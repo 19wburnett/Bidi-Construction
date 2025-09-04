@@ -32,11 +32,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Get subcontractors in the same trade and location
+    console.log('Searching for subcontractors with:', { tradeCategory, location })
+    
     const { data: subcontractors, error: subError } = await supabase
       .from('subcontractors')
       .select('*')
       .eq('trade_category', tradeCategory)
       .ilike('location', `%${location}%`)
+
+    console.log('Subcontractors found:', subcontractors?.length || 0, subcontractors)
 
     if (subError) {
       console.error('Error fetching subcontractors:', subError)
@@ -57,9 +61,15 @@ export async function POST(request: NextRequest) {
     const emailPromises = subcontractors.map(async (sub) => {
       try {
         const { data, error } = await resend.emails.send({
-          from: 'SubBidi <noreply@subbidi.com>',
+          from: 'SubBidi <noreply@savewithbidi.com>',
+          replyTo: `bids+${jobRequestId}@savewithbidi.com`,
           to: [sub.email],
           subject: `New ${tradeCategory} Job Opportunity in ${location}`,
+          headers: {
+            'X-Job-Request-ID': jobRequestId,
+            'X-Trade-Category': tradeCategory,
+            'X-Location': location,
+          },
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <div style="background-color: #3b82f6; color: white; padding: 20px; text-align: center;">
@@ -81,16 +91,27 @@ export async function POST(request: NextRequest) {
                   </div>
                 </div>
 
-                <div style="background-color: #dcfce7; border: 1px solid #16a34a; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                  <h4 style="color: #16a34a; margin-top: 0;">How to Submit Your Bid</h4>
-                  <p style="margin-bottom: 10px;">Reply to this email with:</p>
-                  <ul style="margin: 0; padding-left: 20px;">
-                    <li>Your company name and contact information</li>
-                    <li>Proposed bid amount</li>
-                    <li>Project timeline</li>
-                    <li>Any additional notes or questions</li>
-                    <li>Attach any relevant files (quotes, certifications, etc.)</li>
-                  </ul>
+                <div style="background-color: #dcfce7; border: 1px solid #16a34a; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                  <h4 style="color: #16a34a; margin-top: 0;">📋 How to Submit Your Bid</h4>
+                  <p style="margin-bottom: 15px; font-weight: 600;">Simply reply to this email with the following information:</p>
+                  
+                  <div style="background-color: white; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <h5 style="color: #16a34a; margin-top: 0; margin-bottom: 10px;">Required Information:</h5>
+                    <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                      <li><strong>Company Name:</strong> Your business name</li>
+                      <li><strong>Contact Person:</strong> Your name and title</li>
+                      <li><strong>Phone Number:</strong> Best number to reach you</li>
+                      <li><strong>Bid Amount:</strong> Your proposed price (e.g., "$15,000" or "$12,500 - $15,000")</li>
+                      <li><strong>Timeline:</strong> When you can start and complete the project</li>
+                      <li><strong>Additional Notes:</strong> Any questions, special requirements, or clarifications</li>
+                    </ul>
+                  </div>
+                  
+                  <div style="background-color: #f0f9ff; padding: 15px; border-radius: 6px; border-left: 4px solid #3b82f6;">
+                    <p style="margin: 0; font-size: 14px; color: #1e40af;">
+                      <strong>💡 Pro Tip:</strong> You can attach files like quotes, certifications, or project photos to your reply email.
+                    </p>
+                  </div>
                 </div>
 
                 <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px;">
