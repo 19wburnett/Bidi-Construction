@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update user record with Stripe customer ID
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     await supabase
       .from('users')
       .update({ stripe_customer_id: customer.id })

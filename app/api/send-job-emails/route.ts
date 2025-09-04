@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
 
     // Get job request details
     const { data: jobRequest, error: jobError } = await supabase

@@ -32,7 +32,14 @@ export default function AuthCallbackPage() {
             console.error('Error fetching user data:', userError)
             // Fallback: use old logic if column doesn't exist
             if (userError.code === 'PGRST116' || userError.message?.includes('subscription_status')) {
-              if (userData?.stripe_customer_id) {
+              // Make a separate query for stripe_customer_id
+              const { data: fallbackData } = await supabase
+                .from('users')
+                .select('stripe_customer_id')
+                .eq('id', data.session.user.id)
+                .single()
+              
+              if (fallbackData?.stripe_customer_id) {
                 router.push('/dashboard')
               } else {
                 router.push('/subscription')
@@ -43,13 +50,13 @@ export default function AuthCallbackPage() {
             return
           }
 
-          // Check subscription status with fallback
+          // Check subscription status
           let hasActiveSubscription = false
           if (userData?.subscription_status === 'active') {
             hasActiveSubscription = true
-          } else if (userError?.code === 'PGRST116' || userError?.message?.includes('subscription_status')) {
-            // Fallback: use old logic if column doesn't exist
-            hasActiveSubscription = !!userData?.stripe_customer_id
+          } else if (userData?.stripe_customer_id) {
+            // Fallback: use old logic if subscription_status is not active but has stripe_customer_id
+            hasActiveSubscription = true
           }
 
           if (hasActiveSubscription) {

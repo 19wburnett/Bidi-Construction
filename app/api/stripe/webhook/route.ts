@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   console.log('Webhook event type:', event.type)
 
-      const supabase = createServerSupabaseClient()
+      const supabase = await createServerSupabaseClient()
 
   try {
     switch (event.type) {
