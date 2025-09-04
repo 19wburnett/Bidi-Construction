@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { createServerClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update user record with Stripe customer ID
-    const supabase = createServerClient()
+    const supabase = createServerSupabaseClient()
     await supabase
       .from('users')
       .update({ stripe_customer_id: customer.id })
