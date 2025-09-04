@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: 'SubBidi Professional Plan',
+              name: 'Bidi Professional Plan',
               description: 'Monthly subscription for general contractors',
             },
             unit_amount: 9900, // $99.00

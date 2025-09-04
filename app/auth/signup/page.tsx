@@ -88,7 +88,7 @@ export default function SignupPage() {
         <CardHeader className="text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">
             <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Bidi</h1>
           </div>
           <CardTitle className="text-xl">Create Your Account</CardTitle>
           <CardDescription>

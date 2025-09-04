@@ -1,4 +1,4 @@
-# SubBidi - Construction Marketplace
+# Bidi - Construction Marketplace
 
 A SaaS web app that connects general contractors with subcontractors for construction projects.
 
@@ -25,7 +25,7 @@ A SaaS web app that connects general contractors with subcontractors for constru
 
 ```bash
 git clone <your-repo>
-cd subbidi
+cd bidi
 npm install
 ```
 

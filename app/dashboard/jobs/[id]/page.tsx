@@ -221,7 +221,7 @@ export default function JobDetailsPage() {
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <Link href="/dashboard">

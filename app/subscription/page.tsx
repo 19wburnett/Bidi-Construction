@@ -80,7 +80,7 @@ export default function SubscriptionPage() {
         <CardHeader className="text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">
             <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
           </div>
           <CardTitle className="text-2xl sm:text-3xl">Choose Your Plan</CardTitle>
           <CardDescription className="text-base sm:text-lg">

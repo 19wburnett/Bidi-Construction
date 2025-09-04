@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const emailPromises = subcontractors.map(async (sub) => {
       try {
         const { data, error } = await resend.emails.send({
-          from: 'SubBidi <noreply@savewithbidi.com>',
+          from: 'Bidi <noreply@savewithbidi.com>',
           reply_to: `bids+${jobRequestId}@savewithbidi.com`,
           to: [sub.email],
           subject: `New ${tradeCategory} Job Opportunity in ${location}`,
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <div style="background-color: #3b82f6; color: white; padding: 20px; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px;">SubBidi</h1>
+                <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
                 <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
               </div>
               
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
                 <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px;">
                   <h4 style="color: #f59e0b; margin-top: 0;">Important Notes</h4>
                   <ul style="margin: 0; padding-left: 20px;">
-                    <li>This is an automated message from SubBidi</li>
+                    <li>This is an automated message from Bidi</li>
                     <li>Reply directly to this email to submit your bid</li>
                     <li>Include all relevant project details in your response</li>
                     <li>The general contractor will review all bids and contact you directly</li>
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
               
               <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
                 <p style="margin: 0; font-size: 14px;">
-                  © 2024 SubBidi. All rights reserved.
+                  © 2024 Bidi. All rights reserved.
                 </p>
                 <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
                   This email was sent to ${sub.email} because you're registered as a ${tradeCategory} subcontractor in ${location}.

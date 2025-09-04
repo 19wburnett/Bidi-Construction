@@ -1,4 +1,4 @@
--- SubBidi Database Schema
+-- Bidi Database Schema
 -- Run this in your Supabase SQL editor
 
 -- Enable necessary extensions

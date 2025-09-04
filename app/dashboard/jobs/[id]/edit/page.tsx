@@ -246,7 +246,7 @@ export default function EditJobPage() {
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Bidi</h1>
           </div>
           <Link href={`/dashboard/jobs/${jobRequest.id}`}>
             <Button variant="outline">
