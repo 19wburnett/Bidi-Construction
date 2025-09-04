@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download } from 'lucide-react'
 import Link from 'next/link'
+import NotificationBell from '@/components/notification-bell'
 
 interface JobRequest {
   id: string
@@ -31,6 +32,7 @@ interface Bid {
   ai_summary: string | null
   raw_email: string
   created_at: string
+  seen: boolean
 }
 
 export default function JobDetailsPage() {
@@ -84,6 +86,22 @@ export default function JobDetailsPage() {
       }
 
       setBids(bidsData || [])
+
+      // Mark all bids for this job as seen
+      if (bidsData && bidsData.length > 0) {
+        const unseenBids = bidsData.filter(bid => !bid.seen)
+        if (unseenBids.length > 0) {
+          const { error: markSeenError } = await supabase
+            .from('bids')
+            .update({ seen: true })
+            .eq('job_request_id', params.id)
+            .eq('seen', false)
+
+          if (markSeenError) {
+            console.error('Error marking bids as seen:', markSeenError)
+          }
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch job details')
     } finally {
@@ -168,30 +186,36 @@ export default function JobDetailsPage() {
       <header className="bg-white border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
-          <Link href="/dashboard">
-            <Button variant="outline">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </Link>
+          <div className="flex items-center space-x-2 sm:space-x-4">
+            <Link href="/dashboard">
+              <Button variant="outline" className="hidden sm:flex">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            </Link>
+            <NotificationBell />
+          </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 py-4 sm:py-8 max-w-4xl">
         {/* Job Details */}
         <Card className="mb-8">
           <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <CardTitle className="text-2xl">{jobRequest.trade_category}</CardTitle>
-                <CardDescription className="text-lg">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+              <div className="flex-1">
+                <CardTitle className="text-xl sm:text-2xl">{jobRequest.trade_category}</CardTitle>
+                <CardDescription className="text-base sm:text-lg">
                   {jobRequest.location} • {jobRequest.budget_range}
                 </CardDescription>
               </div>
-              <Badge variant="outline">
+              <Badge variant="outline" className="self-start sm:self-auto">
                 {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'} Received
               </Badge>
             </div>
@@ -234,9 +258,9 @@ export default function JobDetailsPage() {
 
         {/* Bids Section */}
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-900">Received Bids</h2>
-            <Badge variant="secondary">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Received Bids</h2>
+            <Badge variant="secondary" className="self-start sm:self-auto">
               {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'}
             </Badge>
           </div>
@@ -256,16 +280,16 @@ export default function JobDetailsPage() {
               {bids.map((bid) => (
                 <Card key={bid.id} className="border-l-4 border-l-blue-500">
                   <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div>
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                      <div className="flex-1">
                         <CardTitle className="text-lg">
                           {bid.subcontractor_name || bid.subcontractor_email}
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription className="break-all">
                           {bid.subcontractor_email}
                         </CardDescription>
                       </div>
-                      <div className="text-right">
+                      <div className="text-left sm:text-right">
                         <div className="text-sm text-gray-500">
                           {formatDate(bid.created_at)}
                         </div>
@@ -278,7 +302,7 @@ export default function JobDetailsPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-3">
                         {bid.phone && (
                           <div className="flex items-center space-x-2">

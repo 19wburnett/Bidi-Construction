@@ -14,43 +14,43 @@ export default function HomePage() {
       <header className="border-b bg-white/80 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
-          <div className="flex space-x-4">
+          <div className="flex space-x-2 sm:space-x-4">
             <Link href="/auth/login">
-              <Button variant="ghost">Login</Button>
+              <Button variant="ghost" className="text-sm sm:text-base">Login</Button>
             </Link>
             <Link href="/auth/signup">
-              <Button>Get Started</Button>
+              <Button className="text-sm sm:text-base">Get Started</Button>
             </Link>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="container mx-auto px-4 py-16 text-center">
+      <section className="container mx-auto px-4 py-8 sm:py-16 text-center">
         <div className="flex justify-center mb-6">
           <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
             ✨ AI-Powered Bid Analysis
           </div>
         </div>
-        <h1 className="text-5xl font-bold text-gray-900 mb-6">
+        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
           Connect General Contractors with
           <span className="text-blue-600"> Subcontractors</span>
         </h1>
-        <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+        <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
           Streamline your construction projects with our marketplace that connects GCs with qualified subcontractors. 
           Post jobs, receive bids, and manage projects all in one place.
         </p>
-        <div className="flex justify-center space-x-4">
+        <div className="flex flex-col sm:flex-row justify-center gap-4">
           <Link href="/auth/signup">
-            <Button size="lg" className="text-lg px-8 py-3">
+            <Button size="lg" className="text-base sm:text-lg px-6 sm:px-8 py-3 w-full sm:w-auto">
               Start as General Contractor
             </Button>
           </Link>
           <Link href="/subcontractor">
-            <Button variant="outline" size="lg" className="text-lg px-8 py-3">
+            <Button variant="outline" size="lg" className="text-base sm:text-lg px-6 sm:px-8 py-3 w-full sm:w-auto">
               Learn More for Subs
             </Button>
           </Link>
@@ -58,11 +58,11 @@ export default function HomePage() {
       </section>
 
       {/* Features Section */}
-      <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
+      <section className="container mx-auto px-4 py-8 sm:py-16">
+        <h2 className="text-2xl sm:text-3xl font-bold text-center text-gray-900 mb-8 sm:mb-12">
           How SubBidi Works
         </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           <Card>
             <CardHeader>
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
@@ -114,16 +114,16 @@ export default function HomePage() {
       </section>
 
       {/* CTA Section */}
-      <section className="bg-blue-600 text-white py-16">
+      <section className="bg-blue-600 text-white py-8 sm:py-16">
         <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">
+          <h2 className="text-2xl sm:text-3xl font-bold mb-4">
             Ready to Streamline Your Construction Projects?
           </h2>
-          <p className="text-xl mb-8 opacity-90">
+          <p className="text-lg sm:text-xl mb-8 opacity-90">
             Join hundreds of general contractors who trust SubBidi for their subcontractor needs.
           </p>
           <Link href="/auth/signup">
-            <Button variant="secondary" size="lg" className="text-lg px-8 py-3">
+            <Button variant="secondary" size="lg" className="text-base sm:text-lg px-6 sm:px-8 py-3">
               Get Started Today
             </Button>
           </Link>

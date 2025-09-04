@@ -79,11 +79,11 @@ export default function SubscriptionPage() {
       <Card className="w-full max-w-2xl">
         <CardHeader className="text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
-          <CardTitle className="text-3xl">Choose Your Plan</CardTitle>
-          <CardDescription className="text-lg">
+          <CardTitle className="text-2xl sm:text-3xl">Choose Your Plan</CardTitle>
+          <CardDescription className="text-base sm:text-lg">
             Subscribe to start posting job requests and connecting with subcontractors
           </CardDescription>
         </CardHeader>
@@ -101,8 +101,8 @@ export default function SubscriptionPage() {
           {/* Pricing Card */}
           <div className="border rounded-lg p-6 bg-white">
             <div className="text-center mb-6">
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">Professional Plan</h3>
-              <div className="text-4xl font-bold text-blue-600 mb-2">$99<span className="text-lg text-gray-600">/month</span></div>
+              <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Professional Plan</h3>
+              <div className="text-3xl sm:text-4xl font-bold text-blue-600 mb-2">$99<span className="text-base sm:text-lg text-gray-600">/month</span></div>
               <p className="text-gray-600">Perfect for general contractors</p>
             </div>
             

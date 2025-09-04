@@ -78,7 +78,7 @@ export default function ProfileDropdown() {
         <div className={`w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ${user.avatar_url ? 'hidden' : ''}`}>
           <User className="w-4 h-4 text-white" />
         </div>
-        <span className="hidden md:block text-sm font-medium">
+        <span className="hidden sm:block text-sm font-medium">
           {user.full_name || user.email}
         </span>
       </Button>
@@ -92,7 +92,7 @@ export default function ProfileDropdown() {
           />
           
           {/* Dropdown */}
-          <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border z-20">
+          <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border z-20 max-w-[calc(100vw-2rem)]">
             <div className="py-1">
               <div className="px-4 py-2 border-b">
                 <p className="text-sm font-medium text-gray-900 truncate">

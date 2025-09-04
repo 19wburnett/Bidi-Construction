@@ -13,6 +13,7 @@ import { useAuth } from '@/app/providers'
 import { Building2, Upload, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
+import NotificationBell from '@/components/notification-bell'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -154,22 +155,26 @@ export default function NewJobPage() {
       <header className="bg-white border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
+            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <Link href="/dashboard">
-              <Button variant="outline">
+              <Button variant="outline" className="hidden sm:flex">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Dashboard
               </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
             </Link>
+            <NotificationBell />
             <ProfileDropdown />
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8 max-w-2xl">
+      <div className="container mx-auto px-4 py-4 sm:py-8 max-w-2xl">
         <Card>
           <CardHeader>
             <CardTitle>Post a New Job Request</CardTitle>

@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       try {
         const { data, error } = await resend.emails.send({
           from: 'SubBidi <noreply@savewithbidi.com>',
-          replyTo: `bids+${jobRequestId}@savewithbidi.com`,
+          reply_to: `bids+${jobRequestId}@savewithbidi.com`,
           to: [sub.email],
           subject: `New ${tradeCategory} Job Opportunity in ${location}`,
           headers: {
