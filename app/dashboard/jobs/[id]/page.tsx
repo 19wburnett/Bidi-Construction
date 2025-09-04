@@ -10,6 +10,7 @@ import { useAuth } from '@/app/providers'
 import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download } from 'lucide-react'
 import Link from 'next/link'
 import NotificationBell from '@/components/notification-bell'
+import SeenStatusIndicator from '@/components/seen-status-indicator'
 
 interface JobRequest {
   id: string
@@ -40,6 +41,7 @@ export default function JobDetailsPage() {
   const [bids, setBids] = useState<Bid[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
   const { user } = useAuth()
   const router = useRouter()
   const params = useParams()
@@ -89,17 +91,49 @@ export default function JobDetailsPage() {
 
       // Mark all bids for this job as seen
       if (bidsData && bidsData.length > 0) {
-        const unseenBids = bidsData.filter(bid => !bid.seen)
-        if (unseenBids.length > 0) {
-          const { error: markSeenError } = await supabase
-            .from('bids')
-            .update({ seen: true })
-            .eq('job_request_id', params.id)
-            .eq('seen', false)
+        console.log('Bids data:', bidsData)
+        console.log('Bid seen status:', bidsData.map(bid => ({ id: bid.id, seen: bid.seen })))
+        
+        // Mark all bids for this job as seen (regardless of current seen status)
+        console.log('Marking all bids as seen for job:', params.id)
+        console.log('Bids to update:', bidsData.map(bid => ({ id: bid.id, job_request_id: bid.job_request_id })))
+        
+        // Try updating by specific bid IDs first
+        const bidIds = bidsData.map(bid => bid.id)
+        console.log('Updating specific bid IDs:', bidIds)
+        
+        const { data: updateData, error: markSeenError } = await supabase
+          .from('bids')
+          .update({ seen: true })
+          .in('id', bidIds)
+          .select('id, seen')
 
-          if (markSeenError) {
-            console.error('Error marking bids as seen:', markSeenError)
+        console.log('Update result data:', updateData)
+        console.log('Update result error:', markSeenError)
+
+        if (markSeenError) {
+          console.error('Error marking bids as seen:', markSeenError)
+        } else {
+          console.log('Successfully marked all bids as seen for job:', params.id)
+          console.log('Updated bids:', updateData)
+          
+          // Also mark corresponding notifications as read
+          const { error: notificationError } = await supabase
+            .from('notifications')
+            .update({ read: true })
+            .eq('user_id', user.id)
+            .in('bid_id', bidIds)
+          
+          if (notificationError) {
+            console.error('Error marking notifications as read:', notificationError)
+          } else {
+            console.log('Successfully marked notifications as read')
           }
+          
+          // Trigger refresh of seen status indicator after a short delay
+          setTimeout(() => {
+            setRefreshTrigger(prev => prev + 1)
+          }, 500)
         }
       }
     } catch (err: any) {
@@ -215,9 +249,11 @@ export default function JobDetailsPage() {
                   {jobRequest.location} • {jobRequest.budget_range}
                 </CardDescription>
               </div>
-              <Badge variant="outline" className="self-start sm:self-auto">
-                {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'} Received
-              </Badge>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                <Badge variant="outline" className="self-start sm:self-auto">
+                  {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'} Received
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent>

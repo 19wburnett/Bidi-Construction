@@ -29,7 +29,7 @@ export default function NotificationBell() {
   useEffect(() => {
     fetchNotifications()
     
-    // Set up real-time subscription for new bids
+    // Set up real-time subscription for new bids and updates
     const channel = supabase
       .channel('bids_changes')
       .on(
@@ -41,6 +41,32 @@ export default function NotificationBell() {
         },
         (payload) => {
           // When a new bid is inserted, fetch updated notifications
+          fetchNotifications()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'bids'
+        },
+        (payload) => {
+          // When a bid is updated (e.g., seen status), fetch updated notifications
+          console.log('Bid updated:', payload)
+          fetchNotifications()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications'
+        },
+        (payload) => {
+          // When a notification is updated, fetch updated notifications
+          console.log('Notification updated:', payload)
           fetchNotifications()
         }
       )
@@ -240,6 +266,11 @@ export default function NotificationBell() {
       // On desktop, show dropdown
       setIsOpen(!isOpen)
     }
+  }
+
+  const refreshNotifications = () => {
+    console.log('Manually refreshing notifications...')
+    fetchNotifications()
   }
 
   if (loading) {
