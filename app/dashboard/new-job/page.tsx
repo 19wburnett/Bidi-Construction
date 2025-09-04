@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Building2, Upload, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import ProfileDropdown from '@/components/profile-dropdown'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -156,12 +157,15 @@ export default function NewJobPage() {
             <Building2 className="h-8 w-8 text-blue-600" />
             <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
-          <Link href="/dashboard">
-            <Button variant="outline">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </Link>
+          <div className="flex items-center space-x-4">
+            <Link href="/dashboard">
+              <Button variant="outline">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Button>
+            </Link>
+            <ProfileDropdown />
+          </div>
         </div>
       </header>
 

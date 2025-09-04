@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Building2, Plus, FileText, Users, Mail, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
+import ProfileDropdown from '@/components/profile-dropdown'
 
 interface JobRequest {
   id: string
@@ -133,10 +134,6 @@ export default function DashboardPage() {
     }
   }
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/')
-  }
 
   if (!user) {
     return null
@@ -193,12 +190,7 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold text-gray-900">SubBidi</h1>
           </div>
           <div className="flex items-center space-x-4">
-            <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-              Welcome, {user.email}
-            </div>
-            <Button variant="outline" onClick={handleLogout}>
-              Logout
-            </Button>
+            <ProfileDropdown />
           </div>
         </div>
       </header>
