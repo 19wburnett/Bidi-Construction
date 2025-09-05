@@ -4,6 +4,10 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Navbar from '@/components/navbar'
 import Link from 'next/link'
 import { 
@@ -18,7 +22,11 @@ import {
   MapPin,
   ArrowRight,
   Play,
-  Star
+  Star,
+  Loader2,
+  Search,
+  Zap,
+  Brain
 } from 'lucide-react'
 
 interface DemoBid {
@@ -77,55 +85,117 @@ const sampleBids: DemoBid[] = [
   }
 ]
 
+interface ProjectForm {
+  projectType: string
+  description: string
+  budget: string
+  timeline: string
+  location: string
+  squareFootage: string
+}
+
 export default function DemoPage() {
   const [currentStep, setCurrentStep] = useState(0)
   const [isRunning, setIsRunning] = useState(false)
   const [showBids, setShowBids] = useState(false)
+  const [projectSubmitted, setProjectSubmitted] = useState(false)
+  const [projectForm, setProjectForm] = useState<ProjectForm>({
+    projectType: '',
+    description: '',
+    budget: '',
+    timeline: '',
+    location: '',
+    squareFootage: ''
+  })
+  const [loadingStep, setLoadingStep] = useState<string | null>(null)
 
   const steps = [
     {
       title: 'Submit Your Project',
       description: 'Provide basic project details and requirements',
       icon: Building2,
-      color: 'blue'
+      color: 'blue',
+      loadingText: 'Processing your project details...'
     },
     {
       title: 'Automated Search',
       description: 'Our system finds qualified subcontractors in your area',
-      icon: Mail,
-      color: 'green'
+      icon: Search,
+      color: 'green',
+      loadingText: 'Searching for qualified contractors...'
     },
     {
       title: 'Collect Bids',
       description: 'We automatically collect and organize incoming bids',
       icon: Users,
-      color: 'purple'
+      color: 'purple',
+      loadingText: 'Collecting bids from contractors...'
     },
     {
       title: 'AI Analysis',
       description: 'Our AI levels and presents all bids for easy comparison',
-      icon: FileText,
-      color: 'orange'
+      icon: Brain,
+      color: 'orange',
+      loadingText: 'AI analyzing and leveling bids...'
     }
   ]
 
-  const runDemo = async () => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProjectSubmitted(true)
+    setCurrentStep(0)
     setIsRunning(true)
     setShowBids(false)
     
-    for (let i = 0; i < steps.length; i++) {
-      setCurrentStep(i)
-      await new Promise(resolve => setTimeout(resolve, 2000))
-    }
+    // Step 1: Process project details
+    setLoadingStep('Processing your project details...')
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    setCurrentStep(1)
+    
+    // Step 2: Search for contractors
+    setLoadingStep('Searching for qualified contractors...')
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    setCurrentStep(2)
+    
+    // Step 3: Collect bids
+    setLoadingStep('Collecting bids from contractors...')
+    await new Promise(resolve => setTimeout(resolve, 2500))
+    setCurrentStep(3)
+    
+    // Step 4: AI Analysis
+    setLoadingStep('AI analyzing and leveling bids...')
+    await new Promise(resolve => setTimeout(resolve, 2000))
     
     setShowBids(true)
     setIsRunning(false)
+    setLoadingStep(null)
+  }
+
+  const fillSampleData = () => {
+    setProjectForm({
+      projectType: 'kitchen-renovation',
+      description: 'Complete kitchen renovation with modern design, new cabinets, countertops, and appliances. Looking for high-quality work with attention to detail.',
+      budget: '25k-50k',
+      timeline: '1-month',
+      location: 'Downtown, 5-mile radius',
+      squareFootage: '200 sq ft'
+    })
   }
 
   const resetDemo = () => {
     setCurrentStep(0)
     setShowBids(false)
     setIsRunning(false)
+    setProjectSubmitted(false)
+    setLoadingStep(null)
+    setProjectForm({
+      projectType: '',
+      description: '',
+      budget: '',
+      timeline: '',
+      location: '',
+      squareFootage: ''
+    })
   }
 
   return (
@@ -139,29 +209,170 @@ export default function DemoPage() {
             See How Our Search Tool Works
           </h1>
           <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
-            Watch our automated system find subcontractors, collect bids, and present them in an easy-to-read format.
+            Submit your project details and watch our automated system find subcontractors, collect bids, and present them in an easy-to-read format.
           </p>
-          
-          <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <Button 
-              onClick={runDemo} 
-              disabled={isRunning}
-              size="lg" 
-              className="text-base px-8 py-3"
-            >
-              <Play className="h-5 w-5 mr-2" />
-              {isRunning ? 'Running Demo...' : 'Start Demo'}
-            </Button>
-            <Button 
-              onClick={resetDemo} 
-              variant="outline" 
-              size="lg" 
-              className="text-base px-8 py-3"
-            >
-              Reset Demo
-            </Button>
-          </div>
         </div>
+
+        {/* Project Submission Form */}
+        {!projectSubmitted && (
+          <Card className="mb-12 max-w-2xl mx-auto">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Building2 className="h-5 w-5 mr-2 text-blue-600" />
+                Submit Your Project Details
+              </CardTitle>
+              <CardDescription>
+                Fill out the form below to see how our system works with your specific project
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleFormSubmit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="projectType">Project Type</Label>
+                    <Select 
+                      value={projectForm.projectType} 
+                      onValueChange={(value) => setProjectForm({...projectForm, projectType: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select project type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="kitchen-renovation">Kitchen Renovation</SelectItem>
+                        <SelectItem value="bathroom-remodel">Bathroom Remodel</SelectItem>
+                        <SelectItem value="home-addition">Home Addition</SelectItem>
+                        <SelectItem value="roofing">Roofing</SelectItem>
+                        <SelectItem value="flooring">Flooring</SelectItem>
+                        <SelectItem value="electrical">Electrical Work</SelectItem>
+                        <SelectItem value="plumbing">Plumbing</SelectItem>
+                        <SelectItem value="hvac">HVAC</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="squareFootage">Square Footage</Label>
+                    <Input
+                      id="squareFootage"
+                      type="text"
+                      placeholder="e.g., 200 sq ft"
+                      value={projectForm.squareFootage}
+                      onChange={(e) => setProjectForm({...projectForm, squareFootage: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="description">Project Description</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Describe your project in detail..."
+                    value={projectForm.description}
+                    onChange={(e) => setProjectForm({...projectForm, description: e.target.value})}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="budget">Budget Range</Label>
+                    <Select 
+                      value={projectForm.budget} 
+                      onValueChange={(value) => setProjectForm({...projectForm, budget: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select budget" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="under-10k">Under $10,000</SelectItem>
+                        <SelectItem value="10k-25k">$10,000 - $25,000</SelectItem>
+                        <SelectItem value="25k-50k">$25,000 - $50,000</SelectItem>
+                        <SelectItem value="50k-100k">$50,000 - $100,000</SelectItem>
+                        <SelectItem value="over-100k">Over $100,000</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="timeline">Timeline</Label>
+                    <Select 
+                      value={projectForm.timeline} 
+                      onValueChange={(value) => setProjectForm({...projectForm, timeline: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select timeline" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asap">ASAP</SelectItem>
+                        <SelectItem value="1-2-weeks">1-2 weeks</SelectItem>
+                        <SelectItem value="1-month">1 month</SelectItem>
+                        <SelectItem value="2-3-months">2-3 months</SelectItem>
+                        <SelectItem value="flexible">Flexible</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Location</Label>
+                    <Input
+                      id="location"
+                      type="text"
+                      placeholder="e.g., Downtown, 5-mile radius"
+                      value={projectForm.location}
+                      onChange={(e) => setProjectForm({...projectForm, location: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button 
+                    type="button"
+                    variant="outline" 
+                    size="lg" 
+                    className="flex-1"
+                    onClick={fillSampleData}
+                  >
+                    <Play className="h-5 w-5 mr-2" />
+                    Fill Sample Data
+                  </Button>
+                  <Button 
+                    type="submit" 
+                    size="lg" 
+                    className="flex-1"
+                    disabled={!projectForm.projectType || !projectForm.description || !projectForm.budget}
+                  >
+                    <Zap className="h-5 w-5 mr-2" />
+                    Submit Project & Start Demo
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Loading State */}
+        {isRunning && loadingStep && (
+          <Card className="mb-12 max-w-2xl mx-auto">
+            <CardContent className="pt-6">
+              <div className="text-center space-y-4">
+                <div className="flex justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">{loadingStep}</h3>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${((currentStep + 1) / steps.length) * 100}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Step {currentStep + 1} of {steps.length}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Demo Steps */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
@@ -199,9 +410,10 @@ export default function DemoPage() {
                   <CardDescription className="text-sm">
                     {step.description}
                   </CardDescription>
-                  {isCurrent && (
+                  {isCurrent && isRunning && (
                     <div className="mt-2">
                       <Badge variant="default" className="bg-blue-600">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                         In Progress...
                       </Badge>
                     </div>
@@ -217,31 +429,41 @@ export default function DemoPage() {
           })}
         </div>
 
-        {/* Sample Project */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Building2 className="h-5 w-5 mr-2 text-blue-600" />
-              Sample Project: Kitchen Renovation
-            </CardTitle>
-            <CardDescription>
-              Residential kitchen renovation in downtown area, 200 sq ft, modern design
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-              <div>
-                <strong>Budget:</strong> $40,000 - $50,000
+        {/* Project Details */}
+        {projectSubmitted && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Building2 className="h-5 w-5 mr-2 text-blue-600" />
+                  Your Project: {projectForm.projectType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </div>
+                <Button onClick={resetDemo} variant="outline" size="sm">
+                  Reset Demo
+                </Button>
+              </CardTitle>
+              <CardDescription>
+                {projectForm.description}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <strong>Budget:</strong> {projectForm.budget.replace('-', ' - ').replace(/\b\w/g, l => l.toUpperCase())}
+                </div>
+                <div>
+                  <strong>Timeline:</strong> {projectForm.timeline.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </div>
+                <div>
+                  <strong>Location:</strong> {projectForm.location || 'Not specified'}
+                </div>
+                <div>
+                  <strong>Size:</strong> {projectForm.squareFootage || 'Not specified'}
+                </div>
               </div>
-              <div>
-                <strong>Timeline:</strong> 2-4 weeks
-              </div>
-              <div>
-                <strong>Location:</strong> Downtown, 5-mile radius
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Results Section */}
         {showBids && (
@@ -250,9 +472,12 @@ export default function DemoPage() {
               <h2 className="text-2xl font-bold text-gray-900 mb-2">
                 Your Leveled Bids Are Ready!
               </h2>
-              <p className="text-gray-600">
+              <p className="text-gray-600 mb-4">
                 Our AI has analyzed and organized all received bids for easy comparison
               </p>
+              <Button onClick={resetDemo} variant="outline" size="sm">
+                Try Another Project
+              </Button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
