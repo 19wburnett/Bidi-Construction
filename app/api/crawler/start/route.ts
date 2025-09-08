@@ -192,7 +192,7 @@ async function enhanceResultsWithWebsiteScraping(results: any[]) {
   const { scrapeMultipleWebsites } = await import('@/lib/crawlers/website-scraper')
   
   // Get all unique websites from results
-  const websites = [...new Set(results.map(r => r.website).filter(Boolean))]
+  const websites = Array.from(new Set(results.map(r => r.website).filter(Boolean)))
   
   if (websites.length === 0) {
     console.log('No websites found to scrape')
