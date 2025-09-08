@@ -44,12 +44,12 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
     try {
       await page.goto(website, { waitUntil: 'networkidle2', timeout: 10000 })
     } catch (error) {
-      console.log(`Failed to load ${website}:`, error.message)
+      console.log(`Failed to load ${website}:`, error instanceof Error ? error.message : String(error))
       // Try with a shorter timeout and different wait condition
       try {
         await page.goto(website, { waitUntil: 'domcontentloaded', timeout: 5000 })
       } catch (retryError) {
-        console.log(`Retry failed for ${website}:`, retryError.message)
+        console.log(`Retry failed for ${website}:`, retryError instanceof Error ? retryError.message : String(retryError))
         return { website }
       }
     }

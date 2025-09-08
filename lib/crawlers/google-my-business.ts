@@ -36,7 +36,14 @@ export async function crawlGoogleMyBusiness(
     
     // Try to find business listings
     const businesses = await page.evaluate(() => {
-      const results = []
+      const results: Array<{
+        name: string;
+        address: string | null;
+        phone: string | null;
+        website: string | null;
+        rating: number | null;
+        source: string;
+      }> = []
       
       // Look for business cards in the sidebar
       const businessCards = document.querySelectorAll('[role="article"], .Nv2PK, .THOPZb, .lI9IFe')
@@ -184,7 +191,7 @@ export async function crawlGoogleMyBusiness(
   return results
 }
 
-function generateEmailFromWebsite(website: string): string {
+function generateEmailFromWebsite(website: string): string | null {
   try {
     // Extract domain from website URL
     const url = new URL(website.startsWith('http') ? website : `https://${website}`)

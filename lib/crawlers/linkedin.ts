@@ -47,7 +47,13 @@ export async function crawlLinkedIn(
     
     // Extract business information
     const businesses = await page.evaluate((selector) => {
-      const results = []
+      const results: Array<{
+        name: string;
+        description: string | null;
+        location: string;
+        website: string | null;
+        source: string;
+      }> = []
       const businessElements = document.querySelectorAll(selector)
       
       businessElements.forEach((element) => {

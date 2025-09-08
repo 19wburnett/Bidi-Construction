@@ -47,7 +47,14 @@ export async function crawlYelp(
     
     // Extract business information
     const businesses = await page.evaluate((selector) => {
-      const results = []
+      const results: Array<{
+        name: string;
+        address: string;
+        phone: string | null;
+        rating: number | null;
+        website: string | null;
+        source: string;
+      }> = []
       const elements = document.querySelectorAll(selector)
       
       elements.forEach((element) => {

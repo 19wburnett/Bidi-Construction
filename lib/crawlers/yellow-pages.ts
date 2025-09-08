@@ -31,7 +31,14 @@ export async function crawlYellowPages(
     
     // Extract business information
     const businesses = await page.evaluate(() => {
-      const results = []
+      const results: Array<{
+        name: string;
+        email: string | null;
+        phone: string | null;
+        address: string | null;
+        website: string | null;
+        source: string;
+      }> = []
       
       // Try multiple selectors for Yellow Pages
       const selectors = [
@@ -43,7 +50,7 @@ export async function crawlYellowPages(
         '[data-testid="serp-ia-card"]'
       ]
       
-      let businessElements = []
+      let businessElements: Element[] = []
       for (const selector of selectors) {
         const elements = document.querySelectorAll(selector)
         if (elements.length > 0) {
@@ -214,7 +221,7 @@ export async function crawlYellowPages(
 async function extractBusinessProfileInfo(page: any, business: any): Promise<any> {
   try {
     // Look for business profile link in the current page
-    const profileLink = await page.evaluate((businessName) => {
+    const profileLink = await page.evaluate((businessName: string) => {
       // Try to find a link to the business profile
       const links = Array.from(document.querySelectorAll('a'))
       
@@ -245,10 +252,10 @@ async function extractBusinessProfileInfo(page: any, business: any): Promise<any
       // Fallback: look for any link within business listing containers
       if (!profileLink) {
         const businessContainers = document.querySelectorAll('.result, .business-listing, .listing, .v-card, .info, [data-testid="serp-ia-card"]')
-        for (const container of businessContainers) {
+        for (const container of Array.from(businessContainers)) {
           const containerText = container.textContent?.toLowerCase() || ''
           if (containerText.includes(businessName.toLowerCase())) {
-            const containerLink = container.querySelector('a[href]:not([href*="mailto"]):not([href*="tel"])')
+            const containerLink = container.querySelector('a[href]:not([href*="mailto"]):not([href*="tel"])') as HTMLAnchorElement
             if (containerLink) {
               profileLink = containerLink
               break
@@ -356,7 +363,7 @@ async function extractBusinessProfileInfo(page: any, business: any): Promise<any
   }
 }
 
-function generateEmailFromWebsite(website: string): string {
+function generateEmailFromWebsite(website: string): string | null {
   try {
     // Extract domain from website URL
     const url = new URL(website.startsWith('http') ? website : `https://${website}`)

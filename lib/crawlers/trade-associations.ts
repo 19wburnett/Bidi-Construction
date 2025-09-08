@@ -31,7 +31,13 @@ export async function crawlTradeAssociations(
         
         // Extract business information
         const businesses = await page.evaluate(() => {
-          const results = []
+          const results: Array<{
+            name: string;
+            email: string | null;
+            phone: string | null;
+            address: string | null;
+            source: string;
+          }> = []
           
           // Yellow Pages specific selectors
           const selectors = [
@@ -42,7 +48,7 @@ export async function crawlTradeAssociations(
             '.info'
           ]
           
-          let businessElements = []
+          let businessElements: Element[] = []
           for (const selector of selectors) {
             const elements = document.querySelectorAll(selector)
             if (elements.length > 0) {
