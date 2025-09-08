@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download } from 'lucide-react'
+import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download, Globe } from 'lucide-react'
 import Link from 'next/link'
 import NotificationBell from '@/components/notification-bell'
 import SeenStatusIndicator from '@/components/seen-status-indicator'
@@ -27,6 +27,7 @@ interface Bid {
   subcontractor_email: string
   subcontractor_name: string | null
   phone: string | null
+  website: string | null
   bid_amount: number | null
   timeline: string | null
   notes: string | null
@@ -344,6 +345,19 @@ export default function JobDetailsPage() {
                           <div className="flex items-center space-x-2">
                             <Phone className="h-4 w-4 text-gray-500" />
                             <span className="text-sm">{bid.phone}</span>
+                          </div>
+                        )}
+                        {bid.website && (
+                          <div className="flex items-center space-x-2">
+                            <Globe className="h-4 w-4 text-gray-500" />
+                            <a 
+                              href={bid.website.startsWith('http') ? bid.website : `https://${bid.website}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:underline break-all"
+                            >
+                              {bid.website}
+                            </a>
                           </div>
                         )}
                         {bid.timeline && (

@@ -110,6 +110,9 @@ export default function NewJobPage() {
           description: formData.description,
           budget_range: formData.budget_range,
           files: fileUrls.length > 0 ? fileUrls : null,
+          status: 'collecting_bids',
+          bid_collection_started_at: new Date().toISOString(),
+          bid_collection_ends_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
         })
         .select()
         .single()
@@ -118,21 +121,56 @@ export default function NewJobPage() {
         throw insertError
       }
 
-      // Send emails to subcontractors
-      const emailResponse = await fetch('/api/send-job-emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jobRequestId: data.id,
-          tradeCategory: formData.trade_category,
-          location: formData.location,
-        }),
-      })
+      // Check if user is admin with demo mode enabled
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('is_admin, demo_mode')
+        .eq('id', user.id)
+        .single()
 
-      if (!emailResponse.ok) {
-        console.error('Failed to send emails to subcontractors')
+      if (userData?.is_admin && userData?.demo_mode) {
+        // Generate demo bids for admin users (async, don't wait)
+        fetch('/api/generate-demo-bids', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jobRequestId: data.id,
+            tradeCategory: formData.trade_category,
+          }),
+        }).then(response => {
+          if (response.ok) {
+            console.log('Demo bid generation started')
+          } else {
+            console.error('Failed to start demo bid generation')
+          }
+        }).catch(error => {
+          console.error('Error starting demo bid generation:', error)
+        })
+      } else {
+        // Send emails to subcontractors for regular users
+        const emailResponse = await fetch('/api/send-job-emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jobRequestId: data.id,
+            tradeCategory: formData.trade_category,
+            location: formData.location,
+          }),
+        })
+
+        if (!emailResponse.ok) {
+          console.error('Failed to send emails to subcontractors')
+        } else {
+          // Move job to active status after emails are sent
+          await supabase
+            .from('job_requests')
+            .update({ status: 'active' })
+            .eq('id', data.id)
+        }
       }
 
       // Redirect to dashboard

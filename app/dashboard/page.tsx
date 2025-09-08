@@ -24,7 +24,10 @@ interface JobRequest {
   budget_range: string
   created_at: string
   bids_count?: number
-  status?: string
+  unseen_bids_count?: number
+  status?: 'active' | 'closed' | 'collecting_bids'
+  bid_collection_started_at?: string
+  bid_collection_ends_at?: string
 }
 
 export default function DashboardPage() {
@@ -34,6 +37,8 @@ export default function DashboardPage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
   const [showSuccessMessage, setShowSuccessMessage] = useState(false)
   const [activeTab, setActiveTab] = useState<'current' | 'past'>('current')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [demoMode, setDemoMode] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -64,7 +69,37 @@ export default function DashboardPage() {
     fetchUserSubscription()
     fetchJobRequests()
     fetchPastJobRequests()
+    checkAdminStatus()
+    
+    // Set up periodic timeout check
+    const timeoutInterval = setInterval(() => {
+      checkBidTimeouts()
+    }, 30000) // Check every 30 seconds
+
+    return () => clearInterval(timeoutInterval)
   }, [user, router])
+
+  const checkAdminStatus = async () => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('is_admin, demo_mode')
+        .eq('id', user.id)
+        .single()
+
+      if (error) {
+        console.error('Error checking admin status:', error)
+        return
+      }
+
+      setIsAdmin(data?.is_admin || false)
+      setDemoMode(data?.demo_mode || false)
+    } catch (err) {
+      console.error('Error checking admin status:', err)
+    }
+  }
 
   const fetchUserSubscription = async () => {
     if (!user) return
@@ -103,12 +138,12 @@ export default function DashboardPage() {
     if (!user) return
 
     try {
-      // First get all active job requests
+      // First get all job requests (including those without status for backward compatibility)
       const { data: jobsData, error: jobsError } = await supabase
         .from('job_requests')
         .select('*')
         .eq('gc_id', user.id)
-        .eq('status', 'active')
+        .or('status.is.null,status.in.(active,collecting_bids)')
         .order('created_at', { ascending: false })
 
       if (jobsError) {
@@ -116,9 +151,10 @@ export default function DashboardPage() {
         return
       }
 
-      // Then get bid counts for each job
+      // Then get bid counts and unseen bid counts for each job
       const jobsWithBidCounts = await Promise.all(
         (jobsData || []).map(async (job) => {
+          // Get total bid count
           const { count, error: countError } = await supabase
             .from('bids')
             .select('*', { count: 'exact', head: true })
@@ -126,10 +162,26 @@ export default function DashboardPage() {
 
           if (countError) {
             console.error('Error counting bids:', countError)
-            return { ...job, bids_count: 0 }
+            return { ...job, bids_count: 0, unseen_bids_count: 0 }
           }
 
-          return { ...job, bids_count: count || 0 }
+          // Get unseen bid count
+          const { count: unseenCount, error: unseenError } = await supabase
+            .from('bids')
+            .select('*', { count: 'exact', head: true })
+            .eq('job_request_id', job.id)
+            .eq('seen', false)
+
+          if (unseenError) {
+            console.error('Error counting unseen bids:', unseenError)
+            return { ...job, bids_count: count || 0, unseen_bids_count: 0 }
+          }
+
+          return { 
+            ...job, 
+            bids_count: count || 0, 
+            unseen_bids_count: unseenCount || 0 
+          }
         })
       )
 
@@ -227,6 +279,52 @@ export default function DashboardPage() {
     }
   }
 
+  const stopCollectingBids = async (jobId: string) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase
+        .from('job_requests')
+        .update({ 
+          status: 'active',
+          bid_collection_ends_at: new Date().toISOString()
+        })
+        .eq('id', jobId)
+        .eq('gc_id', user.id)
+
+      if (error) {
+        console.error('Error stopping bid collection:', error)
+        return
+      }
+
+      // Refresh job requests
+      fetchJobRequests()
+    } catch (err) {
+      console.error('Error:', err)
+    }
+  }
+
+  const checkBidTimeouts = async () => {
+    try {
+      const response = await fetch('/api/check-bid-timeouts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.updated > 0) {
+          // Refresh job requests if any were updated
+          fetchJobRequests()
+        }
+      }
+    } catch (error) {
+      console.error('Error checking bid timeouts:', error)
+    }
+  }
+
 
   if (!user) {
     return null
@@ -298,6 +396,26 @@ export default function DashboardPage() {
               <span className="font-semibold">Payment Successful!</span>
             </div>
             <p className="mt-1">Your subscription is now active. Welcome to Bidi!</p>
+          </div>
+        )}
+
+        {/* Demo Mode Indicator */}
+        {isAdmin && demoMode && (
+          <div className="mb-6 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <Building2 className="h-5 w-5 mr-2" />
+                <div>
+                  <span className="font-semibold">Demo Mode Active</span>
+                  <p className="text-sm mt-1">New job requests will automatically generate demo bids for demonstration purposes.</p>
+                </div>
+              </div>
+              <Link href="/admin/demo-settings">
+                <Button variant="outline" size="sm" className="text-blue-700 border-blue-400 hover:bg-blue-200">
+                  Settings
+                </Button>
+              </Link>
+            </div>
           </div>
         )}
 
@@ -471,7 +589,12 @@ export default function DashboardPage() {
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                         <div className="flex-1">
-                          <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
+                            {job.status === 'collecting_bids' && (job.unseen_bids_count || 0) > 0 && (
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                            )}
+                          </div>
                           <div className="flex flex-wrap items-center gap-2 mt-2">
                             <div className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
                               <MapPin className="h-3 w-3" />
@@ -488,10 +611,28 @@ export default function DashboardPage() {
                             <Calendar className="h-3 w-3" />
                             {new Date(job.created_at).toLocaleDateString()}
                           </div>
-                          <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
-                            <MessageSquare className="h-3 w-3" />
-                            {job.bids_count || 0} bids received
-                          </div>
+                          {job.status === 'collecting_bids' ? (
+                            <div className="flex flex-col gap-1">
+                              <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-600"></div>
+                                Collecting bids...
+                              </div>
+                              {(job.bids_count || 0) > 0 && (
+                                <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1 relative">
+                                  <MessageSquare className="h-3 w-3" />
+                                  {job.bids_count || 0} bids received
+                                  {(job.unseen_bids_count || 0) > 0 && (
+                                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
+                              <MessageSquare className="h-3 w-3" />
+                              {job.bids_count || 0} bids received
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -499,9 +640,23 @@ export default function DashboardPage() {
                   <CardContent className="pt-0">
                     <p className="text-gray-700 mb-4 line-clamp-2 sm:line-clamp-3 text-sm sm:text-base leading-relaxed">{job.description}</p>
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <Link href={`/dashboard/jobs/${job.id}`} className="flex-1 sm:flex-none order-1">
+                      <Link 
+                        href={`/dashboard/jobs/${job.id}`} 
+                        className="flex-1 sm:flex-none order-1 relative"
+                        onClick={() => {
+                          // Refresh job requests after a short delay to update unseen counts
+                          setTimeout(() => {
+                            fetchJobRequests()
+                          }, 1000)
+                        }}
+                      >
                         <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
                           View Bids
+                          {job.status === 'collecting_bids' && (job.unseen_bids_count || 0) > 0 && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse flex items-center justify-center">
+                              <span className="text-white text-xs font-bold">!</span>
+                            </div>
+                          )}
                         </Button>
                       </Link>
                       <Link href={`/dashboard/jobs/${job.id}/edit`} className="flex-1 sm:flex-none order-2">
@@ -509,15 +664,27 @@ export default function DashboardPage() {
                           Edit Job
                         </Button>
                       </Link>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => closeJob(job.id)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full sm:w-auto text-xs sm:text-sm order-3"
-                      >
-                        <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                        Close
-                      </Button>
+                      {job.status === 'collecting_bids' ? (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => stopCollectingBids(job.id)}
+                          className="text-orange-600 hover:text-orange-700 hover:bg-orange-50 w-full sm:w-auto text-xs sm:text-sm order-3"
+                        >
+                          <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                          Stop Collecting
+                        </Button>
+                      ) : (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => closeJob(job.id)}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full sm:w-auto text-xs sm:text-sm order-3"
+                        >
+                          <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                          Close
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

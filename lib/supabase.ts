@@ -15,22 +15,28 @@ export interface Database {
         Row: {
           id: string
           email: string
-          role: 'GC' | 'sub'
+          role: 'GC' | 'sub' | 'admin'
           stripe_customer_id: string | null
+          is_admin: boolean
+          demo_mode: boolean
           created_at: string
         }
         Insert: {
           id: string
           email: string
-          role: 'GC' | 'sub'
+          role: 'GC' | 'sub' | 'admin'
           stripe_customer_id?: string | null
+          is_admin?: boolean
+          demo_mode?: boolean
           created_at?: string
         }
         Update: {
           id?: string
           email?: string
-          role?: 'GC' | 'sub'
+          role?: 'GC' | 'sub' | 'admin'
           stripe_customer_id?: string | null
+          is_admin?: boolean
+          demo_mode?: boolean
           created_at?: string
         }
       }
@@ -43,6 +49,9 @@ export interface Database {
           description: string
           budget_range: string
           files: string[] | null
+          status: 'active' | 'closed' | 'collecting_bids'
+          bid_collection_started_at: string | null
+          bid_collection_ends_at: string | null
           created_at: string
         }
         Insert: {
@@ -53,6 +62,9 @@ export interface Database {
           description: string
           budget_range: string
           files?: string[] | null
+          status?: 'active' | 'closed' | 'collecting_bids'
+          bid_collection_started_at?: string | null
+          bid_collection_ends_at?: string | null
           created_at?: string
         }
         Update: {
@@ -63,6 +75,9 @@ export interface Database {
           description?: string
           budget_range?: string
           files?: string[] | null
+          status?: 'active' | 'closed' | 'collecting_bids'
+          bid_collection_started_at?: string | null
+          bid_collection_ends_at?: string | null
           created_at?: string
         }
       }

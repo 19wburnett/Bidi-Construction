@@ -172,32 +172,34 @@ export default function NotificationsPage() {
 
   const markAsRead = async (notificationId: string) => {
     try {
-      // Update notification as read
-      const { error: notificationError } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', notificationId)
+      // Find the notification to determine if it has a notification_id
+      const notification = notifications.find(n => n.notification_id === notificationId || n.id === notificationId)
+      if (!notification) return
 
-      if (notificationError) {
-        console.error('Error marking notification as read:', notificationError)
-        return
-      }
+      // If it has a notification_id, update the notifications table
+      if (notification.notification_id) {
+        const { error: notificationError } = await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('id', notification.notification_id)
 
-      // Also mark the associated bid as seen
-      const notification = notifications.find(n => n.notification_id === notificationId)
-      if (notification) {
-        const { error: bidError } = await supabase
-          .from('bids')
-          .update({ seen: true })
-          .eq('id', notification.id)
-
-        if (bidError) {
-          console.error('Error marking bid as seen:', bidError)
+        if (notificationError) {
+          console.error('Error marking notification as read:', notificationError)
         }
       }
 
-      // Update local state
-      setNotifications(prev => prev.filter(n => n.notification_id !== notificationId))
+      // Mark the associated bid as seen
+      const { error: bidError } = await supabase
+        .from('bids')
+        .update({ seen: true })
+        .eq('id', notification.id)
+
+      if (bidError) {
+        console.error('Error marking bid as seen:', bidError)
+      }
+
+      // Update local state - remove the notification
+      setNotifications(prev => prev.filter(n => n.id !== notification.id))
     } catch (err) {
       console.error('Error marking as read:', err)
       // Fallback: remove from local state
@@ -333,19 +335,17 @@ export default function NotificationsPage() {
                       <span className="text-xs text-gray-500">
                         {formatTimeAgo(notification.created_at)}
                       </span>
-                      {notification.notification_id && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            markAsRead(notification.notification_id!)
-                          }}
-                          className="p-1 h-6 w-6"
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          markAsRead(notification.notification_id || notification.id)
+                        }}
+                        className="p-1 h-6 w-6"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
                   </div>
                 </CardContent>

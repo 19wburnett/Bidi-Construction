@@ -11,6 +11,7 @@ export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isSignedIn, setIsSignedIn] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const pathname = usePathname()
   const supabase = createClient()
 
@@ -19,14 +20,38 @@ export default function Navbar() {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
       setIsSignedIn(!!user)
+      
+      if (user) {
+        // Check if user is admin
+        const { data: userData } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+        
+        setIsAdmin(userData?.is_admin || false)
+      }
     }
 
     getUser()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         setUser(session?.user ?? null)
         setIsSignedIn(!!session?.user)
+        
+        if (session?.user) {
+          // Check if user is admin
+          const { data: userData } = await supabase
+            .from('users')
+            .select('is_admin')
+            .eq('id', session.user.id)
+            .single()
+          
+          setIsAdmin(userData?.is_admin || false)
+        } else {
+          setIsAdmin(false)
+        }
       }
     )
 
@@ -45,6 +70,7 @@ export default function Navbar() {
     ...(isSignedIn ? [
       { name: 'Dashboard', href: '/dashboard' },
       { name: 'Settings', href: '/settings' },
+      ...(isAdmin ? [{ name: 'Admin', href: '/admin/demo-settings' }] : [])
     ] : [])
   ]
 

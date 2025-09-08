@@ -76,6 +76,18 @@ export async function POST(request: NextRequest) {
     // Extract bid information using AI
     const bidData = await extractBidData(emailContent, from.email)
 
+    // Look up website from discovered contractors, fallback to AI extraction
+    let website = bidData.website || null
+    const { data: contractorData } = await supabase
+      .from('crawler_discovered_contractors')
+      .select('website')
+      .eq('email', from.email)
+      .single()
+    
+    if (contractorData?.website) {
+      website = contractorData.website
+    }
+
     // Store the bid in the database
     const { data: bid, error: bidError } = await supabase
       .from('bids')
@@ -84,6 +96,7 @@ export async function POST(request: NextRequest) {
         subcontractor_email: from.email,
         subcontractor_name: bidData.companyName || from.name || 'Unknown',
         phone: bidData.phone || null,
+        website: website,
         bid_amount: bidData.bidAmount || null,
         timeline: bidData.timeline || null,
         notes: bidData.notes || null,
@@ -151,6 +164,7 @@ async function extractBidData(emailContent: string, senderEmail: string) {
     {
       "companyName": "string or null",
       "phone": "string or null", 
+      "website": "string or null",
       "bidAmount": "number or null",
       "timeline": "string or null",
       "notes": "string or null"
@@ -162,6 +176,7 @@ async function extractBidData(emailContent: string, senderEmail: string) {
     Instructions:
     - Extract company name from signature or email content
     - Look for phone numbers in any format
+    - Look for website URLs (www.domain.com, domain.com, etc.)
     - Extract bid amount (look for dollar amounts, estimates, quotes)
     - Find timeline information (start date, duration, completion date)
     - Capture any additional notes or special requirements
@@ -191,6 +206,7 @@ async function extractBidData(emailContent: string, senderEmail: string) {
     return {
       companyName: null,
       phone: null,
+      website: null,
       bidAmount: null,
       timeline: null,
       notes: null,

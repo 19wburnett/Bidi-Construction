@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { User, Settings, LogOut } from 'lucide-react'
+import { User, Settings, LogOut, LayoutDashboard } from 'lucide-react'
 
 interface UserProfile {
   id: string
@@ -15,7 +16,9 @@ interface UserProfile {
 export default function ProfileDropdown() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => {
     const getUser = async () => {
@@ -27,12 +30,22 @@ export default function ProfileDropdown() {
           avatar_url: authUser.user_metadata?.picture || authUser.user_metadata?.avatar_url,
           full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name
         })
+
+        // Determine admin status
+        const { data: userData } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', authUser.id)
+          .single()
+        setIsAdmin(!!userData?.is_admin)
+      } else {
+        setIsAdmin(false)
       }
     }
     getUser()
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setUser({
           id: session.user.id,
@@ -40,8 +53,16 @@ export default function ProfileDropdown() {
           avatar_url: session.user.user_metadata?.picture || session.user.user_metadata?.avatar_url,
           full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name
         })
+
+        const { data: userData } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', session.user.id)
+          .single()
+        setIsAdmin(!!userData?.is_admin)
       } else {
         setUser(null)
+        setIsAdmin(false)
       }
     })
 
@@ -50,7 +71,7 @@ export default function ProfileDropdown() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
-    window.location.href = '/'
+    router.push('/')
   }
 
   if (!user) return null
@@ -102,11 +123,24 @@ export default function ProfileDropdown() {
                   {user.email}
                 </p>
               </div>
+
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    setIsOpen(false)
+                    router.push('/admin/demo-settings')
+                  }}
+                  className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  <LayoutDashboard className="w-4 h-4 mr-2" />
+                  Admin Dashboard
+                </button>
+              )}
               
               <button
                 onClick={() => {
                   setIsOpen(false)
-                  window.location.href = '/settings'
+                  router.push('/settings')
                 }}
                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
               >
