@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { createClient } from '@/lib/supabase'
-import { Building2, ArrowLeft, Save, User, Phone, Bell } from 'lucide-react'
+import { Building2, ArrowLeft, Save, User, Phone, Bell, CreditCard, Coins } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
@@ -20,6 +20,9 @@ interface UserSettings {
   email_notifications: boolean
   bid_notifications: boolean
   marketing_emails: boolean
+  payment_type: 'subscription' | 'credits' | 'pay_per_job'
+  subscription_status: string
+  credits: number
 }
 
 export default function SettingsPage() {
@@ -30,10 +33,16 @@ export default function SettingsPage() {
     email_notifications: true,
     bid_notifications: true,
     marketing_emails: false,
+    payment_type: 'subscription',
+    subscription_status: 'inactive',
+    credits: 0,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [newPaymentType, setNewPaymentType] = useState<'subscription' | 'credits'>('subscription')
+  const [paymentChanging, setPaymentChanging] = useState(false)
   
   const router = useRouter()
   const supabase = createClient()
@@ -57,6 +66,18 @@ export default function SettingsPage() {
       
       if (authUser) {
         const metadata = authUser.user_metadata || {}
+        
+        // Get payment information from users table
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('payment_type, subscription_status, credits')
+          .eq('id', authUser.id)
+          .single()
+        
+        if (userError) {
+          console.error('Error fetching user payment data:', userError)
+        }
+        
         setSettings({
           first_name: metadata.first_name || '',
           last_name: metadata.last_name || '',
@@ -64,6 +85,9 @@ export default function SettingsPage() {
           email_notifications: metadata.email_notifications !== false,
           bid_notifications: metadata.bid_notifications !== false,
           marketing_emails: metadata.marketing_emails === true,
+          payment_type: userData?.payment_type || 'subscription',
+          subscription_status: userData?.subscription_status || 'inactive',
+          credits: userData?.credits || 0,
         })
       }
     } catch (error) {
@@ -107,6 +131,48 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: error.message || 'Failed to save settings' })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handlePaymentTypeChange = (newType: 'subscription' | 'credits') => {
+    setNewPaymentType(newType)
+    setShowPaymentModal(true)
+  }
+
+  const confirmPaymentTypeChange = async () => {
+    setPaymentChanging(true)
+    setMessage(null)
+
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (!authUser) throw new Error('User not authenticated')
+
+      // Update payment type in users table
+      const { error } = await supabase
+        .from('users')
+        .update({ payment_type: newPaymentType })
+        .eq('id', authUser.id)
+
+      if (error) {
+        throw error
+      }
+
+      // Update local state
+      setSettings(prev => ({
+        ...prev,
+        payment_type: newPaymentType
+      }))
+
+      setMessage({ 
+        type: 'success', 
+        text: `Payment method changed to ${newPaymentType === 'credits' ? 'Credits' : 'Subscription'} successfully!` 
+      })
+      setShowPaymentModal(false)
+    } catch (error: any) {
+      console.error('Error changing payment type:', error)
+      setMessage({ type: 'error', text: error.message || 'Failed to change payment method' })
+    } finally {
+      setPaymentChanging(false)
     }
   }
 
@@ -263,6 +329,79 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* Payment Method */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <CreditCard className="h-5 w-5 mr-2" />
+                Payment Method
+              </CardTitle>
+              <CardDescription>
+                Choose how you want to pay for job requests
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3">
+                {/* Current Payment Method Display */}
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      {settings.payment_type === 'credits' ? (
+                        <Coins className="h-5 w-5 text-orange-600" />
+                      ) : (
+                        <CreditCard className="h-5 w-5 text-blue-600" />
+                      )}
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {settings.payment_type === 'credits' ? 'Credits' : 'Subscription'}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {settings.payment_type === 'credits' 
+                            ? `You have ${settings.credits} credit${settings.credits !== 1 ? 's' : ''} available`
+                            : `Status: ${settings.subscription_status}`
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Method Options */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-gray-700">Switch Payment Method:</Label>
+                  <div className="flex space-x-3">
+                    <Button
+                      variant={settings.payment_type === 'subscription' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handlePaymentTypeChange('subscription')}
+                      disabled={settings.payment_type === 'subscription'}
+                      className="flex items-center space-x-2"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      <span>Subscription</span>
+                    </Button>
+                    <Button
+                      variant={settings.payment_type === 'credits' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handlePaymentTypeChange('credits')}
+                      disabled={settings.payment_type === 'credits'}
+                      className="flex items-center space-x-2"
+                    >
+                      <Coins className="h-4 w-4" />
+                      <span>Credits</span>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Payment Method Info */}
+                <div className="text-sm text-gray-600 space-y-1">
+                  <p><strong>Subscription:</strong> Monthly recurring payment for unlimited job requests</p>
+                  <p><strong>Credits:</strong> Pay per job request ($20 per credit, never expire)</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Save Button */}
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving} className="min-w-32">
@@ -281,6 +420,59 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Payment Method Change Confirmation Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                {newPaymentType === 'credits' ? (
+                  <Coins className="h-5 w-5 mr-2 text-orange-600" />
+                ) : (
+                  <CreditCard className="h-5 w-5 mr-2 text-blue-600" />
+                )}
+                Switch to {newPaymentType === 'credits' ? 'Credits' : 'Subscription'}
+              </CardTitle>
+              <CardDescription>
+                Are you sure you want to change your payment method?
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                <p className="text-sm text-orange-700">
+                  <strong>Important:</strong> Changing your payment method will affect how you pay for future job requests.
+                  {newPaymentType === 'credits' && ' You will need to purchase credits before posting jobs.'}
+                </p>
+              </div>
+
+              <div className="flex space-x-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowPaymentModal(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmPaymentTypeChange}
+                  disabled={paymentChanging}
+                  className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                >
+                  {paymentChanging ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Changing...
+                    </>
+                  ) : (
+                    'Confirm Change'
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

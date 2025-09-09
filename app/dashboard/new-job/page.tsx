@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Upload, ArrowLeft } from 'lucide-react'
+import { Building2, Upload, ArrowLeft, X } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
@@ -52,9 +52,46 @@ export default function NewJobPage() {
   const [files, setFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
+  const [paymentType, setPaymentType] = useState<'subscription' | 'credits'>('subscription')
+  const [userSubscriptionStatus, setUserSubscriptionStatus] = useState<string>('inactive')
+  const [userCredits, setUserCredits] = useState<number>(0)
+  const [showCreditsModal, setShowCreditsModal] = useState(false)
+  const [creditsToPurchase, setCreditsToPurchase] = useState(1)
+  const [purchaseLoading, setPurchaseLoading] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
+
+  useEffect(() => {
+    if (!user) {
+      router.push('/auth/login')
+    } else {
+      setIsCheckingAuth(false)
+      // Check user's subscription status
+      checkUserSubscription()
+    }
+  }, [user, router])
+
+  const checkUserSubscription = async () => {
+    if (!user) return
+    
+    try {
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('subscription_status, payment_type, credits')
+        .eq('id', user.id)
+        .single()
+      
+      if (userData) {
+        setUserSubscriptionStatus(userData.subscription_status || 'inactive')
+        setPaymentType(userData.payment_type || 'subscription')
+        setUserCredits(userData.credits || 0)
+      }
+    } catch (error) {
+      console.error('Error checking user subscription:', error)
+    }
+  }
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -77,6 +114,19 @@ export default function NewJobPage() {
     setError('')
 
     try {
+      // Check if user has credits (for credit users) or active subscription
+      if (paymentType === 'credits' && userCredits < 1) {
+        setError('You need at least 1 credit to post a job. Please purchase credits first.')
+        setLoading(false)
+        return
+      }
+
+      if (paymentType === 'subscription' && userSubscriptionStatus !== 'active') {
+        setError('You need an active subscription to post jobs. Please subscribe or switch to credits.')
+        setLoading(false)
+        return
+      }
+
       // Upload files to Supabase storage
       const fileUrls: string[] = []
       
@@ -100,6 +150,19 @@ export default function NewJobPage() {
         fileUrls.push(publicUrl)
       }
 
+      // If using credits, deduct one credit and create job
+      if (paymentType === 'credits') {
+        // Deduct credit from user account
+        const { error: creditError } = await supabase
+          .from('users')
+          .update({ credits: userCredits - 1 })
+          .eq('id', user.id)
+
+        if (creditError) {
+          throw new Error('Failed to deduct credit')
+        }
+      }
+
       // Create job request
       const { data, error: insertError } = await supabase
         .from('job_requests')
@@ -113,6 +176,9 @@ export default function NewJobPage() {
           status: 'collecting_bids',
           bid_collection_started_at: new Date().toISOString(),
           bid_collection_ends_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
+          payment_type: paymentType,
+          payment_status: 'paid',
+          credits_used: paymentType === 'credits' ? 1 : 0
         })
         .select()
         .single()
@@ -182,8 +248,52 @@ export default function NewJobPage() {
     }
   }
 
+  const handlePurchaseCredits = async () => {
+    if (!user) return
+
+    setPurchaseLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/stripe/purchase-credits', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          creditsToPurchase: creditsToPurchase,
+        }),
+      })
+
+      const { url, error: stripeError } = await response.json()
+
+      if (stripeError) {
+        setError(stripeError)
+      } else if (url) {
+        // Redirect to Stripe checkout
+        window.location.href = url
+      }
+    } catch (err) {
+      setError('Failed to create checkout session')
+    } finally {
+      setPurchaseLoading(false)
+    }
+  }
+
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!user) {
-    router.push('/auth/login')
     return null
   }
 
@@ -222,6 +332,77 @@ export default function NewJobPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Payment Type Selection */}
+              {userSubscriptionStatus !== 'active' && (
+                <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <Label className="text-base font-semibold">Choose Payment Method</Label>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="subscription"
+                        name="paymentType"
+                        value="subscription"
+                        checked={paymentType === 'subscription'}
+                        onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
+                        className="text-blue-600"
+                      />
+                      <Label htmlFor="subscription" className="font-medium">
+                        Monthly Subscription ($100/month) - Unlimited jobs
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="credits"
+                        name="paymentType"
+                        value="credits"
+                        checked={paymentType === 'credits'}
+                        onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
+                        className="text-blue-600"
+                      />
+                      <Label htmlFor="credits" className="font-medium">
+                        Credits ($20 per credit) - Beta pricing
+                      </Label>
+                    </div>
+                  </div>
+                  {paymentType === 'subscription' && (
+                    <p className="text-sm text-blue-700">
+                      You'll be redirected to subscribe before posting this job.
+                    </p>
+                  )}
+                  {paymentType === 'credits' && (
+                    <div className="text-sm text-blue-700">
+                      <p>You have {userCredits} credit{userCredits !== 1 ? 's' : ''} available.</p>
+                      {userCredits < 1 && (
+                        <div className="flex items-center gap-3 mt-2">
+                          <p className="text-orange-600 font-medium">You need to purchase credits first.</p>
+                          <Button 
+                            size="sm" 
+                            onClick={() => setShowCreditsModal(true)}
+                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                          >
+                            Purchase Credits
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {userSubscriptionStatus === 'active' && (
+                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <span className="text-green-800 font-medium">Active Subscription</span>
+                  </div>
+                  <p className="text-sm text-green-700 mt-1">
+                    You have unlimited job posting with your active subscription.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="trade_category">Trade Category *</Label>
                 <Select
@@ -341,6 +522,80 @@ export default function NewJobPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Purchase Credits Modal */}
+      {showCreditsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <div>
+                <CardTitle className="text-lg">Purchase Credits</CardTitle>
+                <CardDescription>
+                  Buy credits to post job requests
+                </CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowCreditsModal(false)}
+                className="h-6 w-6 p-0"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-center mb-4">
+                <div className="text-2xl font-bold text-blue-600 mb-2">
+                  Current Credits: {userCredits}
+                </div>
+                <p className="text-sm text-gray-600">
+                  Each credit allows you to post one job request
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Number of Credits to Purchase:
+                </label>
+                <select
+                  value={creditsToPurchase}
+                  onChange={(e) => setCreditsToPurchase(parseInt(e.target.value))}
+                  className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value={1}>1 Credit - $20</option>
+                  <option value={5}>5 Credits - $100</option>
+                  <option value={10}>10 Credits - $200</option>
+                  <option value={25}>25 Credits - $500</option>
+                  <option value={50}>50 Credits - $1,000</option>
+                </select>
+              </div>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                <div className="flex items-center space-x-2 mb-1">
+                  <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-semibold">
+                    Beta Pricing
+                  </span>
+                </div>
+                <p className="text-sm text-orange-700">
+                  Credits never expire and can be used anytime
+                </p>
+              </div>
+
+              {error && (
+                <div className="text-red-600 text-sm text-center">{error}</div>
+              )}
+
+              <Button 
+                onClick={handlePurchaseCredits}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white"
+                disabled={purchaseLoading}
+              >
+                {purchaseLoading ? 'Processing...' : `Purchase ${creditsToPurchase} Credit${creditsToPurchase > 1 ? 's' : ''} - $${creditsToPurchase * 20}`}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

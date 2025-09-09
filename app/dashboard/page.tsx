@@ -13,6 +13,7 @@ import { useAuth } from '@/app/providers'
 import { Building2, Plus, FileText, Users, Mail, CheckCircle, X, History, MapPin, DollarSign, MessageSquare, Calendar } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
+import CreditsDisplay from '@/components/credits-display'
 import NotificationBell from '@/components/notification-bell'
 import DebugNotifications from '@/components/debug-notifications'
 
@@ -35,6 +36,8 @@ export default function DashboardPage() {
   const [pastJobRequests, setPastJobRequests] = useState<JobRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
+  const [paymentType, setPaymentType] = useState<string>('subscription')
+  const [userCredits, setUserCredits] = useState<number>(0)
   const [showSuccessMessage, setShowSuccessMessage] = useState(false)
   const [activeTab, setActiveTab] = useState<'current' | 'past'>('current')
   const [isAdmin, setIsAdmin] = useState(false)
@@ -107,7 +110,7 @@ export default function DashboardPage() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('subscription_status, stripe_customer_id')
+        .select('subscription_status, stripe_customer_id, payment_type, credits')
         .eq('id', user.id)
         .single()
 
@@ -127,6 +130,8 @@ export default function DashboardPage() {
         }
       } else {
         setSubscriptionStatus(data?.subscription_status || 'inactive')
+        setPaymentType(data?.payment_type || 'subscription')
+        setUserCredits(data?.credits || 0)
       }
     } catch (err) {
       console.error('Error:', err)
@@ -341,35 +346,7 @@ export default function DashboardPage() {
     )
   }
 
-  // Check if user needs to subscribe
-  if (subscriptionStatus !== 'active') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
-              <Building2 className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900">Bidi</h1>
-            </div>
-            <CardTitle>Subscription Required</CardTitle>
-            <CardDescription>
-              You need an active subscription to access the dashboard
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-gray-600 mb-4">
-              Current status: <span className="font-semibold capitalize">{subscriptionStatus}</span>
-            </p>
-            <Link href="/subscription">
-              <Button className="w-full">
-                Subscribe Now
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  // Dashboard is now accessible to all authenticated users
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -381,6 +358,7 @@ export default function DashboardPage() {
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
+            <CreditsDisplay />
             <NotificationBell />
             <ProfileDropdown />
           </div>

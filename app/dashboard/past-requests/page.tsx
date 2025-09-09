@@ -153,35 +153,7 @@ export default function PastRequestsPage() {
     )
   }
 
-  // Check if user needs to subscribe
-  if (subscriptionStatus !== 'active') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
-              <Building2 className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900">Bidi</h1>
-            </div>
-            <CardTitle>Subscription Required</CardTitle>
-            <CardDescription>
-              You need an active subscription to access the dashboard
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-gray-600 mb-4">
-              Current status: <span className="font-semibold capitalize">{subscriptionStatus}</span>
-            </p>
-            <Link href="/subscription">
-              <Button className="w-full">
-                Subscribe Now
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  // Past requests page is now accessible to all authenticated users
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -55,92 +55,240 @@ export default function JobDetailsPage() {
     }
 
     if (params.id) {
-      fetchJobDetails()
+      console.log('useEffect triggered with:', { userId: user.id, jobId: params.id })
+      
+      // Test database health first
+      testDatabaseHealth().then(() => {
+        fetchJobDetails()
+      }).catch((err) => {
+        console.error('Database health check failed:', err)
+        setError('Database connection failed. Please try again later.')
+        setLoading(false)
+      })
     }
   }, [user, params.id, router])
 
+  const testDatabaseHealth = async () => {
+    console.log('Testing database health...')
+    const { data, error } = await supabase
+      .from('job_requests')
+      .select('count')
+      .limit(1)
+    
+    if (error) {
+      throw new Error('Database health check failed: ' + error.message)
+    }
+    
+    console.log('Database health check passed')
+  }
+
+
   const fetchJobDetails = async () => {
-    if (!params.id || !user) return
+    if (!params.id || !user) {
+      console.log('Missing params.id or user:', { paramsId: params.id, user: !!user })
+      return
+    }
+
+    console.log('Starting fetchJobDetails with:', { jobId: params.id, userId: user.id })
+    setLoading(true)
+    setError('')
 
     try {
-      // Fetch job request details
+      console.log('Step 1: Testing database connection...')
+      
+      // First, test if we can connect to the database
+      const { data: testData, error: testError } = await supabase
+        .from('job_requests')
+        .select('id')
+        .limit(1)
+      
+      console.log('Database connection test:', { testData, testError })
+      
+      if (testError) {
+        console.error('Database connection failed:', testError)
+        throw new Error('Database connection failed: ' + testError.message)
+      }
+      
+      console.log('Step 2: Database connection successful, fetching job request details...')
+      
+      // Try a simpler query first to see if the issue is with the complex query
+      console.log('Step 2a: Trying simple job query...')
+      const { data: simpleJobData, error: simpleJobError } = await supabase
+        .from('job_requests')
+        .select('id, gc_id')
+        .eq('id', params.id)
+        .single()
+      
+      console.log('Simple job query result:', { simpleJobData, simpleJobError })
+      
+      if (simpleJobError) {
+        console.error('Simple job query failed:', simpleJobError)
+        throw simpleJobError
+      }
+      
+      if (!simpleJobData) {
+        throw new Error('Job not found')
+      }
+      
+      if (simpleJobData.gc_id !== user.id) {
+        throw new Error('You do not have access to this job')
+      }
+      
+      console.log('Step 2b: Simple query successful, fetching full job details...')
+      
+      // Now try the full query
       const { data: jobData, error: jobError } = await supabase
         .from('job_requests')
         .select('*')
         .eq('id', params.id)
-        .eq('gc_id', user.id)
         .single()
 
+      console.log('Job query result:', { jobData, jobError })
+
       if (jobError) {
+        console.error('Error fetching job:', jobError)
         throw jobError
       }
 
+      if (!jobData) {
+        console.error('No job data found for ID:', params.id)
+        throw new Error('Job not found')
+      }
+
+      console.log('Step 2: Job data fetched successfully:', jobData)
       setJobRequest(jobData)
 
       // Fetch bids for this job
-      const { data: bidsData, error: bidsError } = await supabase
+      console.log('Step 3: Fetching bids for job:', params.id)
+      
+      // Add timeout to bids query
+      const bidsTimeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Bids query timed out after 15 seconds')), 15000)
+      })
+      
+      const bidsQueryPromise = supabase
         .from('bids')
         .select('*')
         .eq('job_request_id', params.id)
         .order('created_at', { ascending: false })
 
+      console.log('Executing bids query...')
+      const { data: bidsData, error: bidsError } = await Promise.race([bidsQueryPromise, bidsTimeoutPromise]) as any
+
+      console.log('Bids query result:', { bidsData, bidsError })
+
       if (bidsError) {
+        console.error('Error fetching bids:', bidsError)
         throw bidsError
       }
 
+      console.log('Step 4: Bids fetched successfully:', bidsData)
       setBids(bidsData || [])
 
-      // Mark all bids for this job as seen
+      // Mark all bids for this job as seen (only if there are bids)
       if (bidsData && bidsData.length > 0) {
-        console.log('Bids data:', bidsData)
-        console.log('Bid seen status:', bidsData.map(bid => ({ id: bid.id, seen: bid.seen })))
-        
-        // Mark all bids for this job as seen (regardless of current seen status)
-        console.log('Marking all bids as seen for job:', params.id)
-        console.log('Bids to update:', bidsData.map(bid => ({ id: bid.id, job_request_id: bid.job_request_id })))
-        
-        // Try updating by specific bid IDs first
-        const bidIds = bidsData.map(bid => bid.id)
-        console.log('Updating specific bid IDs:', bidIds)
-        
-        const { data: updateData, error: markSeenError } = await supabase
-          .from('bids')
-          .update({ seen: true })
-          .in('id', bidIds)
-          .select('id, seen')
+        console.log('Step 5: Marking bids as seen for job:', params.id)
+        await markBidsAsSeen(bidsData)
+      } else {
+        console.log('Step 5: No bids found for this job')
+      }
 
-        console.log('Update result data:', updateData)
-        console.log('Update result error:', markSeenError)
+      console.log('Step 6: fetchJobDetails completed successfully')
 
-        if (markSeenError) {
-          console.error('Error marking bids as seen:', markSeenError)
-        } else {
-          console.log('Successfully marked all bids as seen for job:', params.id)
-          console.log('Updated bids:', updateData)
+    } catch (err: any) {
+      console.error('Error in fetchJobDetails:', err)
+      console.error('Error details:', {
+        message: err.message,
+        code: err.code,
+        details: err.details,
+        hint: err.hint
+      })
+      
+      // If it's a timeout error, try a different approach
+      if (err.message.includes('timed out')) {
+        console.log('Attempting fallback query...')
+        try {
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('job_requests')
+            .select('id, trade_category, location, description, budget_range, created_at')
+            .eq('id', params.id)
+            .single()
           
-          // Also mark corresponding notifications as read
-          const { error: notificationError } = await supabase
-            .from('notifications')
-            .update({ read: true })
-            .eq('user_id', user.id)
-            .in('bid_id', bidIds)
-          
-          if (notificationError) {
-            console.error('Error marking notifications as read:', notificationError)
-          } else {
-            console.log('Successfully marked notifications as read')
+          if (!fallbackError && fallbackData) {
+            console.log('Fallback query successful:', fallbackData)
+            setJobRequest({
+              ...fallbackData,
+              files: null // Add missing files property
+            })
+            setBids([]) // Set empty bids for now
+            return
           }
-          
-          // Trigger refresh of seen status indicator after a short delay
-          setTimeout(() => {
-            setRefreshTrigger(prev => prev + 1)
-          }, 500)
+        } catch (fallbackErr) {
+          console.error('Fallback query also failed:', fallbackErr)
         }
       }
-    } catch (err: any) {
+      
       setError(err.message || 'Failed to fetch job details')
     } finally {
+      console.log('Step 7: Setting loading to false')
       setLoading(false)
+    }
+  }
+
+  const markBidsAsSeen = async (bidsData: Bid[]) => {
+    console.log('Starting markBidsAsSeen with bids:', bidsData.length)
+    
+    try {
+      const bidIds = bidsData.map(bid => bid.id)
+      console.log('Updating bid IDs:', bidIds)
+      
+      console.log('Step 5a: Updating bids table...')
+      const { data: updateData, error: markSeenError } = await supabase
+        .from('bids')
+        .update({ seen: true })
+        .in('id', bidIds)
+        .select('id, seen')
+
+      console.log('Bid update result:', { updateData, markSeenError })
+
+      if (markSeenError) {
+        console.error('Error marking bids as seen:', markSeenError)
+        // Don't throw error here - this is not critical for the main functionality
+        return
+      }
+
+      console.log('Step 5b: Successfully marked bids as seen:', updateData)
+      
+      // Also mark corresponding notifications as read
+      if (user) {
+        console.log('Step 5c: Updating notifications table...')
+        const { error: notificationError } = await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('user_id', user.id)
+          .in('bid_id', bidIds)
+        
+        console.log('Notification update result:', { notificationError })
+        
+        if (notificationError) {
+          console.error('Error marking notifications as read:', notificationError)
+          // Don't throw error here - this is not critical for the main functionality
+        } else {
+          console.log('Step 5d: Successfully marked notifications as read')
+        }
+      }
+      
+      // Trigger refresh of seen status indicator
+      console.log('Step 5e: Setting refresh trigger')
+      setTimeout(() => {
+        setRefreshTrigger(prev => prev + 1)
+      }, 500)
+      
+      console.log('markBidsAsSeen completed successfully')
+      
+    } catch (err) {
+      console.error('Error in markBidsAsSeen:', err)
+      // Don't throw error here - this is not critical for the main functionality
     }
   }
 
@@ -185,10 +333,22 @@ export default function JobDetailsPage() {
             <CardTitle className="text-red-600">Error</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
-          <CardContent className="text-center">
-            <Link href="/dashboard">
-              <Button>Back to Dashboard</Button>
-            </Link>
+          <CardContent className="text-center space-y-4">
+            <div className="flex flex-col space-y-2">
+              <Button 
+                onClick={() => {
+                  setError('')
+                  setLoading(true)
+                  fetchJobDetails()
+                }}
+                className="w-full"
+              >
+                Try Again
+              </Button>
+              <Link href="/dashboard">
+                <Button variant="outline" className="w-full">Back to Dashboard</Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>

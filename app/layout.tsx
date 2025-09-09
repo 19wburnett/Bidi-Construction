@@ -2,11 +2,12 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
+import AuthErrorBoundary from '@/components/auth-error-boundary'
 
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Bidi - Connect General Contractors with Subcontractors',
+  title: 'Bidi (Beta) - Connect General Contractors with Subcontractors',
   description: 'A marketplace connecting general contractors with qualified subcontractors for construction projects.',
 }
 
@@ -22,7 +23,9 @@ export default function RootLayout({
       </head>
       <body className={inter.className}>
         <Providers>
-          {children}
+          <AuthErrorBoundary>
+            {children}
+          </AuthErrorBoundary>
         </Providers>
       </body>
     </html>
