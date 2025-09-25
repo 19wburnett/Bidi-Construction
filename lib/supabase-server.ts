@@ -30,50 +30,22 @@ export const createServerSupabaseClient = async () => {
 }
 
 /**
- * Helper function to get authenticated user with automatic session refresh
- * Use this in API routes to ensure you have a valid user session
+ * Simple helper function to get authenticated user
+ * Use this in API routes to check if user is authenticated
  */
 export const getAuthenticatedUser = async () => {
   try {
     const supabase = await createServerSupabaseClient()
     
-    // First try to get the user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const { data: { user }, error } = await supabase.auth.getUser()
     
-    if (userError) {
-      console.error('Error getting user:', userError)
-      return { user: null, error: userError }
+    if (error) {
+      console.error('Error getting user:', error)
+      return { user: null, error }
     }
     
     if (!user) {
       return { user: null, error: new Error('No authenticated user found') }
-    }
-    
-    // Check if we need to refresh the session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-    
-    if (sessionError) {
-      console.error('Error getting session:', sessionError)
-      return { user: null, error: sessionError }
-    }
-    
-    if (session) {
-      const expiresAt = new Date(session.expires_at! * 1000)
-      const now = new Date()
-      const timeUntilExpiry = expiresAt.getTime() - now.getTime()
-      
-      // If session expires within 5 minutes, try to refresh it
-      if (timeUntilExpiry < 5 * 60 * 1000) {
-        console.log('Session expires soon, attempting refresh...')
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
-        
-        if (refreshError) {
-          console.error('Session refresh failed:', refreshError)
-          return { user: null, error: refreshError }
-        }
-        
-        return { user: refreshData.user, error: null }
-      }
     }
     
     return { user, error: null }

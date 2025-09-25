@@ -21,6 +21,7 @@ export default function ProfileDropdown() {
   const router = useRouter()
 
   useEffect(() => {
+    // Simple check - just get the current user
     const getUser = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (authUser) {
@@ -43,31 +44,7 @@ export default function ProfileDropdown() {
       }
     }
     getUser()
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email || '',
-          avatar_url: session.user.user_metadata?.picture || session.user.user_metadata?.avatar_url,
-          full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name
-        })
-
-        const { data: userData } = await supabase
-          .from('users')
-          .select('is_admin')
-          .eq('id', session.user.id)
-          .single()
-        setIsAdmin(!!userData?.is_admin)
-      } else {
-        setUser(null)
-        setIsAdmin(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase])
+  }, []) // Remove auth listener to prevent re-renders
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()

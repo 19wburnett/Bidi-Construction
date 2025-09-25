@@ -16,6 +16,7 @@ export default function Navbar() {
   const supabase = createClient()
 
   useEffect(() => {
+    // Simple check - just get the current user
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
@@ -34,29 +35,7 @@ export default function Navbar() {
     }
 
     getUser()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setUser(session?.user ?? null)
-        setIsSignedIn(!!session?.user)
-        
-        if (session?.user) {
-          // Check if user is admin
-          const { data: userData } = await supabase
-            .from('users')
-            .select('is_admin')
-            .eq('id', session.user.id)
-            .single()
-          
-          setIsAdmin(userData?.is_admin || false)
-        } else {
-          setIsAdmin(false)
-        }
-      }
-    )
-
-    return () => subscription.unsubscribe()
-  }, [supabase.auth])
+  }, []) // Remove auth listener to prevent re-renders
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()

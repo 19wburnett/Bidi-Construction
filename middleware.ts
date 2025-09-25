@@ -32,37 +32,14 @@ export async function middleware(request: NextRequest) {
   )
 
   try {
-    // Get the current session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-    
-    // If there's a session error or no session, try to refresh
-    if (sessionError || !session) {
-      console.log('No valid session, attempting refresh...')
-      const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession()
-      
-      if (refreshError || !refreshedSession) {
-        // If refresh fails, user needs to login again
-        const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
-        const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
-        
-        if (!isPublicPath) {
-          const url = request.nextUrl.clone()
-          url.pathname = '/auth/login'
-          return NextResponse.redirect(url)
-        }
-      }
-    }
+    // Simple check - just get the user
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Get user after potential refresh
-    const {
-      data: { user },
-      error: userError
-    } = await supabase.auth.getUser()
-
-    // If user is not signed in and the current path is protected, redirect to login
+    // Define public paths
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
     
+    // If no user and trying to access protected path, redirect to login
     if (!user && !isPublicPath) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
@@ -78,8 +55,6 @@ export async function middleware(request: NextRequest) {
 
     return response
   } catch (error) {
-    console.error('Middleware auth error:', error)
-    
     // On error, allow access to public paths, redirect others to login
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')

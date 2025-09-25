@@ -1,21 +1,17 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useRef } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
-import { AuthUtils } from '@/lib/auth-utils'
-import type { User, Session } from '@supabase/supabase-js'
-// import { HeroUIProvider } from '@heroui/system'
+import type { User } from '@supabase/supabase-js'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
-  error: string | null
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  error: null,
 })
 
 export const useAuth = () => {
@@ -29,88 +25,64 @@ export const useAuth = () => {
 export function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const supabase = createClient()
+  const supabase = useRef(createClient()).current
   const initialized = useRef(false)
 
   useEffect(() => {
+    if (initialized.current) return // Prevent multiple initializations
+    
     let mounted = true
+    initialized.current = true
 
-    const initializeAuth = async () => {
+    // Initial auth check
+    const checkAuth = async () => {
       try {
-        setError(null)
+        const { data: { user }, error } = await supabase.auth.getUser()
         
-        // Get initial session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-        
-        if (sessionError) {
-          console.error('Error getting session:', sessionError)
-          if (mounted) {
-            setError('Failed to get session')
-            setLoading(false)
-          }
-          return
-        }
-
         if (mounted) {
-          setUser(session?.user ?? null)
-          setLoading(false)
-          initialized.current = true
-          
-          // Start session refresh if user is authenticated
-          if (session?.user) {
-            AuthUtils.startSessionRefresh()
+          if (error) {
+            setUser(null)
+          } else {
+            setUser(user)
           }
+          setLoading(false)
         }
       } catch (err) {
-        console.error('Auth initialization error:', err)
         if (mounted) {
-          setError('Authentication initialization failed')
+          setUser(null)
           setLoading(false)
         }
       }
     }
 
-    // Set up auth state change listener
+    // Listen for auth state changes (important for OAuth callbacks)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state change:', event, session?.user?.id)
-        
-        if (!mounted) return
-
-        try {
-          setError(null)
-          
-          if (event === 'SIGNED_OUT' || !session) {
-            setUser(null)
-            AuthUtils.stopSessionRefresh()
-          } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (mounted) {
+          if (event === 'SIGNED_IN' && session?.user) {
             setUser(session.user)
-            AuthUtils.startSessionRefresh()
+          } else if (event === 'SIGNED_OUT') {
+            setUser(null)
           }
-          
           setLoading(false)
-        } catch (err) {
-          console.error('Auth state change error:', err)
-          setError('Authentication state change failed')
         }
       }
     )
 
-    // Initialize auth state
-    if (!initialized.current) {
-      initializeAuth()
-    }
+    // Initial check
+    checkAuth()
 
     return () => {
       mounted = false
       subscription.unsubscribe()
-      AuthUtils.stopSessionRefresh()
     }
-  }, [supabase.auth])
+  }, [supabase]) // Include supabase in dependencies
+
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({ user, loading }), [user, loading])
 
   return (
-    <AuthContext.Provider value={{ user, loading, error }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   )

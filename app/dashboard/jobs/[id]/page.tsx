@@ -55,32 +55,11 @@ export default function JobDetailsPage() {
     }
 
     if (params.id) {
-      console.log('useEffect triggered with:', { userId: user.id, jobId: params.id })
-      
-      // Test database health first
-      testDatabaseHealth().then(() => {
-        fetchJobDetails()
-      }).catch((err) => {
-        console.error('Database health check failed:', err)
-        setError('Database connection failed. Please try again later.')
-        setLoading(false)
-      })
+      fetchJobDetails()
     }
   }, [user, params.id, router])
 
-  const testDatabaseHealth = async () => {
-    console.log('Testing database health...')
-    const { data, error } = await supabase
-      .from('job_requests')
-      .select('count')
-      .limit(1)
-    
-    if (error) {
-      throw new Error('Database health check failed: ' + error.message)
-    }
-    
-    console.log('Database health check passed')
-  }
+  // Removed unnecessary database health check
 
 
   const fetchJobDetails = async () => {

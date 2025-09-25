@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { useAuth } from '@/app/providers'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Bell, X } from 'lucide-react'
@@ -24,66 +25,22 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const { user } = useAuth()
+  const supabase = useRef(createClient()).current
   const router = useRouter()
 
   useEffect(() => {
-    fetchNotifications()
-    
-    // Set up real-time subscription for new bids and updates
-    const channel = supabase
-      .channel('bids_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'bids'
-        },
-        (payload) => {
-          // When a new bid is inserted, fetch updated notifications
-          fetchNotifications()
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'bids'
-        },
-        (payload) => {
-          // When a bid is updated (e.g., seen status), fetch updated notifications
-          console.log('Bid updated:', payload)
-          fetchNotifications()
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'notifications'
-        },
-        (payload) => {
-          // When a notification is updated, fetch updated notifications
-          console.log('Notification updated:', payload)
-          fetchNotifications()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
+    // Only fetch if we have a user and haven't fetched yet
+    if (user && notifications.length === 0) {
+      fetchNotifications()
     }
-  }, [])
+  }, [user]) // Only depend on user, not empty array
 
   const fetchNotifications = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      console.log('Fetching notifications for user:', user.id)
+      // Fetching notifications for user
 
       // First, try to get from notifications table
       const { data: notificationData, error: notificationError } = await supabase
@@ -110,18 +67,15 @@ export default function NotificationBell() {
         .order('created_at', { ascending: false })
         .limit(10)
 
-      console.log('Notification data:', notificationData)
-      console.log('Notification error:', notificationError)
+      // Processing notification data
 
       if (notificationError && notificationError.code === 'PGRST116') {
         // Notifications table doesn't exist, fall back to bids
-        console.log('Notifications table does not exist, falling back to bids')
         await fetchNotificationsFromBids(user.id)
         return
       }
 
       if (notificationError) {
-        console.error('Error fetching notifications:', notificationError)
         // Fall back to bids if notifications table has issues
         await fetchNotificationsFromBids(user.id)
         return
@@ -141,15 +95,14 @@ export default function NotificationBell() {
           seen: notif.bids.seen,
           dismissed: notif.dismissed || false
         }))
-        console.log('Processed notifications:', notifications)
+        // Processed notifications
         setNotifications(notifications)
       } else {
         // No notifications in table, fall back to bids
-        console.log('No notifications found, falling back to bids')
         await fetchNotificationsFromBids(user.id)
       }
     } catch (err) {
-      console.error('Error:', err)
+      // Silent error handling
     } finally {
       setLoading(false)
     }
@@ -157,7 +110,7 @@ export default function NotificationBell() {
 
   const fetchNotificationsFromBids = async (userId: string) => {
     try {
-      console.log('Fetching notifications from bids for user:', userId)
+      // Fetching notifications from bids for user
       
       // Fallback: Get recent bids for user's jobs
       const { data: bidsData, error } = await supabase
@@ -179,11 +132,9 @@ export default function NotificationBell() {
         .order('created_at', { ascending: false })
         .limit(10)
 
-      console.log('Bids data:', bidsData)
-      console.log('Bids error:', error)
+      // Processing bids data
 
       if (error) {
-        console.error('Error fetching notifications from bids:', error)
         return
       }
 
@@ -200,10 +151,10 @@ export default function NotificationBell() {
         dismissed: false // Mark all as not dismissed for fallback
       }))
 
-      console.log('Processed notifications from bids:', notifications)
+      // Processed notifications from bids
       setNotifications(notifications)
     } catch (err) {
-      console.error('Error fetching from bids:', err)
+      // Silent error handling
     }
   }
 
@@ -213,7 +164,7 @@ export default function NotificationBell() {
       const notification = notifications.find(n => n.notification_id === notificationId || n.id === notificationId)
       if (!notification) return
 
-      console.log('Marking notification as read:', notification)
+      // Marking notification as read
 
       // If it has a notification_id, update the notifications table
       if (notification.notification_id) {
@@ -223,10 +174,9 @@ export default function NotificationBell() {
           .eq('id', notification.notification_id)
 
         if (notificationError) {
-          console.error('Error marking notification as read:', notificationError)
           return
         }
-        console.log('Successfully marked notification as read in database')
+        // Successfully marked notification as read in database
       }
 
       // Update local state - mark as read
@@ -239,9 +189,8 @@ export default function NotificationBell() {
         return n
       }))
       
-      console.log('Successfully marked notification as read in local state')
+      // Successfully marked notification as read in local state
     } catch (err) {
-      console.error('Error marking as read:', err)
       // Fallback: mark as read in local state
       setNotifications(prev => prev.map(n => {
         const nIdentifier = n.notification_id || n.id
@@ -259,7 +208,7 @@ export default function NotificationBell() {
       const notification = notifications.find(n => n.notification_id === notificationId || n.id === notificationId)
       if (!notification) return
 
-      console.log('Dismissing notification:', notification)
+      // Dismissing notification
 
       // If it has a notification_id, update the notifications table
       if (notification.notification_id) {
@@ -269,10 +218,9 @@ export default function NotificationBell() {
           .eq('id', notification.notification_id)
 
         if (notificationError) {
-          console.error('Error dismissing notification:', notificationError)
           return
         }
-        console.log('Successfully dismissed notification in database')
+        // Successfully dismissed notification in database
       }
 
       // Update local state - remove the notification completely

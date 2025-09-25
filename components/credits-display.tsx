@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase'
@@ -15,10 +15,11 @@ export default function CreditsDisplay() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { user } = useAuth()
-  const supabase = createClient()
+  const supabase = useRef(createClient()).current
 
   useEffect(() => {
-    if (user) {
+    // Only fetch if we have a user and haven't fetched yet
+    if (user && credits === 0) {
       fetchUserCredits()
     }
   }, [user])
@@ -38,7 +39,7 @@ export default function CreditsDisplay() {
         setPaymentType(userData.payment_type || 'subscription')
       }
     } catch (error) {
-      console.error('Error fetching user credits:', error)
+      // Silent error handling
     }
   }
 

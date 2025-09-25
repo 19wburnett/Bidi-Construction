@@ -143,6 +143,15 @@ export default function AdminDemoSettingsPage() {
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi Admin</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
+            <Link href="/admin/workflow-demo">
+              <Button variant="outline" className="hidden sm:flex">
+                <Users className="h-4 w-4 mr-2" />
+                Workflow Demo
+              </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <Users className="h-4 w-4" />
+              </Button>
+            </Link>
             <Link href="/admin/crawler">
               <Button variant="outline" className="hidden sm:flex">
                 <Search className="h-4 w-4 mr-2" />
@@ -176,6 +185,40 @@ export default function AdminDemoSettingsPage() {
         </div>
 
         <div className="grid gap-6">
+          {/* Workflow Demo */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Users className="h-5 w-5 text-purple-600" />
+                <span>Interactive Workflow Demo</span>
+              </CardTitle>
+              <CardDescription>
+                Experience the complete Bidi workflow from email to bid report in an interactive demo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  This demo simulates the entire process of how Bidi works:
+                </p>
+                <ul className="text-sm text-gray-600 space-y-1 ml-4">
+                  <li>• General contractor sends email with job details</li>
+                  <li>• Bidi processes and extracts job information</li>
+                  <li>• System notifies qualified subcontractors</li>
+                  <li>• Subcontractors respond with bids (simulated)</li>
+                  <li>• Bidi analyzes and compares all bids</li>
+                  <li>• Final report is generated and sent to GC</li>
+                </ul>
+                <Link href="/admin/workflow-demo">
+                  <Button className="w-full">
+                    <Users className="h-4 w-4 mr-2" />
+                    Launch Interactive Demo
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Demo Mode Toggle */}
           <Card>
             <CardHeader>

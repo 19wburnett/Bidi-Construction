@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,7 +44,7 @@ export default function DashboardPage() {
   const [demoMode, setDemoMode] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useRef(createClient()).current
 
   useEffect(() => {
     if (!user) {
@@ -52,35 +52,37 @@ export default function DashboardPage() {
       return
     }
 
-    // Check for success parameter from Stripe
-    const urlParams = new URLSearchParams(window.location.search)
-    if (urlParams.get('success') === 'true') {
-      setShowSuccessMessage(true)
-      // Show success message and refresh subscription status
-      setTimeout(() => {
-        fetchUserSubscription()
-        // Remove success parameter from URL
-        window.history.replaceState({}, '', '/dashboard')
-      }, 1000)
+    // Simple data loading - only run once when user changes
+    const loadData = async () => {
+      setLoading(true)
       
-      // Hide success message after 5 seconds
-      setTimeout(() => {
-        setShowSuccessMessage(false)
-      }, 5000)
+      // Check for success parameter from Stripe
+      const urlParams = new URLSearchParams(window.location.search)
+      if (urlParams.get('success') === 'true') {
+        setShowSuccessMessage(true)
+        setTimeout(() => {
+          fetchUserSubscription()
+          window.history.replaceState({}, '', '/dashboard')
+        }, 1000)
+        
+        setTimeout(() => {
+          setShowSuccessMessage(false)
+        }, 5000)
+      }
+
+      // Load all data
+      await Promise.all([
+        fetchUserSubscription(),
+        fetchJobRequests(),
+        fetchPastJobRequests(),
+        checkAdminStatus()
+      ])
+      
+      setLoading(false)
     }
 
-    fetchUserSubscription()
-    fetchJobRequests()
-    fetchPastJobRequests()
-    checkAdminStatus()
-    
-    // Set up periodic timeout check
-    const timeoutInterval = setInterval(() => {
-      checkBidTimeouts()
-    }, 30000) // Check every 30 seconds
-
-    return () => clearInterval(timeoutInterval)
-  }, [user, router])
+    loadData()
+  }, [user]) // Only depend on user
 
   const checkAdminStatus = async () => {
     if (!user) return
@@ -93,14 +95,16 @@ export default function DashboardPage() {
         .single()
 
       if (error) {
-        console.error('Error checking admin status:', error)
+        setIsAdmin(false)
+        setDemoMode(false)
         return
       }
 
       setIsAdmin(data?.is_admin || false)
       setDemoMode(data?.demo_mode || false)
     } catch (err) {
-      console.error('Error checking admin status:', err)
+      setIsAdmin(false)
+      setDemoMode(false)
     }
   }
 
@@ -115,7 +119,6 @@ export default function DashboardPage() {
         .single()
 
       if (error) {
-        console.error('Error fetching subscription status:', error)
         // Fallback: check if user has stripe_customer_id (old logic)
         if (error.code === 'PGRST116' || error.message.includes('subscription_status')) {
           // Column doesn't exist yet, use old logic
@@ -134,8 +137,9 @@ export default function DashboardPage() {
         setUserCredits(data?.credits || 0)
       }
     } catch (err) {
-      console.error('Error:', err)
       setSubscriptionStatus('inactive')
+      setPaymentType('subscription')
+      setUserCredits(0)
     }
   }
 
@@ -152,49 +156,46 @@ export default function DashboardPage() {
         .order('created_at', { ascending: false })
 
       if (jobsError) {
-        console.error('Error fetching job requests:', jobsError)
+        setJobRequests([])
         return
       }
 
-      // Then get bid counts and unseen bid counts for each job
-      const jobsWithBidCounts = await Promise.all(
-        (jobsData || []).map(async (job) => {
-          // Get total bid count
-          const { count, error: countError } = await supabase
-            .from('bids')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_request_id', job.id)
+      // Optimized: Get all bid counts in a single query
+      const jobIds = (jobsData || []).map(job => job.id)
+      let bidCounts: { [key: string]: { total: number, unseen: number } } = {}
+      
+      if (jobIds.length > 0) {
+        // Get all bid counts for all jobs at once
+        const { data: allBids, error: bidsError } = await supabase
+          .from('bids')
+          .select('job_request_id, seen')
+          .in('job_request_id', jobIds)
 
-          if (countError) {
-            console.error('Error counting bids:', countError)
-            return { ...job, bids_count: 0, unseen_bids_count: 0 }
-          }
+        if (!bidsError && allBids) {
+          // Count bids per job
+          bidCounts = allBids.reduce((acc, bid) => {
+            const jobId = bid.job_request_id
+            if (!acc[jobId]) {
+              acc[jobId] = { total: 0, unseen: 0 }
+            }
+            acc[jobId].total++
+            if (!bid.seen) {
+              acc[jobId].unseen++
+            }
+            return acc
+          }, {} as { [key: string]: { total: number, unseen: number } })
+        }
+      }
 
-          // Get unseen bid count
-          const { count: unseenCount, error: unseenError } = await supabase
-            .from('bids')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_request_id', job.id)
-            .eq('seen', false)
-
-          if (unseenError) {
-            console.error('Error counting unseen bids:', unseenError)
-            return { ...job, bids_count: count || 0, unseen_bids_count: 0 }
-          }
-
-          return { 
-            ...job, 
-            bids_count: count || 0, 
-            unseen_bids_count: unseenCount || 0 
-          }
-        })
-      )
+      const jobsWithBidCounts = (jobsData || []).map(job => ({
+        ...job,
+        bids_count: bidCounts[job.id]?.total || 0,
+        unseen_bids_count: bidCounts[job.id]?.unseen || 0
+      }))
 
       setJobRequests(jobsWithBidCounts)
     } catch (err) {
-      console.error('Error:', err)
-    } finally {
-      setLoading(false)
+      setJobRequests([])
     }
   }
 
@@ -211,30 +212,39 @@ export default function DashboardPage() {
         .order('created_at', { ascending: false })
 
       if (jobsError) {
-        console.error('Error fetching past job requests:', jobsError)
+        setPastJobRequests([])
         return
       }
 
-      // Then get bid counts for each job
-      const jobsWithBidCounts = await Promise.all(
-        (jobsData || []).map(async (job) => {
-          const { count, error: countError } = await supabase
-            .from('bids')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_request_id', job.id)
+      // Optimized: Get all bid counts in a single query
+      const jobIds = (jobsData || []).map(job => job.id)
+      let bidCounts: { [key: string]: number } = {}
+      
+      if (jobIds.length > 0) {
+        // Get all bid counts for all jobs at once
+        const { data: allBids, error: bidsError } = await supabase
+          .from('bids')
+          .select('job_request_id')
+          .in('job_request_id', jobIds)
 
-          if (countError) {
-            console.error('Error counting bids:', countError)
-            return { ...job, bids_count: 0 }
-          }
+        if (!bidsError && allBids) {
+          // Count bids per job
+          bidCounts = allBids.reduce((acc, bid) => {
+            const jobId = bid.job_request_id
+            acc[jobId] = (acc[jobId] || 0) + 1
+            return acc
+          }, {} as { [key: string]: number })
+        }
+      }
 
-          return { ...job, bids_count: count || 0 }
-        })
-      )
+      const jobsWithBidCounts = (jobsData || []).map(job => ({
+        ...job,
+        bids_count: bidCounts[job.id] || 0
+      }))
 
       setPastJobRequests(jobsWithBidCounts)
     } catch (err) {
-      console.error('Error:', err)
+      setPastJobRequests([])
     }
   }
 
@@ -249,7 +259,6 @@ export default function DashboardPage() {
         .eq('gc_id', user.id)
 
       if (error) {
-        console.error('Error closing job:', error)
         return
       }
 
@@ -257,7 +266,7 @@ export default function DashboardPage() {
       fetchJobRequests()
       fetchPastJobRequests()
     } catch (err) {
-      console.error('Error:', err)
+      // Silent error handling
     }
   }
 
@@ -272,7 +281,6 @@ export default function DashboardPage() {
         .eq('gc_id', user.id)
 
       if (error) {
-        console.error('Error reopening job:', error)
         return
       }
 
@@ -280,11 +288,11 @@ export default function DashboardPage() {
       fetchJobRequests()
       fetchPastJobRequests()
     } catch (err) {
-      console.error('Error:', err)
+      // Silent error handling
     }
   }
 
-  const stopCollectingBids = async (jobId: string) => {
+  const stopCollectingBids = useCallback(async (jobId: string) => {
     if (!user) return
 
     try {
@@ -298,38 +306,38 @@ export default function DashboardPage() {
         .eq('gc_id', user.id)
 
       if (error) {
-        console.error('Error stopping bid collection:', error)
         return
       }
 
       // Refresh job requests
       fetchJobRequests()
     } catch (err) {
-      console.error('Error:', err)
+      // Silent error handling
     }
-  }
+  }, [user, supabase])
 
-  const checkBidTimeouts = async () => {
-    try {
-      const response = await fetch('/api/check-bid-timeouts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
+  // Memoize expensive calculations
+  const stats = useMemo(() => {
+    const currentJobsCount = jobRequests.length
+    const pastJobsCount = pastJobRequests.length
+    const currentBidsCount = jobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
+    const pastBidsCount = pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
+    const recentJobsCount = jobRequests.filter(job => 
+      new Date(job.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    ).length
+    const avgBidsPerJob = pastJobRequests.length > 0 
+      ? Math.round(pastBidsCount / pastJobRequests.length * 10) / 10
+      : 0
 
-      if (response.ok) {
-        const data = await response.json()
-        if (data.updated > 0) {
-          // Refresh job requests if any were updated
-          fetchJobRequests()
-        }
-      }
-    } catch (error) {
-      console.error('Error checking bid timeouts:', error)
+    return {
+      currentJobsCount,
+      pastJobsCount,
+      currentBidsCount,
+      pastBidsCount,
+      recentJobsCount,
+      avgBidsPerJob
     }
-  }
-
+  }, [jobRequests, pastJobRequests])
 
   if (!user) {
     return null
@@ -410,7 +418,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="pt-2">
                 <div className="text-xl font-bold">
-                  {activeTab === 'current' ? jobRequests.length : pastJobRequests.length}
+                  {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
                 </div>
               </CardContent>
             </Card>
@@ -422,10 +430,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="pt-2">
                 <div className="text-xl font-bold">
-                  {activeTab === 'current' 
-                    ? jobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-                    : pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-                  }
+                  {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
                 </div>
               </CardContent>
             </Card>
@@ -439,12 +444,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="pt-2">
                 <div className="text-xl font-bold">
-                  {activeTab === 'current' 
-                    ? jobRequests.filter(job => new Date(job.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length
-                    : pastJobRequests.length > 0 
-                      ? Math.round(pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0) / pastJobRequests.length * 10) / 10
-                      : 0
-                  }
+                  {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
                 </div>
               </CardContent>
             </Card>
@@ -461,7 +461,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {activeTab === 'current' ? jobRequests.length : pastJobRequests.length}
+                  {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
                 </div>
               </CardContent>
             </Card>
@@ -473,10 +473,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {activeTab === 'current' 
-                    ? jobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-                    : pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-                  }
+                  {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
                 </div>
               </CardContent>
             </Card>
@@ -490,12 +487,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {activeTab === 'current' 
-                    ? jobRequests.filter(job => new Date(job.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length
-                    : pastJobRequests.length > 0 
-                      ? Math.round(pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0) / pastJobRequests.length * 10) / 10
-                      : 0
-                  }
+                  {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
                 </div>
               </CardContent>
             </Card>
@@ -526,7 +518,7 @@ export default function DashboardPage() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Current Jobs ({jobRequests.length})
+              Current Jobs ({stats.currentJobsCount})
             </button>
             <button
               onClick={() => setActiveTab('past')}
@@ -536,7 +528,7 @@ export default function DashboardPage() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Past Jobs ({pastJobRequests.length})
+              Past Jobs ({stats.pastJobsCount})
             </button>
           </div>
         </div>
