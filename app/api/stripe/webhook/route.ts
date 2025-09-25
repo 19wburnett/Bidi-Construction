@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { createClient } from '@supabase/supabase-js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -11,7 +10,7 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
-  const signature = request.headers.get('stripe-signature')!
+  const signature = request.headers.get('stripe-signature') || ''
 
   console.log('Webhook received:', {
     hasBody: !!body,
@@ -22,25 +21,28 @@ export async function POST(request: NextRequest) {
 
   let event: Stripe.Event
 
-  // Always try to verify signature if webhook secret exists
-  if (webhookSecret) {
-    try {
-      event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
-      console.log('Webhook signature verified successfully')
-    } catch (err) {
-      console.error('Webhook signature verification failed:', err)
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
-    }
-  } else {
-    console.log('No webhook secret found, skipping signature verification')
-    event = JSON.parse(body)
+  // Require webhook secret and signature for verification
+  if (!webhookSecret) {
+    console.error('Missing STRIPE_WEBHOOK_SECRET environment variable')
+    return NextResponse.json({ error: 'Webhook misconfigured' }, { status: 500 })
+  }
+
+  if (!signature) {
+    console.error('Missing Stripe signature header')
+    return NextResponse.json({ error: 'Missing signature' }, { status: 400 })
+  }
+
+  try {
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
+    console.log('Webhook signature verified successfully')
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err)
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
   console.log('Webhook event type:', event.type)
   console.log('Webhook event data:', JSON.stringify(event.data, null, 2))
 
-      const supabase = await createServerSupabaseClient()
-      
       // Use service role for webhook operations to bypass RLS
       const supabaseAdmin = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -127,7 +129,7 @@ export async function POST(request: NextRequest) {
             const jobData = JSON.parse(session.metadata?.jobData || '{}')
             
             // Create job request with payment info
-            const { data: jobRequest, error: jobError } = await supabase
+            const { data: jobRequest, error: jobError } = await supabaseAdmin
               .from('job_requests')
               .insert({
                 gc_id: userId,
@@ -174,7 +176,7 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // Handle subscription payment
-            const { error: updateError } = await supabase
+            const { error: updateError } = await supabaseAdmin
               .from('users')
               .update({ 
                 stripe_customer_id: session.customer as string,
@@ -199,7 +201,7 @@ export async function POST(request: NextRequest) {
         const updatedCustomerId = updatedSubscription.customer as string
 
         // Find user by customer ID and update their subscription status
-        const { data: updatedUser } = await supabase
+        const { data: updatedUser } = await supabaseAdmin
           .from('users')
           .select('id')
           .eq('stripe_customer_id', updatedCustomerId)
@@ -210,7 +212,7 @@ export async function POST(request: NextRequest) {
                         updatedSubscription.status === 'canceled' ? 'canceled' : 
                         updatedSubscription.status === 'past_due' ? 'past_due' : 'inactive'
 
-          await supabase
+          await supabaseAdmin
             .from('users')
             .update({ 
               subscription_status: status,
@@ -228,14 +230,14 @@ export async function POST(request: NextRequest) {
         const deletedCustomerId = deletedSubscription.customer as string
 
         // Find user by customer ID and update their subscription status
-        const { data: deletedUser } = await supabase
+        const { data: deletedUser } = await supabaseAdmin
           .from('users')
           .select('id')
           .eq('stripe_customer_id', deletedCustomerId)
           .single()
 
         if (deletedUser) {
-          await supabase
+          await supabaseAdmin
             .from('users')
             .update({ 
               subscription_status: 'canceled',

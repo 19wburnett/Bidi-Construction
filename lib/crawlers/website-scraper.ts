@@ -19,15 +19,15 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
   let browser
   try {
     browser = await puppeteer.launch({
-      headless: true,
+      headless: 'new',
       args: [
-        '--no-sandbox', 
+        '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--ignore-certificate-errors',
-        '--ignore-ssl-errors',
-        '--ignore-certificate-errors-spki-list',
-        '--disable-web-security',
-        '--allow-running-insecure-content'
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--no-first-run',
+        '--single-process'
       ]
     })
     
@@ -37,17 +37,18 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
     
     // Set timeout
-    await page.setDefaultTimeout(10000)
+    await page.setDefaultTimeout(12000)
+    await page.setDefaultNavigationTimeout(12000)
     
     console.log(`Scraping website: ${website}`)
     
     try {
-      await page.goto(website, { waitUntil: 'networkidle2', timeout: 10000 })
+      await page.goto(website, { waitUntil: 'domcontentloaded', timeout: 10000 })
     } catch (error) {
       console.log(`Failed to load ${website}:`, error instanceof Error ? error.message : String(error))
       // Try with a shorter timeout and different wait condition
       try {
-        await page.goto(website, { waitUntil: 'domcontentloaded', timeout: 5000 })
+        await page.goto(website, { waitUntil: 'domcontentloaded', timeout: 6000 })
       } catch (retryError) {
         console.log(`Retry failed for ${website}:`, retryError instanceof Error ? retryError.message : String(retryError))
         return { website }
@@ -64,7 +65,7 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
     const emailMatches = content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
     if (emailMatches) {
       // Filter out common non-contact emails
-      const contactEmails = emailMatches.filter(email => {
+      const contactEmails = emailMatches.filter((email: string) => {
         const lowerEmail = email.toLowerCase()
         return !lowerEmail.includes('noreply') && 
                !lowerEmail.includes('no-reply') &&
@@ -85,7 +86,7 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
     const phoneMatches = content.match(/(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g)
     if (phoneMatches) {
       // Clean up phone numbers
-      const cleanPhones = phoneMatches.map(phone => {
+      const cleanPhones = phoneMatches.map((phone: string) => {
         return phone.replace(/[^\d]/g, '').replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3')
       })
       
@@ -96,8 +97,8 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
     
     // Try to find contact page
     try {
-      const contactLinks = await page.$$eval('a[href*="contact"], a[href*="about"], a[href*="info"]', links => 
-        links.map(link => link.href).slice(0, 3)
+      const contactLinks = await page.$$eval('a[href*="contact"], a[href*="about"], a[href*="info"]', (links: any[]) => 
+        links.map((link: any) => (link as HTMLAnchorElement).href).slice(0, 3)
       )
       
       if (contactLinks.length > 0) {
@@ -109,7 +110,7 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
           // Extract emails from contact page
           const contactEmailMatches = contactContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
           if (contactEmailMatches && !contactInfo.email) {
-            const contactEmails = contactEmailMatches.filter(email => {
+            const contactEmails = contactEmailMatches.filter((email: string) => {
               const lowerEmail = email.toLowerCase()
               return !lowerEmail.includes('noreply') && 
                      !lowerEmail.includes('no-reply') &&
@@ -126,7 +127,7 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
           // Extract phone from contact page
           const contactPhoneMatches = contactContent.match(/(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g)
           if (contactPhoneMatches && !contactInfo.phone) {
-            const cleanPhones = contactPhoneMatches.map(phone => {
+            const cleanPhones = contactPhoneMatches.map((phone: string) => {
               return phone.replace(/[^\d]/g, '').replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3')
             })
             
