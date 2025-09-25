@@ -14,7 +14,9 @@ export class AuthUtils {
       return // Already started
     }
 
-    // Refresh session every 10 minutes
+    console.log('Starting automatic session refresh...')
+
+    // Refresh session every 5 minutes for more frequent checks
     this.refreshInterval = setInterval(async () => {
       if (this.isRefreshing) return
 
@@ -23,28 +25,44 @@ export class AuthUtils {
         const { data: { session }, error } = await this.supabase.auth.getSession()
         
         if (error) {
-          console.error('Session refresh error:', error)
+          console.error('Session refresh check error:', error)
+          // If we can't get the session, stop the refresh interval
+          this.stopSessionRefresh()
           return
         }
 
         if (session) {
-          // Check if session expires within the next 5 minutes
+          // Check if session expires within the next 10 minutes
           const expiresAt = new Date(session.expires_at! * 1000)
           const now = new Date()
           const timeUntilExpiry = expiresAt.getTime() - now.getTime()
           
-          // If session expires within 5 minutes, refresh it
-          if (timeUntilExpiry < 5 * 60 * 1000) {
-            console.log('Refreshing session...')
-            await this.supabase.auth.refreshSession()
+          // If session expires within 10 minutes, refresh it
+          if (timeUntilExpiry < 10 * 60 * 1000) {
+            console.log('Session expires soon, refreshing...')
+            const { data, error: refreshError } = await this.supabase.auth.refreshSession()
+            
+            if (refreshError) {
+              console.error('Session refresh failed:', refreshError)
+              // If refresh fails, stop the interval - user may need to login again
+              this.stopSessionRefresh()
+            } else {
+              console.log('Session refreshed successfully')
+            }
+          } else {
+            console.log('Session is still valid, no refresh needed')
           }
+        } else {
+          console.log('No active session found')
+          this.stopSessionRefresh()
         }
       } catch (err) {
         console.error('Session refresh failed:', err)
+        this.stopSessionRefresh()
       } finally {
         this.isRefreshing = false
       }
-    }, 10 * 60 * 1000) // Check every 10 minutes
+    }, 5 * 60 * 1000) // Check every 5 minutes
   }
 
   /**
@@ -86,5 +104,51 @@ export class AuthUtils {
       return false
     }
   }
+
+  /**
+   * Get a valid session, refreshing if necessary
+   * This is useful for API routes that need to ensure they have a valid session
+   */
+  static async getValidSession() {
+    try {
+      const { data: { session }, error } = await this.supabase.auth.getSession()
+      
+      if (error) {
+        console.error('Error getting session:', error)
+        return { session: null, error }
+      }
+
+      if (!session) {
+        return { session: null, error: new Error('No session found') }
+      }
+
+      // Check if session is expired or will expire soon
+      const expiresAt = new Date(session.expires_at! * 1000)
+      const now = new Date()
+      const timeUntilExpiry = expiresAt.getTime() - now.getTime()
+      
+      // If session expires within 5 minutes, try to refresh it
+      if (timeUntilExpiry < 5 * 60 * 1000) {
+        console.log('Session expires soon, attempting refresh...')
+        const { data: refreshData, error: refreshError } = await this.supabase.auth.refreshSession()
+        
+        if (refreshError) {
+          console.error('Session refresh failed:', refreshError)
+          return { session: null, error: refreshError }
+        }
+        
+        return { session: refreshData.session, error: null }
+      }
+
+      return { session, error: null }
+    } catch (err) {
+      console.error('Session validation error:', err)
+      return { session: null, error: err }
+    }
+  }
 }
+
+
+
+
 

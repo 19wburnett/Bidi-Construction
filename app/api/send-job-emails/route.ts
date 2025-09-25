@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -12,6 +12,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
+      )
+    }
+
+    // Get authenticated user with automatic session refresh
+    const { user, error: authError } = await getAuthenticatedUser()
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Authentication required', details: authError instanceof Error ? authError.message : 'Unknown auth error' },
+        { status: 401 }
       )
     }
 

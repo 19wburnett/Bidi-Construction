@@ -19,6 +19,7 @@ interface Notification {
   created_at: string
   read: boolean
   seen: boolean
+  dismissed: boolean
   notification_id?: string
 }
 
@@ -70,6 +71,7 @@ export default function NotificationsPage() {
         .select(`
           id,
           read,
+          dismissed,
           created_at,
           bids!inner(
             id,
@@ -84,6 +86,7 @@ export default function NotificationsPage() {
           )
         `)
         .eq('user_id', user.id)
+        .eq('dismissed', false)
         .order('created_at', { ascending: false })
         .limit(50)
 
@@ -111,7 +114,8 @@ export default function NotificationsPage() {
           bid_amount: notif.bids.bid_amount,
           created_at: notif.bids.created_at,
           read: notif.read,
-          seen: notif.bids.seen
+          seen: notif.bids.seen,
+          dismissed: notif.dismissed || false
         }))
         setNotifications(notifications)
       } else {
@@ -161,7 +165,8 @@ export default function NotificationsPage() {
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         read: false, // Mark all as unread for fallback
-        seen: bid.seen || false
+        seen: bid.seen || false,
+        dismissed: false // Mark all as not dismissed for fallback
       }))
 
       setNotifications(notifications)
@@ -176,6 +181,8 @@ export default function NotificationsPage() {
       const notification = notifications.find(n => n.notification_id === notificationId || n.id === notificationId)
       if (!notification) return
 
+      console.log('Marking notification as read:', notification)
+
       // If it has a notification_id, update the notifications table
       if (notification.notification_id) {
         const { error: notificationError } = await supabase
@@ -185,25 +192,72 @@ export default function NotificationsPage() {
 
         if (notificationError) {
           console.error('Error marking notification as read:', notificationError)
+          return
         }
+        console.log('Successfully marked notification as read in database')
       }
 
-      // Mark the associated bid as seen
-      const { error: bidError } = await supabase
-        .from('bids')
-        .update({ seen: true })
-        .eq('id', notification.id)
-
-      if (bidError) {
-        console.error('Error marking bid as seen:', bidError)
-      }
-
-      // Update local state - remove the notification
-      setNotifications(prev => prev.filter(n => n.id !== notification.id))
+      // Update local state - mark as read
+      setNotifications(prev => prev.map(n => {
+        const nIdentifier = n.notification_id || n.id
+        const identifierToFilter = notification.notification_id || notification.id
+        if (nIdentifier === identifierToFilter) {
+          return { ...n, read: true }
+        }
+        return n
+      }))
+      
+      console.log('Successfully marked notification as read in local state')
     } catch (err) {
       console.error('Error marking as read:', err)
+      // Fallback: mark as read in local state
+      setNotifications(prev => prev.map(n => {
+        const nIdentifier = n.notification_id || n.id
+        if (nIdentifier === notificationId) {
+          return { ...n, read: true }
+        }
+        return n
+      }))
+    }
+  }
+
+  const dismissNotification = async (notificationId: string) => {
+    try {
+      // Find the notification to determine if it has a notification_id
+      const notification = notifications.find(n => n.notification_id === notificationId || n.id === notificationId)
+      if (!notification) return
+
+      console.log('Dismissing notification:', notification)
+
+      // If it has a notification_id, update the notifications table
+      if (notification.notification_id) {
+        const { error: notificationError } = await supabase
+          .from('notifications')
+          .update({ dismissed: true })
+          .eq('id', notification.notification_id)
+
+        if (notificationError) {
+          console.error('Error dismissing notification:', notificationError)
+          return
+        }
+        console.log('Successfully dismissed notification in database')
+      }
+
+      // Update local state - remove the notification completely
+      setNotifications(prev => prev.filter(n => {
+        const nIdentifier = n.notification_id || n.id
+        const identifierToFilter = notification.notification_id || notification.id
+        return nIdentifier !== identifierToFilter
+      }))
+      
+      console.log('Successfully removed notification from local state')
+    } catch (err) {
+      console.error('Error dismissing notification:', err)
       // Fallback: remove from local state
-      setNotifications(prev => prev.filter(n => n.id !== notificationId))
+      setNotifications(prev => prev.filter(n => {
+        const nIdentifier = n.notification_id || n.id
+        return nIdentifier !== notificationId
+      }))
     }
   }
 
@@ -291,17 +345,15 @@ export default function NotificationsPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {notifications.map((notification) => (
+            {notifications.filter(n => !n.dismissed).map((notification) => (
               <Card
                 key={notification.id}
                 className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
                   !notification.read ? 'bg-blue-50 border-blue-200' : !notification.seen ? 'bg-yellow-50 border-yellow-200' : ''
                 }`}
                 onClick={() => {
-                  // Mark as read if it has a notification_id
-                  if (notification.notification_id) {
-                    markAsRead(notification.notification_id)
-                  }
+                  // Mark as read when clicked
+                  markAsRead(notification.notification_id || notification.id)
                   router.push(`/dashboard/jobs/${notification.job_id}`)
                 }}
               >
@@ -340,7 +392,7 @@ export default function NotificationsPage() {
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation()
-                          markAsRead(notification.notification_id || notification.id)
+                          dismissNotification(notification.notification_id || notification.id)
                         }}
                         className="p-1 h-6 w-6"
                       >

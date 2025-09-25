@@ -31,29 +31,67 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if expired - required for Server Components
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  try {
+    // Get the current session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    
+    // If there's a session error or no session, try to refresh
+    if (sessionError || !session) {
+      console.log('No valid session, attempting refresh...')
+      const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession()
+      
+      if (refreshError || !refreshedSession) {
+        // If refresh fails, user needs to login again
+        const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
+        const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+        
+        if (!isPublicPath) {
+          const url = request.nextUrl.clone()
+          url.pathname = '/auth/login'
+          return NextResponse.redirect(url)
+        }
+      }
+    }
 
-  // If user is not signed in and the current path is protected, redirect to login
-  const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
-  const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
-  
-  if (!user && !isPublicPath) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
+    // Get user after potential refresh
+    const {
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser()
+
+    // If user is not signed in and the current path is protected, redirect to login
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
+    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    
+    if (!user && !isPublicPath) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/login'
+      return NextResponse.redirect(url)
+    }
+
+    // If user is signed in and trying to access auth pages, redirect to dashboard
+    if (user && request.nextUrl.pathname.startsWith('/auth')) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
+
+    return response
+  } catch (error) {
+    console.error('Middleware auth error:', error)
+    
+    // On error, allow access to public paths, redirect others to login
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
+    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    
+    if (!isPublicPath) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/login'
+      return NextResponse.redirect(url)
+    }
+    
+    return response
   }
-
-  // If user is signed in and trying to access auth pages, redirect to dashboard
-  if (user && request.nextUrl.pathname.startsWith('/auth')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
-  }
-
-  return response
 }
 
 export const config = {

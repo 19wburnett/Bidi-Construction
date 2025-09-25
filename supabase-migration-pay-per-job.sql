@@ -17,3 +17,4 @@ ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending' CHECK (payment_st
 CREATE INDEX IF NOT EXISTS idx_users_payment_type ON users(payment_type);
 CREATE INDEX IF NOT EXISTS idx_job_requests_payment_status ON job_requests(payment_status);
 CREATE INDEX IF NOT EXISTS idx_job_requests_payment_type ON job_requests(payment_type);
+

@@ -37,3 +37,4 @@ CREATE POLICY "Users can view own credit purchases" ON credit_purchases
 
 CREATE POLICY "Users can insert own credit purchases" ON credit_purchases
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+

@@ -56,6 +56,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
           setUser(session?.user ?? null)
           setLoading(false)
           initialized.current = true
+          
+          // Start session refresh if user is authenticated
+          if (session?.user) {
+            AuthUtils.startSessionRefresh()
+          }
         }
       } catch (err) {
         console.error('Auth initialization error:', err)
@@ -78,8 +83,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
           
           if (event === 'SIGNED_OUT' || !session) {
             setUser(null)
+            AuthUtils.stopSessionRefresh()
           } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
             setUser(session.user)
+            AuthUtils.startSessionRefresh()
           }
           
           setLoading(false)
@@ -93,13 +100,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // Initialize auth state
     if (!initialized.current) {
       initializeAuth()
-    }
-
-    // Start session refresh when user is authenticated
-    if (user) {
-      AuthUtils.startSessionRefresh()
-    } else {
-      AuthUtils.stopSessionRefresh()
     }
 
     return () => {
