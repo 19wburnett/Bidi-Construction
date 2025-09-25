@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request: NextRequest) {
@@ -58,17 +67,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Send emails to all matching subcontractors
-    const emailPromises = subcontractors.map(async (sub) => {
+    const emailPromises = subcontractors.map(async (sub: { email: string }) => {
       try {
+        const safeDescription = escapeHtml(jobRequest.description || '').replace(/\n/g, '<br>')
+        const safeBudget = escapeHtml(jobRequest.budget_range || '')
+        const safeTrade = escapeHtml(tradeCategory)
+        const safeLocation = escapeHtml(location)
+
         const { data, error } = await resend.emails.send({
           from: 'Bidi <noreply@savewithbidi.com>',
           reply_to: `bids+${jobRequestId}@savewithbidi.com`,
           to: [sub.email],
-          subject: `New ${tradeCategory} Job Opportunity in ${location}`,
+          subject: `New ${safeTrade} Job Opportunity in ${safeLocation}`,
           headers: {
-            'X-Job-Request-ID': jobRequestId,
-            'X-Trade-Category': tradeCategory,
-            'X-Location': location,
+            'X-Job-Request-ID': String(jobRequestId),
+            'X-Trade-Category': safeTrade,
+            'X-Location': safeLocation,
           },
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -82,12 +96,12 @@ export async function POST(request: NextRequest) {
                 
                 <div style="background-color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                   <h3 style="color: #3b82f6; margin-top: 0;">Project Details</h3>
-                  <p><strong>Trade:</strong> ${tradeCategory}</p>
-                  <p><strong>Location:</strong> ${location}</p>
-                  <p><strong>Budget Range:</strong> ${jobRequest.budget_range}</p>
+                  <p><strong>Trade:</strong> ${safeTrade}</p>
+                  <p><strong>Location:</strong> ${safeLocation}</p>
+                  <p><strong>Budget Range:</strong> ${safeBudget}</p>
                   <p><strong>Description:</strong></p>
                   <div style="background-color: #f1f5f9; padding: 15px; border-radius: 4px; margin-top: 10px;">
-                    ${jobRequest.description.replace(/\n/g, '<br>')}
+                    ${safeDescription}
                   </div>
                 </div>
 
@@ -129,9 +143,7 @@ export async function POST(request: NextRequest) {
                 <p style="margin: 0; font-size: 14px;">
                   © 2024 Bidi. All rights reserved.
                 </p>
-                <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
-                  This email was sent to ${sub.email} because you're registered as a ${tradeCategory} subcontractor in ${location}.
-                </p>
+                <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">This email was sent to ${escapeHtml(sub.email)} because you're registered as a ${safeTrade} subcontractor in ${safeLocation}.</p>
               </div>
             </div>
           `,
@@ -150,8 +162,8 @@ export async function POST(request: NextRequest) {
     })
 
     const results = await Promise.all(emailPromises)
-    const successful = results.filter(r => r.success).length
-    const failed = results.filter(r => !r.success).length
+    const successful = results.filter((r: any) => r.success).length
+    const failed = results.filter((r: any) => !r.success).length
 
     return NextResponse.json({
       message: `Emails sent to ${successful} subcontractors`,
