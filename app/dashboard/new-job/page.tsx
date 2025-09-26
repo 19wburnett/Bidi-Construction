@@ -187,6 +187,30 @@ export default function NewJobPage() {
         throw insertError
       }
 
+      // Send notification email to admin about new job posting
+      try {
+        const notificationResponse = await fetch('/api/send-job-notification', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jobRequestId: data.id,
+            tradeCategory: formData.trade_category,
+            location: formData.location,
+            description: formData.description,
+            budgetRange: formData.budget_range,
+            gcEmail: user.email,
+          }),
+        })
+
+        if (!notificationResponse.ok) {
+          console.error('Failed to send notification email')
+        }
+      } catch (notificationError) {
+        console.error('Error sending notification email:', notificationError)
+      }
+
       // Check if user is admin with demo mode enabled
       const { data: userData, error: userError } = await supabase
         .from('users')
