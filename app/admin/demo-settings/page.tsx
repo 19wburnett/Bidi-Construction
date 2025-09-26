@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Settings, ArrowLeft, Users, Zap, Search } from 'lucide-react'
+import { Building2, Settings, ArrowLeft, Users, Zap, Search, UserPlus } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
@@ -161,6 +161,15 @@ export default function AdminDemoSettingsPage() {
                 <Search className="h-4 w-4" />
               </Button>
             </Link>
+            <Link href="/admin/manage-subcontractors">
+              <Button variant="outline" className="hidden sm:flex">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Subcontractors
+              </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            </Link>
             <Link href="/dashboard">
               <Button variant="outline" className="hidden sm:flex">
                 <ArrowLeft className="h-4 w-4 mr-2" />
@@ -303,6 +312,39 @@ export default function AdminDemoSettingsPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Subcontractor Management */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <UserPlus className="h-5 w-5 text-orange-600" />
+                <span>Subcontractor Management</span>
+              </CardTitle>
+              <CardDescription>
+                Add, edit, and manage subcontractors in your database
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Manage your subcontractor database with full CRUD operations. Add new subcontractors, 
+                  edit existing ones, and maintain your network of qualified contractors.
+                </p>
+                <ul className="text-sm text-gray-600 space-y-1 ml-4">
+                  <li>• Add new subcontractors with contact information</li>
+                  <li>• Edit existing subcontractor details</li>
+                  <li>• Search and filter by trade category or location</li>
+                  <li>• View statistics and manage your network</li>
+                </ul>
+                <Link href="/admin/manage-subcontractors">
+                  <Button className="w-full">
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Manage Subcontractors
+                  </Button>
+                </Link>
               </div>
             </CardContent>
           </Card>

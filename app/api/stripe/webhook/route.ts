@@ -174,11 +174,22 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // Handle subscription payment
-            const { error: updateError } = await supabase
+            // Get the subscription ID from the session
+            let subscriptionId = null
+            if (session.subscription) {
+              subscriptionId = session.subscription as string
+            } else if (session.mode === 'subscription') {
+              // If subscription ID is not directly available, we might need to wait for the subscription.created event
+              // For now, we'll update what we can and the subscription ID will be updated by the subscription.created event
+              console.log('Subscription ID not available in checkout session, will be updated by subscription.created event')
+            }
+
+            const { error: updateError } = await supabaseAdmin
               .from('users')
               .update({ 
                 stripe_customer_id: session.customer as string,
                 subscription_status: 'active',
+                stripe_subscription_id: subscriptionId,
                 subscription_updated_at: new Date().toISOString()
               })
               .eq('id', userId)
@@ -186,7 +197,7 @@ export async function POST(request: NextRequest) {
             if (updateError) {
               console.error('Error updating user subscription:', updateError)
             } else {
-              console.log(`✅ Subscription activated for user: ${userId}`)
+              console.log(`✅ Subscription activated for user: ${userId}${subscriptionId ? ` with subscription ID: ${subscriptionId}` : ''}`)
             }
           }
         } else {
@@ -194,32 +205,71 @@ export async function POST(request: NextRequest) {
         }
         break
 
+      case 'customer.subscription.created':
+        const newSubscription = event.data.object as Stripe.Subscription
+        const newCustomerId = newSubscription.customer as string
+
+        // Find user by customer ID and update their subscription ID
+        // Only update if subscription_id is not already set to avoid race conditions
+        const { data: newUser, error: findUserError } = await supabaseAdmin
+          .from('users')
+          .select('id, stripe_subscription_id')
+          .eq('stripe_customer_id', newCustomerId)
+          .single()
+
+        if (findUserError) {
+          console.error('Error finding user for subscription.created:', findUserError)
+        } else if (newUser) {
+          // Only update if subscription_id is not already set (avoid race condition with checkout.session.completed)
+          if (!newUser.stripe_subscription_id) {
+            const { error: updateError } = await supabaseAdmin
+              .from('users')
+              .update({ 
+                stripe_subscription_id: newSubscription.id,
+                subscription_status: 'active',
+                subscription_updated_at: new Date().toISOString()
+              })
+              .eq('id', newUser.id)
+
+            if (updateError) {
+              console.error('Error updating user subscription in subscription.created:', updateError)
+            } else {
+              console.log(`✅ Subscription created and linked for user: ${newUser.id}, subscription ID: ${newSubscription.id}`)
+            }
+          } else {
+            console.log(`Subscription ID already set for user: ${newUser.id}, skipping update`)
+          }
+        } else {
+          console.log(`No user found for customer ID: ${newCustomerId} in subscription.created event`)
+        }
+        break
+
       case 'customer.subscription.updated':
         const updatedSubscription = event.data.object as Stripe.Subscription
         const updatedCustomerId = updatedSubscription.customer as string
 
-        // Find user by customer ID and update their subscription status
-        const { data: updatedUser } = await supabase
+        // Update user subscription status directly by customer ID (more efficient)
+        const status = updatedSubscription.status === 'active' ? 'active' : 
+                      updatedSubscription.status === 'canceled' ? 'canceled' : 
+                      updatedSubscription.status === 'past_due' ? 'past_due' : 'inactive'
+
+        const { data: updatedUser, error: updateError } = await supabaseAdmin
           .from('users')
-          .select('id')
+          .update({ 
+            subscription_status: status,
+            stripe_subscription_id: updatedSubscription.id,
+            subscription_updated_at: new Date().toISOString()
+          })
           .eq('stripe_customer_id', updatedCustomerId)
+          .select('id')
           .single()
 
-        if (updatedUser) {
-          const status = updatedSubscription.status === 'active' ? 'active' : 
-                        updatedSubscription.status === 'canceled' ? 'canceled' : 
-                        updatedSubscription.status === 'past_due' ? 'past_due' : 'inactive'
-
-          await supabase
-            .from('users')
-            .update({ 
-              subscription_status: status,
-              stripe_subscription_id: updatedSubscription.id,
-              subscription_updated_at: new Date().toISOString()
-            })
-            .eq('id', updatedUser.id)
-
+        if (updateError) {
+          console.error('Error updating user subscription in subscription.updated:', updateError)
+        } else if (updatedUser) {
           console.log(`Subscription updated for user: ${updatedUser.id}, status: ${status}`)
+        } else {
+          console.log(`No user found for customer ID: ${updatedCustomerId} in subscription.updated event`)
         }
         break
 
@@ -227,23 +277,23 @@ export async function POST(request: NextRequest) {
         const deletedSubscription = event.data.object as Stripe.Subscription
         const deletedCustomerId = deletedSubscription.customer as string
 
-        // Find user by customer ID and update their subscription status
-        const { data: deletedUser } = await supabase
+        // Update user subscription status directly by customer ID (more efficient)
+        const { data: deletedUser, error: updateError } = await supabaseAdmin
           .from('users')
-          .select('id')
+          .update({ 
+            subscription_status: 'canceled',
+            subscription_updated_at: new Date().toISOString()
+          })
           .eq('stripe_customer_id', deletedCustomerId)
+          .select('id')
           .single()
 
-        if (deletedUser) {
-          await supabase
-            .from('users')
-            .update({ 
-              subscription_status: 'canceled',
-              subscription_updated_at: new Date().toISOString()
-            })
-            .eq('id', deletedUser.id)
-
+        if (updateError) {
+          console.error('Error updating user subscription in subscription.deleted:', updateError)
+        } else if (deletedUser) {
           console.log(`Subscription canceled for user: ${deletedUser.id}`)
+        } else {
+          console.log(`No user found for customer ID: ${deletedCustomerId} in subscription.deleted event`)
         }
         break
 
