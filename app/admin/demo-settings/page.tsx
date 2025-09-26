@@ -263,58 +263,6 @@ export default function AdminDemoSettingsPage() {
             </CardContent>
           </Card>
 
-          {/* Demo Features Info */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Settings className="h-5 w-5 text-green-600" />
-                <span>Demo Features</span>
-              </CardTitle>
-              <CardDescription>
-                What happens when demo mode is enabled:
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <h4 className="font-medium text-gray-900">Automatic Bid Generation</h4>
-                    <p className="text-sm text-gray-600">
-                      Creates 2-4 realistic demo bids with company names, contact info, pricing, and timelines
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <h4 className="font-medium text-gray-900">Staggered Timing</h4>
-                    <p className="text-sm text-gray-600">
-                      Bids appear over time (0-30 seconds + staggered) to simulate real contractor responses
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <h4 className="font-medium text-gray-900">Realistic Data</h4>
-                    <p className="text-sm text-gray-600">
-                      Bid amounts adjust based on your budget range, with realistic company names and contact details
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <h4 className="font-medium text-gray-900">Trade-Specific Content</h4>
-                    <p className="text-sm text-gray-600">
-                      Demo bids are tailored to the specific trade category (Electrical, Plumbing, HVAC, etc.)
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Subcontractor Management */}
           <Card>
