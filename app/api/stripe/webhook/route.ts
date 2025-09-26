@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
               } else {
                 const newCredits = (currentUser.credits || 0) + creditsToPurchase
                 
-                const { error: updateError } = await supabaseAdmin
+                const { error: updateCreditsError } = await supabaseAdmin
                   .from('users')
                   .update({ 
                     stripe_customer_id: session.customer as string,
@@ -115,8 +115,8 @@ export async function POST(request: NextRequest) {
                   })
                   .eq('id', userId)
                 
-                if (updateError) {
-                  console.error('Error updating user credits:', updateError)
+                if (updateCreditsError) {
+                  console.error('Error updating user credits:', updateCreditsError)
                 } else {
                   console.log(`✅ Credits purchased: ${creditsToPurchase} credits added to user ${userId} (total: ${newCredits})`)
                 }
@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
               console.log('Subscription ID not available in checkout session, will be updated by subscription.created event')
             }
 
-            const { error: updateError } = await supabaseAdmin
+            const { error: updateSubscriptionError } = await supabaseAdmin
               .from('users')
               .update({ 
                 stripe_customer_id: session.customer as string,
@@ -194,8 +194,8 @@ export async function POST(request: NextRequest) {
               })
               .eq('id', userId)
             
-            if (updateError) {
-              console.error('Error updating user subscription:', updateError)
+            if (updateSubscriptionError) {
+              console.error('Error updating user subscription:', updateSubscriptionError)
             } else {
               console.log(`✅ Subscription activated for user: ${userId}${subscriptionId ? ` with subscription ID: ${subscriptionId}` : ''}`)
             }
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
         } else if (newUser) {
           // Only update if subscription_id is not already set (avoid race condition with checkout.session.completed)
           if (!newUser.stripe_subscription_id) {
-            const { error: updateError } = await supabaseAdmin
+            const { error: updateSubscriptionCreatedError } = await supabaseAdmin
               .from('users')
               .update({ 
                 stripe_subscription_id: newSubscription.id,
@@ -231,8 +231,8 @@ export async function POST(request: NextRequest) {
               })
               .eq('id', newUser.id)
 
-            if (updateError) {
-              console.error('Error updating user subscription in subscription.created:', updateError)
+            if (updateSubscriptionCreatedError) {
+              console.error('Error updating user subscription in subscription.created:', updateSubscriptionCreatedError)
             } else {
               console.log(`✅ Subscription created and linked for user: ${newUser.id}, subscription ID: ${newSubscription.id}`)
             }
@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
                       updatedSubscription.status === 'canceled' ? 'canceled' : 
                       updatedSubscription.status === 'past_due' ? 'past_due' : 'inactive'
 
-        const { data: updatedUser, error: updateError } = await supabaseAdmin
+        const { data: updatedUser, error: updateSubscriptionUpdatedError } = await supabaseAdmin
           .from('users')
           .update({ 
             subscription_status: status,
@@ -264,8 +264,8 @@ export async function POST(request: NextRequest) {
           .select('id')
           .single()
 
-        if (updateError) {
-          console.error('Error updating user subscription in subscription.updated:', updateError)
+        if (updateSubscriptionUpdatedError) {
+          console.error('Error updating user subscription in subscription.updated:', updateSubscriptionUpdatedError)
         } else if (updatedUser) {
           console.log(`Subscription updated for user: ${updatedUser.id}, status: ${status}`)
         } else {
@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
         const deletedCustomerId = deletedSubscription.customer as string
 
         // Update user subscription status directly by customer ID (more efficient)
-        const { data: deletedUser, error: updateError } = await supabaseAdmin
+        const { data: deletedUser, error: updateSubscriptionDeletedError } = await supabaseAdmin
           .from('users')
           .update({ 
             subscription_status: 'canceled',
@@ -288,8 +288,8 @@ export async function POST(request: NextRequest) {
           .select('id')
           .single()
 
-        if (updateError) {
-          console.error('Error updating user subscription in subscription.deleted:', updateError)
+        if (updateSubscriptionDeletedError) {
+          console.error('Error updating user subscription in subscription.deleted:', updateSubscriptionDeletedError)
         } else if (deletedUser) {
           console.log(`Subscription canceled for user: ${deletedUser.id}`)
         } else {
