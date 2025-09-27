@@ -57,7 +57,7 @@ RESEND_API_KEY=your_resend_api_key
 OPENAI_API_KEY=your_openai_api_key
 
 # App
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://www.bidicontracting.com
 ```
 
 ### 3. Supabase Setup
@@ -91,7 +91,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the application.
+Open [https://www.bidicontracting.com](https://www.bidicontracting.com) to see the application.
 
 ## Project Structure
 

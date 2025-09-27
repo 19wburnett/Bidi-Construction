@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
+import { PostHogProvider } from '@/components/posthog-provider'
 
 interface AuthContextType {
   user: User | null
@@ -83,7 +84,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={contextValue}>
-      {children}
+      <PostHogProvider>
+        {children}
+      </PostHogProvider>
     </AuthContext.Provider>
   )
 }
