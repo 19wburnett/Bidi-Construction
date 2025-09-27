@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
+// Use Node.js runtime for Supabase compatibility
+export const runtime = 'nodejs'
+
 export async function POST(request: NextRequest) {
   try {
     const { userId, status = 'active' } = await request.json()

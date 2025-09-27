@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 
+// Use Node.js runtime for Supabase compatibility
+export const runtime = 'nodejs'
+
 // Demo bid data for different trade categories
 const DEMO_BID_DATA = {
   Electrical: [
