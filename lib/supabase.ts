@@ -148,6 +148,47 @@ export interface Database {
           created_at?: string
         }
       }
+      gc_contacts: {
+        Row: {
+          id: string
+          gc_id: string
+          email: string
+          name: string
+          company: string | null
+          phone: string | null
+          trade_category: string
+          location: string
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          gc_id: string
+          email: string
+          name: string
+          company?: string | null
+          phone?: string | null
+          trade_category: string
+          location: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          gc_id?: string
+          email?: string
+          name?: string
+          company?: string | null
+          phone?: string | null
+          trade_category?: string
+          location?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
   }
 }
