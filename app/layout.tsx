@@ -9,6 +9,13 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Bidi (Beta) - Connect General Contractors with Subcontractors',
   description: 'A marketplace connecting general contractors with qualified subcontractors for construction projects.',
+  icons: {
+    icon: [
+      { url: '/brand/Bidi%20Contracting%20Logo.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: ['/brand/Bidi%20Contracting%20Logo.svg'],
+    apple: ['/brand/Bidi%20Contracting%20Logo.svg'],
+  },
 }
 
 export default function RootLayout({

@@ -12,6 +12,7 @@ import { Building2, ArrowLeft, Save, User, Phone, Bell, CreditCard, Coins } from
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface UserSettings {
   first_name: string
@@ -178,31 +179,28 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-2 text-gray-600">Loading settings...</p>
-        </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <FallingBlocksLoader text="Loading settings..." size="md" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-white border-b-2 border-gray-200">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
+            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-black" />
+            <h1 className="text-xl sm:text-2xl font-bold text-black">Bidi</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <Link href="/dashboard">
-              <Button variant="outline" className="hidden sm:flex">
+              <Button variant="construction" className="hidden sm:flex">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Dashboard
               </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
+              <Button variant="construction" size="sm" className="sm:hidden">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             </Link>
@@ -214,16 +212,16 @@ export default function SettingsPage() {
 
       <div className="container mx-auto px-4 py-4 sm:py-8 max-w-2xl">
         <div className="mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Settings</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-black">Settings</h2>
           <p className="text-gray-600">Manage your account preferences and notifications</p>
         </div>
 
         {/* Message */}
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
+          <div className={`mb-6 p-4 rounded-lg border-2 ${
             message.type === 'success' 
-              ? 'bg-green-100 border border-green-400 text-green-700' 
-              : 'bg-red-100 border border-red-400 text-red-700'
+              ? 'bg-green-50 border-green-200 text-green-700' 
+              : 'bg-red-50 border-red-200 text-red-700'
           }`}>
             {message.text}
           </div>
@@ -231,13 +229,13 @@ export default function SettingsPage() {
 
         <div className="space-y-6">
           {/* Personal Information */}
-          <Card>
+          <Card className="border-2 border-gray-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center">
+              <CardTitle className="flex items-center text-black">
                 <User className="h-5 w-5 mr-2" />
                 Personal Information
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium text-gray-600">
                 Update your personal details and contact information
               </CardDescription>
             </CardHeader>
@@ -280,13 +278,13 @@ export default function SettingsPage() {
           </Card>
 
           {/* Notification Settings */}
-          <Card>
+          <Card className="border-2 border-gray-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center">
+              <CardTitle className="flex items-center text-black">
                 <Bell className="h-5 w-5 mr-2" />
                 Notification Preferences
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium text-gray-600">
                 Choose how you want to be notified about activity on your account
               </CardDescription>
             </CardHeader>
@@ -330,29 +328,29 @@ export default function SettingsPage() {
           </Card>
 
           {/* Payment Method */}
-          <Card>
+          <Card className="border-2 border-gray-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center">
+              <CardTitle className="flex items-center text-black">
                 <CreditCard className="h-5 w-5 mr-2" />
                 Payment Method
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium text-gray-600">
                 Choose how you want to pay for job requests
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
                 {/* Current Payment Method Display */}
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       {settings.payment_type === 'credits' ? (
-                        <Coins className="h-5 w-5 text-orange-600" />
+                        <Coins className="h-5 w-5 text-orange" />
                       ) : (
-                        <CreditCard className="h-5 w-5 text-blue-600" />
+                        <CreditCard className="h-5 w-5 text-gray-700" />
                       )}
                       <div>
-                        <p className="font-medium text-gray-900">
+                        <p className="font-medium text-black">
                           {settings.payment_type === 'credits' ? 'Credits' : 'Subscription'}
                         </p>
                         <p className="text-sm text-gray-600">
@@ -368,10 +366,10 @@ export default function SettingsPage() {
 
                 {/* Payment Method Options */}
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium text-gray-700">Switch Payment Method:</Label>
+                  <Label className="text-sm font-medium text-black">Switch Payment Method:</Label>
                   <div className="flex space-x-3">
                     <Button
-                      variant={settings.payment_type === 'subscription' ? 'default' : 'outline'}
+                      variant={settings.payment_type === 'subscription' ? 'orange' : 'construction'}
                       size="sm"
                       onClick={() => handlePaymentTypeChange('subscription')}
                       disabled={settings.payment_type === 'subscription'}
@@ -381,7 +379,7 @@ export default function SettingsPage() {
                       <span>Subscription</span>
                     </Button>
                     <Button
-                      variant={settings.payment_type === 'credits' ? 'default' : 'outline'}
+                      variant={settings.payment_type === 'credits' ? 'orange' : 'construction'}
                       size="sm"
                       onClick={() => handlePaymentTypeChange('credits')}
                       disabled={settings.payment_type === 'credits'}
@@ -404,12 +402,12 @@ export default function SettingsPage() {
 
           {/* Save Button */}
           <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving} className="min-w-32">
+            <Button onClick={handleSave} variant="orange" disabled={saving} className="min-w-32 font-bold">
               {saving ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Saving...
-                </>
+                <div className="flex items-center justify-center">
+                  <FallingBlocksLoader text="" size="sm" />
+                  <span className="ml-2">Saving...</span>
+                </div>
               ) : (
                 <>
                   <Save className="h-4 w-4 mr-2" />
@@ -424,22 +422,22 @@ export default function SettingsPage() {
       {/* Payment Method Change Confirmation Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
+          <Card className="w-full max-w-md border-2 border-gray-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center">
+              <CardTitle className="flex items-center text-black">
                 {newPaymentType === 'credits' ? (
-                  <Coins className="h-5 w-5 mr-2 text-orange-600" />
+                  <Coins className="h-5 w-5 mr-2 text-orange" />
                 ) : (
-                  <CreditCard className="h-5 w-5 mr-2 text-blue-600" />
+                  <CreditCard className="h-5 w-5 mr-2 text-gray-700" />
                 )}
                 Switch to {newPaymentType === 'credits' ? 'Credits' : 'Subscription'}
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium text-gray-600">
                 Are you sure you want to change your payment method?
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-3">
                 <p className="text-sm text-orange-700">
                   <strong>Important:</strong> Changing your payment method will affect how you pay for future job requests.
                   {newPaymentType === 'credits' && ' You will need to purchase credits before posting jobs.'}
@@ -448,7 +446,7 @@ export default function SettingsPage() {
 
               <div className="flex space-x-3">
                 <Button
-                  variant="outline"
+                  variant="construction"
                   onClick={() => setShowPaymentModal(false)}
                   className="flex-1"
                 >
@@ -456,14 +454,15 @@ export default function SettingsPage() {
                 </Button>
                 <Button
                   onClick={confirmPaymentTypeChange}
+                  variant="orange"
                   disabled={paymentChanging}
-                  className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                  className="flex-1 font-bold"
                 >
                   {paymentChanging ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Changing...
-                    </>
+                    <div className="flex items-center justify-center">
+                      <FallingBlocksLoader text="" size="sm" />
+                      <span className="ml-2">Changing...</span>
+                    </div>
                   ) : (
                     'Confirm Change'
                   )}

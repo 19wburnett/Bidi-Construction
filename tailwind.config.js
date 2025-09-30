@@ -47,6 +47,12 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Bidi Construction Orange Accent
+        orange: {
+          DEFAULT: "hsl(var(--orange))",
+          foreground: "hsl(var(--orange-foreground))",
+          light: "hsl(var(--orange-light))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Building2, Menu, X, User, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
+import logo from '../public/brand/Bidi Contracting Logo.svg'
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -62,20 +63,20 @@ export default function Navbar() {
   }
 
   return (
-    <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50 transition-all duration-300">
+    <header className="border-b-2 border-gray-200 bg-white sticky top-0 z-50 shadow-sm">
       <div className="container mx-auto px-4 py-4">
         <div className="flex justify-between items-center">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2 group">
+          <Link href="/" className="flex items-center space-x-3 group">
             <div className="relative">
-              <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 transition-transform duration-300 group-hover:scale-110" />
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-ping"></div>
+              <img src={logo.src} alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black transition-transform duration-300 group-hover:scale-105" />
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
             </div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <div className="flex items-center space-x-3">
+              <h1 className="text-2xl sm:text-3xl font-bold text-black tracking-tight">
                 Bidi
               </h1>
-              <span className="bg-orange-100 text-orange-800 text-xs font-semibold px-2 py-1 rounded-full border border-orange-200">
+              <span className="bidi-orange-bg-light bidi-orange-text text-xs font-bold px-3 py-1 rounded-full border border-orange/20">
                 BETA
               </span>
             </div>
@@ -87,10 +88,10 @@ export default function Navbar() {
               <Link
                 key={item.name}
                 href={item.href}
-                className={`text-sm font-medium transition-all duration-200 hover:text-blue-600 ${
+                className={`text-sm font-semibold transition-all duration-200 hover:text-black ${
                   isActive(item.href)
-                    ? 'text-blue-600 border-b-2 border-blue-600 pb-1'
-                    : 'text-gray-700 hover:border-b-2 hover:border-blue-300 pb-1'
+                    ? 'text-black border-b-2 border-orange pb-1'
+                    : 'text-gray-600 hover:border-b-2 hover:border-gray-300 pb-1'
                 }`}
               >
                 {item.name}
@@ -102,20 +103,20 @@ export default function Navbar() {
           <div className="hidden md:flex items-center space-x-4">
             {isSignedIn ? (
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-gray-100 rounded-lg px-3 py-1">
-                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                <div className="flex items-center space-x-2 bg-gray-100 rounded-lg px-3 py-2 border border-gray-200">
+                  <div className="w-8 h-8 bg-orange rounded-full flex items-center justify-center">
                     <span className="text-white font-bold text-sm">
                       {user?.email?.charAt(0).toUpperCase() || 'U'}
                     </span>
                   </div>
-                  <span className="text-gray-700 text-sm font-medium">
+                  <span className="text-gray-700 text-sm font-semibold">
                     {user?.email?.split('@')[0] || 'User'}
                   </span>
                 </div>
                 <Button 
-                  variant="ghost" 
+                  variant="construction" 
                   onClick={handleSignOut}
-                  className="text-sm hover:scale-105 transition-transform duration-200"
+                  className="text-sm"
                 >
                   <LogOut className="h-4 w-4 mr-2" />
                   Sign Out
@@ -124,12 +125,12 @@ export default function Navbar() {
             ) : (
               <>
                 <Link href="/auth/login">
-                  <Button variant="ghost" className="text-sm hover:scale-105 transition-transform duration-200">
+                  <Button variant="construction" className="text-sm">
                     Login
                   </Button>
                 </Link>
                 <Link href="/auth/signup">
-                  <Button className="text-sm hover:scale-105 transition-all duration-200 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg hover:shadow-xl">
+                  <Button variant="orange" className="text-sm">
                     Get Started
                   </Button>
                 </Link>
@@ -152,37 +153,37 @@ export default function Navbar() {
 
         {/* Mobile Navigation */}
         {isMenuOpen && (
-          <div className="md:hidden mt-4 pb-4 border-t border-gray-200">
+          <div className="md:hidden mt-4 pb-4 border-t-2 border-gray-200">
             <nav className="flex flex-col space-y-2 pt-4">
               {navigation.map((item) => (
                 <Link
                   key={item.name}
                   href={item.href}
                   onClick={() => setIsMenuOpen(false)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
                     isActive(item.href)
-                      ? 'text-blue-600 bg-blue-50'
-                      : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                      ? 'text-black bg-orange/10 border-l-4 border-orange'
+                      : 'text-gray-600 hover:text-black hover:bg-gray-50'
                   }`}
                 >
                   {item.name}
                 </Link>
               ))}
-              <div className="pt-4 border-t border-gray-200 space-y-2">
+              <div className="pt-4 border-t-2 border-gray-200 space-y-2">
                 {isSignedIn ? (
                   <>
-                    <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 rounded-lg">
-                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                    <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 rounded-lg border border-gray-200">
+                      <div className="w-8 h-8 bg-orange rounded-full flex items-center justify-center">
                         <span className="text-white font-bold text-sm">
                           {user?.email?.charAt(0).toUpperCase() || 'U'}
                         </span>
                       </div>
-                      <span className="text-gray-700 text-sm font-medium">
+                      <span className="text-gray-700 text-sm font-semibold">
                         {user?.email?.split('@')[0] || 'User'}
                       </span>
                     </div>
                     <Button 
-                      variant="ghost" 
+                      variant="construction" 
                       onClick={handleSignOut}
                       className="w-full justify-start text-sm"
                     >
@@ -193,12 +194,12 @@ export default function Navbar() {
                 ) : (
                   <>
                     <Link href="/auth/login" onClick={() => setIsMenuOpen(false)}>
-                      <Button variant="ghost" className="w-full justify-start text-sm">
+                      <Button variant="construction" className="w-full justify-start text-sm">
                         Login
                       </Button>
                     </Link>
                     <Link href="/auth/signup" onClick={() => setIsMenuOpen(false)}>
-                      <Button className="w-full text-sm bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                      <Button variant="orange" className="w-full text-sm">
                         Get Started
                       </Button>
                     </Link>

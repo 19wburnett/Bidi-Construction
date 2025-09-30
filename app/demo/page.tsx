@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Navbar from '@/components/navbar'
+import Footer from '@/components/footer'
 import Link from 'next/link'
 import { 
   Building2, 
@@ -199,29 +200,36 @@ export default function DemoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-white relative">
+      {/* Professional Construction Background */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white"></div>
+        <div className="absolute top-0 left-0 w-full h-1 bg-orange"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 rounded-full blur-3xl"></div>
+      </div>
+
       <Navbar />
 
       <div className="container mx-auto px-4 py-8">
         {/* Demo Header */}
         <div className="text-center mb-12">
-          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+          <h1 className="text-3xl sm:text-4xl font-bold text-black mb-4">
             See How Our Search Tool Works
           </h1>
-          <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
+          <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto font-medium">
             Submit your project details and watch our automated system find subcontractors, collect bids, and present them in an easy-to-read format.
           </p>
         </div>
 
         {/* Project Submission Form */}
         {!projectSubmitted && (
-          <Card className="mb-12 max-w-2xl mx-auto">
+          <Card className="mb-12 max-w-2xl mx-auto border-2 border-gray-200 bg-white">
             <CardHeader>
               <CardTitle className="flex items-center">
-                <Building2 className="h-5 w-5 mr-2 text-blue-600" />
+                <Building2 className="h-5 w-5 mr-2 text-black" />
                 Submit Your Project Details
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium text-gray-600">
                 Fill out the form below to see how our system works with your specific project
               </CardDescription>
             </CardHeader>
@@ -328,7 +336,7 @@ export default function DemoPage() {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Button 
                     type="button"
-                    variant="outline" 
+                    variant="construction" 
                     size="lg" 
                     className="flex-1"
                     onClick={fillSampleData}
@@ -339,7 +347,8 @@ export default function DemoPage() {
                   <Button 
                     type="submit" 
                     size="lg" 
-                    className="flex-1"
+                    variant="orange"
+                    className="flex-1 font-bold"
                     disabled={!projectForm.projectType || !projectForm.description || !projectForm.budget}
                   >
                     <Zap className="h-5 w-5 mr-2" />
@@ -353,16 +362,16 @@ export default function DemoPage() {
 
         {/* Loading State */}
         {isRunning && loadingStep && (
-          <Card className="mb-12 max-w-2xl mx-auto">
+          <Card className="mb-12 max-w-2xl mx-auto border-2 border-gray-200 bg-white">
             <CardContent className="pt-6">
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                  <Loader2 className="h-8 w-8 animate-spin text-black" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900">{loadingStep}</h3>
+                <h3 className="text-lg font-semibold text-black">{loadingStep}</h3>
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                    className="bg-black h-2 rounded-full transition-all duration-500"
                     style={{ width: `${((currentStep + 1) / steps.length) * 100}%` }}
                   ></div>
                 </div>
@@ -384,26 +393,20 @@ export default function DemoPage() {
             return (
               <Card 
                 key={index}
-                className={`transition-all duration-500 ${
+                className={`transition-all duration-500 border-2 ${
                   isActive 
-                    ? 'ring-2 ring-blue-500 shadow-lg' 
-                    : 'opacity-50'
-                } ${isCurrent ? 'scale-105' : ''}`}
+                    ? 'border-orange shadow-lg' 
+                    : 'border-gray-200 opacity-60'
+                } ${isCurrent ? 'scale-105' : ''} bg-white`}
               >
                 <CardHeader className="text-center">
                   <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${
-                    isActive 
-                      ? `bg-${step.color}-100` 
-                      : 'bg-gray-100'
+                    isActive ? 'bidi-orange-bg-light' : 'bg-gray-100'
                   }`}>
-                    <Icon className={`h-8 w-8 ${
-                      isActive 
-                        ? `text-${step.color}-600` 
-                        : 'text-gray-400'
-                    }`} />
+                    <Icon className={`h-8 w-8 ${isActive ? 'bidi-orange-text' : 'text-gray-400'}`} />
                   </div>
                   <CardTitle className={`text-lg ${
-                    isActive ? 'text-gray-900' : 'text-gray-500'
+                    isActive ? 'text-black' : 'text-gray-500'
                   }`}>
                     {step.title}
                   </CardTitle>
@@ -412,7 +415,7 @@ export default function DemoPage() {
                   </CardDescription>
                   {isCurrent && isRunning && (
                     <div className="mt-2">
-                      <Badge variant="default" className="bg-blue-600">
+                      <Badge variant="orange">
                         <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                         In Progress...
                       </Badge>
@@ -420,7 +423,7 @@ export default function DemoPage() {
                   )}
                   {isActive && !isCurrent && (
                     <div className="mt-2">
-                      <CheckCircle className="h-5 w-5 text-green-600 mx-auto" />
+                      <CheckCircle className="h-5 w-5 text-gray-700 mx-auto" />
                     </div>
                   )}
                 </CardHeader>
@@ -431,14 +434,14 @@ export default function DemoPage() {
 
         {/* Project Details */}
         {projectSubmitted && (
-          <Card className="mb-8">
+          <Card className="mb-8 border-2 border-gray-200 bg-white">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <Building2 className="h-5 w-5 mr-2 text-blue-600" />
+                  <Building2 className="h-5 w-5 mr-2 text-black" />
                   Your Project: {projectForm.projectType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </div>
-                <Button onClick={resetDemo} variant="outline" size="sm">
+                <Button onClick={resetDemo} variant="construction" size="sm">
                   Reset Demo
                 </Button>
               </CardTitle>
@@ -469,20 +472,20 @@ export default function DemoPage() {
         {showBids && (
           <div className="space-y-6">
             <div className="text-center">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+              <h2 className="text-2xl font-bold text-black mb-2">
                 Your Leveled Bids Are Ready!
               </h2>
               <p className="text-gray-600 mb-4">
                 Our AI has analyzed and organized all received bids for easy comparison
               </p>
-              <Button onClick={resetDemo} variant="outline" size="sm">
+              <Button onClick={resetDemo} variant="construction" size="sm">
                 Try Another Project
               </Button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {sampleBids.map((bid, index) => (
-                <Card key={bid.id} className="relative">
+                <Card key={bid.id} className="relative border-2 border-gray-200 bg-white">
                   <CardHeader>
                     <div className="flex justify-between items-start">
                       <div>
@@ -492,7 +495,7 @@ export default function DemoPage() {
                           {bid.location}
                         </CardDescription>
                       </div>
-                      <Badge variant="secondary" className="bg-green-100 text-green-800">
+                      <Badge variant="secondary" className="bidi-orange-bg-light bidi-orange-text border border-orange/20">
                         #{index + 1} Choice
                       </Badge>
                     </div>
@@ -500,11 +503,11 @@ export default function DemoPage() {
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div className="flex items-center">
-                        <DollarSign className="h-4 w-4 mr-2 text-green-600" />
+                        <DollarSign className="h-4 w-4 mr-2 text-gray-700" />
                         <span className="font-semibold text-lg">{bid.price}</span>
                       </div>
                       <div className="flex items-center">
-                        <Clock className="h-4 w-4 mr-2 text-blue-600" />
+                        <Clock className="h-4 w-4 mr-2 text-gray-700" />
                         <span>{bid.timeline}</span>
                       </div>
                     </div>
@@ -550,7 +553,7 @@ export default function DemoPage() {
                       </div>
                     </div>
 
-                    <Button className="w-full mt-4">
+                    <Button variant="orange" className="w-full mt-4 font-bold">
                       Contact This Contractor
                       <ArrowRight className="h-4 w-4 ml-2" />
                     </Button>
@@ -562,8 +565,8 @@ export default function DemoPage() {
         )}
 
         {/* CTA Section */}
-        <div className="text-center mt-12 p-8 bg-white rounded-lg shadow-lg">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+        <div className="text-center mt-12 p-8 bg-white rounded-lg shadow-lg border-2 border-gray-200">
+          <h2 className="text-2xl font-bold text-black mb-4">
             Ready to Try This for Your Project?
           </h2>
           <p className="text-gray-600 mb-6">
@@ -571,18 +574,19 @@ export default function DemoPage() {
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-4">
             <Link href="/auth/signup">
-              <Button size="lg" className="text-base px-8 py-3">
+              <Button size="lg" variant="orange" className="text-base px-8 py-3 font-bold">
                 Start Your Search Now
               </Button>
             </Link>
             <Link href="/">
-              <Button variant="outline" size="lg" className="text-base px-8 py-3">
+              <Button variant="construction" size="lg" className="text-base px-8 py-3">
                 Back to Home
               </Button>
             </Link>
           </div>
         </div>
       </div>
+      <Footer />
     </div>
   )
 }

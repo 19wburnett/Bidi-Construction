@@ -16,6 +16,8 @@ import ProfileDropdown from '@/components/profile-dropdown'
 import CreditsDisplay from '@/components/credits-display'
 import NotificationBell from '@/components/notification-bell'
 import DebugNotifications from '@/components/debug-notifications'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import logo from '../../public/brand/Bidi Contracting Logo.svg'
 
 interface JobRequest {
   id: string
@@ -345,11 +347,8 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading dashboard...</p>
-        </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <FallingBlocksLoader text="Loading dashboard..." size="lg" />
       </div>
     )
   }
@@ -357,13 +356,13 @@ export default function DashboardPage() {
   // Dashboard is now accessible to all authenticated users
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-white border-b-2 border-gray-200 shadow-sm">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
+          <div className="flex items-center space-x-3">
+            <img src={logo.src} alt="Bidi" className="h-8 w-8 text-black" />
+            <h1 className="text-2xl font-bold text-black tracking-tight">Bidi Dashboard</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <CreditsDisplay />
@@ -376,28 +375,28 @@ export default function DashboardPage() {
       <div className="container mx-auto px-4 py-8">
         {/* Success Message */}
         {showSuccessMessage && (
-          <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+          <div className="mb-8 p-6 bg-green-50 border-2 border-green-200 text-green-800 rounded-lg">
             <div className="flex items-center">
-              <CheckCircle className="h-5 w-5 mr-2" />
-              <span className="font-semibold">Payment Successful!</span>
+              <CheckCircle className="h-6 w-6 mr-3" />
+              <span className="font-bold text-lg">Payment Successful!</span>
             </div>
-            <p className="mt-1">Your subscription is now active. Welcome to Bidi!</p>
+            <p className="mt-2 font-medium">Your subscription is now active. Welcome to Bidi!</p>
           </div>
         )}
 
         {/* Demo Mode Indicator */}
         {isAdmin && demoMode && (
-          <div className="mb-6 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded-lg">
+          <div className="mb-8 p-6 bg-gray-50 border-2 border-gray-200 text-gray-800 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
-                <Building2 className="h-5 w-5 mr-2" />
+                <Building2 className="h-6 w-6 mr-3" />
                 <div>
-                  <span className="font-semibold">Demo Mode Active</span>
-                  <p className="text-sm mt-1">New job requests will automatically generate demo bids for demonstration purposes.</p>
+                  <span className="font-bold text-lg">Demo Mode Active</span>
+                  <p className="text-sm mt-1 font-medium">New job requests will automatically generate demo bids for demonstration purposes.</p>
                 </div>
               </div>
               <Link href="/admin/demo-settings">
-                <Button variant="outline" size="sm" className="text-blue-700 border-blue-400 hover:bg-blue-200">
+                <Button variant="construction" size="sm">
                   Settings
                 </Button>
               </Link>
@@ -409,41 +408,41 @@ export default function DashboardPage() {
         <div className="mb-8">
           {/* Mobile: Horizontal scrollable cards */}
           <div className="flex gap-4 overflow-x-auto pb-2 sm:hidden">
-            <Card className="min-w-[140px] flex-shrink-0">
+            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium">
+                <CardTitle className="text-xs font-medium text-black">
                   {activeTab === 'current' ? 'Active Jobs' : 'Closed Jobs'}
                 </CardTitle>
-                <FileText className="h-3 w-3 text-muted-foreground" />
+                <FileText className="h-3 w-3 text-gray-600" />
               </CardHeader>
               <CardContent className="pt-2">
-                <div className="text-xl font-bold">
+                <div className="text-xl font-bold text-black">
                   {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="min-w-[140px] flex-shrink-0">
+            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium">Total Bids</CardTitle>
-                <Users className="h-3 w-3 text-muted-foreground" />
+                <CardTitle className="text-xs font-medium text-black">Total Bids</CardTitle>
+                <Users className="h-3 w-3 text-gray-600" />
               </CardHeader>
               <CardContent className="pt-2">
-                <div className="text-xl font-bold">
+                <div className="text-xl font-bold text-black">
                   {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="min-w-[140px] flex-shrink-0">
+            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium">
+                <CardTitle className="text-xs font-medium text-black">
                   {activeTab === 'current' ? 'Recent Jobs' : 'Avg Bids/Job'}
                 </CardTitle>
-                <Mail className="h-3 w-3 text-muted-foreground" />
+                <Mail className="h-3 w-3 text-gray-600" />
               </CardHeader>
               <CardContent className="pt-2">
-                <div className="text-xl font-bold">
+                <div className="text-xl font-bold text-black">
                   {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
                 </div>
               </CardContent>
@@ -452,41 +451,41 @@ export default function DashboardPage() {
 
           {/* Desktop: Grid layout */}
           <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            <Card>
+            <Card className="border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
+                <CardTitle className="text-sm font-medium text-black">
                   {activeTab === 'current' ? 'Active Jobs' : 'Closed Jobs'}
                 </CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
+                <FileText className="h-4 w-4 text-gray-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold text-black">
                   {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Bids Received</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium text-black">Total Bids Received</CardTitle>
+                <Users className="h-4 w-4 text-gray-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold text-black">
                   {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-2 border-gray-200 bg-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
+                <CardTitle className="text-sm font-medium text-black">
                   {activeTab === 'current' ? 'Recent Jobs (30 days)' : 'Average Bids per Job'}
                 </CardTitle>
-                <Mail className="h-4 w-4 text-muted-foreground" />
+                <Mail className="h-4 w-4 text-gray-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold text-black">
                   {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
                 </div>
               </CardContent>
@@ -496,11 +495,11 @@ export default function DashboardPage() {
 
         {/* Job Requests Section */}
         <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-4">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Your Job Requests</h2>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+            <h2 className="text-2xl sm:text-3xl font-bold text-black tracking-tight">Your Job Requests</h2>
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <Link href="/dashboard/new-job">
-                <Button className="w-full sm:w-auto">
+                  <Button variant="orange" className="w-full sm:w-auto font-bold">
                   <Plus className="h-4 w-4 mr-2" />
                   Post New Job
                 </Button>
@@ -509,23 +508,23 @@ export default function DashboardPage() {
           </div>
           
           {/* Tab Navigation */}
-          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit border-2 border-gray-200">
             <button
               onClick={() => setActiveTab('current')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`px-6 py-3 text-sm font-semibold rounded-md transition-all duration-200 ${
                 activeTab === 'current'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'bg-white text-black shadow-sm border border-gray-200'
+                  : 'text-gray-600 hover:text-black hover:bg-gray-50'
               }`}
             >
               Current Jobs ({stats.currentJobsCount})
             </button>
             <button
               onClick={() => setActiveTab('past')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`px-6 py-3 text-sm font-semibold rounded-md transition-all duration-200 ${
                 activeTab === 'past'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'bg-white text-black shadow-sm border border-gray-200'
+                  : 'text-gray-600 hover:text-black hover:bg-gray-50'
               }`}
             >
               Past Jobs ({stats.pastJobsCount})
@@ -536,16 +535,16 @@ export default function DashboardPage() {
         {/* Job Requests Content */}
         {activeTab === 'current' ? (
           jobRequests.length === 0 ? (
-            <Card>
-              <CardContent className="text-center py-12">
-                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No active job requests yet</h3>
-                <p className="text-gray-600 mb-4">
+            <Card className="border-2 border-gray-200">
+              <CardContent className="text-center py-16">
+                <FileText className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+                <h3 className="text-2xl font-bold text-black mb-4">No active job requests yet</h3>
+                <p className="text-xl text-gray-600 mb-8 font-medium">
                   Get started by posting your first job request to connect with subcontractors.
                 </p>
                 <Link href="/dashboard/new-job">
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
+                  <Button variant="orange" size="lg" className="font-bold">
+                    <Plus className="h-5 w-5 mr-2" />
                     Post Your First Job
                   </Button>
                 </Link>
@@ -554,7 +553,7 @@ export default function DashboardPage() {
           ) : (
             <div className="grid gap-6">
               {jobRequests.map((job) => (
-                <Card key={job.id} className="hover:shadow-md transition-shadow">
+                <Card key={job.id} className="hover:shadow-lg transition-all duration-200 border-2 border-gray-200 hover:border-gray-300">
                   <CardHeader className="pb-3">
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
@@ -588,7 +587,7 @@ export default function DashboardPage() {
                                 Collecting bids...
                               </div>
                               {(job.bids_count || 0) > 0 && (
-                                <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1 relative">
+                                <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1 relative">
                                   <MessageSquare className="h-3 w-3" />
                                   {job.bids_count || 0} bids received
                                   {(job.unseen_bids_count || 0) > 0 && (
@@ -598,7 +597,7 @@ export default function DashboardPage() {
                               )}
                             </div>
                           ) : (
-                            <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
+                            <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
                               <MessageSquare className="h-3 w-3" />
                               {job.bids_count || 0} bids received
                             </div>
@@ -663,11 +662,11 @@ export default function DashboardPage() {
           )
         ) : (
           pastJobRequests.length === 0 ? (
-            <Card>
-              <CardContent className="text-center py-12">
-                <History className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No closed requests yet</h3>
-                <p className="text-gray-600 mb-4">
+            <Card className="border-2 border-gray-200">
+              <CardContent className="text-center py-16">
+                <History className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+                <h3 className="text-2xl font-bold text-black mb-4">No closed requests yet</h3>
+                <p className="text-xl text-gray-600 font-medium">
                   Closed job requests will appear here once you close them from your active jobs.
                 </p>
               </CardContent>
@@ -675,7 +674,7 @@ export default function DashboardPage() {
           ) : (
             <div className="grid gap-6">
               {pastJobRequests.map((job) => (
-                <Card key={job.id} className="opacity-75 hover:shadow-md transition-shadow">
+                <Card key={job.id} className="opacity-75 hover:shadow-lg transition-all duration-200 border-2 border-gray-200 hover:border-gray-300">
                   <CardHeader className="pb-3">
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
@@ -701,7 +700,7 @@ export default function DashboardPage() {
                             <Calendar className="h-3 w-3" />
                             {new Date(job.created_at).toLocaleDateString()}
                           </div>
-                          <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
+                          <div className="bg-orange-100 text-black px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
                             <MessageSquare className="h-3 w-3" />
                             {job.bids_count || 0} bids received
                           </div>

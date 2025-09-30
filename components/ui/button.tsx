@@ -18,6 +18,10 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        // Bidi Construction Orange Accent - for important actions
+        orange: "bg-orange text-orange-foreground hover:bg-orange/90 font-semibold",
+        // Professional construction variant
+        construction: "bg-white border-2 border-gray-300 text-gray-900 hover:border-gray-400 font-medium",
       },
       size: {
         default: "h-10 px-4 py-2",

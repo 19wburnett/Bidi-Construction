@@ -4,48 +4,60 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    /* Bidi Construction Color System */
+    --background: 0 0% 100%; /* White */
+    --foreground: 0 0% 0%; /* Black */
+    --card: 0 0% 100%; /* White */
+    --card-foreground: 0 0% 0%; /* Black */
+    --popover: 0 0% 100%; /* White */
+    --popover-foreground: 0 0% 0%; /* Black */
+    --primary: 0 0% 0%; /* Black - for primary text and elements */
+    --primary-foreground: 0 0% 100%; /* White - for text on black */
+    --secondary: 0 0% 96%; /* Light gray */
+    --secondary-foreground: 0 0% 0%; /* Black */
+    --muted: 0 0% 96%; /* Light gray */
+    --muted-foreground: 0 0% 45%; /* Medium gray */
+    --accent: 0 0% 96%; /* Light gray */
+    --accent-foreground: 0 0% 0%; /* Black */
+    --destructive: 0 84.2% 60.2%; /* Red for destructive actions */
+    --destructive-foreground: 0 0% 100%; /* White */
+    --border: 0 0% 89%; /* Light gray border */
+    --input: 0 0% 96%; /* Light gray input background */
+    --ring: 14 100% 48%; /* Orange ring - EB5023 */
+    --radius: 0.375rem; /* Slightly smaller radius for more professional look */
+    
+    /* Bidi Construction Orange Accent */
+    --orange: 14 100% 48%; /* EB5023 - Orange accent color */
+    --orange-foreground: 0 0% 100%; /* White text on orange */
+    --orange-light: 14 100% 95%; /* Very light orange for backgrounds */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
+    /* Dark mode for Bidi Construction - inverted scheme */
+    --background: 0 0% 9%; /* Very dark gray/black */
+    --foreground: 0 0% 98%; /* Near white */
+    --card: 0 0% 9%; /* Very dark gray/black */
+    --card-foreground: 0 0% 98%; /* Near white */
+    --popover: 0 0% 9%; /* Very dark gray/black */
+    --popover-foreground: 0 0% 98%; /* Near white */
+    --primary: 0 0% 98%; /* Near white for primary elements */
+    --primary-foreground: 0 0% 9%; /* Very dark for text on white */
+    --secondary: 0 0% 14%; /* Dark gray */
+    --secondary-foreground: 0 0% 98%; /* Near white */
+    --muted: 0 0% 14%; /* Dark gray */
+    --muted-foreground: 0 0% 65%; /* Medium light gray */
+    --accent: 0 0% 14%; /* Dark gray */
+    --accent-foreground: 0 0% 98%; /* Near white */
+    --destructive: 0 62.8% 30.6%; /* Darker red for destructive actions */
+    --destructive-foreground: 0 0% 98%; /* Near white */
+    --border: 0 0% 14%; /* Dark gray border */
+    --input: 0 0% 14%; /* Dark gray input background */
+    --ring: 14 100% 48%; /* Orange ring - same as light mode */
+    
+    /* Orange accent remains the same in dark mode */
+    --orange: 14 100% 48%; /* EB5023 - Orange accent color */
+    --orange-foreground: 0 0% 100%; /* White text on orange */
+    --orange-light: 14 100% 10%; /* Dark orange for backgrounds in dark mode */
   }
 }
 
@@ -54,7 +66,9 @@
     border-color: hsl(var(--border));
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    /* More professional construction software feel */
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
@@ -71,6 +85,45 @@
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  /* Bidi Construction Specific Utilities */
+  .bidi-orange {
+    background-color: hsl(var(--orange));
+    color: hsl(var(--orange-foreground));
+  }
+
+  .bidi-orange-text {
+    color: hsl(var(--orange));
+  }
+
+  .bidi-orange-border {
+    border-color: hsl(var(--orange));
+  }
+
+  .bidi-orange-bg-light {
+    background-color: hsl(var(--orange-light));
+  }
+
+  /* Construction Software Professional Styling */
+  .construction-card {
+    @apply border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200;
+  }
+
+  .construction-button-primary {
+    @apply bidi-orange hover:opacity-90 font-semibold px-6 py-3 rounded-md transition-all duration-200;
+  }
+
+  .construction-button-secondary {
+    @apply bg-white border-2 border-gray-300 text-gray-900 hover:border-gray-400 font-medium px-6 py-3 rounded-md transition-all duration-200;
+  }
+
+  .construction-header {
+    @apply font-bold text-gray-900 tracking-tight;
+  }
+
+  .construction-subheader {
+    @apply font-semibold text-gray-700 tracking-tight;
   }
 }
 

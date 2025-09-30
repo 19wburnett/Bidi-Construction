@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Navbar from '@/components/navbar'
+import Footer from '@/components/footer'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { 
@@ -123,11 +124,12 @@ export default function SubcontractorsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 relative overflow-hidden">
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-200 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-200 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-pulse animation-delay-2000"></div>
+    <div className="min-h-screen bg-white relative">
+      {/* Professional Construction Background */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white"></div>
+        <div className="absolute top-0 left-0 w-full h-1 bg-orange"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 rounded-full blur-3xl"></div>
       </div>
 
       <Navbar />
@@ -135,34 +137,35 @@ export default function SubcontractorsPage() {
       {/* Hero Section */}
       <section className="container mx-auto px-4 py-8 sm:py-16 text-center relative z-10">
         <div className="flex justify-center mb-6">
-          <div className="bg-green-100 text-green-800 px-4 py-2 rounded-full text-sm font-medium shadow-lg flex items-center space-x-2">
+          <div className="bg-gray-100 text-gray-800 px-4 py-2 rounded-full text-sm font-semibold border border-gray-200 flex items-center space-x-2">
             <Briefcase className="h-4 w-4" />
             <span>For Subcontractors</span>
           </div>
         </div>
         <div className="flex justify-center mb-6">
-          <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full text-sm font-medium shadow-lg flex items-center space-x-2">
+          <div className="bidi-orange-bg-light bidi-orange-text px-4 py-2 rounded-full text-sm font-bold border border-orange/20 flex items-center space-x-2">
             <CheckCircle className="h-4 w-4" />
             <span>100% Free for Subcontractors</span>
           </div>
         </div>
         
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-6">
+        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black mb-6">
           Get More Jobs
-          <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            {' '}Automatically
+          <span className="block bidi-orange-text">
+            Automatically
           </span>
         </h1>
         
-        <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+        <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-3xl mx-auto font-medium">
           Join our network of qualified subcontractors and receive job opportunities directly in your inbox. 
-          No more cold calling or searching for work - we bring the jobs to you. <strong className="text-blue-600">It's completely free!</strong>
+          No more cold calling or searching for work - we bring the jobs to you. <strong className="bidi-orange-text">It's completely free!</strong>
         </p>
         
         <div className="flex justify-center">
           <Button 
             size="lg" 
-            className="text-base sm:text-lg px-6 sm:px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group"
+            variant="orange"
+            className="text-base sm:text-lg px-6 sm:px-8 py-3 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group"
             onClick={() => document.getElementById('signup-form')?.scrollIntoView({ behavior: 'smooth' })}
           >
             Join Now - It's Free!
@@ -173,7 +176,7 @@ export default function SubcontractorsPage() {
 
       {/* How It Works Section */}
       <section className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
-        <h2 className="text-2xl sm:text-3xl font-bold text-center text-gray-900 mb-8 sm:mb-12">
+        <h2 className="text-2xl sm:text-3xl font-bold text-center text-black mb-8 sm:mb-12">
           How It Works for Subcontractors
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
@@ -182,32 +185,35 @@ export default function SubcontractorsPage() {
               icon: Briefcase,
               title: "1. Sign Up",
               description: "Fill out your profile with your trade, location, and contact information. It takes just 2 minutes.",
-              bgColor: "bg-blue-100",
-              iconColor: "text-blue-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700",
+              borderColor: "border-gray-200"
             },
             {
               icon: Mail,
               title: "2. Get Notified",
               description: "Receive email notifications when jobs matching your trade and location become available.",
-              bgColor: "bg-green-100",
-              iconColor: "text-green-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700",
+              borderColor: "border-gray-200"
             },
             {
               icon: FileText,
               title: "3. Submit Bids",
               description: "Reply with your bid details and we'll organize everything for the general contractor.",
-              bgColor: "bg-purple-100",
-              iconColor: "text-purple-600"
+              bgColor: "bidi-orange-bg-light",
+              iconColor: "bidi-orange-text",
+              borderColor: "border-orange/20"
             }
           ].map((step, index) => {
             const Icon = step.icon
             return (
-              <Card key={index} className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group">
+              <Card key={index} className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group border-2 border-gray-200 bg-white">
                 <CardHeader>
-                  <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${step.bgColor} group-hover:scale-110 transition-transform duration-300`}>
+                  <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${step.bgColor} ${step.borderColor} border-2 group-hover:scale-110 transition-transform duration-300`}>
                     <Icon className={`h-8 w-8 ${step.iconColor}`} />
                   </div>
-                  <CardTitle className="text-lg group-hover:text-blue-600 transition-colors duration-300">
+                  <CardTitle className="text-lg group-hover:text-black transition-colors duration-300">
                     {step.title}
                   </CardTitle>
                   <CardDescription className="text-sm group-hover:text-gray-700 transition-colors duration-300">
@@ -223,7 +229,7 @@ export default function SubcontractorsPage() {
       {/* Benefits Section */}
       <section className="bg-gray-50 py-8 sm:py-16">
         <div className="container mx-auto px-4">
-          <h2 className="text-2xl sm:text-3xl font-bold text-center text-gray-900 mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold text-center text-black mb-8 sm:mb-12">
             Why Join Our Network?
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -232,53 +238,53 @@ export default function SubcontractorsPage() {
               icon: Clock,
               title: "Save Time",
               description: "No more cold calling or driving around looking for work. Jobs come to you.",
-              bgColor: "bg-blue-100",
-              iconColor: "text-blue-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700"
             },
             {
               icon: DollarSign,
               title: "More Opportunities",
               description: "Access to jobs from general contractors you might not have found otherwise.",
-              bgColor: "bg-green-100",
-              iconColor: "text-green-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700"
             },
             {
               icon: Star,
               title: "Professional Presentation",
               description: "Your bids are organized and presented professionally to help you win more work.",
-              bgColor: "bg-purple-100",
-              iconColor: "text-purple-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700"
             },
             {
               icon: Users,
               title: "Build Relationships",
               description: "Connect with general contractors who need reliable subcontractors.",
-              bgColor: "bg-orange-100",
-              iconColor: "text-orange-600"
+              bgColor: "bidi-orange-bg-light",
+              iconColor: "bidi-orange-text"
             },
             {
               icon: MapPin,
               title: "Local Jobs",
               description: "Only receive notifications for jobs in your area and trade.",
-              bgColor: "bg-pink-100",
-              iconColor: "text-pink-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700"
             },
             {
               icon: DollarSign,
               title: "Completely Free",
               description: "No fees, no subscriptions, no hidden costs. Join and start receiving jobs at no cost.",
-              bgColor: "bg-emerald-100",
-              iconColor: "text-emerald-600"
+              bgColor: "bg-gray-100",
+              iconColor: "text-gray-700"
             }
           ].map((benefit, index) => {
             const Icon = benefit.icon
             return (
               <div key={index} className="text-center">
-                <div className={`w-16 h-16 ${benefit.bgColor} rounded-full flex items-center justify-center mx-auto mb-4`}>
+                <div className={`w-16 h-16 ${benefit.bgColor} rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-gray-200`}>
                   <Icon className={`h-8 w-8 ${benefit.iconColor}`} />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">{benefit.title}</h3>
-                <p className="text-gray-600">{benefit.description}</p>
+                <h3 className="text-xl font-semibold text-black mb-3">{benefit.title}</h3>
+                <p className="text-gray-600 font-medium">{benefit.description}</p>
               </div>
             )
           })}
@@ -290,20 +296,20 @@ export default function SubcontractorsPage() {
       <section id="signup-form" className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
+            <h2 className="text-2xl sm:text-3xl font-bold text-black mb-4">
               Join Our Network Today - It's Free!
             </h2>
-            <p className="text-lg text-gray-600">
+            <p className="text-lg text-gray-600 font-medium">
               Fill out the form below and start receiving job opportunities in your area. 
-              <strong className="text-blue-600"> No cost, no fees, no strings attached.</strong>
+              <strong className="bidi-orange-text"> No cost, no fees, no strings attached.</strong>
             </p>
           </div>
 
           {!isSubmitted ? (
-            <Card className="shadow-2xl">
+            <Card className="shadow-2xl border-2 border-gray-200 bg-white">
               <CardHeader>
                 <CardTitle className="text-center">Subcontractor Registration</CardTitle>
-                <CardDescription className="text-center">
+                <CardDescription className="text-center font-medium text-gray-600">
                   Complete your profile to start receiving job notifications
                 </CardDescription>
               </CardHeader>
@@ -373,7 +379,8 @@ export default function SubcontractorsPage() {
 
                   <Button 
                     type="submit" 
-                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg py-3"
+                    variant="orange"
+                    className="w-full text-lg py-3 font-bold"
                     disabled={isSubmitting}
                   >
                     {isSubmitting ? (
@@ -392,13 +399,13 @@ export default function SubcontractorsPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="shadow-2xl text-center">
+            <Card className="shadow-2xl text-center border-2 border-gray-200 bg-white">
               <CardContent className="pt-8">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Bidi!</h3>
-                <p className="text-lg text-gray-600 mb-6">
+                <h3 className="text-2xl font-bold text-black mb-4">Welcome to Bidi!</h3>
+                <p className="text-lg text-gray-600 mb-6 font-medium">
                   Thank you for joining our free network! You've been successfully added to our database 
                   and will start receiving email notifications for jobs matching your trade ({formData.trade}) 
                   and location ({formData.location}) - at no cost to you.
@@ -420,13 +427,13 @@ export default function SubcontractorsPage() {
                       location: ''
                     })
                   }}
-                  variant="outline"
+                  variant="construction"
                   className="mr-4"
                 >
                   Register Another
                 </Button>
                 <Link href="/">
-                  <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                  <Button variant="orange" className="font-bold">
                     Back to Home
                   </Button>
                 </Link>
@@ -437,39 +444,8 @@ export default function SubcontractorsPage() {
       </section>
 
       {/* CTA Section */}
-      <section className="bg-blue-600 text-white py-8 sm:py-16">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-2xl sm:text-3xl font-bold mb-4">
-            Ready to Get More Jobs?
-          </h2>
-          <p className="text-lg sm:text-xl mb-8 opacity-90">
-            Join hundreds of subcontractors who are already receiving job opportunities through Bidi. 
-            <strong className="text-white"> It's completely free to join!</strong>
-          </p>
-          <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <Button 
-              size="lg" 
-              className="text-base sm:text-lg px-6 sm:px-8 py-3 bg-white text-blue-600 hover:bg-gray-100 border-2 border-white"
-              onClick={() => document.getElementById('signup-form')?.scrollIntoView({ behavior: 'smooth' })}
-            >
-              Sign Up Now
-            </Button>
-          </div>
-        </div>
-      </section>
 
-      {/* Footer */}
-      <footer className="bg-gray-900 text-white py-8">
-        <div className="container mx-auto px-4 text-center">
-          <div className="flex items-center justify-center space-x-2 mb-4">
-            <Building2 className="h-6 w-6" />
-            <span className="text-xl font-bold">Bidi</span>
-          </div>
-          <p className="text-gray-400">
-            © 2024 Bidi. All rights reserved.
-          </p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   )
 }
