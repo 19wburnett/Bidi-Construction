@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
     // Store categorized notes if any were extracted
     if (categorizedNotes && categorizedNotes.length > 0) {
       try {
-        const notesToInsert = categorizedNotes.map(note => ({
+        const notesToInsert = categorizedNotes.map((note: { type: string; category?: string | null; location?: string | null; content: string; confidence: number }) => ({
           bid_id: bid.id,
           note_type: note.type,
           category: note.category,
@@ -294,7 +294,7 @@ async function extractCategorizedNotes(emailContent: string, tradeCategory: stri
     if (jsonMatch) {
       const notes = JSON.parse(jsonMatch[0])
       // Validate the structure
-      return notes.filter(note => 
+      return notes.filter((note: { type: string; content: string; confidence: number }) => 
         note.type && 
         note.content && 
         typeof note.confidence === 'number' &&

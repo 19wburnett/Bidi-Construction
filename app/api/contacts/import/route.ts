@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import * as XLSX from 'xlsx'
 
+export const runtime = 'nodejs'
+
 interface ContactRow {
   email: string
   name: string

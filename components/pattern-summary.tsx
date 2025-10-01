@@ -34,7 +34,7 @@ interface PatternSummaryProps {
 }
 
 interface Pattern {
-  type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material'
+  type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
   category: string
   location: string | null
   content: string
@@ -88,6 +88,11 @@ export default function PatternSummary({ bids }: PatternSummaryProps) {
       icon: Package,
       color: 'bg-purple-100 text-purple-800',
       label: 'Materials'
+    },
+    other: {
+      icon: MessageSquare,
+      color: 'bg-gray-100 text-gray-800',
+      label: 'Other'
     }
   }
 
@@ -171,7 +176,7 @@ function analyzePatterns(notes: (BidNote & { contractor: string })[]): Pattern[]
   groupedNotes.forEach((groupNotes, key) => {
     if (groupNotes.length >= 2) {
       const firstNote = groupNotes[0]
-      const contractors = [...new Set(groupNotes.map(n => n.contractor))]
+      const contractors = Array.from(new Set(groupNotes.map(n => n.contractor)))
       const avgConfidence = groupNotes.reduce((sum, n) => sum + n.confidence_score, 0) / groupNotes.length
       
       patterns.push({
