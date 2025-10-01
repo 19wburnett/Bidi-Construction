@@ -87,17 +87,7 @@ export default function HomePage() {
       </section>
 
       {/* Dashboard Preview Section */}
-      <section className="container mx-auto px-4 py-16 relative z-10">
-        <div className={`text-center mb-12 transition-all duration-1000 delay-1000 ${
-          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
-        }`}>
-          <h2 className="text-3xl sm:text-4xl font-bold text-black mb-6 tracking-tight">
-            Professional Construction Management
-          </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto font-medium">
-            See how Bidi streamlines your subcontractor search process with a clean, professional interface designed for construction professionals
-          </p>
-        </div>
+      <section className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
 
         {/* Interactive Dashboard Preview */}
         <div className={`max-w-6xl mx-auto transition-all duration-1000 delay-1200 ${
@@ -105,70 +95,71 @@ export default function HomePage() {
         }`}>
           <div className="bg-white rounded-xl shadow-2xl overflow-hidden border-2 border-gray-200">
             {/* Dashboard Header */}
-            <div className="bg-white border-b-2 border-gray-200 px-6 py-4">
-              <div className="flex justify-between items-center">
+            <div className="bg-white border-b-2 border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
                 <div className="flex items-center space-x-3">
-                  <img src={logo.src} alt="Bidi" className="h-10 w-10 text-black" />
-                  <h3 className="text-2xl font-bold text-black">Bidi Dashboard</h3>
+                  <img src={logo.src} alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black" />
+                  <h3 className="text-lg sm:text-2xl font-bold text-black">Bidi Dashboard</h3>
                 </div>
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2 bg-gray-100 rounded-lg px-3 py-2 border border-gray-200">
-                    <div className="w-8 h-8 bg-orange rounded-full flex items-center justify-center">
-                      <span className="text-white font-bold text-sm">MJ</span>
+                <div className="flex items-center space-x-2 sm:space-x-4">
+                  <div className="flex items-center space-x-2 bg-gray-100 rounded-lg px-2 sm:px-3 py-1 sm:py-2 border border-gray-200">
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 bg-orange rounded-full flex items-center justify-center">
+                      <span className="text-white font-bold text-xs sm:text-sm">MJ</span>
                     </div>
-                    <span className="text-gray-700 text-sm font-semibold">Mike Johnson</span>
+                    <span className="text-gray-700 text-xs sm:text-sm font-semibold hidden sm:inline">Mike Johnson</span>
+                    <span className="text-gray-700 text-xs sm:text-sm font-semibold sm:hidden">MJ</span>
                   </div>
-                  <div className="w-3 h-3 bg-orange rounded-full animate-pulse"></div>
+                  <div className="w-2 h-2 sm:w-3 sm:h-3 bg-orange rounded-full animate-pulse"></div>
                 </div>
               </div>
             </div>
 
             {/* Dashboard Content */}
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+                <div className="bg-white rounded-lg p-3 sm:p-6 border-2 border-gray-200 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600 font-semibold">Active Jobs</p>
-                      <p className="text-3xl font-bold text-black">3</p>
+                      <p className="text-xs sm:text-sm text-gray-600 font-semibold">Active Jobs</p>
+                      <p className="text-xl sm:text-3xl font-bold text-black">3</p>
                     </div>
-                    <Building2 className="h-10 w-10 text-gray-400" />
+                    <Building2 className="h-6 w-6 sm:h-10 sm:w-10 text-gray-400" />
                   </div>
                 </div>
-                <div className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
+                <div className="bg-white rounded-lg p-3 sm:p-6 border-2 border-gray-200 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600 font-semibold">Bids Received</p>
-                      <p className="text-3xl font-bold text-black">12</p>
+                      <p className="text-xs sm:text-sm text-gray-600 font-semibold">Bids Received</p>
+                      <p className="text-xl sm:text-3xl font-bold text-black">12</p>
                     </div>
-                    <FileText className="h-10 w-10 text-gray-400" />
+                    <FileText className="h-6 w-6 sm:h-10 sm:w-10 text-gray-400" />
                   </div>
                 </div>
-                <div className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
+                <div className="bg-white rounded-lg p-3 sm:p-6 border-2 border-gray-200 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600 font-semibold">Subcontractors</p>
-                      <p className="text-3xl font-bold text-black">8</p>
+                      <p className="text-xs sm:text-sm text-gray-600 font-semibold">Subcontractors</p>
+                      <p className="text-xl sm:text-3xl font-bold text-black">8</p>
                     </div>
-                    <Users className="h-10 w-10 text-gray-400" />
+                    <Users className="h-6 w-6 sm:h-10 sm:w-10 text-gray-400" />
                   </div>
                 </div>
-                <div className="bg-white rounded-lg p-6 border-2 border-orange shadow-sm">
+                <div className="bg-white rounded-lg p-3 sm:p-6 border-2 border-orange shadow-sm col-span-2 lg:col-span-1">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm bidi-orange-text font-semibold">Time Saved</p>
-                      <p className="text-3xl font-bold bidi-orange-text">24h</p>
+                      <p className="text-xs sm:text-sm bidi-orange-text font-semibold">Time Saved</p>
+                      <p className="text-xl sm:text-3xl font-bold bidi-orange-text">24h</p>
                     </div>
-                    <Clock className="h-10 w-10 bidi-orange-text" />
+                    <Clock className="h-6 w-6 sm:h-10 sm:w-10 bidi-orange-text" />
                   </div>
                 </div>
               </div>
 
               {/* Recent Jobs */}
-              <div className="mb-6">
-                <h4 className="text-xl font-bold text-black mb-6">Recent Job Searches</h4>
-                <div className="space-y-3">
+              <div className="mb-4 sm:mb-6">
+                <h4 className="text-lg sm:text-xl font-bold text-black mb-4 sm:mb-6">Recent Job Searches</h4>
+                <div className="space-y-2 sm:space-y-3">
                   {[
                     {
                       title: "Kitchen Renovation - Downtown",
@@ -197,38 +188,38 @@ export default function HomePage() {
                   ].map((job, index) => (
                     <div 
                       key={index} 
-                      className={`bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-all duration-200 cursor-pointer group ${
+                      className={`bg-gray-50 rounded-lg p-3 sm:p-4 hover:bg-gray-100 transition-all duration-200 cursor-pointer group ${
                         selectedJob === index ? 'ring-2 ring-orange-500 bg-orange-50' : ''
                       }`}
                       onClick={() => setSelectedJob(selectedJob === index ? null : index)}
                     >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h5 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors duration-200">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-start space-y-2 sm:space-y-0">
+                        <div className="flex-1 min-w-0">
+                          <h5 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors duration-200 text-sm sm:text-base truncate">
                             {job.title}
                           </h5>
-                          <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
+                          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4 mt-1 sm:mt-2 text-xs sm:text-sm text-gray-600">
                             <span className="flex items-center">
-                              <DollarSign className="h-4 w-4 mr-1" />
+                              <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                               {job.budget}
                             </span>
                             <span className="flex items-center">
-                              <Users className="h-4 w-4 mr-1" />
+                              <Users className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                               {job.bids} bids
                             </span>
                             <span className="text-gray-400">{job.time}</span>
                           </div>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 w-full sm:w-auto justify-between sm:justify-end">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                             job.color === 'green' ? 'bg-green-100 text-green-800' :
                             job.color === 'blue' ? 'bg-blue-100 text-blue-800' :
-                            'bg-purple-100 text-purple-800'
+                            'bg-orange-100 text-orange-800'
                           }`}>
                             {job.status}
                           </span>
                           {job.bids > 0 && (
-                            <Button size="sm" className="text-xs">
+                            <Button size="sm" className="text-xs px-2 py-1 h-auto">
                               View Bids
                             </Button>
                           )}
@@ -242,8 +233,8 @@ export default function HomePage() {
           </div>
 
           {/* Click to interact hint */}
-          <div className="text-center mt-6">
-            <p className="text-sm text-gray-600 font-medium flex items-center justify-center">
+          <div className="text-center mt-4 sm:mt-6">
+            <p className="text-xs sm:text-sm text-gray-600 font-medium flex items-center justify-center">
               <span className="w-2 h-2 bg-orange rounded-full mr-2 animate-pulse"></span>
               Click anywhere to explore the dashboard
             </p>
@@ -278,7 +269,7 @@ export default function HomePage() {
               icon: Users,
               title: "3. Collect Bids",
               description: "We automatically collect and organize all incoming bids with pricing and contact information.",
-              color: "purple",
+              color: "orange",
               delay: "delay-1800"
             },
             {
