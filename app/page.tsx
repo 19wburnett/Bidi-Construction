@@ -56,8 +56,7 @@ export default function HomePage() {
         <p className={`text-xl sm:text-2xl text-gray-600 mb-10 max-w-4xl mx-auto font-medium transition-all duration-1000 delay-700 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          Our automated system searches for qualified subcontractors, collects their bids, and presents them in an easy-to-read format. 
-          Get competitive pricing and contact information instantly - no more manual searching or waiting for responses.
+          Post a job, and get leveled bids from subcontractors.
         </p>
         
         <div className={`flex flex-col sm:flex-row justify-center gap-6 transition-all duration-1000 delay-1000 ${
