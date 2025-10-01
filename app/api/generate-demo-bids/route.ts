@@ -324,6 +324,67 @@ ${bidData.companyName} Team`,
       console.error('Error creating demo bid:', bidError)
     } else {
       console.log(`Demo bid created: ${bidData.companyName} - $${adjustedAmount}`)
+
+      // Insert categorized demo bid notes to showcase the feature in demo mode
+      try {
+        const demoNotes = buildDemoNotesFromText(bidData.notes)
+        if (demoNotes.length > 0) {
+          const { error: notesError } = await supabase
+            .from('bid_notes')
+            .insert(
+              demoNotes.map(n => ({
+                bid_id: bid.id,
+                note_type: n.type,
+                category: n.category,
+                location: n.location,
+                content: n.content,
+                confidence_score: n.confidence
+              }))
+            )
+
+          if (notesError) {
+            console.error('Error inserting demo bid notes:', notesError)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to create demo bid_notes:', err)
+      }
     }
   }
+}
+
+// Heuristic demo notes extractor to simulate categorized notes without AI
+function buildDemoNotesFromText(notes: string | undefined): Array<{
+  type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
+  category: string | null
+  location: string | null
+  content: string
+  confidence: number
+}> {
+  const results: Array<{ type: any; category: string | null; location: string | null; content: string; confidence: number }> = []
+  const text = (notes || '').toLowerCase()
+
+  // Simple keyword-based categorization suitable for demo mode
+  if (text.includes('permit')) {
+    results.push({ type: 'requirement', category: 'permit', location: null, content: 'Includes all permits and inspections', confidence: 0.9 })
+  }
+  if (text.includes('timeline') || text.includes('weeks') || text.includes('week')) {
+    results.push({ type: 'timeline', category: 'timeline', location: null, content: 'Proposed timeline as stated in bid', confidence: 0.8 })
+  }
+  if (text.includes('materials') || text.includes('premium') || text.includes('copper') || text.includes('tile')) {
+    results.push({ type: 'material', category: 'material', location: null, content: 'Specific material requirements or quality level mentioned', confidence: 0.75 })
+  }
+  if (text.includes('inspection') || text.includes('licensed') || text.includes('bonded')) {
+    results.push({ type: 'concern', category: 'safety', location: null, content: 'Compliance and safety certifications noted', confidence: 0.7 })
+  }
+  if (text.includes('recommend')) {
+    results.push({ type: 'suggestion', category: 'other', location: null, content: 'Contractor made a recommendation to improve the project', confidence: 0.65 })
+  }
+
+  // Always include at least one generic requirement for demo visibility
+  if (results.length === 0 && (notes || '').trim().length > 0) {
+    results.push({ type: 'requirement', category: 'other', location: null, content: 'General project requirement stated in bid notes', confidence: 0.6 })
+  }
+
+  return results
 }

@@ -78,6 +78,9 @@ export async function POST(request: NextRequest) {
 
     // Extract bid information using AI
     const bidData = await extractBidData(emailContent, from.email)
+    
+    // Extract categorized notes using AI
+    const categorizedNotes = await extractCategorizedNotes(emailContent, jobRequest.trade_category)
 
     // Look up website from discovered contractors, fallback to AI extraction
     let website = bidData.website || null
@@ -115,6 +118,32 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Bid stored successfully:', bid.id)
+
+    // Store categorized notes if any were extracted
+    if (categorizedNotes && categorizedNotes.length > 0) {
+      try {
+        const notesToInsert = categorizedNotes.map(note => ({
+          bid_id: bid.id,
+          note_type: note.type,
+          category: note.category,
+          location: note.location,
+          content: note.content,
+          confidence_score: note.confidence
+        }))
+
+        const { error: notesError } = await supabase
+          .from('bid_notes')
+          .insert(notesToInsert)
+
+        if (notesError) {
+          console.error('Error storing categorized notes:', notesError)
+        } else {
+          console.log(`Stored ${categorizedNotes.length} categorized notes for bid ${bid.id}`)
+        }
+      } catch (error) {
+        console.error('Error processing categorized notes:', error)
+      }
+    }
 
     return NextResponse.json({ 
       message: 'Bid processed successfully',
@@ -214,5 +243,69 @@ async function extractBidData(emailContent: string, senderEmail: string) {
       timeline: null,
       notes: null,
     }
+  }
+}
+
+async function extractCategorizedNotes(emailContent: string, tradeCategory: string) {
+  try {
+    const prompt = `
+    Analyze this subcontractor email and extract any specific notes, requirements, concerns, or suggestions mentioned.
+    Focus on construction-related details that would be useful for project planning.
+    
+    Return ONLY a JSON array of note objects. Each note should have:
+    {
+      "type": "requirement|concern|suggestion|timeline|material|other",
+      "category": "shower|electrical|plumbing|flooring|kitchen|bathroom|structural|safety|permit|other",
+      "location": "master_bathroom|kitchen|basement|upstairs|downstairs|exterior|other",
+      "content": "exact text of the note",
+      "confidence": 0.95
+    }
+
+    Trade Category: ${tradeCategory}
+    Email content:
+    ${emailContent}
+
+    Instructions:
+    - Extract specific requirements (e.g., "shower needs complete renovation", "electrical panel upgrade required")
+    - Identify concerns or warnings (e.g., "timeline might be tight", "permit issues expected")
+    - Capture suggestions or recommendations (e.g., "recommend using tile instead of vinyl")
+    - Note timeline-related information (e.g., "can start next week", "will take 3 weeks")
+    - Extract material preferences or requirements (e.g., "must use copper pipes", "prefer ceramic tile")
+    - Be specific about locations when mentioned (e.g., "master bathroom", "kitchen", "basement")
+    - Only include notes that are construction/project relevant
+    - Set confidence score based on how clear and specific the note is (0.0 to 1.0)
+    - If no relevant notes found, return empty array []
+    `
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 800,
+      temperature: 0.1,
+    })
+
+    const content = response.choices[0]?.message?.content
+    if (!content) {
+      throw new Error('No response from AI')
+    }
+
+    // Try to parse the JSON response
+    const jsonMatch = content.match(/\[[\s\S]*\]/)
+    if (jsonMatch) {
+      const notes = JSON.parse(jsonMatch[0])
+      // Validate the structure
+      return notes.filter(note => 
+        note.type && 
+        note.content && 
+        typeof note.confidence === 'number' &&
+        note.confidence >= 0 &&
+        note.confidence <= 1
+      )
+    }
+
+    return []
+  } catch (error) {
+    console.error('Error extracting categorized notes:', error)
+    return []
   }
 }

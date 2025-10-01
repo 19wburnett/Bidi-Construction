@@ -26,6 +26,7 @@ import {
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -504,7 +505,7 @@ export default function ManageSubcontractorsPage() {
           <CardContent>
             {loading ? (
               <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <FallingBlocksLoader text="" size="sm" />
                 <p className="text-gray-600 mt-2">Loading subcontractors...</p>
               </div>
             ) : filteredSubcontractors.length === 0 ? (

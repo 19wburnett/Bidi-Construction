@@ -42,6 +42,13 @@ export async function middleware(request: NextRequest) {
     
     // For API routes, only refresh cookies/session and pass through without redirects
     if (!isApiRoute) {
+      // If user is signed in and hits the home page, send them to dashboard
+      if (user && request.nextUrl.pathname === '/') {
+        const url = request.nextUrl.clone()
+        url.pathname = '/dashboard'
+        return NextResponse.redirect(url)
+      }
+
       // If no user and trying to access protected path, redirect to login
       if (!user && !isPublicPath) {
         const url = request.nextUrl.clone()

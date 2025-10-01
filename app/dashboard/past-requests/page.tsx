@@ -10,6 +10,8 @@ import { Building2, ArrowLeft, FileText, History, CheckCircle, MapPin, DollarSig
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import DashboardNavbar from '@/components/dashboard-navbar'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface JobRequest {
   id: string
@@ -146,8 +148,7 @@ export default function PastRequestsPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading past requests...</p>
+          <FallingBlocksLoader text="Loading past requests..." size="lg" />
         </div>
       </div>
     )
@@ -158,18 +159,13 @@ export default function PastRequestsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
-          </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            <NotificationBell />
-            <ProfileDropdown />
-          </div>
-        </div>
-      </header>
+      <DashboardNavbar 
+        title="Bidi"
+        showBackButton={false}
+        showCredits={false}
+        showNotifications={true}
+        showProfile={true}
+      />
 
       <div className="container mx-auto px-4 py-4 sm:py-8">
         {/* Header Section */}

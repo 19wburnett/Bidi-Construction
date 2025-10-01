@@ -11,6 +11,12 @@ import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, Mess
 import Link from 'next/link'
 import NotificationBell from '@/components/notification-bell'
 import SeenStatusIndicator from '@/components/seen-status-indicator'
+import BidNotesDisplay from '@/components/bid-notes-display'
+import PatternSummary from '@/components/pattern-summary'
+import EmailDraftButton from '@/components/email-draft-button'
+import JobSummaryPanel from '@/components/job-summary-panel'
+import DashboardNavbar from '@/components/dashboard-navbar'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface JobRequest {
   id: string
@@ -35,6 +41,17 @@ interface Bid {
   raw_email: string
   created_at: string
   seen: boolean
+  bid_notes?: BidNote[]
+}
+
+interface BidNote {
+  id: string
+  note_type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
+  category: string | null
+  location: string | null
+  content: string
+  confidence_score: number
+  created_at: string
 }
 
 export default function JobDetailsPage() {
@@ -147,7 +164,18 @@ export default function JobDetailsPage() {
       
       const bidsQueryPromise = supabase
         .from('bids')
-        .select('*')
+        .select(`
+          *,
+          bid_notes (
+            id,
+            note_type,
+            category,
+            location,
+            content,
+            confidence_score,
+            created_at
+          )
+        `)
         .eq('job_request_id', params.id)
         .order('created_at', { ascending: false })
 
@@ -297,8 +325,7 @@ export default function JobDetailsPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading job details...</p>
+          <FallingBlocksLoader text="Loading job details..." size="lg" />
         </div>
       </div>
     )
@@ -357,28 +384,22 @@ export default function JobDetailsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi</h1>
-          </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            <Link href="/dashboard">
-              <Button variant="outline" className="hidden sm:flex">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <NotificationBell />
-          </div>
-        </div>
-      </header>
+      <DashboardNavbar 
+        title="Bidi"
+        showBackButton={true}
+        backButtonHref="/dashboard"
+        backButtonText="Back to Dashboard"
+        showCredits={false}
+        showNotifications={true}
+        showProfile={false}
+      />
 
       <div className="container mx-auto px-4 py-4 sm:py-8 max-w-4xl">
+        {/* Job Summary Panel */}
+        {bids.length > 0 && jobRequest && (
+          <JobSummaryPanel jobRequest={jobRequest} bids={bids} />
+        )}
+
         {/* Job Details */}
         <Card className="mb-8">
           <CardHeader>
@@ -436,10 +457,18 @@ export default function JobDetailsPage() {
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Received Bids</h2>
-            <Badge variant="secondary" className="self-start sm:self-auto">
-              {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'}
-            </Badge>
+            <div className="flex items-center space-x-3">
+              <Badge variant="secondary" className="self-start sm:self-auto">
+                {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'}
+              </Badge>
+              {bids.length > 0 && jobRequest && (
+                <EmailDraftButton jobRequest={jobRequest} bids={bids} />
+              )}
+            </div>
           </div>
+
+          {/* Pattern Summary */}
+          <PatternSummary bids={bids} />
 
           {bids.length === 0 ? (
             <Card>
@@ -454,7 +483,7 @@ export default function JobDetailsPage() {
           ) : (
             <div className="space-y-4">
               {bids.map((bid) => (
-                <Card key={bid.id} className="border-l-4 border-l-blue-500">
+                <Card key={bid.id} className="border-l-4 border-l-orange-500">
                   <CardHeader>
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                       <div className="flex-1">
@@ -530,6 +559,13 @@ export default function JobDetailsPage() {
                         )}
                       </div>
                     </div>
+                    
+                    {/* Categorized Notes Section */}
+                    {bid.bid_notes && bid.bid_notes.length > 0 && (
+                      <div className="mt-4 pt-4 border-t">
+                        <BidNotesDisplay notes={bid.bid_notes} bidId={bid.id} />
+                      </div>
+                    )}
                     
                     <div className="mt-4 pt-4 border-t">
                       <details className="group">

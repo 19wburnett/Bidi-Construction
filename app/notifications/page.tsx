@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { ArrowLeft, Bell, X, MapPin, DollarSign, MessageSquare, Calendar } from 'lucide-react'
 import Link from 'next/link'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface Notification {
   id: string
@@ -290,7 +291,7 @@ export default function NotificationsPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <FallingBlocksLoader text="Loading notifications..." size="lg" />
           <p>Loading notifications...</p>
         </div>
       </div>

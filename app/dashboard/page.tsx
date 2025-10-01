@@ -17,6 +17,7 @@ import CreditsDisplay from '@/components/credits-display'
 import NotificationBell from '@/components/notification-bell'
 import DebugNotifications from '@/components/debug-notifications'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import DashboardNavbar from '@/components/dashboard-navbar'
 import logo from '../../public/brand/Bidi Contracting Logo.svg'
 
 interface JobRequest {
@@ -359,19 +360,13 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="bg-white border-b-2 border-gray-200 shadow-sm">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-3">
-            <img src={logo.src} alt="Bidi" className="h-8 w-8 text-black" />
-            <h1 className="text-2xl font-bold text-black tracking-tight">Bidi Dashboard</h1>
-          </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            <CreditsDisplay />
-            <NotificationBell />
-            <ProfileDropdown />
-          </div>
-        </div>
-      </header>
+      <DashboardNavbar 
+        title="Bidi Dashboard"
+        showBackButton={false}
+        showCredits={true}
+        showNotifications={true}
+        showProfile={true}
+      />
 
       {/* Navigation */}
       <nav className="bg-white border-b">
@@ -381,7 +376,7 @@ export default function DashboardPage() {
               href="/dashboard" 
               className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 pathname === '/dashboard' 
-                  ? 'bg-blue-100 text-blue-700' 
+                  ? 'bg-orange-100 text-orange-700' 
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               }`}
             >
@@ -392,23 +387,12 @@ export default function DashboardPage() {
               href="/dashboard/contacts" 
               className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 pathname === '/dashboard/contacts' 
-                  ? 'bg-blue-100 text-blue-700' 
+                  ? 'bg-orange-100 text-orange-700' 
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               }`}
             >
               <UserCheck className="h-4 w-4" />
               <span>My Contacts</span>
-            </Link>
-            <Link 
-              href="/dashboard/past-requests" 
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                pathname === '/dashboard/past-requests' 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
-            >
-              <History className="h-4 w-4" />
-              <span>Past Requests</span>
             </Link>
           </div>
         </div>

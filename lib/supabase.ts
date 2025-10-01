@@ -148,6 +148,38 @@ export interface Database {
           created_at?: string
         }
       }
+      bid_notes: {
+        Row: {
+          id: string
+          bid_id: string
+          note_type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
+          category: string | null
+          location: string | null
+          content: string
+          confidence_score: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          bid_id: string
+          note_type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
+          category?: string | null
+          location?: string | null
+          content: string
+          confidence_score?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          bid_id?: string
+          note_type?: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
+          category?: string | null
+          location?: string | null
+          content?: string
+          confidence_score?: number
+          created_at?: string
+        }
+      }
       gc_contacts: {
         Row: {
           id: string

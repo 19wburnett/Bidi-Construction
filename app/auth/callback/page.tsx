@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 function AuthCallbackContent() {
   const router = useRouter()
@@ -129,8 +130,7 @@ function AuthCallbackContent() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-        <p className="text-lg font-medium">Completing sign in...</p>
+        <FallingBlocksLoader text="Completing sign in..." size="lg" />
         <p className="text-sm text-gray-600 mt-2">Please wait while we set up your account</p>
       </div>
     </div>
@@ -142,8 +142,7 @@ export default function AuthCallbackPage() {
     <Suspense fallback={
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-lg font-medium">Loading...</p>
+          <FallingBlocksLoader text="Loading..." size="lg" />
         </div>
       </div>
     }>

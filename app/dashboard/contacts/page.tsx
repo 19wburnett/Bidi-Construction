@@ -29,6 +29,8 @@ import {
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import DashboardNavbar from '@/components/dashboard-navbar'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -299,8 +301,7 @@ export default function ContactsPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <FallingBlocksLoader text="Loading..." size="lg" />
         </div>
       </div>
     )
@@ -309,28 +310,15 @@ export default function ContactsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <Link href="/dashboard">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Dashboard
-                </Button>
-              </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">My Contacts</h1>
-                <p className="text-gray-600">Manage your contractor contacts</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <NotificationBell />
-              <ProfileDropdown />
-            </div>
-          </div>
-        </div>
-      </div>
+      <DashboardNavbar 
+        title="My Contacts"
+        showBackButton={true}
+        backButtonHref="/dashboard"
+        backButtonText="Back to Dashboard"
+        showCredits={false}
+        showNotifications={true}
+        showProfile={true}
+      />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Success/Error Messages */}
@@ -622,8 +610,7 @@ export default function ContactsPage() {
           <CardContent>
             {loading ? (
               <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-2 text-gray-600">Loading contacts...</p>
+                <FallingBlocksLoader text="Loading contacts..." size="md" />
               </div>
             ) : filteredContacts.length === 0 ? (
               <div className="text-center py-8">

@@ -13,6 +13,7 @@ import { Building2, Search, Users, Mail, Activity, ArrowLeft, Play, Pause, Squar
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import logo from '../../../public/brand/Bidi Contracting Logo.svg'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -221,7 +222,7 @@ export default function CrawlerAdminPage() {
       <header className="bg-white border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi Crawler Admin</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">

@@ -11,6 +11,7 @@ import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, Mess
 import Link from 'next/link'
 import NotificationBell from '@/components/notification-bell'
 import SeenStatusIndicator from '@/components/seen-status-indicator'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface JobRequest {
   id: string
@@ -161,7 +162,7 @@ export default function JobDetailsPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <FallingBlocksLoader text="Loading job details..." size="lg" />
           <p>Loading job details...</p>
         </div>
       </div>

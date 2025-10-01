@@ -29,6 +29,7 @@ import {
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import logo from '../../../public/brand/Bidi Contracting Logo.svg'
 
 interface MockBid {
   id: string
@@ -271,7 +272,7 @@ export default function WorkflowDemoPage() {
       <header className="bg-white border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi Workflow Demo</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
@@ -304,19 +305,19 @@ export default function WorkflowDemoPage() {
               <div key={index} className="flex items-center">
                 <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
                   index <= currentStep 
-                    ? 'bg-blue-600 text-white' 
+                    ? 'bg-orange-600 text-white' 
                     : 'bg-gray-200 text-gray-600'
                 }`}>
                   {index + 1}
                 </div>
                 <span className={`ml-2 text-sm font-medium ${
-                  index <= currentStep ? 'text-blue-600' : 'text-gray-500'
+                  index <= currentStep ? 'text-orange-600' : 'text-gray-500'
                 }`}>
                   {step}
                 </span>
                 {index < steps.length - 1 && (
                   <div className={`w-8 h-0.5 mx-4 ${
-                    index < currentStep ? 'bg-blue-600' : 'bg-gray-200'
+                    index < currentStep ? 'bg-orange-600' : 'bg-gray-200'
                   }`} />
                 )}
               </div>
@@ -329,7 +330,7 @@ export default function WorkflowDemoPage() {
           <Card className="max-w-2xl mx-auto">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
-                <Mail className="h-5 w-5 text-blue-600" />
+                <Mail className="h-5 w-5 text-orange-600" />
                 <span>General Contractor Email</span>
               </CardTitle>
               <CardDescription>
@@ -386,7 +387,7 @@ export default function WorkflowDemoPage() {
             </CardHeader>
             <CardContent>
               <div className="text-center space-y-4">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
                 <p className="text-gray-600">Analyzing job requirements and preparing to notify subcontractors...</p>
               </div>
             </CardContent>
@@ -398,7 +399,7 @@ export default function WorkflowDemoPage() {
           <Card className="max-w-4xl mx-auto">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
-                <Building2 className="h-5 w-5 text-blue-600" />
+                <Building2 className="h-5 w-5 text-orange-600" />
                 <span>Job Details Processed</span>
               </CardTitle>
               <CardDescription>
@@ -451,7 +452,7 @@ export default function WorkflowDemoPage() {
           <Card className="max-w-2xl mx-auto">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
-                <Users className="h-5 w-5 text-blue-600" />
+                <Users className="h-5 w-5 text-orange-600" />
                 <span>Notifying Subcontractors</span>
               </CardTitle>
               <CardDescription>
@@ -461,7 +462,7 @@ export default function WorkflowDemoPage() {
             <CardContent>
               <div className="space-y-4">
                 <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
+                  <Loader2 className="h-8 w-8 animate-spin text-orange-600 mx-auto mb-4" />
                   <p className="text-gray-600">Sending notifications to subcontractors...</p>
                 </div>
                 <div className="space-y-2">
@@ -522,7 +523,7 @@ export default function WorkflowDemoPage() {
                 ))}
                 {bidsReceived < 4 && (
                   <div className="text-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-blue-600 mx-auto mb-2" />
+                    <Loader2 className="h-6 w-6 animate-spin text-orange-600 mx-auto mb-2" />
                     <p className="text-gray-600">Waiting for more bids...</p>
                   </div>
                 )}
@@ -555,9 +556,9 @@ export default function WorkflowDemoPage() {
               <div className="space-y-6">
                 {/* Summary Stats */}
                 <div className="grid md:grid-cols-4 gap-4">
-                  <div className="bg-blue-50 p-4 rounded-lg text-center">
-                    <div className="text-2xl font-bold text-blue-600">{bids.length}</div>
-                    <div className="text-sm text-blue-800">Total Bids</div>
+                  <div className="bg-orange-50 p-4 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-orange-600">{bids.length}</div>
+                    <div className="text-sm text-orange-800">Total Bids</div>
                   </div>
                   <div className="bg-green-50 p-4 rounded-lg text-center">
                     <div className="text-2xl font-bold text-green-600">${bids.length > 0 ? Math.min(...bids.filter(b => b).map(b => b.bidAmount)).toLocaleString() : '0'}</div>

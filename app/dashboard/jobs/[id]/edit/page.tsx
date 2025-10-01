@@ -12,6 +12,8 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Building2, ArrowLeft, Upload, X } from 'lucide-react'
 import Link from 'next/link'
+import DashboardNavbar from '@/components/dashboard-navbar'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -194,8 +196,7 @@ export default function EditJobPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading job details...</p>
+          <FallingBlocksLoader text="Loading job details..." size="lg" />
         </div>
       </div>
     )
@@ -242,20 +243,15 @@ export default function EditJobPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-900">Bidi</h1>
-          </div>
-          <Link href={`/dashboard/jobs/${jobRequest.id}`}>
-            <Button variant="outline">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Job Details
-            </Button>
-          </Link>
-        </div>
-      </header>
+      <DashboardNavbar 
+        title="Bidi"
+        showBackButton={true}
+        backButtonHref={`/dashboard/jobs/${jobRequest.id}`}
+        backButtonText="Back to Job Details"
+        showCredits={false}
+        showNotifications={false}
+        showProfile={false}
+      />
 
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <Card>
