@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { createClient } from '@/lib/supabase'
 import { Building2, ArrowLeft } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import logo from '../../../public/brand/Bidi Contracting Logo.svg'
 
 export default function SignupPage() {
   const [email, setEmail] = useState('')
@@ -112,7 +113,7 @@ export default function SignupPage() {
         <Card className="w-full max-w-md border-2 border-gray-200 bg-white">
           <CardHeader className="text-center">
             <div className="flex items-center justify-center space-x-2 mb-4">
-              <Building2 className="h-8 w-8 text-black" />
+              <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />
               <h1 className="text-2xl font-bold text-black">Bidi</h1>
             </div>
             <CardTitle className="text-xl text-black">Create Your Account</CardTitle>

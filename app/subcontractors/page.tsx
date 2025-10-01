@@ -157,8 +157,7 @@ export default function SubcontractorsPage() {
         </h1>
         
         <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-3xl mx-auto font-medium">
-          Join our network of qualified subcontractors and receive job opportunities directly in your inbox. 
-          No more cold calling or searching for work - we bring the jobs to you. <strong className="bidi-orange-text">It's completely free!</strong>
+          Join our network of subcontractors and get jobs sent to your inbox.<strong className="bidi-orange-text"> No software needed, just reply to our emails with your bid.</strong>
         </p>
         
         <div className="flex justify-center">

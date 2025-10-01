@@ -47,9 +47,9 @@ export default function HomePage() {
         <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black mb-6 tracking-tight transition-all duration-1000 delay-500 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          Find the Best Subcontractors
+          We Level Subcontractor Bids 
           <span className="block bidi-orange-text">
-            Automatically
+            So You Don't Have To
           </span>
         </h1>
         
