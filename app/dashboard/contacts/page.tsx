@@ -436,12 +436,12 @@ export default function ContactsPage() {
               </div>
               <div>
                 <Label htmlFor="trade-filter">Trade Category</Label>
-                <Select value={filterTrade} onValueChange={setFilterTrade}>
+                <Select value={filterTrade || 'all'} onValueChange={(v) => setFilterTrade(v === 'all' ? '' : v)}>
                   <SelectTrigger>
                     <SelectValue placeholder="All trades" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All trades</SelectItem>
+                    <SelectItem value="all">All trades</SelectItem>
                     {TRADE_CATEGORIES.map(trade => (
                       <SelectItem key={trade} value={trade}>{trade}</SelectItem>
                     ))}

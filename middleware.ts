@@ -38,19 +38,23 @@ export async function middleware(request: NextRequest) {
     // Define public paths
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
-    // If no user and trying to access protected path, redirect to login
-    if (!user && !isPublicPath) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/auth/login'
-      return NextResponse.redirect(url)
-    }
+    // For API routes, only refresh cookies/session and pass through without redirects
+    if (!isApiRoute) {
+      // If no user and trying to access protected path, redirect to login
+      if (!user && !isPublicPath) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/auth/login'
+        return NextResponse.redirect(url)
+      }
 
-    // If user is signed in and trying to access auth pages, redirect to dashboard
-    if (user && request.nextUrl.pathname.startsWith('/auth')) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/dashboard'
-      return NextResponse.redirect(url)
+      // If user is signed in and trying to access auth pages, redirect to dashboard
+      if (user && request.nextUrl.pathname.startsWith('/auth')) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/dashboard'
+        return NextResponse.redirect(url)
+      }
     }
 
     return response
@@ -58,8 +62,9 @@ export async function middleware(request: NextRequest) {
     // On error, allow access to public paths, redirect others to login
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
-    if (!isPublicPath) {
+    if (!isApiRoute && !isPublicPath) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
       return NextResponse.redirect(url)
@@ -77,9 +82,8 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public folder
-     * - api (API routes)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
 
