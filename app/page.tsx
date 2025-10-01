@@ -84,20 +84,6 @@ export default function HomePage() {
             </Button>
           </Link>
         </div>
-
-        {/* Professional Construction Icons */}
-        <div className="absolute top-20 left-10 opacity-20">
-          <Building2 className="h-12 w-12 text-gray-400" />
-        </div>
-        <div className="absolute top-32 right-16 opacity-20">
-          <Users className="h-10 w-10 text-gray-400" />
-        </div>
-        <div className="absolute bottom-20 left-20 opacity-20">
-          <FileText className="h-11 w-11 text-gray-400" />
-        </div>
-        <div className="absolute bottom-32 right-10 opacity-20">
-          <Mail className="h-9 w-9 text-gray-400" />
-        </div>
       </section>
 
       {/* Dashboard Preview Section */}
