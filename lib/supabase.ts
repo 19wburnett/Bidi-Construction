@@ -49,9 +49,13 @@ export interface Database {
           description: string
           budget_range: string
           files: string[] | null
+          plan_files: string[] | null
           status: 'active' | 'closed' | 'collecting_bids'
           bid_collection_started_at: string | null
           bid_collection_ends_at: string | null
+          recipient_type: 'contacts_only' | 'network_only' | 'both' | 'selected'
+          selected_network_subcontractors: string[] | null
+          selected_contact_subcontractors: string[] | null
           created_at: string
         }
         Insert: {
@@ -62,9 +66,13 @@ export interface Database {
           description: string
           budget_range: string
           files?: string[] | null
+          plan_files?: string[] | null
           status?: 'active' | 'closed' | 'collecting_bids'
           bid_collection_started_at?: string | null
           bid_collection_ends_at?: string | null
+          recipient_type?: 'contacts_only' | 'network_only' | 'both' | 'selected'
+          selected_network_subcontractors?: string[] | null
+          selected_contact_subcontractors?: string[] | null
           created_at?: string
         }
         Update: {
@@ -75,10 +83,75 @@ export interface Database {
           description?: string
           budget_range?: string
           files?: string[] | null
+          plan_files?: string[] | null
           status?: 'active' | 'closed' | 'collecting_bids'
           bid_collection_started_at?: string | null
           bid_collection_ends_at?: string | null
+          recipient_type?: 'contacts_only' | 'network_only' | 'both' | 'selected'
+          selected_network_subcontractors?: string[] | null
+          selected_contact_subcontractors?: string[] | null
           created_at?: string
+        }
+      }
+      plan_annotations: {
+        Row: {
+          id: string
+          job_request_id: string
+          plan_file_url: string
+          bid_id: string | null
+          annotation_type: 'note' | 'question' | 'concern' | 'suggestion' | 'highlight'
+          x_coordinate: number
+          y_coordinate: number
+          content: string
+          created_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          job_request_id: string
+          plan_file_url: string
+          bid_id?: string | null
+          annotation_type: 'note' | 'question' | 'concern' | 'suggestion' | 'highlight'
+          x_coordinate: number
+          y_coordinate: number
+          content: string
+          created_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          job_request_id?: string
+          plan_file_url?: string
+          bid_id?: string | null
+          annotation_type?: 'note' | 'question' | 'concern' | 'suggestion' | 'highlight'
+          x_coordinate?: number
+          y_coordinate?: number
+          content?: string
+          created_at?: string
+          created_by?: string | null
+        }
+      }
+      plan_annotation_responses: {
+        Row: {
+          id: string
+          annotation_id: string
+          content: string
+          created_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          annotation_id: string
+          content: string
+          created_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          annotation_id?: string
+          content?: string
+          created_at?: string
+          created_by?: string | null
         }
       }
       bids: {
@@ -158,6 +231,7 @@ export interface Database {
           content: string
           confidence_score: number
           created_at: string
+          page_number: number | null
         }
         Insert: {
           id?: string
@@ -168,6 +242,7 @@ export interface Database {
           content: string
           confidence_score?: number
           created_at?: string
+          page_number?: number | null
         }
         Update: {
           id?: string
@@ -178,6 +253,7 @@ export interface Database {
           content?: string
           confidence_score?: number
           created_at?: string
+          page_number?: number | null
         }
       }
       gc_contacts: {

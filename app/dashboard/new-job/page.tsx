@@ -10,12 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Upload, ArrowLeft, X, CheckCircle } from 'lucide-react'
+import { Building2, Upload, ArrowLeft, X, CheckCircle, Users, Network, UserCheck } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
 import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import SubcontractorSelectionModal from '@/components/subcontractor-selection-modal'
 
 const TRADE_CATEGORIES = [
   'Electrical',
@@ -52,6 +53,7 @@ export default function NewJobPage() {
     budget_range: '',
   })
   const [files, setFiles] = useState<File[]>([])
+  const [planFiles, setPlanFiles] = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
@@ -61,6 +63,10 @@ export default function NewJobPage() {
   const [showCreditsModal, setShowCreditsModal] = useState(false)
   const [creditsToPurchase, setCreditsToPurchase] = useState(1)
   const [purchaseLoading, setPurchaseLoading] = useState(false)
+  const [recipientType, setRecipientType] = useState<'contacts_only' | 'network_only' | 'both' | 'selected'>('both')
+  const [selectedContactSubs, setSelectedContactSubs] = useState<string[]>([])
+  const [selectedNetworkSubs, setSelectedNetworkSubs] = useState<string[]>([])
+  const [showSubSelectionModal, setShowSubSelectionModal] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -74,6 +80,7 @@ export default function NewJobPage() {
       checkUserSubscription()
     }
   }, [user, router])
+
 
   const checkUserSubscription = async () => {
     if (!user) return
@@ -95,6 +102,11 @@ export default function NewJobPage() {
     }
   }
 
+  const handleSubcontractorSelection = (contacts: string[], network: string[]) => {
+    setSelectedContactSubs(contacts)
+    setSelectedNetworkSubs(network)
+  }
+
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
@@ -104,8 +116,17 @@ export default function NewJobPage() {
     setFiles(prev => [...prev, ...selectedFiles])
   }
 
+  const handlePlanFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || [])
+    setPlanFiles(prev => [...prev, ...selectedFiles])
+  }
+
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const removePlanFile = (index: number) => {
+    setPlanFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -131,7 +152,9 @@ export default function NewJobPage() {
 
       // Upload files to Supabase storage
       const fileUrls: string[] = []
+      const planFileUrls: string[] = []
       
+      // Upload regular files
       for (const file of files) {
         const fileExt = file.name.split('.').pop()
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
@@ -150,6 +173,27 @@ export default function NewJobPage() {
           .getPublicUrl(filePath)
 
         fileUrls.push(publicUrl)
+      }
+
+      // Upload plan files
+      for (const file of planFiles) {
+        const fileExt = file.name.split('.').pop()
+        const fileName = `plans-${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+        const filePath = `job-plans/${user.id}/${fileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('job-plans')
+          .upload(filePath, file)
+
+        if (uploadError) {
+          throw uploadError
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('job-plans')
+          .getPublicUrl(filePath)
+
+        planFileUrls.push(publicUrl)
       }
 
       // If using credits, deduct one credit and create job
@@ -175,12 +219,20 @@ export default function NewJobPage() {
           description: formData.description,
           budget_range: formData.budget_range,
           files: fileUrls.length > 0 ? fileUrls : null,
+          plan_files: planFileUrls.length > 0 ? planFileUrls : null,
           status: 'collecting_bids',
           bid_collection_started_at: new Date().toISOString(),
           bid_collection_ends_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
           payment_type: paymentType,
           payment_status: 'paid',
-          credits_used: paymentType === 'credits' ? 1 : 0
+          credits_used: paymentType === 'credits' ? 1 : 0,
+          recipient_type: recipientType,
+          selected_network_subcontractors: recipientType === 'selected' && selectedNetworkSubs.length > 0 
+            ? selectedNetworkSubs 
+            : null,
+          selected_contact_subcontractors: recipientType === 'selected' && selectedContactSubs.length > 0
+            ? selectedContactSubs
+            : null
         })
         .select()
         .single()
@@ -347,7 +399,7 @@ export default function NewJobPage() {
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Payment Type Selection */}
               {userSubscriptionStatus !== 'active' && (
-                <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="space-y-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
                   <Label className="text-base font-semibold">Choose Payment Method</Label>
                   <div className="space-y-2">
                     <div className="flex items-center space-x-2">
@@ -358,7 +410,7 @@ export default function NewJobPage() {
                         value="subscription"
                         checked={paymentType === 'subscription'}
                         onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
-                        className="text-blue-600"
+                        className="text-orange-600"
                       />
                       <Label htmlFor="subscription" className="font-medium">
                         Monthly Subscription ($100/month) - Unlimited jobs
@@ -372,7 +424,7 @@ export default function NewJobPage() {
                         value="credits"
                         checked={paymentType === 'credits'}
                         onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
-                        className="text-blue-600"
+                        className="text-orange-600"
                       />
                       <Label htmlFor="credits" className="font-medium">
                         Credits ($20 per credit) - Beta pricing
@@ -380,12 +432,12 @@ export default function NewJobPage() {
                     </div>
                   </div>
                   {paymentType === 'subscription' && (
-                    <p className="text-sm text-blue-700">
+                    <p className="text-sm text-orange-700">
                       You'll be redirected to subscribe before posting this job.
                     </p>
                   )}
                   {paymentType === 'credits' && (
-                    <div className="text-sm text-blue-700">
+                    <div className="text-sm text-orange-700">
                       <p>You have {userCredits} credit{userCredits !== 1 ? 's' : ''} available.</p>
                       {userCredits < 1 && (
                         <div className="flex items-center gap-3 mt-2">
@@ -405,16 +457,18 @@ export default function NewJobPage() {
               )}
 
               {userSubscriptionStatus === 'active' && (
-                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                <div className="p-3 bg-black-50 rounded-lg border border-black-200">
                   <div className="flex items-center space-x-2">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                    <span className="text-green-800 font-medium">Active Subscription</span>
+                    <CheckCircle className="h-5 w-5 text-black-600" />
+                    <span className="text-black-800 font-medium">Active Subscription</span>
                   </div>
-                  <p className="text-sm text-green-700 mt-1">
+                  <p className="text-sm text-black-700 mt-1">
                     You have unlimited job posting with your active subscription.
                   </p>
                 </div>
               )}
+
+              
 
               <div className="space-y-2">
                 <Label htmlFor="trade_category">Trade Category *</Label>
@@ -479,12 +533,63 @@ export default function NewJobPage() {
                 </Select>
               </div>
 
+
+              <div className="space-y-2">
+                <Label htmlFor="planFiles">Project Plans (Optional)</Label>
+                <div className="border-2 border-dashed border-orange-300 rounded-lg p-6 text-center bg-orange-50">
+                  <Building2 className="h-8 w-8 text-orange-500 mx-auto mb-2" />
+                  <p className="text-sm text-orange-700 mb-2 font-medium">
+                    Upload architectural plans, blueprints, or drawings
+                  </p>
+                  <p className="text-xs text-orange-600 mb-3">
+                    These will be used for subcontractor annotations and bid notes
+                  </p>
+                  <input
+                    type="file"
+                    id="planFiles"
+                    multiple
+                    accept=".pdf,.dwg,.jpg,.jpeg,.png,.tiff"
+                    onChange={handlePlanFileUpload}
+                    className="hidden"
+                  />
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm"
+                    className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                    onClick={() => document.getElementById('planFiles')?.click()}
+                  >
+                    Choose Plan Files
+                  </Button>
+                </div>
+                
+                {planFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Selected Plan Files:</p>
+                    {planFiles.map((file, index) => (
+                      <div key={index} className="flex items-center justify-between bg-orange-50 p-2 rounded border border-orange-200">
+                        <span className="text-sm text-orange-800">{file.name}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-orange-600 hover:bg-orange-100"
+                          onClick={() => removePlanFile(index)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="files">Project Files (Optional)</Label>
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
                   <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
                   <p className="text-sm text-gray-600 mb-2">
-                    Upload plans, specifications, or other project documents
+                    Upload specifications, contracts, or other project documents
                   </p>
                   <input
                     type="file"
@@ -524,6 +629,134 @@ export default function NewJobPage() {
                 )}
               </div>
 
+                            {/* Recipient Selection */}
+                            <div className="space-y-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
+                <Label className="text-base font-semibold">Send Bid Request To *</Label>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="recipient-both"
+                      name="recipientType"
+                      value="both"
+                      checked={recipientType === 'both'}
+                      onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
+                      className="text-black"
+                    />
+                    <Label htmlFor="recipient-both" className="font-medium flex items-center">
+                      <Users className="h-4 w-4 mr-1" />
+                      All My Contacts & Bidi Network (Recommended)
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="recipient-contacts"
+                      name="recipientType"
+                      value="contacts_only"
+                      checked={recipientType === 'contacts_only'}
+                      onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
+                      className="text-black"
+                    />
+                    <Label htmlFor="recipient-contacts" className="font-medium flex items-center">
+                      <Users className="h-4 w-4 mr-1" />
+                      All My Contacts Only
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="recipient-network"
+                      name="recipientType"
+                      value="network_only"
+                      checked={recipientType === 'network_only'}
+                      onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
+                      className="text-black"
+                    />
+                    <Label htmlFor="recipient-network" className="font-medium flex items-center">
+                      <Network className="h-4 w-4 mr-1" />
+                      All Bidi Network Only
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="recipient-selected"
+                      name="recipientType"
+                      value="selected"
+                      checked={recipientType === 'selected'}
+                      onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
+                      className="text-black"
+                    />
+                    <Label htmlFor="recipient-selected" className="font-medium flex items-center">
+                      <UserCheck className="h-4 w-4 mr-1" />
+                      Select Specific Subcontractors
+                    </Label>
+                  </div>
+                </div>
+                <p className="text-sm text-orange-700">
+                  {recipientType === 'both' && 'Job request will be sent to all matching contacts in both your network and Bidi network.'}
+                  {recipientType === 'contacts_only' && 'Job request will only be sent to all matching contacts in your personal network.'}
+                  {recipientType === 'network_only' && 'Job request will only be sent to all matching subcontractors in the Bidi network.'}
+                  {recipientType === 'selected' && 'Choose exactly which subcontractors receive this bid request from both networks.'}
+                </p>
+              </div>
+
+              {/* Select Specific Subcontractors */}
+              {recipientType === 'selected' && (
+                <div className="space-y-3 p-4 bg-black-50 rounded-lg border border-black-200">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">Subcontractor Selection</Label>
+                    {(selectedContactSubs.length > 0 || selectedNetworkSubs.length > 0) && (
+                      <CheckCircle className="h-5 w-5 text-black-600" />
+                    )}
+                  </div>
+                  
+                  {!formData.trade_category ? (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-gray-600">
+                        Please select a trade category first to choose subcontractors.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => setShowSubSelectionModal(true)}
+                      >
+                        <UserCheck className="h-4 w-4 mr-2" />
+                        {selectedContactSubs.length + selectedNetworkSubs.length === 0
+                          ? 'Select Subcontractors'
+                          : `${selectedContactSubs.length + selectedNetworkSubs.length} Subcontractors Selected`
+                        }
+                      </Button>
+                      
+                      {(selectedContactSubs.length > 0 || selectedNetworkSubs.length > 0) && (
+                        <div className="text-sm text-black-700 space-y-1">
+                          {selectedContactSubs.length > 0 && (
+                            <div className="flex items-center">
+                              <Users className="h-3.5 w-3.5 mr-1.5" />
+                              <span>{selectedContactSubs.length} from my contacts</span>
+                            </div>
+                          )}
+                          {selectedNetworkSubs.length > 0 && (
+                            <div className="flex items-center">
+                              <Network className="h-3.5 w-3.5 mr-1.5" />
+                              <span>{selectedNetworkSubs.length} from Bidi network</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+
+
+
               {error && (
                 <div className="text-red-600 text-sm text-center">{error}</div>
               )}
@@ -558,7 +791,7 @@ export default function NewJobPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-center mb-4">
-                <div className="text-2xl font-bold text-blue-600 mb-2">
+                <div className="text-2xl font-bold text-orange-600 mb-2">
                   Current Credits: {userCredits}
                 </div>
                 <p className="text-sm text-gray-600">
@@ -573,7 +806,7 @@ export default function NewJobPage() {
                 <select
                   value={creditsToPurchase}
                   onChange={(e) => setCreditsToPurchase(parseInt(e.target.value))}
-                  className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 >
                   <option value={1}>1 Credit - $20</option>
                   <option value={5}>5 Credits - $100</option>
@@ -609,6 +842,17 @@ export default function NewJobPage() {
           </Card>
         </div>
       )}
+
+      {/* Subcontractor Selection Modal */}
+      <SubcontractorSelectionModal
+        isOpen={showSubSelectionModal}
+        onClose={() => setShowSubSelectionModal(false)}
+        tradeCategory={formData.trade_category}
+        location={formData.location}
+        onConfirm={handleSubcontractorSelection}
+        initialSelectedContacts={selectedContactSubs}
+        initialSelectedNetwork={selectedNetworkSubs}
+      />
     </div>
   )
 }

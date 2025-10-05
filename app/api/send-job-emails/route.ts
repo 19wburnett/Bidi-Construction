@@ -44,39 +44,107 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get subcontractors in the same trade and location
-    console.log('Searching for subcontractors with:', { tradeCategory, location })
+    const recipientType = jobRequest.recipient_type || 'both'
+    const selectedNetworkEmails = jobRequest.selected_network_subcontractors || []
+    const selectedContactEmails = jobRequest.selected_contact_subcontractors || []
     
-    const { data: subcontractors, error: subError } = await supabase
-      .from('subcontractors')
-      .select('*')
-      .eq('trade_category', tradeCategory)
-      .ilike('location', `%${location}%`)
+    let recipientsToEmail: Array<{ email: string; name: string }> = []
 
-    console.log('Subcontractors found:', subcontractors?.length || 0, subcontractors)
+    // Handle different recipient types
+    if (recipientType === 'selected') {
+      // For 'selected' type, use only the specified emails from both sources
+      console.log('Using selected subcontractors only...')
+      
+      // Get selected GC contacts
+      if (selectedContactEmails.length > 0) {
+        const { data: gcContacts, error: contactsError } = await supabase
+          .from('gc_contacts')
+          .select('email, name')
+          .eq('gc_id', jobRequest.gc_id)
+          .in('email', selectedContactEmails)
 
-    if (subError) {
-      console.error('Error fetching subcontractors:', subError)
-      return NextResponse.json(
-        { error: 'Failed to fetch subcontractors' },
-        { status: 500 }
-      )
+        if (contactsError) {
+          console.error('Error fetching selected GC contacts:', contactsError)
+        } else if (gcContacts && gcContacts.length > 0) {
+          console.log('Selected GC contacts found:', gcContacts.length)
+          recipientsToEmail = [...recipientsToEmail, ...gcContacts]
+        }
+      }
+
+      // Get selected Bidi network subcontractors
+      if (selectedNetworkEmails.length > 0) {
+        const { data: subcontractors, error: subError } = await supabase
+          .from('subcontractors')
+          .select('email, name')
+          .in('email', selectedNetworkEmails)
+
+        if (subError) {
+          console.error('Error fetching selected network subcontractors:', subError)
+        } else if (subcontractors && subcontractors.length > 0) {
+          console.log('Selected Bidi network subcontractors found:', subcontractors.length)
+          recipientsToEmail = [...recipientsToEmail, ...subcontractors]
+        }
+      }
+    } else {
+      // For other types, fetch all matching subcontractors
+      
+      // Get GC contacts if needed
+      if (recipientType === 'contacts_only' || recipientType === 'both') {
+        console.log('Fetching all matching GC contacts...')
+        const { data: gcContacts, error: contactsError } = await supabase
+          .from('gc_contacts')
+          .select('email, name')
+          .eq('gc_id', jobRequest.gc_id)
+          .eq('trade_category', tradeCategory)
+          .ilike('location', `%${location}%`)
+
+        if (contactsError) {
+          console.error('Error fetching GC contacts:', contactsError)
+        } else if (gcContacts && gcContacts.length > 0) {
+          console.log('GC contacts found:', gcContacts.length)
+          recipientsToEmail = [...recipientsToEmail, ...gcContacts]
+        }
+      }
+
+      // Get Bidi network subcontractors if needed
+      if (recipientType === 'network_only' || recipientType === 'both') {
+        console.log('Fetching all matching Bidi network subcontractors...')
+        const { data: subcontractors, error: subError } = await supabase
+          .from('subcontractors')
+          .select('email, name')
+          .eq('trade_category', tradeCategory)
+          .ilike('location', `%${location}%`)
+
+        if (subError) {
+          console.error('Error fetching subcontractors:', subError)
+        } else if (subcontractors && subcontractors.length > 0) {
+          console.log('Bidi network subcontractors found:', subcontractors.length)
+          recipientsToEmail = [...recipientsToEmail, ...subcontractors]
+        }
+      }
     }
 
-    if (!subcontractors || subcontractors.length === 0) {
+    // Remove duplicates (in case someone is in both lists)
+    const uniqueRecipients = Array.from(
+      new Map(recipientsToEmail.map(item => [item.email, item])).values()
+    )
+
+    console.log('Total unique recipients:', uniqueRecipients.length)
+
+    if (uniqueRecipients.length === 0) {
       return NextResponse.json(
-        { message: 'No subcontractors found for this trade and location' },
+        { message: 'No recipients found for this job request based on your selection' },
         { status: 200 }
       )
     }
 
-    // Send emails to all matching subcontractors
-    const emailPromises = subcontractors.map(async (sub) => {
+    // Send emails to all recipients
+    const emailPromises = uniqueRecipients.map(async (recipient) => {
       try {
         const { data, error } = await resend.emails.send({
           from: 'Bidi <noreply@savewithbidi.com>',
           reply_to: `bids+${jobRequestId}@savewithbidi.com`,
-          to: [sub.email],
+          to: [recipient.email],
           subject: `New ${tradeCategory} Job Opportunity in ${location}`,
           headers: {
             'X-Job-Request-ID': jobRequestId,
@@ -143,7 +211,7 @@ export async function POST(request: NextRequest) {
                   © 2024 Bidi. All rights reserved.
                 </p>
                 <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
-                  This email was sent to ${sub.email} because you're registered as a ${tradeCategory} subcontractor in ${location}.
+                  This email was sent to ${recipient.email} because you're registered as a ${tradeCategory} subcontractor in ${location}.
                 </p>
               </div>
             </div>
@@ -151,14 +219,14 @@ export async function POST(request: NextRequest) {
         })
 
         if (error) {
-          console.error(`Failed to send email to ${sub.email}:`, error)
-          return { success: false, email: sub.email, error }
+          console.error(`Failed to send email to ${recipient.email}:`, error)
+          return { success: false, email: recipient.email, error }
         }
 
-        return { success: true, email: sub.email, data }
+        return { success: true, email: recipient.email, data }
       } catch (error) {
-        console.error(`Error sending email to ${sub.email}:`, error)
-        return { success: false, email: sub.email, error }
+        console.error(`Error sending email to ${recipient.email}:`, error)
+        return { success: false, email: recipient.email, error }
       }
     })
 
@@ -167,10 +235,10 @@ export async function POST(request: NextRequest) {
     const failed = results.filter(r => !r.success).length
 
     return NextResponse.json({
-      message: `Emails sent to ${successful} subcontractors`,
+      message: `Emails sent to ${successful} recipients`,
       successful,
       failed,
-      total: subcontractors.length,
+      total: uniqueRecipients.length,
     })
   } catch (error) {
     console.error('Error in send-job-emails:', error)

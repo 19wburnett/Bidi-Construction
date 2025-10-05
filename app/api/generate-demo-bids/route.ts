@@ -338,12 +338,15 @@ ${bidData.companyName} Team`,
                 category: n.category,
                 location: n.location,
                 content: n.content,
-                confidence_score: n.confidence
+                confidence_score: n.confidence,
+                page_number: n.page_number // Include page number for auto-placement
               }))
             )
 
           if (notesError) {
             console.error('Error inserting demo bid notes:', notesError)
+          } else {
+            console.log(`Created ${demoNotes.length} demo notes for ${bidData.companyName}, ${demoNotes.filter(n => n.page_number).length} with page references`)
           }
         }
       } catch (err) {
@@ -354,36 +357,109 @@ ${bidData.companyName} Team`,
 }
 
 // Heuristic demo notes extractor to simulate categorized notes without AI
+// Now includes page number references to showcase the auto-placement feature
 function buildDemoNotesFromText(notes: string | undefined): Array<{
   type: 'requirement' | 'concern' | 'suggestion' | 'timeline' | 'material' | 'other'
   category: string | null
   location: string | null
   content: string
   confidence: number
+  page_number: number | null
 }> {
-  const results: Array<{ type: any; category: string | null; location: string | null; content: string; confidence: number }> = []
+  const results: Array<{ type: any; category: string | null; location: string | null; content: string; confidence: number; page_number: number | null }> = []
   const text = (notes || '').toLowerCase()
 
-  // Simple keyword-based categorization suitable for demo mode
-  if (text.includes('permit')) {
-    results.push({ type: 'requirement', category: 'permit', location: null, content: 'Includes all permits and inspections', confidence: 0.9 })
+  // Generate realistic demo notes with page number references
+  // This showcases the auto-placement feature for demo clients
+  
+  if (text.includes('permit') || text.includes('licensed')) {
+    results.push({ 
+      type: 'requirement', 
+      category: 'permit', 
+      location: 'Main entrance', 
+      content: 'All permits and inspections must be completed before work begins. Electrical panel location shown requires city approval.', 
+      confidence: 0.92,
+      page_number: 1 // First page typically shows site plan
+    })
   }
+  
   if (text.includes('timeline') || text.includes('weeks') || text.includes('week')) {
-    results.push({ type: 'timeline', category: 'timeline', location: null, content: 'Proposed timeline as stated in bid', confidence: 0.8 })
+    results.push({ 
+      type: 'timeline', 
+      category: 'schedule', 
+      location: 'Kitchen area', 
+      content: 'Proposed 2-3 week timeline assumes materials are available. Kitchen electrical work must be completed before cabinet installation.', 
+      confidence: 0.88,
+      page_number: 2 // Second page often shows floor plan details
+    })
   }
-  if (text.includes('materials') || text.includes('premium') || text.includes('copper') || text.includes('tile')) {
-    results.push({ type: 'material', category: 'material', location: null, content: 'Specific material requirements or quality level mentioned', confidence: 0.75 })
+  
+  if (text.includes('materials') || text.includes('premium') || text.includes('quality')) {
+    results.push({ 
+      type: 'material', 
+      category: 'materials', 
+      location: 'Bathroom', 
+      content: 'Premium materials specified in plans. Recommend upgrading to copper piping in bathroom areas for longevity.', 
+      confidence: 0.85,
+      page_number: 3 // Third page might show bathroom details
+    })
   }
-  if (text.includes('inspection') || text.includes('licensed') || text.includes('bonded')) {
-    results.push({ type: 'concern', category: 'safety', location: null, content: 'Compliance and safety certifications noted', confidence: 0.7 })
+  
+  if (text.includes('inspection') || text.includes('certified') || text.includes('bonded')) {
+    results.push({ 
+      type: 'concern', 
+      category: 'safety', 
+      location: 'Electrical panel', 
+      content: 'Current electrical panel location may not meet code requirements. Recommend reviewing with inspector before proceeding.', 
+      confidence: 0.79,
+      page_number: 1 // Back to first page for electrical concerns
+    })
   }
-  if (text.includes('recommend')) {
-    results.push({ type: 'suggestion', category: 'other', location: null, content: 'Contractor made a recommendation to improve the project', confidence: 0.65 })
+  
+  if (text.includes('recommend') || text.includes('suggest')) {
+    results.push({ 
+      type: 'suggestion', 
+      category: 'improvement', 
+      location: 'Living room', 
+      content: 'Suggest adding additional outlet in living room area for better functionality. Minimal cost increase.', 
+      confidence: 0.76,
+      page_number: 2
+    })
+  }
+  
+  if (text.includes('warranty') || text.includes('guarantee')) {
+    results.push({ 
+      type: 'requirement', 
+      category: 'warranty', 
+      location: null, 
+      content: 'All work includes warranty as specified. Documentation will be provided upon completion.', 
+      confidence: 0.83,
+      page_number: null // Some notes don't need page references
+    })
   }
 
-  // Always include at least one generic requirement for demo visibility
+  // Add a few more realistic demo notes to showcase the feature better
+  if (text.includes('experience') || text.includes('years')) {
+    results.push({ 
+      type: 'suggestion', 
+      category: 'design', 
+      location: 'Master bedroom', 
+      content: 'Based on our experience, recommend moving light switch location for better accessibility as shown in plans.', 
+      confidence: 0.81,
+      page_number: 3
+    })
+  }
+
+  // Always include at least one note with page reference for demo visibility
   if (results.length === 0 && (notes || '').trim().length > 0) {
-    results.push({ type: 'requirement', category: 'other', location: null, content: 'General project requirement stated in bid notes', confidence: 0.6 })
+    results.push({ 
+      type: 'requirement', 
+      category: 'general', 
+      location: 'Main area', 
+      content: 'General project requirements as outlined in the specifications. Will follow all details shown in construction documents.', 
+      confidence: 0.72,
+      page_number: 1
+    })
   }
 
   return results

@@ -142,12 +142,6 @@ export default function SubcontractorsPage() {
             <span>For Subcontractors</span>
           </div>
         </div>
-        <div className="flex justify-center mb-6">
-          <div className="bidi-orange-bg-light bidi-orange-text px-4 py-2 rounded-full text-sm font-bold border border-orange/20 flex items-center space-x-2">
-            <CheckCircle className="h-4 w-4" />
-            <span>100% Free for Subcontractors</span>
-          </div>
-        </div>
         
         <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black mb-6">
           Get More Jobs

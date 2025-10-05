@@ -45,7 +45,6 @@ export default function Navbar() {
 
   const navigation = [
     { name: 'Home', href: '/' },
-    { name: 'Demo', href: '/demo' },
     { name: 'For Subcontractors', href: '/subcontractors' },
     { name: 'Pricing', href: '/pricing' },
     ...(isSignedIn ? [
