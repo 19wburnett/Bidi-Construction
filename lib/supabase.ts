@@ -50,7 +50,7 @@ export interface Database {
           budget_range: string
           files: string[] | null
           plan_files: string[] | null
-          status: 'active' | 'closed' | 'collecting_bids'
+          status: 'active' | 'closed' | 'cancelled' | 'expired'
           bid_collection_started_at: string | null
           bid_collection_ends_at: string | null
           recipient_type: 'contacts_only' | 'network_only' | 'both' | 'selected'

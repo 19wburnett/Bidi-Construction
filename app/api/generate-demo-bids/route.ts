@@ -352,6 +352,50 @@ ${bidData.companyName} Team`,
       } catch (err) {
         console.error('Failed to create demo bid_notes:', err)
       }
+
+      // Generate and insert realistic line items for the bid
+      try {
+        // Get job request to determine trade category
+        const { data: jobRequest } = await supabase
+          .from('job_requests')
+          .select('trade_category')
+          .eq('id', jobRequestId)
+          .single()
+
+        if (jobRequest) {
+          const lineItems = generateLineItemsForBid(
+            jobRequest.trade_category,
+            adjustedAmount,
+            bidData.companyName
+          )
+          
+          if (lineItems.length > 0) {
+            const { error: lineItemsError } = await supabase
+              .from('bid_line_items')
+              .insert(
+                lineItems.map((item, index) => ({
+                  bid_id: bid.id,
+                  item_number: index + 1,
+                  description: item.item_description,
+                  category: item.category,
+                  quantity: item.quantity,
+                  unit: item.unit,
+                  unit_price: item.unit_price,
+                  amount: item.amount,
+                  notes: item.notes
+                }))
+              )
+
+            if (lineItemsError) {
+              console.error('Error inserting demo line items:', lineItemsError)
+            } else {
+              console.log(`Created ${lineItems.length} line items for ${bidData.companyName}`)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to create demo line_items:', err)
+      }
     }
   }
 }
@@ -463,4 +507,388 @@ function buildDemoNotesFromText(notes: string | undefined): Array<{
   }
 
   return results
+}
+
+// Generate realistic line items for a bid based on trade category and total amount
+function generateLineItemsForBid(
+  tradeCategory: string,
+  totalAmount: number,
+  companyName: string
+): Array<{
+  category: string
+  item_description: string
+  quantity: number
+  unit: string
+  unit_price: number
+  amount: number
+  notes: string | null
+}> {
+  const lineItems: Array<{
+    category: string
+    item_description: string
+    quantity: number
+    unit: string
+    unit_price: number
+    amount: number
+    notes: string | null
+  }> = []
+
+  // Different line item templates based on trade category
+  switch (tradeCategory) {
+    case 'Electrical':
+      // Labor typically 40-50% of total
+      const electricalLaborAmount = Math.round(totalAmount * 0.45)
+      const electricalLaborRate = 85 + Math.floor(Math.random() * 30) // $85-115/hr
+      const electricalLaborHours = Math.round(electricalLaborAmount / electricalLaborRate)
+      
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Licensed electrician labor',
+        quantity: electricalLaborHours,
+        unit: 'hours',
+        unit_price: electricalLaborRate,
+        amount: electricalLaborHours * electricalLaborRate,
+        notes: 'Includes journeyman and apprentice electricians'
+      })
+      
+      // Materials 30-40%
+      const panelCost = 450 + Math.floor(Math.random() * 300)
+      lineItems.push({
+        category: 'materials',
+        item_description: '200A electrical panel upgrade',
+        quantity: 1,
+        unit: 'ea',
+        unit_price: panelCost,
+        amount: panelCost,
+        notes: 'Includes main breaker and ground fault protection'
+      })
+      
+      const wiringAmount = Math.round(totalAmount * 0.18)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Wire and cable (12/2, 14/2 Romex)',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: wiringAmount,
+        amount: wiringAmount,
+        notes: 'Copper wire, code compliant'
+      })
+      
+      // Fixtures and devices 10-15%
+      const fixturesAmount = Math.round(totalAmount * 0.12)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Outlets, switches, and cover plates',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: fixturesAmount,
+        amount: fixturesAmount,
+        notes: 'Commercial grade devices'
+      })
+      
+      // Permits and inspections
+      const permitCost = 200 + Math.floor(Math.random() * 200)
+      lineItems.push({
+        category: 'permits',
+        item_description: 'Electrical permit and inspections',
+        quantity: 1,
+        unit: 'ea',
+        unit_price: permitCost,
+        amount: permitCost,
+        notes: 'City permit and final inspection'
+      })
+      break
+
+    case 'Plumbing':
+      // Labor 45-55%
+      const plumbingLaborAmount = Math.round(totalAmount * 0.50)
+      const plumbingLaborRate = 75 + Math.floor(Math.random() * 25)
+      const plumbingLaborHours = Math.round(plumbingLaborAmount / plumbingLaborRate)
+      
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Licensed plumber labor',
+        quantity: plumbingLaborHours,
+        unit: 'hours',
+        unit_price: plumbingLaborRate,
+        amount: plumbingLaborHours * plumbingLaborRate,
+        notes: 'Master plumber and helper'
+      })
+      
+      // Fixtures 25-35%
+      const fixtureCost = 450 + Math.floor(Math.random() * 350)
+      const numFixtures = Math.min(3, Math.floor(totalAmount / 3000) + 1)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Plumbing fixtures (toilets, sinks, faucets)',
+        quantity: numFixtures,
+        unit: 'ea',
+        unit_price: fixtureCost,
+        amount: numFixtures * fixtureCost,
+        notes: 'Mid-grade fixtures, chrome finish'
+      })
+      
+      // Piping materials 15-20%
+      const pipingAmount = Math.round(totalAmount * 0.17)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'PEX piping and fittings',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: pipingAmount,
+        amount: pipingAmount,
+        notes: 'Includes valves, connectors, and supports'
+      })
+      
+      // Permit
+      const plumbingPermit = 150 + Math.floor(Math.random() * 150)
+      lineItems.push({
+        category: 'permits',
+        item_description: 'Plumbing permit',
+        quantity: 1,
+        unit: 'ea',
+        unit_price: plumbingPermit,
+        amount: plumbingPermit,
+        notes: null
+      })
+      break
+
+    case 'HVAC':
+      // Equipment 50-60%
+      const hvacEquipmentAmount = Math.round(totalAmount * 0.55)
+      const tonnage = Math.min(5, Math.max(2, Math.floor(totalAmount / 5000)))
+      lineItems.push({
+        category: 'equipment',
+        item_description: `${tonnage}-ton HVAC system (16 SEER)`,
+        quantity: 1,
+        unit: 'ea',
+        unit_price: hvacEquipmentAmount,
+        amount: hvacEquipmentAmount,
+        notes: 'Energy-efficient heat pump with air handler'
+      })
+      
+      // Labor 25-30%
+      const hvacLaborAmount = Math.round(totalAmount * 0.27)
+      lineItems.push({
+        category: 'labor',
+        item_description: 'HVAC installation labor',
+        quantity: 1,
+        unit: 'job',
+        unit_price: hvacLaborAmount,
+        amount: hvacLaborAmount,
+        notes: 'NATE-certified technicians'
+      })
+      
+      // Ductwork and materials 10-15%
+      const ductworkAmount = Math.round(totalAmount * 0.12)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Ductwork, registers, and thermostat',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: ductworkAmount,
+        amount: ductworkAmount,
+        notes: 'Insulated ductwork and programmable thermostat'
+      })
+      
+      // Electrical work
+      const hvacElectricalAmount = Math.round(totalAmount * 0.05)
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Electrical connections',
+        quantity: 1,
+        unit: 'job',
+        unit_price: hvacElectricalAmount,
+        amount: hvacElectricalAmount,
+        notes: 'Disconnect and wiring to panel'
+      })
+      break
+
+    case 'Roofing':
+      // Materials 50-60%
+      const roofArea = 1500 + Math.floor(Math.random() * 1500) // 1500-3000 sq ft
+      const shingleCostPerSqFt = 1.8 + Math.random() * 1.2
+      const shingleAmount = Math.round(roofArea * shingleCostPerSqFt)
+      
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Architectural shingles (30-year)',
+        quantity: Math.round(roofArea / 100),
+        unit: 'squares',
+        unit_price: Math.round(shingleAmount / (roofArea / 100)),
+        amount: shingleAmount,
+        notes: 'Class A fire-rated, wind resistant'
+      })
+      
+      // Underlayment and supplies 8-12%
+      const underlaymentAmount = Math.round(totalAmount * 0.10)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Underlayment, ice/water shield, and flashing',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: underlaymentAmount,
+        amount: underlaymentAmount,
+        notes: 'Synthetic underlayment and metal flashing'
+      })
+      
+      // Labor 25-35%
+      const roofingLaborAmount = Math.round(totalAmount * 0.30)
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Roof installation labor',
+        quantity: 1,
+        unit: 'job',
+        unit_price: roofingLaborAmount,
+        amount: roofingLaborAmount,
+        notes: 'Includes tear-off and disposal'
+      })
+      
+      // Disposal
+      const disposalCost = 400 + Math.floor(Math.random() * 400)
+      lineItems.push({
+        category: 'other',
+        item_description: 'Old roofing disposal',
+        quantity: 1,
+        unit: 'job',
+        unit_price: disposalCost,
+        amount: disposalCost,
+        notes: 'Dumpster rental and dump fees'
+      })
+      break
+
+    case 'Painting':
+      // Labor is 70-80% for painting
+      const paintingLaborAmount = Math.round(totalAmount * 0.75)
+      const paintingLaborRate = 45 + Math.floor(Math.random() * 20)
+      const paintingLaborHours = Math.round(paintingLaborAmount / paintingLaborRate)
+      
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Interior painting labor',
+        quantity: paintingLaborHours,
+        unit: 'hours',
+        unit_price: paintingLaborRate,
+        amount: paintingLaborHours * paintingLaborRate,
+        notes: 'Surface prep, priming, and two coats'
+      })
+      
+      // Paint and materials 15-25%
+      const paintAmount = Math.round(totalAmount * 0.18)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Premium interior paint',
+        quantity: Math.ceil(paintAmount / 45),
+        unit: 'gallons',
+        unit_price: 45,
+        amount: Math.ceil(paintAmount / 45) * 45,
+        notes: 'Low-VOC, washable finish'
+      })
+      
+      // Supplies
+      const suppliesAmount = Math.round(totalAmount * 0.07)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Painting supplies (brushes, tape, drop cloths)',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: suppliesAmount,
+        amount: suppliesAmount,
+        notes: null
+      })
+      break
+
+    case 'Drywall':
+      // Materials 40-50%
+      const drywallSheets = 30 + Math.floor(Math.random() * 50)
+      const sheetCost = 12 + Math.floor(Math.random() * 6)
+      
+      lineItems.push({
+        category: 'materials',
+        item_description: '1/2" drywall sheets (4x8)',
+        quantity: drywallSheets,
+        unit: 'sheets',
+        unit_price: sheetCost,
+        amount: drywallSheets * sheetCost,
+        notes: 'Moisture-resistant for bathrooms'
+      })
+      
+      // Mud and tape 8-12%
+      const mudAmount = Math.round(totalAmount * 0.10)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Joint compound and tape',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: mudAmount,
+        amount: mudAmount,
+        notes: 'Includes corner bead and fasteners'
+      })
+      
+      // Labor 35-45%
+      const drywallLaborAmount = Math.round(totalAmount * 0.40)
+      const drywallLaborRate = 55 + Math.floor(Math.random() * 20)
+      const drywallLaborHours = Math.round(drywallLaborAmount / drywallLaborRate)
+      
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Drywall installation and finishing',
+        quantity: drywallLaborHours,
+        unit: 'hours',
+        unit_price: drywallLaborRate,
+        amount: drywallLaborHours * drywallLaborRate,
+        notes: 'Hang, tape, mud, and sand to Level 4 finish'
+      })
+      break
+
+    default:
+      // Generic breakdown for other trades
+      const genericLaborAmount = Math.round(totalAmount * 0.55)
+      const genericLaborRate = 65 + Math.floor(Math.random() * 25)
+      const genericLaborHours = Math.round(genericLaborAmount / genericLaborRate)
+      
+      lineItems.push({
+        category: 'labor',
+        item_description: 'Professional labor',
+        quantity: genericLaborHours,
+        unit: 'hours',
+        unit_price: genericLaborRate,
+        amount: genericLaborHours * genericLaborRate,
+        notes: 'Skilled tradespeople'
+      })
+      
+      const genericMaterialsAmount = Math.round(totalAmount * 0.35)
+      lineItems.push({
+        category: 'materials',
+        item_description: 'Materials and supplies',
+        quantity: 1,
+        unit: 'lot',
+        unit_price: genericMaterialsAmount,
+        amount: genericMaterialsAmount,
+        notes: 'Quality materials as specified'
+      })
+      
+      const genericOtherAmount = Math.round(totalAmount * 0.10)
+      lineItems.push({
+        category: 'other',
+        item_description: 'Permits and miscellaneous',
+        quantity: 1,
+        unit: 'job',
+        unit_price: genericOtherAmount,
+        amount: genericOtherAmount,
+        notes: null
+      })
+  }
+
+  // Adjust line items so they sum exactly to the total amount
+  const currentTotal = lineItems.reduce((sum, item) => sum + item.amount, 0)
+  if (currentTotal !== totalAmount && lineItems.length > 0) {
+    const difference = totalAmount - currentTotal
+    // Apply the difference to the last item
+    const lastItem = lineItems[lineItems.length - 1]
+    lastItem.amount += difference
+    lastItem.unit_price = Math.round(lastItem.amount / lastItem.quantity)
+  }
+
+  return lineItems
 }

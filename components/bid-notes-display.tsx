@@ -1,7 +1,9 @@
 'use client'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { 
   AlertTriangle, 
   CheckCircle, 
@@ -9,7 +11,8 @@ import {
   Lightbulb, 
   Package, 
   MapPin,
-  MessageSquare
+  MessageSquare,
+  Edit
 } from 'lucide-react'
 
 interface BidNote {
@@ -25,6 +28,8 @@ interface BidNote {
 interface BidNotesDisplayProps {
   notes: BidNote[]
   bidId: string
+  onAnnotatePlans?: () => void
+  hasPlans?: boolean
 }
 
 const noteTypeConfig = {
@@ -73,7 +78,7 @@ const categoryColors = {
   other: 'bg-gray-50 text-gray-700'
 }
 
-export default function BidNotesDisplay({ notes, bidId }: BidNotesDisplayProps) {
+export default function BidNotesDisplay({ notes, bidId, onAnnotatePlans, hasPlans }: BidNotesDisplayProps) {
   if (!notes || notes.length === 0) {
     return null
   }
@@ -89,63 +94,95 @@ export default function BidNotesDisplay({ notes, bidId }: BidNotesDisplayProps) 
 
   return (
     <div className="space-y-4">
-      <h4 className="font-medium text-sm mb-3 flex items-center">
-        <MessageSquare className="h-4 w-4 mr-2" />
-        Categorized Notes ({notes.length})
-      </h4>
-      
-      {Object.entries(notesByType).map(([type, typeNotes]) => {
-        const config = noteTypeConfig[type as keyof typeof noteTypeConfig]
-        const Icon = config.icon
-        
-        return (
-          <div key={type} className="space-y-2">
-            <div className="flex items-center space-x-2">
-              <Icon className="h-4 w-4" />
-              <span className="text-sm font-medium text-gray-700">
-                {config.label} ({typeNotes.length})
-              </span>
-            </div>
-            
-            <div className="space-y-2">
-              {typeNotes.map((note) => (
-                <Card key={note.id} className="border-l-4 border-l-gray-200">
-                  <CardContent className="p-3">
-                    <div className="space-y-2">
-                      <p className="text-sm text-gray-800">{note.content}</p>
-                      
-                      <div className="flex flex-wrap gap-2">
-                        {note.category && (
-                          <Badge 
-                            variant="secondary" 
-                            className={`text-xs ${categoryColors[note.category as keyof typeof categoryColors] || categoryColors.other}`}
-                          >
-                            {note.category}
-                          </Badge>
-                        )}
-                        
-                        {note.location && (
-                          <Badge variant="outline" className="text-xs flex items-center">
-                            <MapPin className="h-3 w-3 mr-1" />
-                            {note.location.replace('_', ' ')}
-                          </Badge>
-                        )}
-                        
-                        <Badge 
-                          variant="outline" 
-                          className={`text-xs ${config.color}`}
-                        >
-                          {Math.round(note.confidence_score * 100)}% confidence
-                        </Badge>
+      {/* Header with Annotate Button - Outside Accordion */}
+      <div className="flex items-center justify-between pb-2">
+        <div className="flex items-center">
+          <MessageSquare className="h-4 w-4 mr-2" />
+          <h4 className="font-medium text-sm">
+            Bid Notes ({notes.length})
+          </h4>
+        </div>
+        {hasPlans && onAnnotatePlans && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAnnotatePlans}
+            className="h-8 text-orange-600 border-orange-600 hover:bg-orange-50"
+          >
+            <Edit className="h-3 w-3 mr-1" />
+            Annotate Plans
+          </Button>
+        )}
+      </div>
+
+      {/* Parent Accordion for Categorized Notes */}
+      <Accordion type="single" collapsible className="w-full" defaultValue="categorized-notes">
+        <AccordionItem value="categorized-notes" className="border-none">
+          <AccordionTrigger className="hover:no-underline py-2 text-sm text-gray-600">
+            <span>View Notes by Category</span>
+          </AccordionTrigger>
+          <AccordionContent>
+            {/* Nested Accordion for Note Types */}
+            <Accordion type="multiple" className="w-full">
+              {Object.entries(notesByType).map(([type, typeNotes]) => {
+                const config = noteTypeConfig[type as keyof typeof noteTypeConfig]
+                const Icon = config.icon
+                
+                return (
+                  <AccordionItem key={type} value={type}>
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center space-x-2">
+                        <Icon className="h-4 w-4" />
+                        <span className="text-sm font-medium text-gray-700">
+                          {config.label} ({typeNotes.length})
+                        </span>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )
-      })}
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="space-y-2 pt-2">
+                        {typeNotes.map((note) => (
+                          <Card key={note.id} className="border-l-4 border-l-gray-200">
+                            <CardContent className="p-3">
+                              <div className="space-y-2">
+                                <p className="text-sm text-gray-800">{note.content}</p>
+                                
+                                <div className="flex flex-wrap gap-2">
+                                  {note.category && (
+                                    <Badge 
+                                      variant="secondary" 
+                                      className={`text-xs ${categoryColors[note.category as keyof typeof categoryColors] || categoryColors.other}`}
+                                    >
+                                      {note.category}
+                                    </Badge>
+                                  )}
+                                  
+                                  {note.location && (
+                                    <Badge variant="outline" className="text-xs flex items-center">
+                                      <MapPin className="h-3 w-3 mr-1" />
+                                      {note.location.replace('_', ' ')}
+                                    </Badge>
+                                  )}
+                                  
+                                  <Badge 
+                                    variant="outline" 
+                                    className={`text-xs ${config.color}`}
+                                  >
+                                    {Math.round(note.confidence_score * 100)}% confidence
+                                  </Badge>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              })}
+            </Accordion>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </div>
   )
 }

@@ -133,11 +133,12 @@ export default function PlanAnnotatorModal({
   const [pageHeights, setPageHeights] = useState<number[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [currentPageRange, setCurrentPageRange] = useState({ start: 1, end: 5 })
+  const [currentPageRange, setCurrentPageRange] = useState({ start: 1, end: 25 })
   const pdfContainerRef = useRef<HTMLDivElement>(null)
   const pageRefs = useRef<(HTMLDivElement | null)[]>([])
+  const flexContainerRef = useRef<HTMLDivElement>(null)
   
-  const PAGES_PER_LOAD = 5 // Load 5 pages at a time
+  const PAGES_PER_LOAD = 25 // Load 25 pages at a time
   
   // Custom note creation state
   const [isCreatingNote, setIsCreatingNote] = useState(false)
@@ -203,8 +204,8 @@ export default function PlanAnnotatorModal({
     setIsLoading(false)
     setLoadError(null)
     
-    // For large PDFs, only load first 5 pages initially
-    if (numPages > 10) {
+    // For large PDFs (>50 pages), load in batches for better performance
+    if (numPages > 50) {
       console.warn(`Large PDF detected: ${numPages} pages. Loading in batches of ${PAGES_PER_LOAD} for better performance.`)
       setCurrentPageRange({ start: 1, end: Math.min(PAGES_PER_LOAD, numPages) })
     } else {
@@ -435,303 +436,130 @@ export default function PlanAnnotatorModal({
     try {
       // Show loading state
       const loadingAlert = document.createElement('div')
-      loadingAlert.textContent = 'Generating annotated PDF... This may take a moment.'
-      loadingAlert.style.cssText = 'position:fixed;top:20px;right:20px;background:#3b82f6;color:white;padding:12px 20px;border-radius:8px;z-index:10000;'
+      loadingAlert.textContent = 'Generating annotated PDF... This may take a moment for large files.'
+      loadingAlert.style.cssText = 'position:fixed;top:20px;right:20px;background:#3b82f6;color:white;padding:12px 20px;border-radius:8px;z-index:10000;box-shadow:0 4px 6px rgba(0,0,0,0.1);'
       document.body.appendChild(loadingAlert)
 
-      // Dynamic import of pdf-lib
-      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
-      
-      // Fetch the original PDF
-      const existingPdfBytes = await fetch(planFile).then(res => res.arrayBuffer())
-      
-      // Load the PDF
-      const pdfDoc = await PDFDocument.load(existingPdfBytes)
-      const pages = pdfDoc.getPages()
-      
-      // Embed font
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+      // Dynamic imports
+      const html2canvas = (await import('html2canvas')).default
+      const { jsPDF } = await import('jspdf')
       
       // Get unique page numbers that have notes
-      const pagesWithNotes = Array.from(new Set(placedNotes.map(note => note.pageNumber || 1)))
+      const pagesWithNotes = Array.from(new Set(placedNotes.map(note => note.pageNumber || 1))).sort((a, b) => a - b)
       
-      // Process only pages with notes
-      let totalNotesDrawn = 0
-      for (const pageNum of pagesWithNotes) {
-        const pageIndex = pageNum - 1
-        if (pageIndex < 0 || pageIndex >= pages.length) continue
-        
-        const page = pages[pageIndex]
-        const { width: pageWidth, height: pageHeight } = page.getSize()
-        
-        // Get notes for this page
-        const pageNotes = placedNotes.filter(note => (note.pageNumber || 1) === pageNum)
-        
-        // Pre-calculate the maximum height needed for all notes on this page
-        let maxHeightNeeded = pageHeight
-        
-        for (const note of pageNotes) {
-          const pinY = pageHeight - (note.y / 100) * pageHeight
-          
-          // Calculate comment height
-          const words = note.content.split(' ')
-          let estimatedLines = 0
-          let currentLine = ''
-          for (const word of words) {
-            const testLine = currentLine + word + ' '
-            const textWidth = font.widthOfTextAtSize(testLine, 8)
-            if (textWidth > 264) { // commentWidth - 16
-              estimatedLines++
-              currentLine = word + ' '
-            } else {
-              currentLine = testLine
-            }
-          }
-          if (currentLine.length > 0) estimatedLines++
-          
-          let totalHeight = 35
-          if (note.category) totalHeight += 12
-          if (note.location) totalHeight += 12
-          totalHeight += 5
-          totalHeight += (estimatedLines * 12) + 10
-          totalHeight += 15
-          const commentHeight = Math.max(100, totalHeight)
-          
-          // Calculate where the comment box would be positioned
-          let commentY = pinY - (commentHeight / 2)
-          if (commentY < 10) commentY = 10
-          
-          const commentTop = commentY + commentHeight
-          
-          // Track the highest point any comment reaches
-          if (commentTop > maxHeightNeeded) {
-            maxHeightNeeded = commentTop
-          }
-        }
-        
-        // Add generous padding (100px at top to ensure boxes don't get cut off)
-        maxHeightNeeded += 100
-        
-        // Expand the page to include margin and ensure all comments fit
-        const marginWidth = 350
-        page.setSize(pageWidth + marginWidth, maxHeightNeeded)
-        
-        // Draw each note
-        for (const note of pageNotes) {
-          try {
-            totalNotesDrawn++
-            const config = NOTE_TYPE_CONFIG[note.note_type]
-          
-          // Convert percentage position to PDF coordinates (PDF origin is bottom-left)
-          // IMPORTANT: Use pageHeight (original) for the Y percentage calculation, not maxHeightNeeded
-          const pinX = (note.x / 100) * pageWidth
-          const pinY = pageHeight - (note.y / 100) * pageHeight
-          
-          // Draw pin (small circle)
-          const pinRadius = 6
-          page.drawCircle({
-            x: pinX,
-            y: pinY,
-            size: pinRadius,
-            color: getColorFromConfig(config.color, rgb),
-            borderColor: rgb(1, 1, 1),
-            borderWidth: 2,
-          })
-          
-          // Draw connection line to margin
-          const marginX = pageWidth + 20
-          page.drawLine({
-            start: { x: pinX, y: pinY },
-            end: { x: marginX, y: pinY },
-            thickness: 1,
-            color: getColorFromConfig(config.color, rgb),
-            opacity: 0.5,
-            dashArray: [6, 3],
-          })
-          
-          // Calculate comment box dimensions
-          const words = note.content.split(' ')
-          const commentWidth = 280
-          const fontSize = 8
-          const lineHeight = 12
-          
-          // Estimate number of lines needed for content
-          let estimatedLines = 0
-          let currentLine = ''
-          for (const word of words) {
-            const testLine = currentLine + word + ' '
-            const textWidth = font.widthOfTextAtSize(testLine, fontSize)
-            if (textWidth > commentWidth - 16) {
-              estimatedLines++
-              currentLine = word + ' '
-            } else {
-              currentLine = testLine
-            }
-          }
-          if (currentLine.length > 0) estimatedLines++
-          
-          // Calculate total height needed
-          let totalHeight = 35 // Header (type + bidder)
-          if (note.category) totalHeight += 12
-          if (note.location) totalHeight += 12
-          totalHeight += 5 // Spacing before content
-          totalHeight += (estimatedLines * lineHeight) + 10 // Content
-          totalHeight += 15 // Bottom padding for confidence score
-          
-          const commentHeight = Math.max(100, totalHeight)
-          const commentX = marginX + 10
-          
-          // Center comment box on pin (page has been expanded to fit)
-          let commentY = pinY - (commentHeight / 2)
-          // Ensure it doesn't go below the bottom
-          if (commentY < 10) commentY = 10
-          
-          // Draw comment background
-          page.drawRectangle({
-            x: commentX,
-            y: commentY,
-            width: commentWidth,
-            height: commentHeight,
-            color: rgb(1, 1, 1),
-            borderColor: getColorFromConfig(config.color, rgb),
-            borderWidth: 3,
-          })
-          
-          // Draw note type header
-          page.drawText(note.note_type.toUpperCase(), {
-            x: commentX + 8,
-            y: commentY + commentHeight - 15,
-            size: 9,
-            font: boldFont,
-            color: getColorFromConfig(config.color, rgb),
-          })
-          
-          // Draw bidder name
-          page.drawText(note.bidderName, {
-            x: commentX + 8,
-            y: commentY + commentHeight - 28,
-            size: 8,
-            font: font,
-            color: rgb(0.3, 0.3, 0.3),
-          })
-          
-          // Draw category and location if available
-          let currentY = commentY + commentHeight - 40
-          if (note.category) {
-            page.drawText(`Category: ${note.category}`, {
-              x: commentX + 8,
-              y: currentY,
-              size: 7,
-              font: font,
-              color: rgb(0.4, 0.4, 0.4),
-            })
-            currentY -= 12
-          }
-          if (note.location) {
-            page.drawText(`Location: ${note.location}`, {
-              x: commentX + 8,
-              y: currentY,
-              size: 7,
-              font: font,
-              color: rgb(0.4, 0.4, 0.4),
-            })
-            currentY -= 12
-          }
-          
-          // Draw full note content with word wrap (no truncation)
-          currentY -= 5 // Add spacing before content
-          let line = ''
-          
-          for (const word of words) {
-            const testLine = line + word + ' '
-            const textWidth = font.widthOfTextAtSize(testLine, fontSize)
-            
-            if (textWidth > commentWidth - 16 && line.length > 0) {
-              // Draw the current line
-              page.drawText(line.trim(), {
-                x: commentX + 8,
-                y: currentY,
-                size: fontSize,
-                font: font,
-                color: rgb(0, 0, 0),
-              })
-              line = word + ' '
-              currentY -= lineHeight
-              
-              // Stop if we're about to go below the bottom padding
-              if (currentY < commentY + 20) break
-            } else {
-              line = testLine
-            }
-          }
-          
-          // Draw remaining text
-          if (line.trim().length > 0 && currentY >= commentY + 20) {
-            page.drawText(line.trim(), {
-              x: commentX + 8,
-              y: currentY,
-              size: fontSize,
-              font: font,
-              color: rgb(0, 0, 0),
-            })
-          }
-          
-          // Draw confidence score
-          page.drawText(`${Math.round(note.confidence_score * 100)}%`, {
-            x: commentX + commentWidth - 30,
-            y: commentY + 5,
-            size: 7,
-            font: font,
-            color: rgb(0.5, 0.5, 0.5),
-          })
-          
-          } catch (noteError) {
-            console.error(`Error drawing note ${totalNotesDrawn}:`, noteError)
-            // Continue with other notes even if one fails
-          }
-        }
+      // Create new PDF document (start with reasonable defaults)
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+      })
+      
+      let firstPage = true
+      
+      // Check if we have the flex container ref
+      if (!flexContainerRef.current) {
+        throw new Error('Could not find the page container. Please try again.')
       }
       
-      // Save the PDF
-      const pdfBytes = await pdfDoc.save()
+      for (const pageNum of pagesWithNotes) {
+        // Get the page container
+        const pageRef = pageRefs.current[pageNum - 1]
+        if (!pageRef) {
+          console.warn(`Could not find page ${pageNum} to capture`)
+          continue
+        }
+        
+        // Update loading message
+        loadingAlert.textContent = `Capturing page ${pageNum}... (${pagesWithNotes.indexOf(pageNum) + 1}/${pagesWithNotes.length})`
+        
+        // Temporarily scroll to this page to ensure it's fully rendered
+        pageRef.scrollIntoView({ behavior: 'instant', block: 'center' })
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // Get the position and dimensions of the page relative to the flex container
+        const flexRect = flexContainerRef.current.getBoundingClientRect()
+        const pageRect = pageRef.getBoundingClientRect()
+        
+        // Calculate the region to capture (page + margin area)
+        const marginWidth = 320 // Width of margin area with comment cards
+        const captureWidth = pageRect.width + marginWidth + 50 // Extra padding
+        const captureHeight = pageRect.height + 20 // Small padding
+        const captureX = pageRect.left - flexRect.left
+        const captureY = pageRect.top - flexRect.top
+        
+        // Capture the specific region that includes the page and its margin
+        const canvas = await html2canvas(flexContainerRef.current, {
+          scale: 3, // Higher resolution for better quality and style fidelity
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#f3f4f6',
+          allowTaint: true,
+          foreignObjectRendering: false, // Better CSS compatibility
+          imageTimeout: 0,
+          removeContainer: true,
+          x: captureX,
+          y: captureY,
+          width: captureWidth,
+          height: captureHeight,
+          windowWidth: flexContainerRef.current.scrollWidth,
+          windowHeight: flexContainerRef.current.scrollHeight,
+          onclone: (clonedDoc) => {
+            // Ensure all styles are properly applied in the cloned document
+            const clonedContainer = clonedDoc.querySelector('[data-html2canvas-ignore]')
+            if (clonedContainer) {
+              clonedContainer.removeAttribute('data-html2canvas-ignore')
+            }
+          }
+        })
+        
+        const imgData = canvas.toDataURL('image/png') // Use PNG for better quality with no compression artifacts
+        const imgWidth = canvas.width
+        const imgHeight = canvas.height
+        
+        // Calculate PDF page dimensions to fit the captured content
+        const pdfWidth = 1200 // Fixed width for consistency
+        const pdfHeight = (imgHeight * pdfWidth) / imgWidth
+        
+        // Add new page with correct dimensions
+        if (!firstPage) {
+          pdf.addPage([pdfWidth, pdfHeight])
+        } else {
+          firstPage = false
+        }
+        
+        // For the first page, we need to delete it and recreate with correct size
+        if (pagesWithNotes.indexOf(pageNum) === 0) {
+          pdf.deletePage(1)
+          pdf.addPage([pdfWidth, pdfHeight])
+        }
+        
+        // Add image to PDF
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'SLOW')
+        
+        loadingAlert.textContent = `Processing page ${pageNum}... (${pagesWithNotes.indexOf(pageNum) + 1}/${pagesWithNotes.length})`
+      }
+      
+      loadingAlert.textContent = 'Finalizing PDF...'
+      
+      // Download the PDF
+      pdf.save(`${planFileName.replace('.pdf', '')}-annotated.pdf`)
       
       // Remove loading alert
       document.body.removeChild(loadingAlert)
       
-      // Create blob and download
-      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${planFileName.replace('.pdf', '')}-annotated.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-      
-      alert(`Successfully downloaded PDF with ${totalNotesDrawn} annotations!`)
+      alert(`Successfully downloaded annotated PDF with ${placedNotes.length} notes across ${pagesWithNotes.length} page(s)!`)
     } catch (error) {
       console.error('Error generating PDF:', error)
       // Remove loading alert if it exists
-      const loadingAlert = document.querySelector('div[style*="Generating annotated PDF"]')
-      if (loadingAlert) document.body.removeChild(loadingAlert)
+      const loadingAlerts = document.querySelectorAll('div[style*="Generating"], div[style*="Capturing"], div[style*="Processing"], div[style*="Finalizing"]')
+      loadingAlerts.forEach(alert => {
+        try {
+          document.body.removeChild(alert)
+        } catch (e) {
+          // Ignore if already removed
+        }
+      })
       alert(`Failed to generate annotated PDF: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
-  }
-  
-  // Helper function to convert Tailwind color classes to RGB
-  function getColorFromConfig(colorClass: string, rgbFn: (r: number, g: number, b: number) => any) {
-    const colorMap: Record<string, [number, number, number]> = {
-      'bg-blue-500': [0.23, 0.51, 0.96],
-      'bg-red-500': [0.94, 0.27, 0.27],
-      'bg-green-500': [0.13, 0.77, 0.37],
-      'bg-yellow-500': [0.92, 0.70, 0.03],
-      'bg-purple-500': [0.66, 0.33, 0.97],
-      'bg-gray-500': [0.42, 0.45, 0.50],
-    }
-    const color = colorMap[colorClass] || [0.5, 0.5, 0.5]
-    return rgbFn(color[0], color[1], color[2])
   }
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3))
@@ -761,60 +589,69 @@ export default function PlanAnnotatorModal({
       <DialogContent className="max-w-[100vw] max-h-[100vh] h-[100vh] w-[100vw] p-0 overflow-hidden">
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b bg-white flex-shrink-0">
-            <DialogHeader>
-              <DialogTitle className="flex items-center space-x-2">
-                <FileText className="h-5 w-5" />
-                <span>{planFileName}</span>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 p-2 sm:p-4 border-b bg-white flex-shrink-0">
+            <DialogHeader className="flex-shrink min-w-0">
+              <DialogTitle className="flex items-center space-x-2 text-sm sm:text-base">
+                <FileText className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+                <span className="truncate">{planFileName}</span>
               </DialogTitle>
             </DialogHeader>
-            <div className="flex items-center space-x-2 flex-shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleZoomOut}
-                disabled={zoom <= 0.5}
-              >
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-              <span className="text-sm font-medium min-w-[60px] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleZoomIn}
-                disabled={zoom >= 3}
-              >
-                <ZoomIn className="h-4 w-4" />
-              </Button>
+            <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 overflow-x-auto">
+              {/* Zoom controls */}
+              <div className="flex items-center gap-1 sm:gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleZoomOut}
+                  disabled={zoom <= 0.5}
+                  className="h-8 w-8 p-0 sm:h-9 sm:w-9"
+                >
+                  <ZoomOut className="h-3 w-3 sm:h-4 sm:w-4" />
+                </Button>
+                <span className="text-xs sm:text-sm font-medium min-w-[50px] sm:min-w-[60px] text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleZoomIn}
+                  disabled={zoom >= 3}
+                  className="h-8 w-8 p-0 sm:h-9 sm:w-9"
+                >
+                  <ZoomIn className="h-3 w-3 sm:h-4 sm:w-4" />
+                </Button>
+              </div>
+              {/* Download button - hide text on mobile */}
               <Button
                 onClick={handleDownloadAnnotatedPlan}
                 disabled={placedNotes.length === 0}
                 size="sm"
+                className="h-8 sm:h-9"
               >
-                <Download className="h-4 w-4 mr-2" />
-                Download Annotated Plan
+                <Download className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Download</span>
               </Button>
+              {/* Close button */}
               <Button 
                 variant="ghost" 
                 size="sm"
                 onClick={() => onOpenChange(false)}
+                className="h-8 w-8 p-0 sm:h-9 sm:w-9"
               >
-                <XIcon className="h-4 w-4" />
+                <XIcon className="h-3 w-3 sm:h-4 sm:w-4" />
               </Button>
             </div>
           </div>
 
           {/* Main Content */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
+          <div className="flex flex-col lg:flex-row flex-1 overflow-hidden min-h-0">
             {/* PDF Viewer with Margin Area */}
               <div 
                 ref={pdfContainerRef}
-              className="flex-1 overflow-auto bg-gray-100 p-4"
+              className="flex-1 overflow-auto bg-gray-100 p-2 sm:p-4"
               style={{ maxHeight: 'calc(100vh - 120px)' }}
             >
-              <div className="flex" style={{ gap: '24px' }}>
+              <div ref={flexContainerRef} className="flex flex-col lg:flex-row" style={{ gap: '12px' }}>
                 {/* PDF Area - All Pages */}
                 <div className="flex-shrink-0 space-y-4">
                   <Document
@@ -989,8 +826,8 @@ export default function PlanAnnotatorModal({
                   </Document>
                 </div>
 
-                {/* Margin Area for Comment Cards - Spans all pages */}
-                <div className="flex-shrink-0 relative" style={{ width: '320px' }}>
+                {/* Margin Area for Comment Cards - Spans all pages - Hidden on mobile */}
+                <div className="hidden lg:block flex-shrink-0 relative" style={{ width: '320px' }}>
                   {pageHeights.length > 0 && placedNotes.map((note, index) => {
                     const config = NOTE_TYPE_CONFIG[note.note_type]
                     const Icon = config.icon
@@ -1073,30 +910,30 @@ export default function PlanAnnotatorModal({
               </div>
             </div>
 
-            {/* Notes Panel - Right Side */}
-            <div className="w-96 border-l bg-white overflow-y-auto flex-shrink-0" style={{ maxHeight: 'calc(100vh - 120px)' }}>
-              <div className="p-4 border-b bg-gray-50 sticky top-0 z-10">
+            {/* Notes Panel - Right Side on desktop, bottom on mobile */}
+            <div className="w-full lg:w-96 border-t lg:border-t-0 lg:border-l bg-white overflow-y-auto flex-shrink-0" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+              <div className="p-3 sm:p-4 border-b bg-gray-50 sticky top-0 z-10">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-semibold">Notes</h3>
+                  <h3 className="font-semibold text-sm sm:text-base">Notes</h3>
                   <Button
                     size="sm"
                     onClick={() => setIsCreatingNote(!isCreatingNote)}
-                    className="h-7"
+                    className="h-7 text-xs sm:text-sm"
                   >
                     <Plus className="h-3 w-3 mr-1" />
                     Add Note
                   </Button>
                 </div>
-                <p className="text-sm text-gray-600">
+                <p className="text-xs sm:text-sm text-gray-600">
                   Drag notes onto the plan to annotate ({placedNotes.length} placed)
                 </p>
               </div>
 
-              <div className="p-4 space-y-4">
+              <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
                 {/* Custom Note Creation Form */}
                 {isCreatingNote && (
                   <Card className="border-2 border-orange-500">
-                    <CardContent className="p-4 space-y-3">
+                    <CardContent className="p-3 sm:p-4 space-y-2 sm:space-y-3">
                       <div className="flex items-center justify-between mb-2">
                         <h4 className="font-medium text-sm flex items-center">
                           <Pencil className="h-4 w-4 mr-2 text-orange-500" />
@@ -1197,8 +1034,8 @@ export default function PlanAnnotatorModal({
                 {customNotes.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <h4 className="font-medium text-sm flex items-center">
-                        <Pencil className="h-4 w-4 mr-2 text-orange-500" />
+                      <h4 className="font-medium text-xs sm:text-sm flex items-center">
+                        <Pencil className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 text-orange-500" />
                         Your Notes
                       </h4>
                       <Badge variant="outline" className="text-xs">
@@ -1217,7 +1054,7 @@ export default function PlanAnnotatorModal({
                             key={note.id}
                             draggable={!isPlaced}
                             onDragStart={(e) => !isPlaced && handleDragStart(e, 'custom', note)}
-                            className={`p-3 rounded-lg border-2 transition-all ${
+                            className={`p-2 sm:p-3 rounded-lg border-2 transition-all ${
                               isPlaced 
                                 ? 'bg-gray-50 border-gray-200 opacity-50' 
                                 : `cursor-move hover:shadow-md ${config.borderColor} ${config.bgColor}`
@@ -1249,7 +1086,7 @@ export default function PlanAnnotatorModal({
                                     </Badge>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-700">{note.content}</p>
+                                <p className="text-xs sm:text-sm text-gray-700">{note.content}</p>
                                 {isPlaced && (
                                   <div className="flex items-center mt-2">
                                     <CheckCircle className="h-3 w-3 text-green-500 mr-1" />
@@ -1276,10 +1113,10 @@ export default function PlanAnnotatorModal({
                   return (
                     <div key={bid.id} className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-medium text-sm">
+                        <h4 className="font-medium text-xs sm:text-sm truncate max-w-[200px]">
                           {bid.subcontractor_name || bid.subcontractor_email}
                         </h4>
-                        <Badge variant="outline" className="text-xs">
+                        <Badge variant="outline" className="text-xs flex-shrink-0">
                           {unplacedNotes.length}/{notes.length} remaining
                         </Badge>
                       </div>
@@ -1295,7 +1132,7 @@ export default function PlanAnnotatorModal({
                               key={note.id}
                               draggable={!isPlaced}
                               onDragStart={(e) => !isPlaced && handleDragStart(e, bid.id, note)}
-                              className={`p-3 rounded-lg border-2 transition-all ${
+                              className={`p-2 sm:p-3 rounded-lg border-2 transition-all ${
                                 isPlaced 
                                   ? 'bg-gray-50 border-gray-200 opacity-50' 
                                   : `cursor-move hover:shadow-md ${config.borderColor} ${config.bgColor}`
@@ -1327,7 +1164,7 @@ export default function PlanAnnotatorModal({
                                       </Badge>
                                     )}
                                   </div>
-                                  <p className="text-sm text-gray-700">{note.content}</p>
+                                  <p className="text-xs sm:text-sm text-gray-700">{note.content}</p>
                                   <p className="text-xs text-gray-500 mt-1">
                                     Confidence: {Math.round(note.confidence_score * 100)}%
                                   </p>
@@ -1348,9 +1185,9 @@ export default function PlanAnnotatorModal({
                 })}
 
                 {allNotes.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                    <p className="text-sm">No bidder notes available</p>
+                  <div className="text-center py-8 sm:py-12 text-gray-500">
+                    <FileText className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-3 text-gray-400" />
+                    <p className="text-xs sm:text-sm">No bidder notes available</p>
                   </div>
                 )}
               </div>
@@ -1358,18 +1195,18 @@ export default function PlanAnnotatorModal({
           </div>
 
           {/* Footer Stats */}
-          <div className="border-t bg-gray-50 px-4 py-3 flex-shrink-0">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center space-x-4">
+          <div className="border-t bg-gray-50 px-3 sm:px-4 py-2 sm:py-3 flex-shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs sm:text-sm">
+              <div className="flex items-center gap-2 sm:gap-4">
                 <span className="text-gray-600">
-                  <strong>{placedNotes.length}</strong> notes placed
+                  <strong>{placedNotes.length}</strong> placed
                 </span>
                 <span className="text-gray-600">
-                  <strong>{allNotes.length - placedNotes.length}</strong> notes remaining
+                  <strong>{allNotes.length - placedNotes.length}</strong> remaining
                 </span>
               </div>
-              <div className="text-gray-500 text-xs">
-                Drag notes onto the plan to annotate • Hover over placed notes to see details
+              <div className="text-gray-500 text-xs hidden sm:block">
+                Drag notes onto the plan to annotate
               </div>
             </div>
           </div>

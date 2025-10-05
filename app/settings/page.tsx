@@ -13,6 +13,7 @@ import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import DocumentTemplatesManager from '@/components/document-templates-manager'
 
 interface UserSettings {
   first_name: string
@@ -242,28 +243,30 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="first_name">First Name</Label>
+                  <Label htmlFor="first_name" className="text-sm sm:text-base">First Name</Label>
                   <Input
                     id="first_name"
                     value={settings.first_name}
                     onChange={(e) => handleInputChange('first_name', e.target.value)}
                     placeholder="Enter your first name"
+                    className="text-sm sm:text-base"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="last_name">Last Name</Label>
+                  <Label htmlFor="last_name" className="text-sm sm:text-base">Last Name</Label>
                   <Input
                     id="last_name"
                     value={settings.last_name}
                     onChange={(e) => handleInputChange('last_name', e.target.value)}
                     placeholder="Enter your last name"
+                    className="text-sm sm:text-base"
                   />
                 </div>
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="phone" className="flex items-center">
-                  <Phone className="h-4 w-4 mr-1" />
+                <Label htmlFor="phone" className="flex items-center text-sm sm:text-base">
+                  <Phone className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                   Phone Number
                 </Label>
                 <Input
@@ -272,6 +275,7 @@ export default function SettingsPage() {
                   value={settings.phone}
                   onChange={(e) => handleInputChange('phone', e.target.value)}
                   placeholder="Enter your phone number"
+                  className="text-sm sm:text-base"
                 />
               </div>
             </CardContent>
@@ -289,39 +293,42 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="email_notifications">Email Notifications</Label>
-                  <p className="text-sm text-gray-500">Receive notifications about job requests and bids</p>
+              <div className="flex items-start sm:items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <Label htmlFor="email_notifications" className="text-sm sm:text-base cursor-pointer">Email Notifications</Label>
+                  <p className="text-xs sm:text-sm text-gray-500">Receive notifications about job requests and bids</p>
                 </div>
                 <Switch
                   id="email_notifications"
                   checked={settings.email_notifications}
                   onCheckedChange={(checked) => handleInputChange('email_notifications', checked)}
+                  className="flex-shrink-0"
                 />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="bid_notifications">Bid Notifications</Label>
-                  <p className="text-sm text-gray-500">Get notified when you receive new bids</p>
+              <div className="flex items-start sm:items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <Label htmlFor="bid_notifications" className="text-sm sm:text-base cursor-pointer">Bid Notifications</Label>
+                  <p className="text-xs sm:text-sm text-gray-500">Get notified when you receive new bids</p>
                 </div>
                 <Switch
                   id="bid_notifications"
                   checked={settings.bid_notifications}
                   onCheckedChange={(checked) => handleInputChange('bid_notifications', checked)}
+                  className="flex-shrink-0"
                 />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="marketing_emails">Marketing Emails</Label>
-                  <p className="text-sm text-gray-500">Receive updates about new features and tips</p>
+              <div className="flex items-start sm:items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <Label htmlFor="marketing_emails" className="text-sm sm:text-base cursor-pointer">Marketing Emails</Label>
+                  <p className="text-xs sm:text-sm text-gray-500">Receive updates about new features and tips</p>
                 </div>
                 <Switch
                   id="marketing_emails"
                   checked={settings.marketing_emails}
                   onCheckedChange={(checked) => handleInputChange('marketing_emails', checked)}
+                  className="flex-shrink-0"
                 />
               </div>
             </CardContent>
@@ -399,6 +406,9 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Document Templates */}
+          <DocumentTemplatesManager />
 
           {/* Save Button */}
           <div className="flex justify-end">

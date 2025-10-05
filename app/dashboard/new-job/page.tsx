@@ -220,7 +220,7 @@ export default function NewJobPage() {
           budget_range: formData.budget_range,
           files: fileUrls.length > 0 ? fileUrls : null,
           plan_files: planFileUrls.length > 0 ? planFileUrls : null,
-          status: 'collecting_bids',
+          status: 'active',
           bid_collection_started_at: new Date().toISOString(),
           bid_collection_ends_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
           payment_type: paymentType,
@@ -399,10 +399,10 @@ export default function NewJobPage() {
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Payment Type Selection */}
               {userSubscriptionStatus !== 'active' && (
-                <div className="space-y-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                  <Label className="text-base font-semibold">Choose Payment Method</Label>
+                <div className="space-y-3 p-3 sm:p-4 bg-orange-50 rounded-lg border border-orange-200">
+                  <Label className="text-sm sm:text-base font-semibold">Choose Payment Method</Label>
                   <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-start space-x-2">
                       <input
                         type="radio"
                         id="subscription"
@@ -410,13 +410,13 @@ export default function NewJobPage() {
                         value="subscription"
                         checked={paymentType === 'subscription'}
                         onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
-                        className="text-orange-600"
+                        className="text-orange-600 mt-0.5 flex-shrink-0"
                       />
-                      <Label htmlFor="subscription" className="font-medium">
+                      <Label htmlFor="subscription" className="font-medium text-sm sm:text-base cursor-pointer">
                         Monthly Subscription ($100/month) - Unlimited jobs
                       </Label>
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-start space-x-2">
                       <input
                         type="radio"
                         id="credits"
@@ -424,28 +424,28 @@ export default function NewJobPage() {
                         value="credits"
                         checked={paymentType === 'credits'}
                         onChange={(e) => setPaymentType(e.target.value as 'subscription' | 'credits')}
-                        className="text-orange-600"
+                        className="text-orange-600 mt-0.5 flex-shrink-0"
                       />
-                      <Label htmlFor="credits" className="font-medium">
+                      <Label htmlFor="credits" className="font-medium text-sm sm:text-base cursor-pointer">
                         Credits ($20 per credit) - Beta pricing
                       </Label>
                     </div>
                   </div>
                   {paymentType === 'subscription' && (
-                    <p className="text-sm text-orange-700">
+                    <p className="text-xs sm:text-sm text-orange-700">
                       You'll be redirected to subscribe before posting this job.
                     </p>
                   )}
                   {paymentType === 'credits' && (
-                    <div className="text-sm text-orange-700">
+                    <div className="text-xs sm:text-sm text-orange-700">
                       <p>You have {userCredits} credit{userCredits !== 1 ? 's' : ''} available.</p>
                       {userCredits < 1 && (
-                        <div className="flex items-center gap-3 mt-2">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 mt-2">
                           <p className="text-orange-600 font-medium">You need to purchase credits first.</p>
                           <Button 
                             size="sm" 
                             onClick={() => setShowCreditsModal(true)}
-                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                            className="bg-orange-600 hover:bg-orange-700 text-white w-full sm:w-auto"
                           >
                             Purchase Credits
                           </Button>
@@ -630,10 +630,10 @@ export default function NewJobPage() {
               </div>
 
                             {/* Recipient Selection */}
-                            <div className="space-y-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                <Label className="text-base font-semibold">Send Bid Request To *</Label>
+                            <div className="space-y-3 p-3 sm:p-4 bg-orange-50 rounded-lg border border-orange-200">
+                <Label className="text-sm sm:text-base font-semibold">Send Bid Request To *</Label>
                 <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-start space-x-2">
                     <input
                       type="radio"
                       id="recipient-both"
@@ -641,14 +641,14 @@ export default function NewJobPage() {
                       value="both"
                       checked={recipientType === 'both'}
                       onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
-                      className="text-black"
+                      className="text-black mt-0.5 flex-shrink-0"
                     />
-                    <Label htmlFor="recipient-both" className="font-medium flex items-center">
-                      <Users className="h-4 w-4 mr-1" />
-                      All My Contacts & Bidi Network (Recommended)
+                    <Label htmlFor="recipient-both" className="font-medium text-sm sm:text-base flex items-center flex-wrap cursor-pointer">
+                      <Users className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>All My Contacts & Bidi Network (Recommended)</span>
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-start space-x-2">
                     <input
                       type="radio"
                       id="recipient-contacts"
@@ -656,14 +656,14 @@ export default function NewJobPage() {
                       value="contacts_only"
                       checked={recipientType === 'contacts_only'}
                       onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
-                      className="text-black"
+                      className="text-black mt-0.5 flex-shrink-0"
                     />
-                    <Label htmlFor="recipient-contacts" className="font-medium flex items-center">
-                      <Users className="h-4 w-4 mr-1" />
-                      All My Contacts Only
+                    <Label htmlFor="recipient-contacts" className="font-medium text-sm sm:text-base flex items-center flex-wrap cursor-pointer">
+                      <Users className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>All My Contacts Only</span>
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-start space-x-2">
                     <input
                       type="radio"
                       id="recipient-network"
@@ -671,14 +671,14 @@ export default function NewJobPage() {
                       value="network_only"
                       checked={recipientType === 'network_only'}
                       onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
-                      className="text-black"
+                      className="text-black mt-0.5 flex-shrink-0"
                     />
-                    <Label htmlFor="recipient-network" className="font-medium flex items-center">
-                      <Network className="h-4 w-4 mr-1" />
-                      All Bidi Network Only
+                    <Label htmlFor="recipient-network" className="font-medium text-sm sm:text-base flex items-center flex-wrap cursor-pointer">
+                      <Network className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>All Bidi Network Only</span>
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-start space-x-2">
                     <input
                       type="radio"
                       id="recipient-selected"
@@ -686,15 +686,15 @@ export default function NewJobPage() {
                       value="selected"
                       checked={recipientType === 'selected'}
                       onChange={(e) => setRecipientType(e.target.value as 'contacts_only' | 'network_only' | 'both' | 'selected')}
-                      className="text-black"
+                      className="text-black mt-0.5 flex-shrink-0"
                     />
-                    <Label htmlFor="recipient-selected" className="font-medium flex items-center">
-                      <UserCheck className="h-4 w-4 mr-1" />
-                      Select Specific Subcontractors
+                    <Label htmlFor="recipient-selected" className="font-medium text-sm sm:text-base flex items-center flex-wrap cursor-pointer">
+                      <UserCheck className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span>Select Specific Subcontractors</span>
                     </Label>
                   </div>
                 </div>
-                <p className="text-sm text-orange-700">
+                <p className="text-xs sm:text-sm text-orange-700">
                   {recipientType === 'both' && 'Job request will be sent to all matching contacts in both your network and Bidi network.'}
                   {recipientType === 'contacts_only' && 'Job request will only be sent to all matching contacts in your personal network.'}
                   {recipientType === 'network_only' && 'Job request will only be sent to all matching subcontractors in the Bidi network.'}

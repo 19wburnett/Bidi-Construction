@@ -29,7 +29,7 @@ interface JobRequest {
   created_at: string
   bids_count?: number
   unseen_bids_count?: number
-  status?: 'active' | 'closed' | 'collecting_bids'
+  status?: 'active' | 'closed' | 'cancelled' | 'expired'
   bid_collection_started_at?: string
   bid_collection_ends_at?: string
 }
@@ -156,7 +156,7 @@ export default function DashboardPage() {
         .from('job_requests')
         .select('*')
         .eq('gc_id', user.id)
-        .or('status.is.null,status.in.(active,collecting_bids)')
+        .or('status.is.null,status.eq.active')
         .order('created_at', { ascending: false })
 
       if (jobsError) {
@@ -320,6 +320,13 @@ export default function DashboardPage() {
     }
   }, [user, supabase])
 
+  // Helper function to check if a job is actively collecting bids
+  const isCollectingBids = (job: JobRequest) => {
+    if (job.status !== 'active') return false
+    if (!job.bid_collection_ends_at) return false
+    return new Date(job.bid_collection_ends_at) > new Date()
+  }
+
   // Memoize expensive calculations
   const stats = useMemo(() => {
     const currentJobsCount = jobRequests.length
@@ -371,27 +378,27 @@ export default function DashboardPage() {
       {/* Navigation */}
       <nav className="bg-white border-b">
         <div className="container mx-auto px-4">
-          <div className="flex space-x-8 py-4">
+          <div className="flex space-x-2 sm:space-x-8 py-4 overflow-x-auto">
             <Link 
               href="/dashboard" 
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                 pathname === '/dashboard' 
                   ? 'bg-orange-100 text-orange-700' 
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               }`}
             >
-              <FileText className="h-4 w-4" />
+              <FileText className="h-4 w-4 flex-shrink-0" />
               <span>Jobs</span>
             </Link>
             <Link 
               href="/dashboard/contacts" 
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                 pathname === '/dashboard/contacts' 
                   ? 'bg-orange-100 text-orange-700' 
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
               }`}
             >
-              <UserCheck className="h-4 w-4" />
+              <UserCheck className="h-4 w-4 flex-shrink-0" />
               <span>My Contacts</span>
             </Link>
           </div>
@@ -586,7 +593,7 @@ export default function DashboardPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
-                            {job.status === 'collecting_bids' && (job.unseen_bids_count || 0) > 0 && (
+                            {job.status === 'active' && (job.unseen_bids_count || 0) > 0 && (
                               <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
                             )}
                           </div>
@@ -606,7 +613,7 @@ export default function DashboardPage() {
                             <Calendar className="h-3 w-3" />
                             {new Date(job.created_at).toLocaleDateString()}
                           </div>
-                          {job.status === 'collecting_bids' ? (
+                          {isCollectingBids(job) ? (
                             <div className="flex flex-col gap-1">
                               <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
                                 <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-600"></div>
@@ -647,7 +654,7 @@ export default function DashboardPage() {
                       >
                         <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
                           View Bids
-                          {job.status === 'collecting_bids' && (job.unseen_bids_count || 0) > 0 && (
+                          {job.status === 'active' && (job.unseen_bids_count || 0) > 0 && (
                             <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse flex items-center justify-center">
                               <span className="text-white text-xs font-bold">!</span>
                             </div>
@@ -659,7 +666,7 @@ export default function DashboardPage() {
                           Edit Job
                         </Button>
                       </Link>
-                      {job.status === 'collecting_bids' ? (
+                      {isCollectingBids(job) ? (
                         <Button 
                           variant="outline" 
                           size="sm" 

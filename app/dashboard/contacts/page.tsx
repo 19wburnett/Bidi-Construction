@@ -627,33 +627,33 @@ export default function ContactsPage() {
               <div className="space-y-4">
                 {filteredContacts.map((contact) => (
                   <div key={contact.id} className="border rounded-lg p-4 hover:bg-gray-50">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2 mb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
                           <h3 className="font-semibold text-lg">{contact.name}</h3>
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                             {contact.trade_category}
                           </span>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-600">
-                          <div className="flex items-center">
-                            <Mail className="h-4 w-4 mr-2" />
-                            {contact.email}
+                        <div className="grid grid-cols-1 gap-2 text-sm text-gray-600">
+                          <div className="flex items-center break-all">
+                            <Mail className="h-4 w-4 mr-2 flex-shrink-0" />
+                            <span className="break-all">{contact.email}</span>
                           </div>
                           {contact.phone && (
                             <div className="flex items-center">
-                              <Briefcase className="h-4 w-4 mr-2" />
+                              <Briefcase className="h-4 w-4 mr-2 flex-shrink-0" />
                               {contact.phone}
                             </div>
                           )}
                           {contact.company && (
                             <div className="flex items-center">
-                              <Building2 className="h-4 w-4 mr-2" />
+                              <Building2 className="h-4 w-4 mr-2 flex-shrink-0" />
                               {contact.company}
                             </div>
                           )}
                           <div className="flex items-center">
-                            <MapPin className="h-4 w-4 mr-2" />
+                            <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
                             {contact.location}
                           </div>
                         </div>
@@ -661,21 +661,24 @@ export default function ContactsPage() {
                           <p className="text-sm text-gray-600 mt-2">{contact.notes}</p>
                         )}
                       </div>
-                      <div className="flex items-center space-x-2 ml-4">
+                      <div className="flex sm:flex-col items-center gap-2 sm:ml-4">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleEdit(contact)}
+                          className="flex-1 sm:flex-none w-full sm:w-auto"
                         >
-                          <Edit className="h-4 w-4" />
+                          <Edit className="h-4 w-4 sm:mr-0" />
+                          <span className="ml-2 sm:hidden">Edit</span>
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleDelete(contact.id)}
-                          className="text-red-600 hover:text-red-700"
+                          className="text-red-600 hover:text-red-700 flex-1 sm:flex-none w-full sm:w-auto"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4 sm:mr-0" />
+                          <span className="ml-2 sm:hidden">Delete</span>
                         </Button>
                       </div>
                     </div>

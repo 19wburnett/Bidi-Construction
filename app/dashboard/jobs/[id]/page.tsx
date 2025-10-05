@@ -7,11 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download, Globe, Target, AlertTriangle, CheckCircle, TrendingUp, Users, Clock, Lightbulb, Package, AlertCircle } from 'lucide-react'
+import { Building2, ArrowLeft, FileText, User, Phone, DollarSign, Calendar, MessageSquare, Download, Globe, Target, AlertTriangle, CheckCircle, TrendingUp, Users, Clock, Lightbulb, Package, AlertCircle, Star } from 'lucide-react'
 import Link from 'next/link'
 import NotificationBell from '@/components/notification-bell'
 import SeenStatusIndicator from '@/components/seen-status-indicator'
 import BidNotesDisplay from '@/components/bid-notes-display'
+import BidLineItemsDisplay from '@/components/bid-line-items-display'
 import EmailDraftButton from '@/components/email-draft-button'
 import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
@@ -23,6 +24,18 @@ const PlansViewer = dynamic(() => import('@/components/plans-viewer'), {
   loading: () => <div className="flex items-center justify-center p-8">Loading plans viewer...</div>
 })
 
+// Dynamically import PlanAnnotatorModal with SSR disabled
+const PlanAnnotatorModal = dynamic(() => import('@/components/plan-annotator-modal'), {
+  ssr: false,
+  loading: () => <div>Loading...</div>
+})
+
+// Dynamically import AcceptBidModal
+const AcceptBidModal = dynamic(() => import('@/components/accept-bid-modal'), {
+  ssr: false,
+  loading: () => <div>Loading...</div>
+})
+
 interface JobRequest {
   id: string
   trade_category: string
@@ -32,6 +45,21 @@ interface JobRequest {
   files: string[] | null
   plan_files: string[] | null
   created_at: string
+  status?: string
+  accepted_bid_id?: string | null
+  closed_at?: string | null
+}
+
+interface BidLineItem {
+  id: string
+  item_number: number
+  description: string
+  category: string | null
+  quantity: number | null
+  unit: string | null
+  unit_price: number | null
+  amount: number
+  notes: string | null
 }
 
 interface Bid {
@@ -48,6 +76,13 @@ interface Bid {
   created_at: string
   seen: boolean
   bid_notes?: BidNote[]
+  bid_line_items?: BidLineItem[]
+  profile_picture_url?: string | null
+  google_rating?: number | null
+  google_review_count?: number | null
+  status?: string
+  accepted_at?: string | null
+  declined_at?: string | null
 }
 
 interface BidNote {
@@ -66,6 +101,10 @@ export default function JobDetailsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [annotatorOpen, setAnnotatorOpen] = useState(false)
+  const [selectedBidForAnnotation, setSelectedBidForAnnotation] = useState<string | null>(null)
+  const [acceptBidModalOpen, setAcceptBidModalOpen] = useState(false)
+  const [selectedBidForAcceptance, setSelectedBidForAcceptance] = useState<Bid | null>(null)
   const { user } = useAuth()
   const router = useRouter()
   const params = useParams()
@@ -180,6 +219,17 @@ export default function JobDetailsPage() {
             content,
             confidence_score,
             created_at
+          ),
+          bid_line_items (
+            id,
+            item_number,
+            description,
+            category,
+            quantity,
+            unit,
+            unit_price,
+            amount,
+            notes
           )
         `)
         .eq('job_request_id', params.id)
@@ -593,25 +643,74 @@ export default function JobDetailsPage() {
               {bids.map((bid) => (
                 <Card key={bid.id} className="border-l-4">
                   <CardHeader>
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-                      <div className="flex-1">
-                        <CardTitle className="text-lg">
-                          {bid.subcontractor_name || bid.subcontractor_email}
-                        </CardTitle>
-                        <CardDescription className="break-all">
-                          {bid.subcontractor_email}
-                        </CardDescription>
-                      </div>
-                      <div className="text-left sm:text-right">
-                        <div className="text-sm text-gray-500">
-                          {formatDate(bid.created_at)}
-                        </div>
-                        {bid.bid_amount && (
-                          <div className="text-lg font-bold text-green-600">
-                            {formatCurrency(bid.bid_amount)}
+                    <div className="flex flex-col gap-4">
+                      {/* Top Row: Profile + Name + Date/Amount */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start space-x-3 flex-1 min-w-0">
+                          {/* Profile Picture */}
+                          <div className="flex-shrink-0">
+                            {bid.profile_picture_url ? (
+                              <img 
+                                src={bid.profile_picture_url} 
+                                alt={bid.subcontractor_name || 'Contractor'} 
+                                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-gray-200"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-semibold text-lg sm:text-xl border-2 border-gray-200">
+                                {(bid.subcontractor_name || bid.subcontractor_email).charAt(0).toUpperCase()}
+                              </div>
+                            )}
                           </div>
-                        )}
+                          
+                          {/* Name and Email */}
+                          <div className="flex-1 min-w-0">
+                            <CardTitle className="text-base sm:text-lg break-words">
+                              {bid.subcontractor_name || bid.subcontractor_email}
+                            </CardTitle>
+                            <CardDescription className="break-all text-xs sm:text-sm">
+                              {bid.subcontractor_email}
+                            </CardDescription>
+                          </div>
+                        </div>
+                        
+                        {/* Bid Amount and Date */}
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">
+                            {new Date(bid.created_at).toLocaleDateString()}
+                          </div>
+                          {bid.bid_amount && (
+                            <div className="text-base sm:text-lg font-bold text-green-600 whitespace-nowrap">
+                              {formatCurrency(bid.bid_amount)}
+                            </div>
+                          )}
+                        </div>
                       </div>
+                      
+                      {/* Google Rating - Full Width on Mobile */}
+                      {bid.google_rating && (
+                        <div className="flex items-center space-x-1">
+                          <div className="flex items-center">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                className={`h-3 w-3 sm:h-4 sm:w-4 ${
+                                  star <= Math.round(bid.google_rating!)
+                                    ? 'fill-yellow-400 text-yellow-400'
+                                    : 'text-gray-300'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-xs sm:text-sm font-medium text-gray-700">
+                            {bid.google_rating.toFixed(1)}
+                          </span>
+                          {bid.google_review_count && (
+                            <span className="text-xs text-gray-500">
+                              ({bid.google_review_count} reviews)
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -671,7 +770,53 @@ export default function JobDetailsPage() {
                     {/* Categorized Notes Section */}
                     {bid.bid_notes && bid.bid_notes.length > 0 && (
                       <div className="mt-4 pt-4 border-t">
-                        <BidNotesDisplay notes={bid.bid_notes} bidId={bid.id} />
+                        <BidNotesDisplay 
+                          notes={bid.bid_notes} 
+                          bidId={bid.id}
+                          hasPlans={!!(jobRequest?.plan_files && jobRequest.plan_files.length > 0)}
+                          onAnnotatePlans={() => {
+                            setSelectedBidForAnnotation(bid.id)
+                            setAnnotatorOpen(true)
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Line Items Breakdown Section */}
+                    {bid.bid_line_items && bid.bid_line_items.length > 0 && (
+                      <div className="mt-4">
+                        <BidLineItemsDisplay 
+                          lineItems={bid.bid_line_items}
+                          totalAmount={bid.bid_amount}
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Accept Bid Button */}
+                    {jobRequest?.status === 'active' && bid.status !== 'accepted' && bid.status !== 'declined' && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Button 
+                          onClick={() => {
+                            setSelectedBidForAcceptance(bid)
+                            setAcceptBidModalOpen(true)
+                          }}
+                          className="w-full bg-green-600 hover:bg-green-700"
+                        >
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Accept This Bid
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* Status Badges */}
+                    {(bid.status === 'accepted' || bid.status === 'declined') && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Badge 
+                          variant={bid.status === 'accepted' ? 'default' : 'secondary'}
+                          className={bid.status === 'accepted' ? 'bg-green-600' : 'bg-gray-600'}
+                        >
+                          {bid.status === 'accepted' ? 'Accepted' : 'Declined'}
+                        </Badge>
                       </div>
                     )}
                     
@@ -692,6 +837,37 @@ export default function JobDetailsPage() {
           )}
         </div>
       </div>
+
+      {/* Plan Annotator Modal - Opens from bid notes */}
+      {annotatorOpen && jobRequest?.plan_files && jobRequest.plan_files.length > 0 && (
+        <PlanAnnotatorModal
+          open={annotatorOpen}
+          onOpenChange={setAnnotatorOpen}
+          planFile={jobRequest.plan_files[0]} // Default to first plan file
+          planFileName={jobRequest.plan_files[0].split('/').pop() || 'Plan'}
+          bids={bids.map(bid => ({
+            id: bid.id,
+            subcontractor_name: bid.subcontractor_name,
+            subcontractor_email: bid.subcontractor_email,
+            bid_notes: bid.bid_notes || []
+          }))}
+          jobRequestId={jobRequest.id}
+        />
+      )}
+
+      {/* Accept Bid Modal */}
+      {selectedBidForAcceptance && jobRequest && (
+        <AcceptBidModal
+          open={acceptBidModalOpen}
+          onOpenChange={setAcceptBidModalOpen}
+          bid={selectedBidForAcceptance}
+          jobRequestId={jobRequest.id}
+          onAcceptSuccess={() => {
+            // Refresh the page data
+            fetchJobDetails()
+          }}
+        />
+      )}
     </div>
   )
 }

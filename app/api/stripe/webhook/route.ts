@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
                 description: jobData.description,
                 budget_range: jobData.budget_range,
                 files: jobData.files || null,
-                status: 'collecting_bids',
+                status: 'active',
                 bid_collection_started_at: new Date().toISOString(),
                 bid_collection_ends_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
                 payment_type: 'pay_per_job',

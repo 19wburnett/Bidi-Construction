@@ -8,11 +8,11 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient()
 
-    // Find jobs that should timeout from collecting_bids status
+    // Find jobs that should timeout from active status to expired
     const { data: timeoutJobs, error: timeoutError } = await supabase
       .from('job_requests')
       .select('id, bid_collection_ends_at')
-      .eq('status', 'collecting_bids')
+      .eq('status', 'active')
       .lt('bid_collection_ends_at', new Date().toISOString())
 
     if (timeoutError) {
@@ -30,11 +30,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Update jobs to active status
+    // Update jobs to expired status
     const { error: updateError } = await supabase
       .from('job_requests')
-      .update({ status: 'active' })
-      .eq('status', 'collecting_bids')
+      .update({ status: 'expired' })
+      .eq('status', 'active')
       .lt('bid_collection_ends_at', new Date().toISOString())
 
     if (updateError) {
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      message: `Updated ${timeoutJobs.length} jobs from collecting_bids to active`,
+      message: `Updated ${timeoutJobs.length} jobs from active to expired`,
       updated: timeoutJobs.length
     })
   } catch (error) {
