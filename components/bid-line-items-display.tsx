@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Receipt, Package, Hammer, FileText, DollarSign, Tool } from 'lucide-react'
+import { Receipt, Package, Hammer, FileText, DollarSign, Wrench } from 'lucide-react'
 
 interface BidLineItem {
   id: string
@@ -33,7 +33,7 @@ const CATEGORY_CONFIG = {
     label: 'Materials'
   },
   equipment: {
-    icon: Tool,
+    icon: Wrench,
     color: 'bg-purple-100 text-purple-800 border-purple-200',
     label: 'Equipment'
   },
