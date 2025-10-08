@@ -70,3 +70,5 @@ status: 'closed'
 - `app/dashboard/new-job/page.tsx` - Creates jobs with 5-minute collection window
 - `app/api/check-bid-timeouts/route.ts` - Background job to expire old jobs
 - `supabase-migration-fix-collecting-bids-status.sql` - Database migration
+
+

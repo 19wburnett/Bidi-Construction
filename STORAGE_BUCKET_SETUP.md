@@ -77,3 +77,5 @@ The bucket uses the following folder structure:
 The following file types are accepted:
 - PDF (`.pdf`)
 - Microsoft Word (`.doc`, `.docx`)
+
+

@@ -140,3 +140,5 @@ INSERT INTO bid_line_items (bid_id, item_number, description, category, amount) 
 SELECT bid_amount FROM bids WHERE id = 'your-bid-id';
 -- Should show 9000.00
 ```
+
+

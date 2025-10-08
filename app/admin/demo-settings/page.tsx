@@ -194,6 +194,39 @@ export default function AdminDemoSettingsPage() {
         </div>
 
         <div className="grid gap-6">
+          {/* AI Plan Demo */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Zap className="h-5 w-5 text-orange-600" />
+                <span>AI Plan Analysis Demo</span>
+              </CardTitle>
+              <CardDescription>
+                Upload construction plans, select trades, and see AI-powered bid generation in action.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  This demo showcases AI-powered plan analysis:
+                </p>
+                <ul className="text-sm text-gray-600 space-y-1 ml-4">
+                  <li>• Upload PDF construction plans</li>
+                  <li>• Select trade categories for analysis</li>
+                  <li>• AI generates detailed bid estimates</li>
+                  <li>• View materials, labor, and timeline breakdowns</li>
+                  <li>• Identify potential issues and recommendations</li>
+                </ul>
+                <Link href="/admin/ai-plan-demo">
+                  <Button className="w-full" variant="orange">
+                    <Zap className="h-4 w-4 mr-2" />
+                    Launch AI Plan Demo
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Workflow Demo */}
           <Card>
             <CardHeader>

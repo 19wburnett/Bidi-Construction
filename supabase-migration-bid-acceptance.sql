@@ -102,3 +102,5 @@ CREATE TRIGGER trigger_bid_acceptance
   AFTER UPDATE ON bids
   FOR EACH ROW
   EXECUTE FUNCTION update_job_request_on_bid_acceptance();
+
+
