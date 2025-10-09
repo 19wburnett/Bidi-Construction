@@ -12,7 +12,6 @@ import Footer from '@/components/footer'
 import Link from 'next/link'
 import { Building2, Users, Mail, FileText, Star, CheckCircle, ArrowRight, Sparkles, Zap, Clock, DollarSign, Phone, MapPin, Eye, MoreHorizontal, Play, Loader2, Search, Brain } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import logo from '../public/brand/Bidi Contracting Logo.svg'
 export default function HomePage() {
   const [isVisible, setIsVisible] = useState(false)
   const [hoveredCard, setHoveredCard] = useState<number | null>(null)
@@ -58,7 +57,7 @@ export default function HomePage() {
         }`}>
           Stop spending time on bidding.
           <span className="block bidi-orange-text">
-            Let <span className="font-bidi">Bidi</span> Do It For You
+            Let <span className="font-bidi">BIDI</span> Do It For You
           </span>
         </h1>
         
@@ -105,7 +104,7 @@ export default function HomePage() {
             <div className="bg-white border-b-2 border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
             <div className="flex items-center space-x-3">
-              <img src={logo.src} alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black" />
+              <img src="/brand/Bidi Contracting Logo.svg" alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black" />
               <h3 className="text-lg sm:text-2xl font-bold text-black"><span className="font-bidi">BIDI</span> Dashboard</h3>
             </div>
                 <div className="flex items-center space-x-2 sm:space-x-4">
