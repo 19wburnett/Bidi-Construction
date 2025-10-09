@@ -53,6 +53,7 @@ export default function SignupPage() {
         // Wait a moment for the trigger to complete
         setTimeout(() => {
           router.push('/subscription')
+          router.refresh()
         }, 1000)
       }
     } catch (err) {

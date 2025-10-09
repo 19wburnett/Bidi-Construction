@@ -20,6 +20,7 @@ function AuthCallbackContent() {
           setError(`Authentication error: ${error.message}`)
           setTimeout(() => {
             router.push('/auth/login?error=callback_error')
+            router.refresh()
           }, 3000)
           return
         }
@@ -59,8 +60,10 @@ function AuthCallbackContent() {
               
               if (fallbackData?.stripe_customer_id) {
                 router.push('/dashboard')
+                router.refresh()
               } else {
                 router.push('/subscription')
+                router.refresh()
               }
               return
             }
@@ -69,6 +72,7 @@ function AuthCallbackContent() {
             setError('Failed to load user data')
             setTimeout(() => {
               router.push('/auth/login?error=user_data_error')
+              router.refresh()
             }, 3000)
             return
           }
@@ -77,6 +81,7 @@ function AuthCallbackContent() {
             setError('User account setup failed')
             setTimeout(() => {
               router.push('/auth/login?error=user_setup_failed')
+              router.refresh()
             }, 3000)
             return
           }
@@ -92,17 +97,21 @@ function AuthCallbackContent() {
 
           if (hasActiveSubscription) {
             router.push('/dashboard')
+            router.refresh()
           } else {
             router.push('/subscription')
+            router.refresh()
           }
         } else {
           // No session found, redirect to login
           router.push('/auth/login')
+          router.refresh()
         }
       } catch (err: any) {
         setError(err.message || 'Authentication failed')
         setTimeout(() => {
           router.push('/auth/login?error=callback_error')
+          router.refresh()
         }, 3000)
       }
     }

@@ -57,9 +57,11 @@ export default function LoginPage() {
         if (!hasActiveSubscription) {
           // Redirect to subscription page
           router.push('/subscription')
+          router.refresh()
         } else {
           // Redirect to dashboard
           router.push('/dashboard')
+          router.refresh()
         }
       }
     } catch (err) {
