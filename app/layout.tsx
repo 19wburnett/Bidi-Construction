@@ -1,10 +1,22 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Saira_Stencil_One, Barlow } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import AuthErrorBoundary from '@/components/auth-error-boundary'
 
-const inter = Inter({ subsets: ['latin'] })
+const sairaStencilOne = Saira_Stencil_One({ 
+  weight: '400',
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-saira-stencil',
+})
+
+const barlow = Barlow({ 
+  weight: ['400', '500', '600', '700'],
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-barlow',
+})
 
 export const metadata: Metadata = {
   title: 'Bidi (Beta) - Connect General Contractors with Subcontractors',
@@ -24,11 +36,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${barlow.variable} ${sairaStencilOne.variable}`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body className={inter.className}>
+      <body className={barlow.className}>
         <Providers>
           <AuthErrorBoundary>
             {children}

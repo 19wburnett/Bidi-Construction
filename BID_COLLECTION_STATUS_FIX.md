@@ -72,3 +72,4 @@ status: 'closed'
 - `supabase-migration-fix-collecting-bids-status.sql` - Database migration
 
 
+

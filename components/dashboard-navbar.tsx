@@ -19,7 +19,7 @@ interface DashboardNavbarProps {
 }
 
 export default function DashboardNavbar({
-  title = "Bidi Dashboard",
+  title = "BIDI Dashboard",
   showBackButton = false,
   backButtonHref = "/dashboard",
   backButtonText = "Back to Dashboard",
@@ -27,12 +27,26 @@ export default function DashboardNavbar({
   showNotifications = true,
   showProfile = true,
 }: DashboardNavbarProps) {
+  // Check if title contains "BIDI" to apply custom font
+  const renderTitle = () => {
+    if (title.includes('BIDI')) {
+      return title.split('BIDI').map((part, index) => (
+        index === 0 ? (
+          <span key={index}>
+            <span className="font-bidi">BIDI</span>{part}
+          </span>
+        ) : part
+      ));
+    }
+    return title;
+  };
+
   return (
     <header className="bg-white border-b-2 border-gray-200 shadow-sm">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center">
         <div className="flex items-center space-x-3">
           <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{title}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{renderTitle()}</h1>
         </div>
         <div className="flex items-center space-x-2 sm:space-x-4">
           {showBackButton && (

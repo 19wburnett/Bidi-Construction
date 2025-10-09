@@ -8,7 +8,7 @@ export default function Footer() {
           <div>
             <div className="flex items-center space-x-3 mb-4">
               <img src={logo.src} alt="Bidi" className="h-8 w-8" />
-              <span className="text-2xl font-bold">Bidi</span>
+              <span className="font-bidi text-2xl font-bold">Bidi</span>
             </div>
             <p className="text-gray-400 font-medium">
               Automated subcontractor search and bid collection for construction professionals.

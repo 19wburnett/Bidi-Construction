@@ -39,8 +39,12 @@ export default function HomePage() {
         }`}>
           <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
             <div className="bg-gray-100 border-2 border-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2">
-              <Sparkles className="h-4 w-4" />
-              <span>AI-Powered Bid Analysis</span>
+              <Brain className="h-4 w-4" />
+              <span>AI-Powered Plan Analysis</span>
+            </div>
+            <div className="bg-gray-100 border-2 border-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2">
+              <Zap className="h-4 w-4" />
+              <span>Complete Automation</span>
             </div>
             <div className="bidi-orange-bg-light bidi-orange-text px-4 py-2 rounded-lg text-sm font-bold border border-orange/20 flex items-center space-x-2">
               <span>🚀</span>
@@ -52,16 +56,16 @@ export default function HomePage() {
         <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black mb-6 tracking-tight transition-all duration-1000 delay-500 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          We Level Subcontractor Bids 
+          Stop spending time on bidding.
           <span className="block bidi-orange-text">
-            So You Don't Have To
+            Let <span className="font-bidi">Bidi</span> Do It For You
           </span>
         </h1>
         
         <p className={`text-xl sm:text-2xl text-gray-600 mb-10 max-w-4xl mx-auto font-medium transition-all duration-1000 delay-700 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          Post a job, and get leveled bids from subcontractors.
+          From Job Posting to Final Payment
         </p>
         
         <div className={`flex flex-col sm:flex-row justify-center gap-6 transition-all duration-1000 delay-1000 ${
@@ -73,7 +77,7 @@ export default function HomePage() {
               size="lg" 
               className="text-lg sm:text-xl px-8 sm:px-12 py-4 w-full sm:w-auto font-bold group"
             >
-              Start Searching Now
+              Automate Your Bidding
               <ArrowRight className="ml-2 h-6 w-6 group-hover:translate-x-1 transition-transform duration-200" />
             </Button>
           </Link>
@@ -100,10 +104,10 @@ export default function HomePage() {
             {/* Dashboard Header */}
             <div className="bg-white border-b-2 border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
-                <div className="flex items-center space-x-3">
-                  <img src={logo.src} alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black" />
-                  <h3 className="text-lg sm:text-2xl font-bold text-black">Bidi Dashboard</h3>
-                </div>
+            <div className="flex items-center space-x-3">
+              <img src={logo.src} alt="Bidi" className="h-8 w-8 sm:h-10 sm:w-10 text-black" />
+              <h3 className="text-lg sm:text-2xl font-bold text-black"><span className="font-bidi">BIDI</span> Dashboard</h3>
+            </div>
                 <div className="flex items-center space-x-2 sm:space-x-4">
                   <div className="flex items-center space-x-2 bg-gray-100 rounded-lg px-2 sm:px-3 py-1 sm:py-2 border border-gray-200">
                     <div className="w-6 h-6 sm:w-8 sm:h-8 bg-orange rounded-full flex items-center justify-center">
@@ -247,38 +251,43 @@ export default function HomePage() {
 
       {/* Features Section */}
       <section className="container mx-auto px-4 py-16 relative z-10">
-        <h2 className={`text-3xl sm:text-4xl font-bold text-center text-black mb-12 tracking-tight transition-all duration-1000 delay-1200 ${
+        <h2 className={`text-3xl sm:text-4xl font-bold text-center text-black mb-4 tracking-tight transition-all duration-1000 delay-1200 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          How Our Search Tool Works
+          Complete Bidding Automation
         </h2>
+        <p className={`text-lg text-gray-600 text-center mb-12 max-w-3xl mx-auto transition-all duration-1000 delay-1200 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
+          From finding subcontractors to managing every detail, we handle it all so you can focus on building.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           {[
             {
-              icon: Building2,
-              title: "1. Submit Your Job",
-              description: "Simply provide your project details, location, and requirements. Our system handles the rest.",
+              icon: Search,
+              title: "Find Subcontractors",
+              description: "We automatically search and contact qualified subs in your area and trade, saving you hours of research.",
               color: "blue",
               delay: "delay-1400"
             },
             {
-              icon: Mail,
-              title: "2. Automated Search",
-              description: "Our system automatically finds and contacts qualified subcontractors in your area and trade.",
+              icon: Users,
+              title: "Collect Bids",
+              description: "Handle all back-and-forth communications with subs and automatically collect and organize bids.",
               color: "green",
               delay: "delay-1600"
             },
             {
-              icon: Users,
-              title: "3. Collect Bids",
-              description: "We automatically collect and organize all incoming bids with pricing and contact information.",
+              icon: Brain,
+              title: "AI Plan Analysis",
+              description: "Our AI extracts key details from your plans so GCs know exactly what information they need.",
               color: "orange",
               delay: "delay-1800"
             },
             {
               icon: FileText,
-              title: "4. AI-Leveled Results",
-              description: "Our AI analyzes and presents all bids in an easy-to-read format for quick comparison and decision making.",
+              title: "Manage Paperwork",
+              description: "Automate all back office paperwork including contracts, documentation, and administrative tasks.",
               color: "orange",
               delay: "delay-2000"
             }
@@ -346,10 +355,10 @@ export default function HomePage() {
         {/* Demo Header */}
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold text-black mb-4">
-            See How Our Search Tool Works
+            See Complete Automation in Action
           </h2>
           <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto font-medium">
-            Submit your project details and watch our automated system find subcontractors, collect bids, and present them in an easy-to-read format.
+            Submit your project and watch as we find subs, collect bids, manage communications, and use AI to analyze your plans — all automatically.
           </p>
         </div>
 
@@ -363,19 +372,19 @@ export default function HomePage() {
           <h2 className={`text-3xl sm:text-4xl font-bold mb-6 tracking-tight transition-all duration-1000 delay-3400 ${
             isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}>
-            Ready to Find Subcontractors Automatically?
+            Ready to Automate Your Entire Bidding Process?
           </h2>
           <p className={`text-xl sm:text-2xl mb-10 font-medium transition-all duration-1000 delay-3600 ${
             isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}>
-            Stop wasting time searching for subcontractors. Let our automated system find, contact, and collect bids for you.
-          </p>
+            Stop wasting time on manual work. Let us handle the entire bidding process for you.
+            </p>
           <div className={`transition-all duration-1000 delay-3800 ${
             isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}>
             <Link href="/auth/signup">
               <Button variant="orange" size="lg" className="text-lg sm:text-xl px-8 sm:px-12 py-4 font-bold">
-                Start Your Search Now
+                Get Started Now
               </Button>
             </Link>
           </div>
@@ -406,28 +415,28 @@ function DemoSection() {
   const steps = [
     {
       title: 'Submit Your Project',
-      description: 'Provide basic project details and requirements',
+      description: 'Upload plans and provide project details - AI extracts key info',
       icon: Building2,
       color: 'blue',
       loadingText: 'Processing your project details...'
     },
     {
-      title: 'Automated Search',
-      description: 'Our system finds qualified subcontractors in your area',
+      title: 'Find & Contact Subs',
+      description: 'Auto-search and reach out to qualified subcontractors',
       icon: Search,
       color: 'green',
-      loadingText: 'Searching for qualified contractors...'
+      loadingText: 'Finding and contacting contractors...'
     },
     {
-      title: 'Collect Bids',
-      description: 'We automatically collect and organize incoming bids',
-      icon: Users,
+      title: 'Collect & Manage',
+      description: 'Handle all communications, collect bids, manage paperwork',
+      icon: Mail,
       color: 'purple',
-      loadingText: 'Collecting bids from contractors...'
+      loadingText: 'Managing communications and paperwork...'
     },
     {
-      title: 'AI Analysis',
-      description: 'Our AI levels and presents all bids for easy comparison',
+      title: 'AI-Leveled Results',
+      description: 'AI analyzes and presents organized, comparable bids',
       icon: Brain,
       color: 'orange',
       loadingText: 'AI analyzing and leveling bids...'

@@ -87,6 +87,15 @@
     overflow: hidden;
   }
 
+  /* Bidi Construction Font Utilities */
+  .font-bidi {
+    font-family: var(--font-saira-stencil);
+  }
+
+  .font-barlow {
+    font-family: var(--font-barlow);
+  }
+
   /* Bidi Construction Specific Utilities */
   .bidi-orange {
     background-color: hsl(var(--orange));

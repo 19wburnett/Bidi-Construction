@@ -72,8 +72,8 @@ export default function Navbar() {
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
             </div>
             <div className="flex items-center space-x-3">
-              <h1 className="text-2xl sm:text-3xl font-bold text-black tracking-tight">
-                Bidi
+              <h1 className="text-2xl sm:text-3xl font-bold text-black tracking-tight font-bidi">
+                BIDI
               </h1>
               <span className="bidi-orange-bg-light bidi-orange-text text-xs font-bold px-3 py-1 rounded-full border border-orange/20">
                 BETA
