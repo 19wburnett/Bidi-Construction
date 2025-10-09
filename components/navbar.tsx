@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Building2, Menu, X, User, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
@@ -14,6 +14,7 @@ export default function Navbar() {
   const [user, setUser] = useState<any>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const pathname = usePathname()
+  const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
@@ -41,6 +42,8 @@ export default function Navbar() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     setIsMenuOpen(false)
+    router.push('/')
+    router.refresh()
   }
 
   const navigation = [
