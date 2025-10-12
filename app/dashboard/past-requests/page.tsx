@@ -10,7 +10,6 @@ import { Building2, ArrowLeft, FileText, History, CheckCircle, MapPin, DollarSig
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 interface JobRequest {
@@ -158,15 +157,6 @@ export default function PastRequestsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <DashboardNavbar 
-        title="Bidi"
-        showBackButton={false}
-        showCredits={false}
-        showNotifications={true}
-        showProfile={true}
-      />
-
       <div className="container mx-auto px-4 py-4 sm:py-8">
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">

@@ -1,770 +1,399 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-// import { Button as HeroUIButton } from '@heroui/button'
-// import { Card as HeroUICard, CardBody, CardHeader as HeroUICardHeader } from '@heroui/card'
-// import { Badge } from '@heroui/badge'
-// import { Chip } from '@heroui/chip'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Plus, FileText, Users, Mail, CheckCircle, X, History, MapPin, DollarSign, MessageSquare, Calendar, UserCheck } from 'lucide-react'
+import { 
+  FileText, 
+  Plus, 
+  Briefcase, 
+  TrendingUp, 
+  Clock, 
+  CheckCircle,
+  AlertCircle,
+  ArrowRight,
+  Upload,
+  BarChart3,
+  Users,
+  DollarSign
+} from 'lucide-react'
 import Link from 'next/link'
-import ProfileDropdown from '@/components/profile-dropdown'
-import CreditsDisplay from '@/components/credits-display'
-import NotificationBell from '@/components/notification-bell'
-import DebugNotifications from '@/components/debug-notifications'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
-import DashboardNavbar from '@/components/dashboard-navbar'
-import logo from '../../public/brand/Bidi Contracting Logo.svg'
 
-interface JobRequest {
+interface DashboardStats {
+  totalPlans: number
+  activePlans: number
+  totalJobs: number
+  activeJobs: number
+  pendingBids: number
+  totalContacts: number
+}
+
+interface RecentPlan {
+  id: string
+  title: string
+  file_name: string
+  status: string
+  created_at: string
+  has_takeoff_analysis: boolean
+  has_quality_analysis: boolean
+}
+
+interface RecentJob {
   id: string
   trade_category: string
   location: string
-  description: string
-  budget_range: string
+  status: string
   created_at: string
   bids_count?: number
-  unseen_bids_count?: number
-  status?: 'active' | 'closed' | 'cancelled' | 'expired'
-  bid_collection_started_at?: string
-  bid_collection_ends_at?: string
 }
 
 export default function DashboardPage() {
-  const [jobRequests, setJobRequests] = useState<JobRequest[]>([])
-  const [pastJobRequests, setPastJobRequests] = useState<JobRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
-  const [paymentType, setPaymentType] = useState<string>('subscription')
-  const [userCredits, setUserCredits] = useState<number>(0)
-  const [showSuccessMessage, setShowSuccessMessage] = useState(false)
-  const [activeTab, setActiveTab] = useState<'current' | 'past'>('current')
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [demoMode, setDemoMode] = useState(false)
-  const { user } = useAuth()
   const router = useRouter()
-  const pathname = usePathname()
-  const supabase = useRef(createClient()).current
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState<DashboardStats>({
+    totalPlans: 0,
+    activePlans: 0,
+    totalJobs: 0,
+    activeJobs: 0,
+    pendingBids: 0,
+    totalContacts: 0
+  })
+  const [recentPlans, setRecentPlans] = useState<RecentPlan[]>([])
+  const [recentJobs, setRecentJobs] = useState<RecentJob[]>([])
 
   useEffect(() => {
-    if (!user) {
-      router.push('/auth/login')
-      return
+    if (user) {
+      loadDashboardData()
     }
+  }, [user])
 
-    // Simple data loading - only run once when user changes
-    const loadData = async () => {
-      setLoading(true)
-      
-      // Check for success parameter from Stripe
-      const urlParams = new URLSearchParams(window.location.search)
-      if (urlParams.get('success') === 'true') {
-        setShowSuccessMessage(true)
-        setTimeout(() => {
-          fetchUserSubscription()
-          window.history.replaceState({}, '', '/dashboard')
-        }, 1000)
-        
-        setTimeout(() => {
-          setShowSuccessMessage(false)
-        }, 5000)
-      }
+  async function loadDashboardData() {
+    try {
+      const supabase = createClient()
 
-      // Load all data
-      await Promise.all([
-        fetchUserSubscription(),
-        fetchJobRequests(),
-        fetchPastJobRequests(),
-        checkAdminStatus()
+      // Load stats
+      const [plansResult, jobsResult, bidsResult, contactsResult] = await Promise.all([
+        supabase
+          .from('plans')
+          .select('status', { count: 'exact' })
+          .eq('user_id', user?.id),
+        supabase
+          .from('job_requests')
+          .select('status', { count: 'exact' })
+          .eq('gc_id', user?.id),
+        supabase
+          .from('bids')
+          .select('*, job_requests!inner(gc_id)', { count: 'exact' })
+          .eq('job_requests.gc_id', user?.id)
+          .is('seen_at', null),
+        supabase
+          .from('gc_contacts')
+          .select('*', { count: 'exact' })
+          .eq('gc_id', user?.id)
       ])
-      
+
+      // Count active plans
+      const activePlans = plansResult.data?.filter(p => p.status === 'ready' || p.status === 'processing').length || 0
+      const activeJobs = jobsResult.data?.filter(j => j.status === 'active').length || 0
+
+      setStats({
+        totalPlans: plansResult.count || 0,
+        activePlans,
+        totalJobs: jobsResult.count || 0,
+        activeJobs,
+        pendingBids: bidsResult.count || 0,
+        totalContacts: contactsResult.count || 0
+      })
+
+      // Load recent plans
+      const { data: plans } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      setRecentPlans(plans || [])
+
+      // Load recent jobs
+      const { data: jobs } = await supabase
+        .from('job_requests')
+        .select('*')
+        .eq('gc_id', user?.id)
+        .order('created_at', { ascending: false })
+        .limit(5)
+
+      setRecentJobs(jobs || [])
+
+    } catch (error) {
+      console.error('Error loading dashboard data:', error)
+    } finally {
       setLoading(false)
     }
-
-    loadData()
-  }, [user]) // Only depend on user
-
-  const checkAdminStatus = async () => {
-    if (!user) return
-
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('is_admin, demo_mode')
-        .eq('id', user.id)
-        .single()
-
-      if (error) {
-        setIsAdmin(false)
-        setDemoMode(false)
-        return
-      }
-
-      setIsAdmin(data?.is_admin || false)
-      setDemoMode(data?.demo_mode || false)
-    } catch (err) {
-      setIsAdmin(false)
-      setDemoMode(false)
-    }
-  }
-
-  const fetchUserSubscription = async () => {
-    if (!user) return
-
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('subscription_status, stripe_customer_id, payment_type, credits')
-        .eq('id', user.id)
-        .single()
-
-      if (error) {
-        // Fallback: check if user has stripe_customer_id (old logic)
-        if (error.code === 'PGRST116' || error.message.includes('subscription_status')) {
-          // Column doesn't exist yet, use old logic
-          const { data: fallbackData } = await supabase
-            .from('users')
-            .select('stripe_customer_id')
-            .eq('id', user.id)
-            .single()
-          setSubscriptionStatus(fallbackData?.stripe_customer_id ? 'active' : 'inactive')
-        } else {
-          setSubscriptionStatus('inactive')
-        }
-      } else {
-        setSubscriptionStatus(data?.subscription_status || 'inactive')
-        setPaymentType(data?.payment_type || 'subscription')
-        setUserCredits(data?.credits || 0)
-      }
-    } catch (err) {
-      setSubscriptionStatus('inactive')
-      setPaymentType('subscription')
-      setUserCredits(0)
-    }
-  }
-
-  const fetchJobRequests = async () => {
-    if (!user) return
-
-    try {
-      // First get all job requests (including those without status for backward compatibility)
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('job_requests')
-        .select('*')
-        .eq('gc_id', user.id)
-        .or('status.is.null,status.eq.active')
-        .order('created_at', { ascending: false })
-
-      if (jobsError) {
-        setJobRequests([])
-        return
-      }
-
-      // Optimized: Get all bid counts in a single query
-      const jobIds = (jobsData || []).map(job => job.id)
-      let bidCounts: { [key: string]: { total: number, unseen: number } } = {}
-      
-      if (jobIds.length > 0) {
-        // Get all bid counts for all jobs at once
-        const { data: allBids, error: bidsError } = await supabase
-          .from('bids')
-          .select('job_request_id, seen')
-          .in('job_request_id', jobIds)
-
-        if (!bidsError && allBids) {
-          // Count bids per job
-          bidCounts = allBids.reduce((acc, bid) => {
-            const jobId = bid.job_request_id
-            if (!acc[jobId]) {
-              acc[jobId] = { total: 0, unseen: 0 }
-            }
-            acc[jobId].total++
-            if (!bid.seen) {
-              acc[jobId].unseen++
-            }
-            return acc
-          }, {} as { [key: string]: { total: number, unseen: number } })
-        }
-      }
-
-      const jobsWithBidCounts = (jobsData || []).map(job => ({
-        ...job,
-        bids_count: bidCounts[job.id]?.total || 0,
-        unseen_bids_count: bidCounts[job.id]?.unseen || 0
-      }))
-
-      setJobRequests(jobsWithBidCounts)
-    } catch (err) {
-      setJobRequests([])
-    }
-  }
-
-  const fetchPastJobRequests = async () => {
-    if (!user) return
-
-    try {
-      // Get all closed job requests
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('job_requests')
-        .select('*')
-        .eq('gc_id', user.id)
-        .eq('status', 'closed')
-        .order('created_at', { ascending: false })
-
-      if (jobsError) {
-        setPastJobRequests([])
-        return
-      }
-
-      // Optimized: Get all bid counts in a single query
-      const jobIds = (jobsData || []).map(job => job.id)
-      let bidCounts: { [key: string]: number } = {}
-      
-      if (jobIds.length > 0) {
-        // Get all bid counts for all jobs at once
-        const { data: allBids, error: bidsError } = await supabase
-          .from('bids')
-          .select('job_request_id')
-          .in('job_request_id', jobIds)
-
-        if (!bidsError && allBids) {
-          // Count bids per job
-          bidCounts = allBids.reduce((acc, bid) => {
-            const jobId = bid.job_request_id
-            acc[jobId] = (acc[jobId] || 0) + 1
-            return acc
-          }, {} as { [key: string]: number })
-        }
-      }
-
-      const jobsWithBidCounts = (jobsData || []).map(job => ({
-        ...job,
-        bids_count: bidCounts[job.id] || 0
-      }))
-
-      setPastJobRequests(jobsWithBidCounts)
-    } catch (err) {
-      setPastJobRequests([])
-    }
-  }
-
-  const closeJob = async (jobId: string) => {
-    if (!user) return
-
-    try {
-      const { error } = await supabase
-        .from('job_requests')
-        .update({ status: 'closed' })
-        .eq('id', jobId)
-        .eq('gc_id', user.id)
-
-      if (error) {
-        return
-      }
-
-      // Refresh both job requests lists
-      fetchJobRequests()
-      fetchPastJobRequests()
-    } catch (err) {
-      // Silent error handling
-    }
-  }
-
-  const reopenJob = async (jobId: string) => {
-    if (!user) return
-
-    try {
-      const { error } = await supabase
-        .from('job_requests')
-        .update({ status: 'active' })
-        .eq('id', jobId)
-        .eq('gc_id', user.id)
-
-      if (error) {
-        return
-      }
-
-      // Refresh both job requests lists
-      fetchJobRequests()
-      fetchPastJobRequests()
-    } catch (err) {
-      // Silent error handling
-    }
-  }
-
-  const stopCollectingBids = useCallback(async (jobId: string) => {
-    if (!user) return
-
-    try {
-      const { error } = await supabase
-        .from('job_requests')
-        .update({ 
-          status: 'active',
-          bid_collection_ends_at: new Date().toISOString()
-        })
-        .eq('id', jobId)
-        .eq('gc_id', user.id)
-
-      if (error) {
-        return
-      }
-
-      // Refresh job requests
-      fetchJobRequests()
-    } catch (err) {
-      // Silent error handling
-    }
-  }, [user, supabase])
-
-  // Helper function to check if a job is actively collecting bids
-  const isCollectingBids = (job: JobRequest) => {
-    if (job.status !== 'active') return false
-    if (!job.bid_collection_ends_at) return false
-    return new Date(job.bid_collection_ends_at) > new Date()
-  }
-
-  // Memoize expensive calculations
-  const stats = useMemo(() => {
-    const currentJobsCount = jobRequests.length
-    const pastJobsCount = pastJobRequests.length
-    const currentBidsCount = jobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-    const pastBidsCount = pastJobRequests.reduce((sum, job) => sum + (job.bids_count || 0), 0)
-    const recentJobsCount = jobRequests.filter(job => 
-      new Date(job.created_at) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    ).length
-    const avgBidsPerJob = pastJobRequests.length > 0 
-      ? Math.round(pastBidsCount / pastJobRequests.length * 10) / 10
-      : 0
-
-    return {
-      currentJobsCount,
-      pastJobsCount,
-      currentBidsCount,
-      pastBidsCount,
-      recentJobsCount,
-      avgBidsPerJob
-    }
-  }, [jobRequests, pastJobRequests])
-
-  if (!user) {
-    return null
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <FallingBlocksLoader text="Loading dashboard..." size="lg" />
+      <div className="flex items-center justify-center min-h-screen">
+        <FallingBlocksLoader />
       </div>
     )
   }
 
-  // Dashboard is now accessible to all authenticated users
+  if (!user) {
+    router.push('/auth/login')
+    return null
+  }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-50">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* Header */}
-      <DashboardNavbar 
-        title="Bidi Dashboard"
-        showBackButton={false}
-        showCredits={true}
-        showNotifications={true}
-        showProfile={true}
-      />
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back!</h1>
+          <p className="text-gray-600">Here's what's happening with your projects</p>
+        </div>
 
-      {/* Navigation */}
-      <nav className="bg-white border-b">
-        <div className="container mx-auto px-4">
-          <div className="flex space-x-2 sm:space-x-8 py-4 overflow-x-auto">
-            <Link 
-              href="/dashboard" 
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                pathname === '/dashboard' 
-                  ? 'bg-orange-100 text-orange-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
-            >
-              <FileText className="h-4 w-4 flex-shrink-0" />
-              <span>Jobs</span>
-            </Link>
-            <Link 
-              href="/dashboard/contacts" 
-              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                pathname === '/dashboard/contacts' 
-                  ? 'bg-orange-100 text-orange-700' 
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
-            >
-              <UserCheck className="h-4 w-4 flex-shrink-0" />
-              <span>My Contacts</span>
-            </Link>
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <Link href="/dashboard/plans/new">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-orange-500 bg-gradient-to-br from-orange-50 to-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-lg mb-1">Upload New Plan</h3>
+                    <p className="text-sm text-gray-600">Start analyzing construction plans</p>
+                  </div>
+                  <div className="bg-orange-500 text-white p-3 rounded-lg">
+                    <Upload className="h-6 w-6" />
           </div>
         </div>
-      </nav>
+              </CardContent>
+            </Card>
+          </Link>
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Success Message */}
-        {showSuccessMessage && (
-          <div className="mb-8 p-6 bg-green-50 border-2 border-green-200 text-green-800 rounded-lg">
-            <div className="flex items-center">
-              <CheckCircle className="h-6 w-6 mr-3" />
-              <span className="font-bold text-lg">Payment Successful!</span>
-            </div>
-            <p className="mt-2 font-medium">Your subscription is now active. Welcome to Bidi!</p>
-          </div>
-        )}
-
-        {/* Demo Mode Indicator */}
-        {isAdmin && demoMode && (
-          <div className="mb-8 p-6 bg-gray-50 border-2 border-gray-200 text-gray-800 rounded-lg">
+          <Link href="/dashboard/new-job">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-blue-500 bg-gradient-to-br from-blue-50 to-white">
+              <CardContent className="p-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Building2 className="h-6 w-6 mr-3" />
                 <div>
-                  <span className="font-bold text-lg">Demo Mode Active</span>
-                  <p className="text-sm mt-1 font-medium">New job requests will automatically generate demo bids for demonstration purposes.</p>
+                    <h3 className="font-semibold text-lg mb-1">Post New Job</h3>
+                    <p className="text-sm text-gray-600">Get bids from subcontractors</p>
+                  </div>
+                  <div className="bg-blue-500 text-white p-3 rounded-lg">
+                    <Briefcase className="h-6 w-6" />
                 </div>
               </div>
-              <Link href="/admin/demo-settings">
-                <Button variant="construction" size="sm">
-                  Settings
+              </CardContent>
+            </Card>
+              </Link>
+            </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="bg-orange-100 text-orange-600 p-2 rounded-lg">
+                  <FileText className="h-5 w-5" />
+          </div>
+                {stats.activePlans > 0 && (
+                  <Badge variant="default" className="bg-green-500">
+                    {stats.activePlans} active
+                  </Badge>
+                )}
+                </div>
+              <h3 className="text-2xl font-bold">{stats.totalPlans}</h3>
+              <p className="text-sm text-gray-600">Total Plans</p>
+              </CardContent>
+            </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="bg-blue-100 text-blue-600 p-2 rounded-lg">
+                  <Briefcase className="h-5 w-5" />
+                </div>
+                {stats.activeJobs > 0 && (
+                  <Badge variant="default" className="bg-green-500">
+                    {stats.activeJobs} active
+                  </Badge>
+                )}
+                </div>
+              <h3 className="text-2xl font-bold">{stats.totalJobs}</h3>
+              <p className="text-sm text-gray-600">Total Jobs</p>
+              </CardContent>
+            </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="bg-purple-100 text-purple-600 p-2 rounded-lg">
+                  <DollarSign className="h-5 w-5" />
+                </div>
+                {stats.pendingBids > 0 && (
+                  <Badge variant="default" className="bg-yellow-500">
+                    {stats.pendingBids} new
+                  </Badge>
+                )}
+          </div>
+              <h3 className="text-2xl font-bold">{stats.pendingBids}</h3>
+              <p className="text-sm text-gray-600">Pending Bids</p>
+              </CardContent>
+            </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="bg-green-100 text-green-600 p-2 rounded-lg">
+                  <Users className="h-5 w-5" />
+                </div>
+                </div>
+              <h3 className="text-2xl font-bold">{stats.totalContacts}</h3>
+              <p className="text-sm text-gray-600">Contacts</p>
+              </CardContent>
+            </Card>
+          </div>
+
+        {/* Recent Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Recent Plans */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Recent Plans</CardTitle>
+                  <CardDescription>Your latest uploaded plans</CardDescription>
+        </div>
+                <Link href="/dashboard/plans">
+                  <Button variant="ghost" size="sm">
+                    View All
+                    <ArrowRight className="h-4 w-4 ml-1" />
                 </Button>
               </Link>
             </div>
-          </div>
-        )}
-
-        {/* Stats Cards */}
-        <div className="mb-8">
-          {/* Mobile: Horizontal scrollable cards */}
-          <div className="flex gap-4 overflow-x-auto pb-2 sm:hidden">
-            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium text-black">
-                  {activeTab === 'current' ? 'Active Jobs' : 'Closed Jobs'}
-                </CardTitle>
-                <FileText className="h-3 w-3 text-gray-600" />
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="text-xl font-bold text-black">
-                  {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium text-black">Total Bids</CardTitle>
-                <Users className="h-3 w-3 text-gray-600" />
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="text-xl font-bold text-black">
-                  {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="min-w-[140px] flex-shrink-0 border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-xs font-medium text-black">
-                  {activeTab === 'current' ? 'Recent Jobs' : 'Avg Bids/Job'}
-                </CardTitle>
-                <Mail className="h-3 w-3 text-gray-600" />
-              </CardHeader>
-              <CardContent className="pt-2">
-                <div className="text-xl font-bold text-black">
-                  {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Desktop: Grid layout */}
-          <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-            <Card className="border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-black">
-                  {activeTab === 'current' ? 'Active Jobs' : 'Closed Jobs'}
-                </CardTitle>
-                <FileText className="h-4 w-4 text-gray-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-black">
-                  {activeTab === 'current' ? stats.currentJobsCount : stats.pastJobsCount}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-black">Total Bids Received</CardTitle>
-                <Users className="h-4 w-4 text-gray-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-black">
-                  {activeTab === 'current' ? stats.currentBidsCount : stats.pastBidsCount}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-2 border-gray-200 bg-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-black">
-                  {activeTab === 'current' ? 'Recent Jobs (30 days)' : 'Average Bids per Job'}
-                </CardTitle>
-                <Mail className="h-4 w-4 text-gray-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-black">
-                  {activeTab === 'current' ? stats.recentJobsCount : stats.avgBidsPerJob}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Job Requests Section */}
-        <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-            <h2 className="text-2xl sm:text-3xl font-bold text-black tracking-tight">Your Job Requests</h2>
-            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-              <Link href="/dashboard/new-job">
-                  <Button variant="orange" className="w-full sm:w-auto font-bold">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Post New Job
-                </Button>
-              </Link>
-            </div>
-          </div>
-          
-          {/* Tab Navigation */}
-          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit border-2 border-gray-200">
-            <button
-              onClick={() => setActiveTab('current')}
-              className={`px-6 py-3 text-sm font-semibold rounded-md transition-all duration-200 ${
-                activeTab === 'current'
-                  ? 'bg-white text-black shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-50'
-              }`}
-            >
-              Current Jobs ({stats.currentJobsCount})
-            </button>
-            <button
-              onClick={() => setActiveTab('past')}
-              className={`px-6 py-3 text-sm font-semibold rounded-md transition-all duration-200 ${
-                activeTab === 'past'
-                  ? 'bg-white text-black shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-50'
-              }`}
-            >
-              Past Jobs ({stats.pastJobsCount})
-            </button>
-          </div>
-        </div>
-
-        {/* Job Requests Content */}
-        {activeTab === 'current' ? (
-          jobRequests.length === 0 ? (
-            <Card className="border-2 border-gray-200">
-              <CardContent className="text-center py-16">
-                <FileText className="h-16 w-16 text-gray-400 mx-auto mb-6" />
-                <h3 className="text-2xl font-bold text-black mb-4">No active job requests yet</h3>
-                <p className="text-xl text-gray-600 mb-8 font-medium">
-                  Get started by posting your first job request to connect with subcontractors.
-                </p>
-                <Link href="/dashboard/new-job">
-                  <Button variant="orange" size="lg" className="font-bold">
-                    <Plus className="h-5 w-5 mr-2" />
-                    Post Your First Job
+            </CardHeader>
+            <CardContent>
+              {recentPlans.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                  <p className="text-sm">No plans yet</p>
+                  <Link href="/dashboard/plans/new">
+                    <Button size="sm" className="mt-4">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Upload Your First Plan
                   </Button>
                 </Link>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-6">
-              {jobRequests.map((job) => (
-                <Card key={job.id} className="hover:shadow-lg transition-all duration-200 border-2 border-gray-200 hover:border-gray-300">
-                  <CardHeader className="pb-3">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
-                            {job.status === 'active' && (job.unseen_bids_count || 0) > 0 && (
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 mt-2">
-                            <div className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {job.location}
-                            </div>
-                            <div className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                              <DollarSign className="h-3 w-3" />
-                              {job.budget_range}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex flex-col sm:items-end gap-2">
-                          <div className="text-xs sm:text-sm text-gray-600 flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(job.created_at).toLocaleDateString()}
-                          </div>
-                          {isCollectingBids(job) ? (
-                            <div className="flex flex-col gap-1">
-                              <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-600"></div>
-                                Collecting bids...
-                              </div>
-                              {(job.bids_count || 0) > 0 && (
-                                <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1 relative">
-                                  <MessageSquare className="h-3 w-3" />
-                                  {job.bids_count || 0} bids received
-                                  {(job.unseen_bids_count || 0) > 0 && (
-                                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           ) : (
-                            <div className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
-                              <MessageSquare className="h-3 w-3" />
-                              {job.bids_count || 0} bids received
+                <div className="space-y-3">
+                  {recentPlans.map(plan => (
+                    <Link key={plan.id} href={`/dashboard/plans/${plan.id}`}>
+                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-orange-500 hover:bg-orange-50 transition-all cursor-pointer">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
+                          <div className="bg-orange-100 text-orange-600 p-2 rounded">
+                            <FileText className="h-4 w-4" />
                             </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-sm truncate">
+                              {plan.title || plan.file_name}
+                            </h4>
+                            <div className="flex items-center space-x-2 mt-1">
+                              <Badge variant="outline" className="text-xs">
+                                {plan.status}
+                              </Badge>
+                              {plan.has_takeoff_analysis && (
+                                <Badge variant="outline" className="text-xs bg-blue-50">
+                                  <BarChart3 className="h-3 w-3 mr-1" />
+                                  Takeoff
+                                </Badge>
+                              )}
+                              {plan.has_quality_analysis && (
+                                <Badge variant="outline" className="text-xs bg-green-50">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Quality
+                                </Badge>
                           )}
                         </div>
                       </div>
                     </div>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="text-gray-700 mb-4 line-clamp-2 sm:line-clamp-3 text-sm sm:text-base leading-relaxed">{job.description}</p>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Link 
-                        href={`/dashboard/jobs/${job.id}`} 
-                        className="flex-1 sm:flex-none order-1 relative"
-                        onClick={() => {
-                          // Refresh job requests after a short delay to update unseen counts
-                          setTimeout(() => {
-                            fetchJobRequests()
-                          }, 1000)
-                        }}
-                      >
-                        <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-                          View Bids
-                          {job.status === 'active' && (job.unseen_bids_count || 0) > 0 && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse flex items-center justify-center">
-                              <span className="text-white text-xs font-bold">!</span>
+                        <ArrowRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      </div>
+                    </Link>
+                  ))}
                             </div>
                           )}
+            </CardContent>
+          </Card>
+
+          {/* Recent Jobs */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Recent Jobs</CardTitle>
+                  <CardDescription>Your latest job requests</CardDescription>
+                </div>
+                <Link href="/dashboard/jobs">
+                  <Button variant="ghost" size="sm">
+                    View All
+                    <ArrowRight className="h-4 w-4 ml-1" />
                         </Button>
                       </Link>
-                      <Link href={`/dashboard/jobs/${job.id}/edit`} className="flex-1 sm:flex-none order-2">
-                        <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-                          Edit Job
+              </div>
+            </CardHeader>
+            <CardContent>
+              {recentJobs.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Briefcase className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                  <p className="text-sm">No jobs yet</p>
+                  <Link href="/dashboard/new-job">
+                    <Button size="sm" className="mt-4">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Post Your First Job
                         </Button>
                       </Link>
-                      {isCollectingBids(job) ? (
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => stopCollectingBids(job.id)}
-                          className="text-orange-600 hover:text-orange-700 hover:bg-orange-50 w-full sm:w-auto text-xs sm:text-sm order-3"
-                        >
-                          <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                          Stop Collecting
-                        </Button>
-                      ) : (
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => closeJob(job.id)}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full sm:w-auto text-xs sm:text-sm order-3"
-                        >
-                          <X className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                          Close
-                        </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recentJobs.map(job => (
+                    <Link key={job.id} href={`/dashboard/jobs/${job.id}`}>
+                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
+                          <div className="bg-blue-100 text-blue-600 p-2 rounded">
+                            <Briefcase className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-sm truncate">
+                              {job.trade_category}
+                            </h4>
+                            <div className="flex items-center space-x-2 mt-1">
+                              <span className="text-xs text-gray-500 truncate">
+                                {job.location}
+                              </span>
+                              {job.bids_count && job.bids_count > 0 && (
+                                <Badge variant="outline" className="text-xs">
+                                  {job.bids_count} bids
+                                </Badge>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )
-        ) : (
-          pastJobRequests.length === 0 ? (
-            <Card className="border-2 border-gray-200">
-              <CardContent className="text-center py-16">
-                <History className="h-16 w-16 text-gray-400 mx-auto mb-6" />
-                <h3 className="text-2xl font-bold text-black mb-4">No closed requests yet</h3>
-                <p className="text-xl text-gray-600 font-medium">
-                  Closed job requests will appear here once you close them from your active jobs.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-6">
-              {pastJobRequests.map((job) => (
-                <Card key={job.id} className="opacity-75 hover:shadow-lg transition-all duration-200 border-2 border-gray-200 hover:border-gray-300">
-                  <CardHeader className="pb-3">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-                        <div className="flex-1">
-                          <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
-                          <div className="flex flex-wrap items-center gap-2 mt-2">
-                            <div className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {job.location}
-                            </div>
-                            <div className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                              <DollarSign className="h-3 w-3" />
-                              {job.budget_range}
-                            </div>
-                            <div className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                              <X className="h-3 w-3" />
-                              Closed
                             </div>
                           </div>
-                        </div>
-                        <div className="flex flex-col sm:items-end gap-2">
-                          <div className="text-xs sm:text-sm text-gray-600 flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(job.created_at).toLocaleDateString()}
-                          </div>
-                          <div className="bg-orange-100 text-black px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1">
-                            <MessageSquare className="h-3 w-3" />
-                            {job.bids_count || 0} bids received
-                          </div>
-                        </div>
-                      </div>
+                        <ArrowRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
                     </div>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="text-gray-700 mb-4 line-clamp-2 sm:line-clamp-3 text-sm sm:text-base leading-relaxed">{job.description}</p>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Link href={`/dashboard/jobs/${job.id}`} className="flex-1 sm:flex-none order-1">
-                        <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-                          View Bids
-                        </Button>
                       </Link>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => reopenJob(job.id)}
-                        className="text-green-600 hover:text-green-700 hover:bg-green-50 w-full sm:w-auto text-xs sm:text-sm order-2"
-                      >
-                        <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                        Reopen
-                      </Button>
+                  ))}
                     </div>
+              )}
                   </CardContent>
                 </Card>
-              ))}
             </div>
-          )
-        )}
       </div>
     </div>
   )

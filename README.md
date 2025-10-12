@@ -29,6 +29,11 @@ cd bidi
 npm install
 ```
 
+**Note**: The `postinstall` script automatically updates the PDF.js worker file to match the installed package version. If you encounter PDF viewer errors, run:
+```bash
+node update-pdf-worker.js
+```
+
 ### 2. Environment Setup
 
 Copy the example environment file and fill in your credentials:

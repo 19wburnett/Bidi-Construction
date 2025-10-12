@@ -14,7 +14,6 @@ import SeenStatusIndicator from '@/components/seen-status-indicator'
 import BidNotesDisplay from '@/components/bid-notes-display'
 import BidLineItemsDisplay from '@/components/bid-line-items-display'
 import EmailDraftButton from '@/components/email-draft-button'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import dynamic from 'next/dynamic'
 
@@ -440,17 +439,6 @@ export default function JobDetailsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <DashboardNavbar 
-        title="Bidi"
-        showBackButton={true}
-        backButtonHref="/dashboard"
-        backButtonText="Back to Dashboard"
-        showCredits={false}
-        showNotifications={true}
-        showProfile={false}
-      />
-
       <div className="container mx-auto px-4 py-4 sm:py-8 max-w-4xl">
         {/* Combined Job Overview, Project Summary & Key Insights */}
         <Card className="mb-8 border-l-4">

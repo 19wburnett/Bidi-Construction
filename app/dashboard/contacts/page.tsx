@@ -29,7 +29,6 @@ import {
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 const TRADE_CATEGORIES = [
@@ -309,17 +308,6 @@ export default function ContactsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <DashboardNavbar 
-        title="My Contacts"
-        showBackButton={true}
-        backButtonHref="/dashboard"
-        backButtonText="Back to Dashboard"
-        showCredits={false}
-        showNotifications={true}
-        showProfile={true}
-      />
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Success/Error Messages */}
         {success && (

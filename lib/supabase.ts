@@ -297,6 +297,259 @@ export interface Database {
           updated_at?: string
         }
       }
+      takeoffs: {
+        Row: {
+          id: string
+          project_id: string
+          user_id: string
+          plan_file_url: string
+          name: string
+          version: number
+          status: 'draft' | 'active' | 'archived'
+          data: any
+          ai_analysis_status: 'pending' | 'processing' | 'completed' | 'failed'
+          ai_analysis_result: any | null
+          ai_confidence_score: number | null
+          last_edited_by: string | null
+          is_locked: boolean
+          locked_by: string | null
+          locked_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          user_id: string
+          plan_file_url: string
+          name: string
+          version?: number
+          status?: 'draft' | 'active' | 'archived'
+          data?: any
+          ai_analysis_status?: 'pending' | 'processing' | 'completed' | 'failed'
+          ai_analysis_result?: any | null
+          ai_confidence_score?: number | null
+          last_edited_by?: string | null
+          is_locked?: boolean
+          locked_by?: string | null
+          locked_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          user_id?: string
+          plan_file_url?: string
+          name?: string
+          version?: number
+          status?: 'draft' | 'active' | 'archived'
+          data?: any
+          ai_analysis_status?: 'pending' | 'processing' | 'completed' | 'failed'
+          ai_analysis_result?: any | null
+          ai_confidence_score?: number | null
+          last_edited_by?: string | null
+          is_locked?: boolean
+          locked_by?: string | null
+          locked_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      takeoff_items: {
+        Row: {
+          id: string
+          takeoff_id: string
+          item_type: string
+          category: string
+          description: string
+          quantity: number
+          unit: string
+          unit_cost: number
+          total_cost: number
+          location_reference: string | null
+          detected_by: 'ai' | 'manual' | 'imported'
+          confidence_score: number | null
+          detection_coordinates: any | null
+          plan_page_number: number | null
+          notes: string | null
+          tags: string[] | null
+          created_at: string
+          updated_at: string
+          created_by: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          id?: string
+          takeoff_id: string
+          item_type: string
+          category: string
+          description: string
+          quantity?: number
+          unit: string
+          unit_cost?: number
+          location_reference?: string | null
+          detected_by?: 'ai' | 'manual' | 'imported'
+          confidence_score?: number | null
+          detection_coordinates?: any | null
+          plan_page_number?: number | null
+          notes?: string | null
+          tags?: string[] | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          id?: string
+          takeoff_id?: string
+          item_type?: string
+          category?: string
+          description?: string
+          quantity?: number
+          unit?: string
+          unit_cost?: number
+          location_reference?: string | null
+          detected_by?: 'ai' | 'manual' | 'imported'
+          confidence_score?: number | null
+          detection_coordinates?: any | null
+          plan_page_number?: number | null
+          notes?: string | null
+          tags?: string[] | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+          updated_by?: string | null
+        }
+      }
+      takeoff_comments: {
+        Row: {
+          id: string
+          takeoff_id: string
+          takeoff_item_id: string | null
+          content: string
+          comment_type: 'general' | 'question' | 'suggestion' | 'issue'
+          parent_comment_id: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+          is_resolved: boolean
+        }
+        Insert: {
+          id?: string
+          takeoff_id: string
+          takeoff_item_id?: string | null
+          content: string
+          comment_type?: 'general' | 'question' | 'suggestion' | 'issue'
+          parent_comment_id?: string | null
+          created_by: string
+          created_at?: string
+          updated_at?: string
+          is_resolved?: boolean
+        }
+        Update: {
+          id?: string
+          takeoff_id?: string
+          takeoff_item_id?: string | null
+          content?: string
+          comment_type?: 'general' | 'question' | 'suggestion' | 'issue'
+          parent_comment_id?: string | null
+          created_by?: string
+          created_at?: string
+          updated_at?: string
+          is_resolved?: boolean
+        }
+      }
+      takeoff_presence: {
+        Row: {
+          id: string
+          takeoff_id: string
+          user_id: string
+          last_seen_at: string
+          current_view: string | null
+          cursor_position: any | null
+        }
+        Insert: {
+          id?: string
+          takeoff_id: string
+          user_id: string
+          last_seen_at?: string
+          current_view?: string | null
+          cursor_position?: any | null
+        }
+        Update: {
+          id?: string
+          takeoff_id?: string
+          user_id?: string
+          last_seen_at?: string
+          current_view?: string | null
+          cursor_position?: any | null
+        }
+      }
+      cost_templates: {
+        Row: {
+          id: string
+          user_id: string | null
+          is_global: boolean
+          name: string
+          trade_category: string
+          description: string | null
+          template_data: any
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          is_global?: boolean
+          name: string
+          trade_category: string
+          description?: string | null
+          template_data: any
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          is_global?: boolean
+          name?: string
+          trade_category?: string
+          description?: string | null
+          template_data?: any
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      takeoff_ai_chat: {
+        Row: {
+          id: string
+          takeoff_id: string
+          user_id: string
+          role: 'user' | 'assistant' | 'system'
+          content: string
+          references_items: string[] | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          takeoff_id: string
+          user_id: string
+          role: 'user' | 'assistant' | 'system'
+          content: string
+          references_items?: string[] | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          takeoff_id?: string
+          user_id?: string
+          role?: 'user' | 'assistant' | 'system'
+          content?: string
+          references_items?: string[] | null
+          created_at?: string
+        }
+      }
     }
   }
 }

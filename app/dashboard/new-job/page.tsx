@@ -14,7 +14,6 @@ import { Building2, Upload, ArrowLeft, X, CheckCircle, Users, Network, UserCheck
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import SubcontractorSelectionModal from '@/components/subcontractor-selection-modal'
 
@@ -376,17 +375,6 @@ export default function NewJobPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <DashboardNavbar 
-        title="Bidi"
-        showBackButton={true}
-        backButtonHref="/dashboard"
-        backButtonText="Back to Dashboard"
-        showCredits={false}
-        showNotifications={true}
-        showProfile={true}
-      />
-
       <div className="container mx-auto px-4 py-4 sm:py-8 max-w-2xl">
         <Card>
           <CardHeader>

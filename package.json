@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "node update-pdf-worker.js"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
@@ -29,7 +30,7 @@
     "openai": "^4.20.1",
     "pdf-lib": "^1.17.1",
     "pdf2json": "^3.2.2",
-    "pdfjs-dist": "^5.4.149",
+    "pdfjs-dist": "5.3.93",
     "posthog-js": "^1.268.6",
     "posthog-node": "^5.9.1",
     "puppeteer": "^24.19.0",

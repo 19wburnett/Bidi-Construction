@@ -12,7 +12,6 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Building2, ArrowLeft, Upload, X } from 'lucide-react'
 import Link from 'next/link'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 const TRADE_CATEGORIES = [
@@ -242,17 +241,6 @@ export default function EditJobPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <DashboardNavbar 
-        title="Bidi"
-        showBackButton={true}
-        backButtonHref={`/dashboard/jobs/${jobRequest.id}`}
-        backButtonText="Back to Job Details"
-        showCredits={false}
-        showNotifications={false}
-        showProfile={false}
-      />
-
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <Card>
           <CardHeader>
