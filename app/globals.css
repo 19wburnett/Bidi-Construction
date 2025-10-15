@@ -150,3 +150,189 @@
 .animate-slide-in-right {
   animation: slide-in-right 0.3s ease-out;
 }
+
+/* Demo Animation Keyframes */
+@keyframes fly-out {
+  0% {
+    transform: scale(0) translate(0, 0);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes fly-in {
+  0% {
+    transform: translateY(-100px) scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes scale-in {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-fly-out {
+  animation: fly-out 1s ease-out forwards;
+}
+
+.animate-fly-in {
+  animation: fly-in 0.6s ease-out forwards;
+}
+
+.animate-scan {
+  animation: scan 2s linear infinite;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.6s ease-out forwards;
+}
+
+@keyframes flow-right {
+  0% {
+    left: -10%;
+  }
+  100% {
+    left: 110%;
+  }
+}
+
+@keyframes flow-left {
+  0% {
+    right: -10%;
+  }
+  100% {
+    right: 110%;
+  }
+}
+
+.animate-flow-right {
+  animation: flow-right 2s ease-in-out infinite;
+}
+
+.animate-flow-left {
+  animation: flow-left 2s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+@keyframes slow-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wiggle {
+  0%, 100% {
+    transform: rotate(var(--rotate, 0deg)) translateY(0);
+  }
+  25% {
+    transform: rotate(calc(var(--rotate, 0deg) + 3deg)) translateY(-2px);
+  }
+  75% {
+    transform: rotate(calc(var(--rotate, 0deg) - 3deg)) translateY(2px);
+  }
+}
+
+.animate-slow-spin {
+  animation: slow-spin 8s linear infinite;
+}
+
+.animate-wiggle {
+  animation: wiggle 2s ease-in-out infinite;
+}
+
+/* Construction-themed background patterns */
+.construction-grid {
+  background-image: 
+    repeating-linear-gradient(0deg, rgba(235, 80, 35, 0.06) 0px, rgba(235, 80, 35, 0.06) 1px, transparent 1px, transparent 60px),
+    repeating-linear-gradient(90deg, rgba(235, 80, 35, 0.06) 0px, rgba(235, 80, 35, 0.06) 1px, transparent 1px, transparent 60px);
+}
+
+.blueprint-grid {
+  background-image: 
+    repeating-linear-gradient(0deg, rgba(30, 64, 175, 0.08) 0px, rgba(30, 64, 175, 0.08) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg, rgba(30, 64, 175, 0.08) 0px, rgba(30, 64, 175, 0.08) 1px, transparent 1px, transparent 40px);
+}
+
+.bg-gradient-radial {
+  background-image: radial-gradient(circle, var(--tw-gradient-stops));
+}
+
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  0% {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-right {
+  0% {
+    transform: translateX(-20px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-slide-right {
+  animation: slide-right 0.6s ease-out forwards;
+  opacity: 0;
+}

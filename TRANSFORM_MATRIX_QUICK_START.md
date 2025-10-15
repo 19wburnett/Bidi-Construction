@@ -219,3 +219,4 @@ npm run dev
 
 Then open a plan and try zooming while drawing. You'll immediately feel the difference!
 
+

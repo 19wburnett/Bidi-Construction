@@ -149,3 +149,4 @@ To verify the fix works:
 
 The `DOMMatrix is not defined` error is fixed by ensuring all react-pdf components and their dependencies only load on the client side using Next.js dynamic imports with `ssr: false`. This allows the application to work correctly in both development and production environments.
 
+

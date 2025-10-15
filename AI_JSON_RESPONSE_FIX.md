@@ -238,3 +238,4 @@ Older models (gpt-3.5-turbo, gpt-4) also support `response_format` but may be le
 **Status**: ✅ Fixed  
 **Last Updated**: October 12, 2025
 
+

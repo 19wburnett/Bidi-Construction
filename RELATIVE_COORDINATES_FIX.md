@@ -175,3 +175,4 @@ To verify the fix works:
 **Before fix:** Drawings would "float" or jump to different locations ❌
 **After fix:** Drawings stick perfectly to the PDF at any zoom level ✅
 
+
