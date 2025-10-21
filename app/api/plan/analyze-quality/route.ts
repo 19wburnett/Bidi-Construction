@@ -7,6 +7,9 @@ const openai = new OpenAI({
 })
 
 export async function POST(request: NextRequest) {
+  let planId: string | undefined
+  let userId: string | undefined
+  
   try {
     const supabase = await createServerSupabaseClient()
 
@@ -15,8 +18,12 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    
+    userId = user.id
 
-    const { planId, images } = await request.json()
+    const body = await request.json()
+    planId = body.planId
+    const images = body.images
 
     if (!planId || !images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: 'Missing required fields: planId and images' }, { status: 400 })
@@ -27,7 +34,7 @@ export async function POST(request: NextRequest) {
       .from('plans')
       .select('*')
       .eq('id', planId)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single()
 
     if (planError || !plan) {
@@ -174,7 +181,7 @@ ${images.length > 1 ? 'The images are sequential pages from the same constructio
       .from('plan_quality_analysis')
       .insert({
         plan_id: planId,
-        user_id: user.id,
+        user_id: userId,
         overall_score: qualityData.overall_score,
         issues: qualityData.issues || [],
         missing_details: qualityData.missing_details || [],
@@ -191,6 +198,19 @@ ${images.length > 1 ? 'The images are sequential pages from the same constructio
       console.error('Error saving analysis:', analysisError)
     }
 
+    // Update plan status to completed
+    const { error: planUpdateError } = await supabase
+      .from('plans')
+      .update({ 
+        quality_analysis_status: 'completed',
+        has_quality_analysis: true
+      })
+      .eq('id', planId)
+
+    if (planUpdateError) {
+      console.error('Error updating plan status:', planUpdateError)
+    }
+
     return NextResponse.json({
       success: true,
       overall_score: qualityData.overall_score,
@@ -204,6 +224,21 @@ ${images.length > 1 ? 'The images are sequential pages from the same constructio
 
   } catch (error) {
     console.error('Quality analysis error:', error)
+    
+    // Mark plan as failed if we have the planId and userId
+    if (planId && userId) {
+      try {
+        const supabase = await createServerSupabaseClient()
+        await supabase
+          .from('plans')
+          .update({ quality_analysis_status: 'failed' })
+          .eq('id', planId)
+          .eq('user_id', userId)
+      } catch (updateError) {
+        console.error('Error updating plan status to failed:', updateError)
+      }
+    }
+    
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Analysis failed' },
       { status: 500 }

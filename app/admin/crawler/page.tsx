@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Search, Users, Mail, Activity, ArrowLeft, Play, Pause, Square } from 'lucide-react'
+import { Building2, Search, Users, Mail, Activity, ArrowLeft, Play, Pause, Square, FileText } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
@@ -172,7 +172,7 @@ export default function CrawlerAdminPage() {
       case 'paused':
         return 'text-yellow-600 bg-yellow-100'
       default:
-        return 'text-gray-600 bg-gray-100'
+        return 'text-muted-foreground bg-muted'
     }
   }
 
@@ -200,12 +200,12 @@ export default function CrawlerAdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h2>
-              <p className="text-gray-600 mb-4">You need admin privileges to access this page.</p>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Access Denied</h2>
+              <p className="text-muted-foreground mb-4">You need admin privileges to access this page.</p>
               <Link href="/dashboard">
                 <Button>Return to Dashboard</Button>
               </Link>
@@ -217,15 +217,24 @@ export default function CrawlerAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-background border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi Crawler Admin</h1>
+            <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-foreground" />    
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Bidi Crawler Admin</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
+            <Link href="/admin/analyze-plans">
+              <Button variant="outline" className="hidden sm:flex">
+                <FileText className="h-4 w-4 mr-2" />
+                Analyze Plans
+              </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <FileText className="h-4 w-4" />
+              </Button>
+            </Link>
             <Link href="/admin/demo-settings">
               <Button variant="outline" className="hidden sm:flex">
                 <ArrowLeft className="h-4 w-4 mr-2" />
@@ -243,8 +252,8 @@ export default function CrawlerAdminPage() {
 
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Contractor Discovery Crawler</h1>
-          <p className="text-gray-600">
+          <h1 className="text-3xl font-bold text-foreground mb-2">Contractor Discovery Crawler</h1>
+          <p className="text-muted-foreground">
             Automatically find and contact subcontractors to expand your contractor network.
           </p>
         </div>
@@ -369,28 +378,28 @@ export default function CrawlerAdminPage() {
           <CardContent>
             {crawlerJobs.length === 0 ? (
               <div className="text-center py-8">
-                <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No crawler jobs yet</h3>
-                <p className="text-gray-600 mb-4">
+                <Search className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-foreground mb-2">No crawler jobs yet</h3>
+                <p className="text-muted-foreground mb-4">
                   Start your first crawler job to begin discovering contractors.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
                 {crawlerJobs.map((job) => (
-                  <div key={job.id} className="border rounded-lg p-4 hover:bg-gray-50">
+                  <div key={job.id} className="border rounded-lg p-4 hover:bg-muted">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-2">
-                          <h3 className="font-semibold text-gray-900">{job.trade_category}</h3>
-                          <span className="text-gray-500">in</span>
-                          <span className="text-gray-700">{job.location}</span>
+                          <h3 className="font-semibold text-foreground">{job.trade_category}</h3>
+                          <span className="text-muted-foreground">in</span>
+                          <span className="text-muted-foreground">{job.location}</span>
                           <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center space-x-1 ${getStatusColor(job.status)}`}>
                             {getStatusIcon(job.status)}
                             <span>{job.status}</span>
                           </span>
                         </div>
-                        <div className="flex items-center space-x-4 text-sm text-gray-600">
+                        <div className="flex items-center space-x-4 text-sm text-muted-foreground">
                           <div className="flex items-center space-x-1">
                             <Users className="h-4 w-4" />
                             <span>{job.results_found} contractors found</span>
@@ -406,7 +415,7 @@ export default function CrawlerAdminPage() {
                             <span>Radius: {job.search_radius}mi</span>
                           </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">
+                        <div className="text-xs text-muted-foreground mt-1">
                           Started: {new Date(job.started_at).toLocaleString()}
                           {job.completed_at && (
                             <span className="ml-4">

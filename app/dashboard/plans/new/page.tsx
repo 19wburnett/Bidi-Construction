@@ -126,11 +126,11 @@ export default function UploadPlanPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
       <div className="container mx-auto px-4 py-8 max-w-3xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Upload Plan</h1>
-          <p className="text-gray-600">Upload construction plans for analysis and takeoff</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Upload Plan</h1>
+          <p className="text-gray-600 dark:text-gray-300">Upload construction plans for analysis and takeoff</p>
         </div>
 
         <Card>
@@ -170,8 +170,8 @@ export default function UploadPlanPage() {
                       <FileText className="h-6 w-6" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{selectedFile.name}</p>
-                      <p className="text-sm text-gray-600">
+                      <p className="font-medium text-gray-900 dark:text-white">{selectedFile.name}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
                         {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                       </p>
                     </div>

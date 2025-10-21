@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Settings, ArrowLeft, Users, Zap, Search, UserPlus } from 'lucide-react'
+import { Building2, Settings, ArrowLeft, Users, Zap, Search, UserPlus, FileText } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
@@ -117,12 +117,12 @@ export default function AdminDemoSettingsPage() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h2>
-              <p className="text-gray-600 mb-4">You need admin privileges to access this page.</p>
+              <h2 className="text-xl font-semibold text-foreground mb-2">Access Denied</h2>
+              <p className="text-muted-foreground">You need admin privileges to access this page.</p>
               <Link href="/dashboard">
                 <Button>Return to Dashboard</Button>
               </Link>
@@ -134,15 +134,24 @@ export default function AdminDemoSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-background border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Bidi Admin</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Bidi Admin</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
+            <Link href="/admin/analyze-plans">
+              <Button variant="outline" className="hidden sm:flex">
+                <FileText className="h-4 w-4 mr-2" />
+                Analyze Plans
+              </Button>
+              <Button variant="outline" size="sm" className="sm:hidden">
+                <FileText className="h-4 w-4" />
+              </Button>
+            </Link>
             <Link href="/admin/workflow-demo">
               <Button variant="outline" className="hidden sm:flex">
                 <Users className="h-4 w-4 mr-2" />
@@ -187,8 +196,8 @@ export default function AdminDemoSettingsPage() {
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Demo Settings</h1>
-          <p className="text-gray-600">
+          <h1 className="text-3xl font-bold text-foreground mb-2">Demo Settings</h1>
+          <p className="text-muted-foreground">
             Configure demo mode settings for showcasing the platform to potential clients.
           </p>
         </div>
@@ -355,7 +364,7 @@ export default function AdminDemoSettingsPage() {
                       id="admin-email"
                       type="email"
                       placeholder="user@example.com"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      className="flex-1 px-3 py-2 border border-border rounded-md text-sm"
                     />
                     <Button
                       onClick={() => {

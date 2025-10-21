@@ -275,7 +275,7 @@ export default function ManageSubcontractorsPage() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center">
@@ -294,11 +294,11 @@ export default function ManageSubcontractorsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b">
+      <header className="bg-background border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Manage Subcontractors</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Manage Subcontractors</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <Link href="/admin/demo-settings">
@@ -324,8 +324,8 @@ export default function ManageSubcontractorsPage() {
               <div className="flex items-center">
                 <Users className="h-8 w-8 text-blue-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Subcontractors</p>
-                  <p className="text-2xl font-bold text-gray-900">{subcontractors.length}</p>
+                  <p className="text-sm font-medium text-muted-foreground">Total Subcontractors</p>
+                  <p className="text-2xl font-bold text-foreground">{subcontractors.length}</p>
                 </div>
               </div>
             </CardContent>
@@ -336,8 +336,8 @@ export default function ManageSubcontractorsPage() {
               <div className="flex items-center">
                 <Briefcase className="h-8 w-8 text-green-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Trade Categories</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-muted-foreground">Trade Categories</p>
+                  <p className="text-2xl font-bold text-foreground">
                     {new Set(subcontractors.map(s => s.trade_category)).size}
                   </p>
                 </div>
@@ -350,8 +350,8 @@ export default function ManageSubcontractorsPage() {
               <div className="flex items-center">
                 <MapPin className="h-8 w-8 text-purple-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Locations</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                  <p className="text-sm font-medium text-muted-foreground">Locations</p>
+                  <p className="text-2xl font-bold text-foreground">
                     {new Set(subcontractors.map(s => s.location)).size}
                   </p>
                 </div>
@@ -470,7 +470,7 @@ export default function ManageSubcontractorsPage() {
           
           <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
               <Input
                 placeholder="Search subcontractors..."
                 value={searchTerm}
@@ -510,10 +510,10 @@ export default function ManageSubcontractorsPage() {
               </div>
             ) : filteredSubcontractors.length === 0 ? (
               <div className="text-center py-8">
-                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">No subcontractors found</p>
+                <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No subcontractors found</p>
                 {searchTerm || filterTrade ? (
-                  <p className="text-sm text-gray-500 mt-2">Try adjusting your search or filter</p>
+                  <p className="text-sm text-muted-foreground mt-2">Try adjusting your search or filter</p>
                 ) : (
                   <Button onClick={() => setShowAddForm(true)} className="mt-4">
                     <Plus className="h-4 w-4 mr-2" />
@@ -526,22 +526,22 @@ export default function ManageSubcontractorsPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Name</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Email</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Trade</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Location</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Added</th>
-                      <th className="text-right py-3 px-4 font-medium text-gray-900">Actions</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Name</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Email</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Trade</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Location</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Added</th>
+                      <th className="text-right py-3 px-4 font-medium text-foreground">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredSubcontractors.map((subcontractor) => (
-                      <tr key={subcontractor.id} className="border-b hover:bg-gray-50">
+                      <tr key={subcontractor.id} className="border-b hover:bg-muted">
                         <td className="py-3 px-4">
-                          <div className="font-medium text-gray-900">{subcontractor.name}</div>
+                          <div className="font-medium text-foreground">{subcontractor.name}</div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center text-gray-600">
+                          <div className="flex items-center text-muted-foreground">
                             <Mail className="h-4 w-4 mr-2" />
                             {subcontractor.email}
                           </div>
@@ -552,12 +552,12 @@ export default function ManageSubcontractorsPage() {
                           </span>
                         </td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center text-gray-600">
+                          <div className="flex items-center text-muted-foreground">
                             <MapPin className="h-4 w-4 mr-2" />
                             {subcontractor.location}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-gray-600">
+                        <td className="py-3 px-4 text-muted-foreground">
                           {new Date(subcontractor.created_at).toLocaleDateString()}
                         </td>
                         <td className="py-3 px-4">

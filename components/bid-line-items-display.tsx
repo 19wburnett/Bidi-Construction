@@ -24,27 +24,27 @@ interface BidLineItemsDisplayProps {
 const CATEGORY_CONFIG = {
   labor: {
     icon: Hammer,
-    color: 'bg-blue-100 text-blue-800 border-blue-200',
+    color: 'bg-blue-100 dark:bg-blue-950/50 text-blue-800 dark:text-blue-400 border-blue-200 dark:border-blue-700',
     label: 'Labor'
   },
   materials: {
     icon: Package,
-    color: 'bg-green-100 text-green-800 border-green-200',
+    color: 'bg-green-100 dark:bg-green-950/50 text-green-800 dark:text-green-400 border-green-200 dark:border-green-700',
     label: 'Materials'
   },
   equipment: {
     icon: Wrench,
-    color: 'bg-purple-100 text-purple-800 border-purple-200',
+    color: 'bg-purple-100 dark:bg-purple-950/50 text-purple-800 dark:text-purple-400 border-purple-200 dark:border-purple-700',
     label: 'Equipment'
   },
   permits: {
     icon: FileText,
-    color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    color: 'bg-yellow-100 dark:bg-yellow-950/50 text-yellow-800 dark:text-yellow-400 border-yellow-200 dark:border-yellow-700',
     label: 'Permits'
   },
   other: {
     icon: DollarSign,
-    color: 'bg-gray-100 text-gray-800 border-gray-200',
+    color: 'bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700',
     label: 'Other'
   }
 }
@@ -88,10 +88,10 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Receipt className="h-5 w-5 text-orange-600" />
+            <Receipt className="h-5 w-5 text-orange-600 dark:text-orange-400" />
             <CardTitle className="text-lg">Cost Breakdown</CardTitle>
           </div>
-          <Badge variant="outline" className="text-sm font-semibold">
+          <Badge variant="outline" className="text-sm font-semibold dark:border-gray-700 dark:text-gray-300">
             {lineItems.length} {lineItems.length === 1 ? 'Item' : 'Items'}
           </Badge>
         </div>
@@ -109,12 +109,12 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
             return (
               <div key={category} className="space-y-3">
                 {/* Category Header */}
-                <div className="flex items-center justify-between border-b pb-2">
+                <div className="flex items-center justify-between border-b dark:border-gray-800 pb-2">
                   <div className="flex items-center space-x-2">
                     <Icon className="h-4 w-4" />
-                    <h4 className="font-semibold text-gray-900">{config.label}</h4>
+                    <h4 className="font-semibold text-gray-900 dark:text-white">{config.label}</h4>
                   </div>
-                  <span className="text-sm font-semibold text-gray-700">
+                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
                     {formatCurrency(categoryTotal)}
                   </span>
                 </div>
@@ -122,21 +122,21 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
                 {/* Line Items */}
                 <div className="space-y-2">
                   {items.map((item) => (
-                    <div key={item.id} className="bg-gray-50 rounded-lg p-3">
+                    <div key={item.id} className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex-1">
                           <div className="flex items-start space-x-2">
-                            <span className="text-xs font-medium text-gray-500 mt-0.5">
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
                               #{item.item_number}
                             </span>
-                            <p className="text-sm text-gray-900 font-medium">
+                            <p className="text-sm text-gray-900 dark:text-white font-medium">
                               {item.description}
                             </p>
                           </div>
                           
                           {/* Quantity and Unit Info */}
                           {(item.quantity || item.unit || item.unit_price) && (
-                            <div className="mt-1 flex items-center space-x-2 text-xs text-gray-600">
+                            <div className="mt-1 flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
                               {item.quantity && item.unit && (
                                 <span>
                                   {formatNumber(item.quantity)} {item.unit}
@@ -152,7 +152,7 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
 
                           {/* Notes */}
                           {item.notes && (
-                            <p className="mt-1 text-xs text-gray-600 italic">
+                            <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 italic">
                               {item.notes}
                             </p>
                           )}
@@ -160,7 +160,7 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
 
                         {/* Amount */}
                         <div className="text-right ml-4">
-                          <p className="text-sm font-bold text-gray-900">
+                          <p className="text-sm font-bold text-gray-900 dark:text-white">
                             {formatCurrency(item.amount)}
                           </p>
                         </div>
@@ -173,17 +173,17 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
           })}
 
           {/* Total */}
-          <div className="border-t-2 border-gray-300 pt-4">
+          <div className="border-t-2 border-gray-300 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center">
-              <span className="text-lg font-bold text-gray-900">Total</span>
-              <span className="text-2xl font-bold text-green-600">
+              <span className="text-lg font-bold text-gray-900 dark:text-white">Total</span>
+              <span className="text-2xl font-bold text-green-600 dark:text-green-400">
                 {formatCurrency(calculatedTotal)}
               </span>
             </div>
             
             {/* Show warning if bid_amount doesn't match calculated total */}
             {totalAmount && Math.abs(totalAmount - calculatedTotal) > 0.01 && (
-              <div className="mt-2 text-xs text-orange-600 bg-orange-50 rounded p-2">
+              <div className="mt-2 text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/50 rounded p-2">
                 Note: Bid total ({formatCurrency(totalAmount)}) differs from line items total
               </div>
             )}

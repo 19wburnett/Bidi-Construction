@@ -247,13 +247,13 @@ export default function JobsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
       <div className="container mx-auto px-4 py-4 sm:py-8">
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">My Jobs</h2>
-            <p className="text-gray-600">Manage your job requests and bids</p>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">My Jobs</h2>
+            <p className="text-gray-600 dark:text-gray-300">Manage your job requests and bids</p>
           </div>
           <Link href="/dashboard/new-job">
             <Button className="w-full sm:w-auto">

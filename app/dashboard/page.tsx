@@ -152,23 +152,23 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
       <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back!</h1>
-          <p className="text-gray-600">Here's what's happening with your projects</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Welcome back!</h1>
+          <p className="text-gray-600 dark:text-gray-300">Here's what's happening with your projects</p>
         </div>
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <Link href="/dashboard/plans/new">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-orange-500 bg-gradient-to-br from-orange-50 to-white">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-orange-500 bg-gradient-to-br from-orange-50 to-white dark:from-orange-950/30 dark:to-gray-950">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-lg mb-1">Upload New Plan</h3>
-                    <p className="text-sm text-gray-600">Start analyzing construction plans</p>
+                    <h3 className="font-semibold text-lg mb-1 dark:text-white">Upload New Plan</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Start analyzing construction plans</p>
                   </div>
                   <div className="bg-orange-500 text-white p-3 rounded-lg">
                     <Upload className="h-6 w-6" />
@@ -179,12 +179,12 @@ export default function DashboardPage() {
           </Link>
 
           <Link href="/dashboard/new-job">
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-blue-500 bg-gradient-to-br from-blue-50 to-white">
+            <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 border-blue-500 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/30 dark:to-gray-950">
               <CardContent className="p-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h3 className="font-semibold text-lg mb-1">Post New Job</h3>
-                    <p className="text-sm text-gray-600">Get bids from subcontractors</p>
+                    <h3 className="font-semibold text-lg mb-1 dark:text-white">Post New Job</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Get bids from subcontractors</p>
                   </div>
                   <div className="bg-blue-500 text-white p-3 rounded-lg">
                     <Briefcase className="h-6 w-6" />
@@ -209,8 +209,8 @@ export default function DashboardPage() {
                   </Badge>
                 )}
                 </div>
-              <h3 className="text-2xl font-bold">{stats.totalPlans}</h3>
-              <p className="text-sm text-gray-600">Total Plans</p>
+              <h3 className="text-2xl font-bold dark:text-white">{stats.totalPlans}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Plans</p>
               </CardContent>
             </Card>
 
@@ -226,8 +226,8 @@ export default function DashboardPage() {
                   </Badge>
                 )}
                 </div>
-              <h3 className="text-2xl font-bold">{stats.totalJobs}</h3>
-              <p className="text-sm text-gray-600">Total Jobs</p>
+              <h3 className="text-2xl font-bold dark:text-white">{stats.totalJobs}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Total Jobs</p>
               </CardContent>
             </Card>
 
@@ -243,8 +243,8 @@ export default function DashboardPage() {
                   </Badge>
                 )}
           </div>
-              <h3 className="text-2xl font-bold">{stats.pendingBids}</h3>
-              <p className="text-sm text-gray-600">Pending Bids</p>
+              <h3 className="text-2xl font-bold dark:text-white">{stats.pendingBids}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Pending Bids</p>
               </CardContent>
             </Card>
 
@@ -255,8 +255,8 @@ export default function DashboardPage() {
                   <Users className="h-5 w-5" />
                 </div>
                 </div>
-              <h3 className="text-2xl font-bold">{stats.totalContacts}</h3>
-              <p className="text-sm text-gray-600">Contacts</p>
+              <h3 className="text-2xl font-bold dark:text-white">{stats.totalContacts}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Contacts</p>
               </CardContent>
             </Card>
           </div>
@@ -281,8 +281,8 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {recentPlans.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
                   <p className="text-sm">No plans yet</p>
                   <Link href="/dashboard/plans/new">
                     <Button size="sm" className="mt-4">
@@ -295,31 +295,31 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {recentPlans.map(plan => (
                     <Link key={plan.id} href={`/dashboard/plans/${plan.id}`}>
-                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-orange-500 hover:bg-orange-50 transition-all cursor-pointer">
+                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/30 transition-all cursor-pointer">
                         <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          <div className="bg-orange-100 text-orange-600 p-2 rounded">
+                          <div className="bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 p-2 rounded">
                             <FileText className="h-4 w-4" />
                             </div>
                           <div className="flex-1 min-w-0">
-                            <h4 className="font-medium text-sm truncate">
+                            <h4 className="font-medium text-sm truncate dark:text-white">
                               {plan.title || plan.file_name}
                             </h4>
                             <div className="flex items-center space-x-2 mt-1">
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="outline" className="text-xs dark:border-gray-700 dark:text-gray-300">
                                 {plan.status}
                               </Badge>
                               {plan.has_takeoff_analysis && (
-                                <Badge variant="outline" className="text-xs bg-blue-50">
+                                <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-950/50 dark:border-blue-700 dark:text-blue-400">
                                   <BarChart3 className="h-3 w-3 mr-1" />
                                   Takeoff
                                 </Badge>
                               )}
                               {plan.has_quality_analysis && (
-                                <Badge variant="outline" className="text-xs bg-green-50">
+                                <Badge variant="outline" className="text-xs bg-green-50 dark:bg-green-950/50 dark:border-green-700 dark:text-green-400">
                                   <CheckCircle className="h-3 w-3 mr-1" />
                                   Quality
                                 </Badge>
-                          )}
+                              )}
                         </div>
                       </div>
                     </div>
@@ -350,8 +350,8 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {recentJobs.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <Briefcase className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <Briefcase className="h-12 w-12 mx-auto mb-3 text-gray-400 dark:text-gray-500" />
                   <p className="text-sm">No jobs yet</p>
                   <Link href="/dashboard/new-job">
                     <Button size="sm" className="mt-4">
@@ -364,17 +364,17 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {recentJobs.map(job => (
                     <Link key={job.id} href={`/dashboard/jobs/${job.id}`}>
-                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer">
+                      <div className="flex items-center justify-between p-3 rounded-lg border hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all cursor-pointer">
                         <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          <div className="bg-blue-100 text-blue-600 p-2 rounded">
+                          <div className="bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 p-2 rounded">
                             <Briefcase className="h-4 w-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h4 className="font-medium text-sm truncate">
+                            <h4 className="font-medium text-sm truncate dark:text-white">
                               {job.trade_category}
                             </h4>
                             <div className="flex items-center space-x-2 mt-1">
-                              <span className="text-xs text-gray-500 truncate">
+                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                                 {job.location}
                               </span>
                               {job.bids_count && job.bids_count > 0 && (

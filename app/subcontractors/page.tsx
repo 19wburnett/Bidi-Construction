@@ -124,12 +124,12 @@ export default function SubcontractorsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white relative">
+    <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300">
       {/* Professional Construction Background */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white dark:from-black dark:to-orange-950/20"></div>
         <div className="absolute top-0 left-0 w-full h-1 bg-orange"></div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 dark:bg-orange/10 rounded-full blur-3xl"></div>
       </div>
 
       <Navbar />
@@ -143,14 +143,14 @@ export default function SubcontractorsPage() {
           </div>
         </div>
         
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black mb-6">
+        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black dark:text-white mb-6">
           Get More Jobs
           <span className="block bidi-orange-text">
             Automatically
           </span>
         </h1>
         
-        <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-3xl mx-auto font-medium">
+        <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto font-medium">
           Join our network of subcontractors and get jobs sent to your inbox.<strong className="bidi-orange-text"> No software needed, just reply to our emails with your bid.</strong>
         </p>
         
@@ -169,7 +169,7 @@ export default function SubcontractorsPage() {
 
       {/* How It Works Section */}
       <section className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
-        <h2 className="text-2xl sm:text-3xl font-bold text-center text-black mb-8 sm:mb-12">
+        <h2 className="text-2xl sm:text-3xl font-bold text-center text-black dark:text-white mb-8 sm:mb-12">
           How It Works for Subcontractors
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
@@ -201,15 +201,15 @@ export default function SubcontractorsPage() {
           ].map((step, index) => {
             const Icon = step.icon
             return (
-              <Card key={index} className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group border-2 border-gray-200 bg-white">
+              <Card key={index} className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
                 <CardHeader>
                   <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${step.bgColor} ${step.borderColor} border-2 group-hover:scale-110 transition-transform duration-300`}>
                     <Icon className={`h-8 w-8 ${step.iconColor}`} />
                   </div>
-                  <CardTitle className="text-lg group-hover:text-black transition-colors duration-300">
+                  <CardTitle className="text-lg text-black dark:text-white group-hover:text-black dark:group-hover:text-white transition-colors duration-300">
                     {step.title}
                   </CardTitle>
-                  <CardDescription className="text-sm group-hover:text-gray-700 transition-colors duration-300">
+                  <CardDescription className="text-sm text-gray-600 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors duration-300">
                     {step.description}
                   </CardDescription>
                 </CardHeader>
@@ -220,9 +220,9 @@ export default function SubcontractorsPage() {
       </section>
 
       {/* Benefits Section */}
-      <section className="bg-gray-50 py-8 sm:py-16">
+      <section className="bg-gray-50 dark:bg-black py-8 sm:py-16 transition-colors duration-300">
         <div className="container mx-auto px-4">
-          <h2 className="text-2xl sm:text-3xl font-bold text-center text-black mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-3xl font-bold text-center text-black dark:text-white mb-8 sm:mb-12">
             Why Join Our Network?
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -273,11 +273,11 @@ export default function SubcontractorsPage() {
             const Icon = benefit.icon
             return (
               <div key={index} className="text-center">
-                <div className={`w-16 h-16 ${benefit.bgColor} rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-gray-200`}>
+                <div className={`w-16 h-16 ${benefit.bgColor} dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-gray-200 dark:border-gray-700`}>
                   <Icon className={`h-8 w-8 ${benefit.iconColor}`} />
                 </div>
-                <h3 className="text-xl font-semibold text-black mb-3">{benefit.title}</h3>
-                <p className="text-gray-600 font-medium">{benefit.description}</p>
+                <h3 className="text-xl font-semibold text-black dark:text-white mb-3">{benefit.title}</h3>
+                <p className="text-gray-600 dark:text-gray-300 font-medium">{benefit.description}</p>
               </div>
             )
           })}
@@ -289,20 +289,20 @@ export default function SubcontractorsPage() {
       <section id="signup-form" className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
-            <h2 className="text-2xl sm:text-3xl font-bold text-black mb-4">
+            <h2 className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-4">
               Join Our Network Today - It's Free!
             </h2>
-            <p className="text-lg text-gray-600 font-medium">
+            <p className="text-lg text-gray-600 dark:text-gray-300 font-medium">
               Fill out the form below and start receiving job opportunities in your area. 
               <strong className="bidi-orange-text"> No cost, no fees, no strings attached.</strong>
             </p>
           </div>
 
           {!isSubmitted ? (
-            <Card className="shadow-2xl border-2 border-gray-200 bg-white">
+            <Card className="shadow-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
               <CardHeader>
-                <CardTitle className="text-center">Subcontractor Registration</CardTitle>
-                <CardDescription className="text-center font-medium text-gray-600">
+                <CardTitle className="text-center dark:text-white">Subcontractor Registration</CardTitle>
+                <CardDescription className="text-center font-medium text-gray-600 dark:text-gray-300">
                   Complete your profile to start receiving job notifications
                 </CardDescription>
               </CardHeader>
@@ -392,13 +392,13 @@ export default function SubcontractorsPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="shadow-2xl text-center border-2 border-gray-200 bg-white">
+            <Card className="shadow-2xl text-center border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
               <CardContent className="pt-8">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle className="h-8 w-8 text-green-600" />
                 </div>
-                <h3 className="text-2xl font-bold text-black mb-4">Welcome to Bidi!</h3>
-                <p className="text-lg text-gray-600 mb-6 font-medium">
+                <h3 className="text-2xl font-bold text-black dark:text-white mb-4">Welcome to Bidi!</h3>
+                <p className="text-lg text-gray-600 dark:text-gray-300 mb-6 font-medium">
                   Thank you for joining our free network! You've been successfully added to our database 
                   and will start receiving email notifications for jobs matching your trade ({formData.trade}) 
                   and location ({formData.location}) - at no cost to you.

@@ -14,12 +14,12 @@ export default function DashboardLayout({ children, className }: DashboardLayout
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
       <div className="flex h-screen">
         {/* Mobile Sidebar Overlay */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-40 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
@@ -39,7 +39,7 @@ export default function DashboardLayout({ children, className }: DashboardLayout
           <Button
             variant="ghost"
             size="sm"
-            className="absolute top-4 -right-12 bg-white shadow-lg"
+            className="absolute top-4 -right-12 bg-white dark:bg-gray-950 shadow-lg"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="h-4 w-4" />
@@ -49,7 +49,7 @@ export default function DashboardLayout({ children, className }: DashboardLayout
         {/* Main Content */}
         <main className="flex-1 overflow-auto">
           {/* Mobile Menu Button */}
-          <div className="lg:hidden sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3">
+          <div className="lg:hidden sticky top-0 z-30 bg-white dark:bg-black border-b border-gray-200 dark:border-gray-800 px-4 py-3 transition-colors duration-300">
             <Button
               variant="ghost"
               size="sm"

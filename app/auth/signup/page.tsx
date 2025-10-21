@@ -92,12 +92,12 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white relative">
+    <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300">
       {/* Professional Construction Background */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white dark:from-black dark:to-orange-950/20"></div>
         <div className="absolute top-0 left-0 w-full h-1 bg-orange"></div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 dark:bg-orange/10 rounded-full blur-3xl"></div>
       </div>
 
       <div className="flex items-center justify-center p-4 min-h-screen">
@@ -111,14 +111,14 @@ export default function SignupPage() {
           </Link>
         </div>
         
-        <Card className="w-full max-w-md border-2 border-gray-200 bg-white">
+        <Card className="w-full max-w-md border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
           <CardHeader className="text-center">
             <div className="flex items-center justify-center space-x-2 mb-4">
-              <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />
-              <h1 className="text-2xl font-bold text-black">Bidi</h1>
+              <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8" />
+              <h1 className="text-2xl font-bold text-black dark:text-white">Bidi</h1>
             </div>
-            <CardTitle className="text-xl text-black">Create Your Account</CardTitle>
-            <CardDescription className="font-medium text-gray-600">
+            <CardTitle className="text-xl">Create Your Account</CardTitle>
+            <CardDescription>
               Sign up as a General Contractor to get started
             </CardDescription>
           </CardHeader>
@@ -175,10 +175,10 @@ export default function SignupPage() {
             <div className="mt-4">
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-gray-300" />
+                  <span className="w-full border-t border-gray-300 dark:border-gray-600" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-gray-500">
+                  <span className="bg-white dark:bg-gray-950 px-2 text-gray-500 dark:text-gray-400">
                     Or continue with
                   </span>
                 </div>
@@ -200,7 +200,7 @@ export default function SignupPage() {
               </Button>
             </div>
             <div className="mt-6 text-center">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
                 Already have an account?{' '}
                 <Link href="/auth/login" className="bidi-orange-text hover:underline font-semibold">
                   Sign in

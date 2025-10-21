@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ProfileDropdown from '@/components/profile-dropdown'
 import CreditsDisplay from '@/components/credits-display'
+import ThemeToggle from '@/components/theme-toggle'
 import {
   Home,
   Briefcase,
@@ -48,19 +49,42 @@ interface NavItem {
 export default function DashboardSidebar({ className }: SidebarProps) {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [stats, setStats] = useState({
     activeJobs: 0,
     activePlans: 0,
     pendingBids: 0,
-    unreadNotifications: 0
+    unreadNotifications: 0,
+    pendingAnalyses: 0
   })
 
   const supabase = createClient()
 
   // Load stats
   useEffect(() => {
-    loadStats()
+    checkAdminStatus()
   }, [])
+
+  useEffect(() => {
+    loadStats()
+  }, [isAdmin])
+
+  async function checkAdminStatus() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data } = await supabase
+        .from('users')
+        .select('is_admin')
+        .eq('id', user.id)
+        .single()
+
+      setIsAdmin(data?.is_admin || false)
+    } catch (error) {
+      console.error('Error checking admin status:', error)
+    }
+  }
 
   async function loadStats() {
     try {
@@ -87,11 +111,23 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         .eq('job_requests.gc_id', user.id)
         .is('seen_at', null)
 
+      // Load pending analyses count (for admin)
+      let pendingAnalysesCount = 0
+      if (isAdmin) {
+        const { count } = await supabase
+          .from('plans')
+          .select('*', { count: 'exact', head: true })
+          .or('takeoff_analysis_status.eq.pending,quality_analysis_status.eq.pending')
+        
+        pendingAnalysesCount = count || 0
+      }
+
       setStats({
         activeJobs: jobsCount || 0,
         activePlans: plansCount || 0,
         pendingBids: bidsCount || 0,
-        unreadNotifications: 0 // You can implement this based on your notification system
+        unreadNotifications: 0, // You can implement this based on your notification system
+        pendingAnalyses: pendingAnalysesCount
       })
     } catch (error) {
       console.error('Error loading stats:', error)
@@ -141,6 +177,25 @@ export default function DashboardSidebar({ className }: SidebarProps) {
     }
   ]
 
+  // Admin-only nav items
+  const adminNavItems: NavItem[] = isAdmin ? [
+    {
+      label: 'Admin',
+      href: '/admin/demo-settings',
+      icon: Building2,
+      subItems: [
+        { 
+          label: 'Analyze Plans', 
+          href: '/admin/analyze-plans',
+          badge: stats.pendingAnalyses > 0 ? stats.pendingAnalyses : undefined
+        },
+        { label: 'Crawler', href: '/admin/crawler' },
+        { label: 'Subcontractors', href: '/admin/manage-subcontractors' },
+        { label: 'Workflow Demo', href: '/admin/workflow-demo' }
+      ]
+    }
+  ] : []
+
   function isActiveLink(href: string): boolean {
     // Remove hash from href for comparison
     const cleanHref = href.split('#')[0]
@@ -154,13 +209,13 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   return (
     <div
       className={cn(
-        'flex flex-col h-full bg-white border-r border-gray-200 transition-all duration-300',
+        'flex flex-col h-full bg-white dark:bg-black border-r border-gray-200 dark:border-gray-800 transition-all duration-300',
         isCollapsed ? 'w-20' : 'w-64',
         className
       )}
     >
       {/* Sidebar Header */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center justify-between p-4">
           {!isCollapsed && (
             <Link href="/dashboard" className="flex items-center space-x-2">
@@ -169,7 +224,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
                 alt="Bidi" 
                 className="h-8 w-8"
               />
-              <span className="text-xl font-bold font-bidi">BIDI</span>
+              <span className="text-xl font-bold font-bidi dark:text-white">BIDI</span>
             </Link>
           )}
           {isCollapsed && (
@@ -194,7 +249,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
 
       {/* Quick Actions */}
       {!isCollapsed && (
-        <div className="p-4 border-b border-gray-200">
+        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
           <div className="space-y-2">
             <Link href="/dashboard/plans/new" className="block">
               <Button className="w-full justify-start" size="sm" variant="default">
@@ -209,7 +264,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-4">
         <div className="space-y-1">
-          {navItems.map((item, index) => {
+          {[...navItems, ...adminNavItems].map((item, index) => {
             const Icon = item.icon
             const isActive = isActiveLink(item.href)
             const hasSubItems = item.subItems && item.subItems.length > 0
@@ -221,8 +276,8 @@ export default function DashboardSidebar({ className }: SidebarProps) {
                     className={cn(
                       'flex items-center justify-between px-3 py-2 rounded-lg transition-colors cursor-pointer group',
                       isActive
-                        ? 'bg-orange-50 text-orange-600 font-medium'
-                        : 'text-gray-700 hover:bg-gray-100'
+                        ? 'bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 font-medium'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900'
                     )}
                   >
                     <div className="flex items-center space-x-3 min-w-0">
@@ -256,8 +311,8 @@ export default function DashboardSidebar({ className }: SidebarProps) {
                           className={cn(
                             'px-3 py-1.5 rounded text-sm transition-colors cursor-pointer',
                             pathname === subItem.href
-                              ? 'text-orange-600 font-medium'
-                              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                              ? 'text-orange-600 dark:text-orange-400 font-medium'
+                              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-900'
                           )}
                         >
                           {subItem.label}
@@ -274,18 +329,18 @@ export default function DashboardSidebar({ className }: SidebarProps) {
 
       {/* Stats Summary (when not collapsed) */}
       {!isCollapsed && (
-        <div className="p-4 border-t border-gray-200 bg-gray-50">
+        <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-gray-600">Active Jobs</span>
-              <span className="font-semibold">{stats.activeJobs}</span>
+              <span className="text-gray-600 dark:text-gray-400">Active Jobs</span>
+              <span className="font-semibold dark:text-white">{stats.activeJobs}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-gray-600">Active Plans</span>
-              <span className="font-semibold">{stats.activePlans}</span>
+              <span className="text-gray-600 dark:text-gray-400">Active Plans</span>
+              <span className="font-semibold dark:text-white">{stats.activePlans}</span>
             </div>
             {stats.pendingBids > 0 && (
-              <div className="flex items-center justify-between text-orange-600">
+              <div className="flex items-center justify-between text-orange-600 dark:text-orange-400">
                 <span>Pending Bids</span>
                 <span className="font-semibold">{stats.pendingBids}</span>
               </div>
@@ -294,13 +349,24 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         </div>
       )}
 
-      {/* Collapse Toggle */}
-      <div className="p-4 border-t border-gray-200">
+      {/* Theme Toggle & Collapse */}
+      <div className="p-4 border-t border-gray-200 dark:border-gray-800 space-y-2">
+        {!isCollapsed && (
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Theme</span>
+            <ThemeToggle />
+          </div>
+        )}
+        {isCollapsed && (
+          <div className="flex justify-center mb-2">
+            <ThemeToggle />
+          </div>
+        )}
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-full"
+          className="w-full dark:text-gray-300 dark:hover:text-white"
         >
           {isCollapsed ? (
             <ChevronRight className="h-4 w-4" />

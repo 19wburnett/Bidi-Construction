@@ -74,14 +74,15 @@ export default function NotificationsPage() {
           read,
           dismissed,
           created_at,
-          bids!inner(
+          bid_id,
+          bids:bid_id (
             id,
             job_request_id,
             subcontractor_name,
             bid_amount,
             seen,
             created_at,
-            job_requests!inner(
+            job_requests:job_request_id (
               trade_category
             )
           )
@@ -93,12 +94,18 @@ export default function NotificationsPage() {
 
       if (notificationError && notificationError.code === 'PGRST116') {
         // Notifications table doesn't exist, fall back to bids
+        console.log('Notifications table not found, using bids fallback')
         await fetchNotificationsFromBids(user.id)
         return
       }
 
       if (notificationError) {
-        console.error('Error fetching notifications:', notificationError)
+        console.error('Error fetching notifications:', {
+          message: notificationError.message,
+          details: notificationError.details,
+          hint: notificationError.hint,
+          code: notificationError.code
+        })
         // Fall back to bids if notifications table has issues
         await fetchNotificationsFromBids(user.id)
         return
@@ -289,10 +296,10 @@ export default function NotificationsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-black flex items-center justify-center transition-colors duration-300">
         <div className="text-center">
           <FallingBlocksLoader text="Loading notifications..." size="lg" />
-          <p>Loading notifications...</p>
+          <p className="dark:text-white">Loading notifications...</p>
         </div>
       </div>
     )
@@ -300,13 +307,13 @@ export default function NotificationsPage() {
 
   return (
     <div 
-      className="min-h-screen bg-gray-50 animate-slide-in-right"
+      className="min-h-screen bg-gray-50 dark:bg-black animate-slide-in-right transition-colors duration-300"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
       {/* Header */}
-      <header className="bg-white border-b sticky top-0 z-10">
+      <header className="bg-white dark:bg-black border-b dark:border-gray-800 sticky top-0 z-10 transition-colors duration-300">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <Button
@@ -318,8 +325,8 @@ export default function NotificationsPage() {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div className="flex items-center space-x-2">
-              <Bell className="h-6 w-6 text-blue-600" />
-              <h1 className="text-xl font-semibold">Notifications</h1>
+              <Bell className="h-6 w-6 text-orange" />
+              <h1 className="text-xl font-semibold dark:text-white">Notifications</h1>
               {unreadCount > 0 && (
                 <Badge variant="destructive" className="ml-2">
                   {unreadCount}
@@ -330,7 +337,7 @@ export default function NotificationsPage() {
         </div>
         {/* Swipe indicator for mobile */}
         <div className="sm:hidden flex justify-center pb-2">
-          <div className="w-8 h-1 bg-gray-300 rounded-full"></div>
+          <div className="w-8 h-1 bg-gray-300 dark:bg-gray-700 rounded-full"></div>
         </div>
       </header>
 
@@ -340,8 +347,8 @@ export default function NotificationsPage() {
           <Card>
             <CardContent className="text-center py-12">
               <Bell className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No notifications</h3>
-              <p className="text-gray-500">You'll see new bid notifications here when they come in.</p>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No notifications</h3>
+              <p className="text-gray-500 dark:text-gray-400">You'll see new bid notifications here when they come in.</p>
             </CardContent>
           </Card>
         ) : (
@@ -350,7 +357,7 @@ export default function NotificationsPage() {
               <Card
                 key={notification.id}
                 className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
-                  !notification.read ? 'bg-blue-50 border-blue-200' : !notification.seen ? 'bg-yellow-50 border-yellow-200' : ''
+                  !notification.read ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-900' : !notification.seen ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-900' : ''
                 }`}
                 onClick={() => {
                   // Mark as read when clicked
@@ -362,18 +369,18 @@ export default function NotificationsPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
-                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                        <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">
                           New bid on {notification.job_title}
                         </h3>
                         {!notification.read ? (
-                          <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" title="Unread notification"></div>
+                          <div className="w-2 h-2 bg-orange rounded-full flex-shrink-0" title="Unread notification"></div>
                         ) : !notification.seen ? (
-                          <div className="w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Unseen bid"></div>
+                          <div className="w-2 h-2 bg-yellow-500 dark:bg-yellow-400 rounded-full flex-shrink-0" title="Unseen bid"></div>
                         ) : null}
                       </div>
                       
                       <div className="space-y-1">
-                        <p className="text-sm text-gray-600 truncate">
+                        <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
                           {notification.subcontractor_name}
                         </p>
                         {notification.bid_amount && (
@@ -385,7 +392,7 @@ export default function NotificationsPage() {
                     </div>
                     
                     <div className="flex items-center space-x-2 ml-3">
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
                         {formatTimeAgo(notification.created_at)}
                       </span>
                       <Button

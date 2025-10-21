@@ -43,9 +43,13 @@ import {
   Package,
   Lightbulb,
   MapPin,
-  User
+  User,
+  ArrowLeftRight,
+  Maximize2,
+  Minimize2
 } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import TakeoffAccordion, { BoundingBox } from '@/components/takeoff-accordion'
 
 // Dynamically import react-pdf to avoid SSR issues
 const Document = dynamic(
@@ -76,6 +80,10 @@ interface Plan {
   num_pages: number
   project_name: string | null
   project_location: string | null
+  takeoff_analysis_status?: string | null
+  takeoff_requested_at?: string | null
+  quality_analysis_status?: string | null
+  quality_requested_at?: string | null
 }
 
 interface Drawing {
@@ -114,6 +122,9 @@ interface Drawing {
     confidence_score: number
   }
   page_number?: number
+  analysis_item_id?: string
+  analysis_type?: string
+  is_locked?: boolean
 }
 
 type DrawingTool = 'select' | 'line' | 'rectangle' | 'circle' | 'measurement' | 'note'
@@ -192,6 +203,7 @@ export default function PlanEditorPage() {
   const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null)
   const [pdfJsReady, setPdfJsReady] = useState(false)
   const [documentReady, setDocumentReady] = useState(false)
+  const [pdfError, setPdfError] = useState(false)
 
   // Analysis state
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('takeoff')
@@ -199,6 +211,11 @@ export default function PlanEditorPage() {
   const [takeoffResults, setTakeoffResults] = useState<any>(null)
   const [qualityResults, setQualityResults] = useState<any>(null)
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [sidebarWidth, setSidebarWidth] = useState<'normal' | 'wide' | 'full'>('normal')
+  
+  // Highlight state for click-to-highlight functionality
+  const [highlightedBox, setHighlightedBox] = useState<BoundingBox | null>(null)
+  const highlightTimeoutRef = useRef<NodeJS.Timeout>()
   
   // Zoom feedback state
   const [showZoomIndicator, setShowZoomIndicator] = useState(false)
@@ -243,8 +260,8 @@ export default function PlanEditorPage() {
         
         // Wait longer to ensure worker is fully initialized
         // This prevents "messageHandler is null" errors
-        // Increased to 2 seconds for maximum reliability
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        // Increased to 3 seconds for maximum reliability
+        await new Promise(resolve => setTimeout(resolve, 3000))
         
         // Mark as ready
         setPdfJsReady(true)
@@ -282,13 +299,8 @@ export default function PlanEditorPage() {
       // Add additional delay before loading plan to ensure worker is ready
       const timer = setTimeout(async () => {
         await loadPlan()
-        
-        // Wait additional time after plan loads before allowing Document to render
-        // Increased to 1000ms for maximum reliability
-        setTimeout(() => {
-          setDocumentReady(true)
-        }, 1000)
-      }, 200)
+        // Document ready will be set by onDocumentLoadSuccess callback
+      }, 500)
       return () => clearTimeout(timer)
     }
   }, [user, planId, pdfJsReady])
@@ -414,13 +426,44 @@ export default function PlanEditorPage() {
         setQualityResults(qualityData)
       }
 
+      // Load analysis markers (from admin analysis)
+      const { data: analysisMarkers } = await supabase
+        .from('plan_drawings')
+        .select('*')
+        .eq('plan_id', planId)
+        .not('analysis_item_id', 'is', null)
+
+      if (analysisMarkers && analysisMarkers.length > 0) {
+        // Add analysis markers to drawings (as read-only/locked)
+        const formattedMarkers = analysisMarkers.map((m: any) => ({
+          id: m.id,
+          type: m.drawing_type,
+          geometry: m.geometry,
+          style: m.style,
+          page_number: m.page_number,
+          analysis_item_id: m.analysis_item_id,
+          analysis_type: m.analysis_type,
+          is_locked: true // Mark as read-only
+        }))
+        
+        setDrawings(prev => {
+          // Merge with existing user drawings, avoid duplicates
+          const existingIds = new Set(prev.map(d => d.id))
+          const newMarkers = formattedMarkers.filter(m => !existingIds.has(m.id))
+          return [...prev, ...newMarkers]
+        })
+      }
+
     } catch (error) {
       console.error('Error loading analyses:', error)
     }
   }
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    console.log('📄 PDF Document loaded successfully with', numPages, 'pages')
     setNumPages(numPages)
+    // Set document ready to true now that the PDF is actually loaded
+    setDocumentReady(true)
   }
 
   // Redraw all drawings on all canvases using transform matrix
@@ -477,6 +520,36 @@ export default function PlanEditorPage() {
         // Keep line width consistent regardless of zoom
         ctx.lineWidth = drawing.style.strokeWidth / zoom
         ctx.globalAlpha = drawing.style.opacity
+
+        // Draw analysis markers (circular pins with numbers)
+        if (drawing.analysis_item_id && drawing.type === 'note') {
+          const markerRadius = 15 / zoom
+          
+          // Draw circle
+          ctx.beginPath()
+          ctx.arc(x1, y1, markerRadius, 0, 2 * Math.PI)
+          ctx.fillStyle = drawing.style.color
+          ctx.fill()
+          ctx.strokeStyle = '#ffffff'
+          ctx.lineWidth = 2 / zoom
+          ctx.stroke()
+          
+          // Draw number label
+          const sameTypeMarkers = drawings.filter(d => 
+            d.analysis_type === drawing.analysis_type &&
+            d.analysis_item_id &&
+            (d.page_number || 1) <= pageNum
+          )
+          const markerIndex = sameTypeMarkers.indexOf(drawing) + 1
+          
+          ctx.fillStyle = '#ffffff'
+          ctx.font = `bold ${12 / zoom}px Arial`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(markerIndex.toString(), x1, y1)
+          
+          return // Don't draw other shapes for markers
+        }
 
         if (drawing.type === 'line' || drawing.type === 'measurement') {
           ctx.beginPath()
@@ -603,6 +676,70 @@ export default function PlanEditorPage() {
       ctx.restore()
     })
   }, [drawings, currentDrawing, zoom, viewport, activeTool, scale])
+
+  // Handle item highlight - scrolls to page and sets highlighted box
+  const handleItemHighlight = useCallback((bbox: BoundingBox) => {
+    setHighlightedBox(bbox)
+    
+    // Scroll to the page containing this item
+    const pageElement = document.querySelector(`[data-page-number="${bbox.page}"]`)
+    if (pageElement) {
+      pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    
+    // Clear highlight after 5 seconds
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current)
+    }
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedBox(null)
+    }, 5000)
+  }, [])
+
+  // Draw highlight overlay when an item is clicked
+  useEffect(() => {
+    if (!highlightedBox) return
+    
+    const canvas = canvasRefs.current.get(highlightedBox.page)
+    if (!canvas) return
+    
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    
+    // Redraw base canvas first to clear any previous highlights
+    redrawCanvas()
+    
+    // Get the PDF page element to calculate proper coordinates
+    const pdfPageElement = canvas.parentElement
+    if (!pdfPageElement) return
+    
+    const rect = pdfPageElement.getBoundingClientRect()
+    
+    // Convert normalized coordinates (0-1) to actual canvas pixels
+    // The bounding box coordinates are normalized to the page size
+    const x = highlightedBox.x * rect.width
+    const y = highlightedBox.y * rect.height
+    const w = highlightedBox.width * rect.width
+    const h = highlightedBox.height * rect.height
+    
+    // Draw pulsing highlight box
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0) // Reset transform to screen space
+    
+    // Draw stroke
+    ctx.strokeStyle = '#3b82f6'
+    ctx.lineWidth = 4
+    ctx.setLineDash([8, 4])
+    ctx.shadowColor = '#3b82f6'
+    ctx.shadowBlur = 15
+    ctx.strokeRect(x, y, w, h)
+    
+    // Fill with semi-transparent blue
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.15)'
+    ctx.fillRect(x, y, w, h)
+    
+    ctx.restore()
+  }, [highlightedBox, redrawCanvas])
 
   // Update canvas sizes when PDF pages size changes
   useEffect(() => {
@@ -1087,54 +1224,98 @@ export default function PlanEditorPage() {
     setAnalysisMode('takeoff')
 
     try {
-      // Convert PDF pages to images for Vision API
-      const images = await convertPdfPagesToImages()
+      const supabase = createClient()
+      
+      // Mark the plan as pending takeoff analysis
+      await supabase
+        .from('plans')
+        .update({ 
+          takeoff_analysis_status: 'pending',
+          takeoff_requested_at: new Date().toISOString()
+        })
+        .eq('id', planId)
 
+      // Show pending status immediately
+      setTakeoffResults({
+        status: 'pending',
+        message: 'Converting PDF to images for analysis...',
+        requested_at: new Date().toISOString()
+      })
+
+      // Convert PDF pages to images
+      const images = await convertPdfPagesToImages()
+      
       if (images.length === 0) {
-        throw new Error('No pages could be converted to images. Please wait for the PDF to fully load.')
+        throw new Error('Failed to convert PDF to images')
       }
 
-      // Call AI endpoint for takeoff analysis
-      const response = await fetch('/api/plan/analyze-takeoff', {
+      // Update status
+      setTakeoffResults({
+        status: 'pending',
+        message: `Analyzing ${images.length} page${images.length > 1 ? 's' : ''} with AI...`,
+        requested_at: new Date().toISOString()
+      })
+
+      // Call the multi-provider API to perform the analysis
+      const response = await fetch('/api/plan/analyze-multi-takeoff', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          planId,
-          images, // Send images instead of planUrl
-          drawings: drawings.filter(d => d.type === 'measurement')
+          planId: planId,
+          images: images,
+          drawings: drawings // Include any user annotations
         })
       })
 
-      const data = await response.json()
-      
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to analyze plan')
-      }
-      
-      // Check if AI analysis failed (returned with error field)
-      if (data.error === 'AI_ANALYSIS_FAILED') {
-        // Still show results but with error message
-        setTakeoffResults({
-          ...data,
-          _showError: true // Flag to show special error message in UI
-        })
-        alert(`Analysis Issue: ${data.message}\n\nPlease try:\n• Using a higher resolution image\n• Ensuring the plan has clear dimensions and labels\n• Uploading a different page with more detail`)
-      } else {
-        setTakeoffResults(data)
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Analysis failed')
       }
 
-      // Update plan record only if we got actual results
-      if (data.items && data.items.length > 0) {
-        const supabase = createClient()
-        await supabase
-          .from('plans')
-          .update({ has_takeoff_analysis: true })
-          .eq('id', planId)
-      }
+      const data = await response.json()
+
+      // Update plan status to completed
+      await supabase
+        .from('plans')
+        .update({ 
+          takeoff_analysis_status: 'completed',
+          has_takeoff_analysis: true
+        })
+        .eq('id', planId)
+
+      // Show results
+      setTakeoffResults({
+        status: 'completed',
+        message: 'Analysis complete!',
+        items: data.items || [],
+        summary: data.summary || {},
+        analysisId: data.analysisId,
+        completed_at: new Date().toISOString()
+      })
+
+      alert('✅ Takeoff Analysis Complete!\n\nYour plan has been successfully analyzed. View the results in the sidebar.')
 
     } catch (error) {
-      console.error('Error running takeoff analysis:', error)
-      alert(error instanceof Error ? error.message : 'Failed to run takeoff analysis')
+      console.error('Error requesting takeoff analysis:', error)
+      
+      // Mark as failed in database
+      const supabase = createClient()
+      await supabase
+        .from('plans')
+        .update({ 
+          takeoff_analysis_status: 'failed'
+        })
+        .eq('id', planId)
+
+      setTakeoffResults({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Analysis failed',
+        requested_at: new Date().toISOString()
+      })
+
+      alert('❌ Analysis Failed\n\n' + (error instanceof Error ? error.message : 'Failed to analyze plan. Please try again.'))
     } finally {
       setIsAnalyzing(false)
     }
@@ -1145,53 +1326,113 @@ export default function PlanEditorPage() {
     setAnalysisMode('quality')
 
     try {
-      // Convert PDF pages to images for Vision API
-      const images = await convertPdfPagesToImages()
+      const supabase = createClient()
+      
+      // Mark the plan as pending quality analysis
+      await supabase
+        .from('plans')
+        .update({ 
+          quality_analysis_status: 'pending',
+          quality_requested_at: new Date().toISOString()
+        })
+        .eq('id', planId)
 
+      // Show pending status immediately
+      setQualityResults({
+        status: 'pending',
+        message: 'Converting PDF to images for analysis...',
+        requested_at: new Date().toISOString()
+      })
+
+      // Convert PDF pages to images
+      const images = await convertPdfPagesToImages()
+      
       if (images.length === 0) {
-        throw new Error('No pages could be converted to images. Please wait for the PDF to fully load.')
+        throw new Error('Failed to convert PDF to images')
       }
 
-      // Call AI endpoint for quality analysis
-      const response = await fetch('/api/plan/analyze-quality', {
+      // Update status
+      setQualityResults({
+        status: 'pending',
+        message: `Analyzing ${images.length} page${images.length > 1 ? 's' : ''} with AI...`,
+        requested_at: new Date().toISOString()
+      })
+
+      // Call the multi-provider API to perform the analysis
+      const response = await fetch('/api/plan/analyze-multi-quality', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          planId,
-          images
+          planId: planId,
+          images: images
         })
       })
 
-      const data = await response.json()
-      
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to analyze plan quality')
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Analysis failed')
       }
-      
-      setQualityResults(data)
 
-      // Update plan record
+      const data = await response.json()
+
+      // Update plan status to completed
+      await supabase
+        .from('plans')
+        .update({ 
+          quality_analysis_status: 'completed',
+          has_quality_analysis: true
+        })
+        .eq('id', planId)
+
+      // Show results
+      setQualityResults({
+        status: 'completed',
+        message: 'Analysis complete!',
+        overall_score: data.overall_score,
+        issues: data.issues || [],
+        missing_details: data.missing_details || [],
+        recommendations: data.recommendations || [],
+        findings_by_category: data.findings_by_category || {},
+        findings_by_severity: data.findings_by_severity || {},
+        analysisId: data.analysisId,
+        completed_at: new Date().toISOString()
+      })
+
+      alert('✅ Quality Analysis Complete!\n\nYour plan has been successfully analyzed. View the results in the sidebar.')
+
+    } catch (error) {
+      console.error('Error requesting quality analysis:', error)
+      
+      // Mark as failed in database
       const supabase = createClient()
       await supabase
         .from('plans')
-        .update({ has_quality_analysis: true })
+        .update({ 
+          quality_analysis_status: 'failed'
+        })
         .eq('id', planId)
 
-    } catch (error) {
-      console.error('Error running quality analysis:', error)
-      alert(error instanceof Error ? error.message : 'Failed to run quality analysis')
+      setQualityResults({
+        status: 'failed',
+        message: error instanceof Error ? error.message : 'Analysis failed',
+        requested_at: new Date().toISOString()
+      })
+
+      alert('❌ Analysis Failed\n\n' + (error instanceof Error ? error.message : 'Failed to analyze plan. Please try again.'))
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-  if (loading || !pdfJsReady || !documentReady) {
+  if (loading || !pdfJsReady) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <FallingBlocksLoader />
           <p className="text-sm text-gray-600 mt-4">
-            {!pdfJsReady ? 'Initializing PDF viewer...' : !documentReady ? 'Preparing document...' : 'Loading plan...'}
+            {!pdfJsReady ? 'Initializing PDF viewer...' : 'Loading plan...'}
           </p>
         </div>
       </div>
@@ -1204,11 +1445,11 @@ export default function PlanEditorPage() {
 
   return (
     <div 
-      className="fixed inset-0 flex flex-col bg-gray-100"
+      className="fixed inset-0 flex flex-col bg-gray-100 dark:bg-gray-900 transition-colors duration-300"
       style={{ touchAction: 'pan-y pan-x' }} // Prevent browser pinch-zoom globally on this page
     >
       {/* Top Toolbar */}
-      <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm z-10">
+      <div className="bg-white dark:bg-black border-b dark:border-gray-800 px-4 py-3 flex items-center justify-between shadow-sm z-10 transition-colors duration-300">
         <div className="flex items-center space-x-4">
           <Button
             variant="ghost"
@@ -1219,17 +1460,17 @@ export default function PlanEditorPage() {
             Back
           </Button>
           <div>
-            <h2 className="font-semibold text-lg">{plan.title || plan.file_name}</h2>
-            <p className="text-xs text-gray-500">
+            <h2 className="font-semibold text-lg dark:text-white">{plan.title || plan.file_name}</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               {numPages ? `${numPages} page${numPages !== 1 ? 's' : ''}` : 'Loading...'}
             </p>
           </div>
           
           {/* Active Tool Indicator */}
           {activeTool !== 'select' && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-200 rounded-md">
+            <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-700 rounded-md">
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-              <span className="text-xs font-medium text-blue-700 capitalize">
+              <span className="text-xs font-medium text-blue-700 dark:text-blue-400 capitalize">
                 {activeTool} mode active - Click on the PDF to draw
               </span>
             </div>
@@ -1250,7 +1491,7 @@ export default function PlanEditorPage() {
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-medium min-w-[60px] text-center">
+          <span className="text-sm font-medium min-w-[60px] text-center dark:text-white">
             {Math.round(zoom * 100)}%
           </span>
           <Button
@@ -1270,7 +1511,7 @@ export default function PlanEditorPage() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar */}
-        <div className="bg-white border-r p-2 flex flex-col space-y-2 w-16">
+        <div className="bg-white dark:bg-black border-r dark:border-gray-800 p-2 flex flex-col space-y-2 w-16 transition-colors duration-300">
           <Button
             variant={activeTool === 'select' ? 'default' : 'ghost'}
             size="sm"
@@ -1332,7 +1573,7 @@ export default function PlanEditorPage() {
 
         {/* Main Canvas Area */}
         <div 
-          className="flex-1 overflow-auto p-4 bg-gray-100 relative" 
+          className="flex-1 overflow-auto p-4 bg-gray-100 dark:bg-gray-900 relative" 
           ref={containerRef}
           style={{ 
             cursor: activeTool === 'select' ? (isPanning ? 'grabbing' : 'grab') : 'crosshair',
@@ -1341,10 +1582,10 @@ export default function PlanEditorPage() {
           }}
         >
           {/* Active Tool Indicator */}
-          <div className="absolute top-6 left-6 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3">
+          <div className="absolute top-6 left-6 z-10 bg-white dark:bg-gray-800 rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3">
             <div className="flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${activeTool === 'select' ? 'bg-gray-500' : 'bg-blue-500 animate-pulse'}`} />
-              <span className="text-sm font-medium">
+              <span className="text-sm font-medium dark:text-white">
                 {activeTool === 'select' && 'Select / Pan'}
                 {activeTool === 'line' && 'Drawing Line'}
                 {activeTool === 'rectangle' && 'Drawing Rectangle'}
@@ -1353,13 +1594,13 @@ export default function PlanEditorPage() {
               </span>
             </div>
             {activeTool === 'note' && (
-              <span className="text-xs text-gray-500">Click to place note</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Click to place note</span>
             )}
             {activeTool !== 'select' && activeTool !== 'note' && (
-              <span className="text-xs text-gray-500">Click and drag to draw</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Click and drag to draw</span>
             )}
             {activeTool === 'select' && (
-              <span className="text-xs text-gray-500">Drag to pan</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Drag to pan</span>
             )}
           </div>
 
@@ -1375,8 +1616,8 @@ export default function PlanEditorPage() {
 
           {/* Drawings Counter & Clear */}
           {drawings.length > 0 && (
-            <div className="absolute top-6 right-6 z-10 bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3">
-              <span className="text-sm">
+            <div className="absolute top-6 right-6 z-10 bg-white dark:bg-gray-800 rounded-lg shadow-lg px-4 py-2 flex items-center space-x-3">
+              <span className="text-sm dark:text-white">
                 {drawings.length} drawing{drawings.length !== 1 ? 's' : ''}
               </span>
               <Button
@@ -1392,7 +1633,7 @@ export default function PlanEditorPage() {
                       .eq('plan_id', planId)
                   }
                 }}
-                className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                className="h-6 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
@@ -1404,7 +1645,7 @@ export default function PlanEditorPage() {
               <div className="flex items-center justify-center p-12">
                 <div className="text-center">
                   <FallingBlocksLoader />
-                  <p className="text-sm text-gray-600 mt-4">Initializing PDF viewer...</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Initializing PDF viewer...</p>
                 </div>
               </div>
             ) : planUrl ? (
@@ -1413,7 +1654,22 @@ export default function PlanEditorPage() {
                 onLoadSuccess={onDocumentLoadSuccess}
                 onLoadError={(error: Error) => {
                   console.error('PDF load error:', error)
-                  alert('Failed to load PDF. Please try refreshing the page.')
+                  setPdfError(true)
+                  
+                  // If it's a worker error, try to reinitialize
+                  if (error.message && error.message.includes('messageHandler')) {
+                    console.log('Worker error detected, attempting recovery...')
+                    setTimeout(() => {
+                      setPdfError(false)
+                      setDocumentReady(false)
+                      setPdfJsReady(false)
+                      
+                      // Reinitialize after a delay
+                      setTimeout(() => {
+                        window.location.reload()
+                      }, 1000)
+                    }, 500)
+                  }
                 }}
                 loading={
                   <div className="flex items-center justify-center p-12">
@@ -1422,20 +1678,24 @@ export default function PlanEditorPage() {
                 }
                 error={
                   <div className="flex items-center justify-center p-12">
-                    <div className="text-center text-red-600">
+                    <div className="text-center text-red-600 dark:text-red-400">
                       <AlertTriangle className="h-12 w-12 mx-auto mb-4" />
                       <p className="font-medium">Failed to load PDF</p>
-                      <p className="text-sm mt-2">Please try refreshing the page</p>
+                      <p className="text-sm mt-2">
+                        {pdfError && 'Attempting to recover...'}
+                        {!pdfError && 'Please try refreshing the page'}
+                      </p>
                     </div>
                   </div>
                 }
               >
-                {/* Render all pages */}
+                {/* Render all pages - only after document is fully loaded */}
                 <div className="space-y-6">
-                  {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
-                    <div key={`page-${pageNum}`} className="relative bg-white shadow-lg">
+                  {documentReady && numPages ? (
+                    Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+                    <div key={`page-${pageNum}`} className="relative bg-white dark:bg-gray-800 shadow-lg">
                       {/* Page number indicator */}
-                      <div className="absolute -top-8 left-0 text-sm text-gray-500 font-medium">
+                      <div className="absolute -top-8 left-0 text-sm text-gray-500 dark:text-gray-400 font-medium">
                         Page {pageNum} of {numPages}
                       </div>
                       
@@ -1463,14 +1723,14 @@ export default function PlanEditorPage() {
                           }}
                           loading={
                             <div className="flex items-center justify-center" style={{ width: 800 * zoom, height: 1000 * zoom }}>
-                              <p className="text-gray-400 text-sm">Loading page {pageNum}...</p>
+                              <p className="text-gray-400 dark:text-gray-500 text-sm">Loading page {pageNum}...</p>
                             </div>
                           }
                           error={(error: Error) => {
                             console.error(`Error loading page ${pageNum}:`, error)
                             return (
                               <div className="flex items-center justify-center" style={{ width: 800 * zoom, height: 1000 * zoom }}>
-                                <div className="text-center text-orange-600">
+                                <div className="text-center text-orange-600 dark:text-orange-400">
                                   <AlertTriangle className="h-8 w-8 mx-auto mb-2" />
                                   <p className="text-sm">Page {pageNum} temporarily unavailable</p>
                                   <p className="text-xs mt-1">Scroll past and come back</p>
@@ -1555,7 +1815,7 @@ export default function PlanEditorPage() {
                                   {/* Hover/Selected Tooltip */}
                                   {(selectedNoteId === note.id) && (
                                     <div 
-                                      className={`absolute left-10 top-0 min-w-[250px] max-w-[350px] bg-white rounded-lg shadow-xl border-l-4 ${config.borderColor} p-3 z-30`}
+                                      className={`absolute left-10 top-0 min-w-[250px] max-w-[350px] bg-white dark:bg-gray-800 rounded-lg shadow-xl border-l-4 ${config.borderColor} p-3 z-30`}
                                       onClick={(e) => e.stopPropagation()}
                                     >
                                       {/* Note Header */}
@@ -1580,7 +1840,7 @@ export default function PlanEditorPage() {
                                       </div>
 
                                       {/* Note Content */}
-                                      <p className="text-sm text-gray-800 leading-relaxed mb-2">
+                                      <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed mb-2">
                                         {note.note_data!.content}
                                       </p>
 
@@ -1602,12 +1862,12 @@ export default function PlanEditorPage() {
                                       )}
 
                                       {/* Footer */}
-                                      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                                        <div className="flex items-center text-xs text-gray-600">
+                                      <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
+                                        <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
                                           <User className="h-3 w-3 mr-1" />
                                           <span>You</span>
                                         </div>
-                                        <div className="text-xs text-gray-500">
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">
                                           {Math.round(note.note_data!.confidence_score * 100)}%
                                         </div>
                                       </div>
@@ -1619,7 +1879,15 @@ export default function PlanEditorPage() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                  ))
+                ) : (
+                  <div className="flex items-center justify-center p-12">
+                    <div className="text-center">
+                      <FallingBlocksLoader />
+                      <p className="text-sm text-gray-600 mt-4">Loading PDF pages...</p>
+                    </div>
+                  </div>
+                )}
                 </div>
               </Document>
             ) : null}
@@ -1628,7 +1896,13 @@ export default function PlanEditorPage() {
 
         {/* Right Analysis Sidebar */}
         {sidebarVisible ? (
-          <div className="bg-white border-l w-96 flex flex-col overflow-hidden relative">
+          <div 
+            className={`bg-white dark:bg-black border-l dark:border-gray-800 flex flex-col overflow-hidden relative transition-all duration-300 ${
+              sidebarWidth === 'full' ? 'w-4/5' :
+              sidebarWidth === 'wide' ? 'w-[700px]' :
+              'w-96'
+            }`}
+          >
             {/* Close Sidebar Button */}
             <Button
               variant="ghost"
@@ -1640,8 +1914,31 @@ export default function PlanEditorPage() {
               <ChevronRight className="h-4 w-4" />
             </Button>
 
+            {/* Sidebar Width Toggle Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSidebarWidth(prev => 
+                  prev === 'normal' ? 'wide' : 
+                  prev === 'wide' ? 'full' : 
+                  'normal'
+                )
+              }}
+              className="absolute top-2 right-12 z-10 h-8 w-8 p-0"
+              title={`Sidebar: ${sidebarWidth} (click to ${sidebarWidth === 'normal' ? 'expand' : sidebarWidth === 'wide' ? 'maximize' : 'reset'})`}
+            >
+              {sidebarWidth === 'normal' ? (
+                <ArrowLeftRight className="h-4 w-4" />
+              ) : sidebarWidth === 'wide' ? (
+                <Maximize2 className="h-4 w-4" />
+              ) : (
+                <Minimize2 className="h-4 w-4" />
+              )}
+            </Button>
+
             {/* Analysis Mode Tabs */}
-            <div className="border-b p-4 pr-12">
+            <div className="border-b dark:border-gray-800 p-4 pr-24">
               <div className="grid grid-cols-3 gap-2">
                 <Button
                   variant={analysisMode === 'takeoff' ? 'default' : 'outline'}
@@ -1697,6 +1994,42 @@ export default function PlanEditorPage() {
 
                 {takeoffResults ? (
                   <div className="space-y-3">
+                    {/* Pending Status Message */}
+                    {takeoffResults.status === 'pending' && (
+                      <Card className="border-blue-200 bg-blue-50">
+                        <CardContent className="p-6">
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                                <Clock className="h-6 w-6 text-white animate-pulse" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-blue-900 mb-2 text-lg">AI Analysis In Progress</h4>
+                              <p className="text-blue-800 mb-3">
+                                Your takeoff analysis has been queued for processing. Our AI system is analyzing your plans to provide detailed quantity takeoffs and measurements.
+                              </p>
+                              <div className="bg-white rounded-lg p-4 border border-blue-200 mb-3">
+                                <div className="flex items-center gap-2 text-sm text-blue-900 mb-2">
+                                  <Clock className="h-4 w-4" />
+                                  <span className="font-medium">Requested:</span>
+                                  <span>{new Date(takeoffResults.requested_at).toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-blue-900">
+                                  <span className="font-medium">⏱️ Expected completion:</span>
+                                  <span>1-2 hours</span>
+                                </div>
+                              </div>
+                              <div className="flex items-start gap-2 text-sm text-blue-700">
+                                <span>📧</span>
+                                <p>You will receive an email notification at <strong>{user?.email}</strong> when the analysis is complete.</p>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
                     {/* Error Message (if AI couldn't analyze) */}
                     {takeoffResults._showError && (
                       <Card className="border-orange-200 bg-orange-50">
@@ -1732,7 +2065,7 @@ export default function PlanEditorPage() {
                     )}
                     
                     {/* Summary Card */}
-                    {takeoffResults.summary && (
+                    {takeoffResults.status !== 'pending' && takeoffResults.summary && (
                       <Card>
                         <CardContent className="p-4">
                           <h4 className="font-medium mb-3">Summary</h4>
@@ -1805,74 +2138,14 @@ export default function PlanEditorPage() {
                       </Card>
                     )}
 
-                    {/* Items Breakdown */}
-                    {takeoffResults.items && takeoffResults.items.length > 0 ? (
-                      <Card>
-                        <CardContent className="p-4">
-                          <h4 className="font-medium mb-3">Items ({takeoffResults.items.length})</h4>
-                          <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                            {takeoffResults.items.map((item: any, index: number) => (
-                              <div 
-                                key={index} 
-                                className="border rounded-lg p-3 hover:bg-gray-50 transition-colors"
-                              >
-                                <div className="flex items-start justify-between mb-2">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <p className="font-medium text-sm">
-                                        {item.name || item.description || `Item ${index + 1}`}
-                                      </p>
-                                      {item.category && (
-                                        <Badge 
-                                          variant="outline" 
-                                          className="text-xs capitalize"
-                                        >
-                                          {item.category}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    {item.description && item.name !== item.description && (
-                                      <p className="text-xs text-gray-600 mt-1">
-                                        {item.description}
-                                      </p>
-                                    )}
-                                    {item.dimensions && (
-                                      <p className="text-xs text-blue-600 mt-1">
-                                        📐 {item.dimensions}
-                                      </p>
-                                    )}
-                                    {item.location && (
-                                      <p className="text-xs text-gray-500 mt-1">
-                                        📍 {item.location}
-                                      </p>
-                                    )}
-                                  </div>
-                                  {item.cost && (
-                                    <Badge variant="outline" className="ml-2">
-                                      ${typeof item.cost === 'number' ? item.cost.toFixed(2) : item.cost}
-                                    </Badge>
-                                  )}
-                                </div>
-                                
-                                <div className="flex items-center justify-between text-sm mt-2">
-                                  <span className="text-gray-600">
-                                    <span className="font-medium text-gray-900">
-                                      {item.quantity} {item.unit || 'units'}
-                                    </span>
-                                  </span>
-                                </div>
-
-                                {item.notes && (
-                                  <p className="text-xs text-gray-500 mt-2 p-2 bg-gray-50 rounded italic">
-                                    💡 {item.notes}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ) : (
+                    {/* Items Breakdown - 3-Level Accordion */}
+                    {takeoffResults.status !== 'pending' && takeoffResults.items && takeoffResults.items.length > 0 ? (
+                      <TakeoffAccordion 
+                        items={takeoffResults.items}
+                        summary={takeoffResults.summary}
+                        onItemHighlight={handleItemHighlight}
+                      />
+                    ) : takeoffResults.status !== 'pending' ? (
                       <Card>
                         <CardContent className="p-4">
                           <p className="text-sm text-gray-600 text-center">
@@ -1882,10 +2155,10 @@ export default function PlanEditorPage() {
                           </p>
                         </CardContent>
                       </Card>
-                    )}
+                    ) : null}
 
                     {/* Raw Response (if available and items parsing failed) */}
-                    {takeoffResults.raw_response && (!takeoffResults.items || takeoffResults.items.length === 0) && (
+                    {takeoffResults.status !== 'pending' && takeoffResults.raw_response && (!takeoffResults.items || takeoffResults.items.length === 0) && (
                       <Card>
                         <CardContent className="p-4">
                           <h4 className="font-medium mb-2">AI Response</h4>
@@ -1931,7 +2204,44 @@ export default function PlanEditorPage() {
 
                 {qualityResults ? (
                   <div className="space-y-3">
+                    {/* Pending Status Message */}
+                    {qualityResults.status === 'pending' && (
+                      <Card className="border-green-200 bg-green-50">
+                        <CardContent className="p-6">
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+                                <Clock className="h-6 w-6 text-white animate-pulse" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-green-900 mb-2 text-lg">AI Quality Check In Progress</h4>
+                              <p className="text-green-800 mb-3">
+                                Your quality analysis has been queued for review. Our AI system is inspecting your plans for completeness, compliance, and potential quality issues.
+                              </p>
+                              <div className="bg-white rounded-lg p-4 border border-green-200 mb-3">
+                                <div className="flex items-center gap-2 text-sm text-green-900 mb-2">
+                                  <Clock className="h-4 w-4" />
+                                  <span className="font-medium">Requested:</span>
+                                  <span>{new Date(qualityResults.requested_at).toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-green-900">
+                                  <span className="font-medium">⏱️ Expected completion:</span>
+                                  <span>1-2 hours</span>
+                                </div>
+                              </div>
+                              <div className="flex items-start gap-2 text-sm text-green-700">
+                                <span>📧</span>
+                                <p>You will receive an email notification at <strong>{user?.email}</strong> when the review is complete.</p>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
                     {/* Overall Score Card */}
+                    {qualityResults.status !== 'pending' && (
                     <Card>
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between mb-2">
@@ -1955,8 +2265,10 @@ export default function PlanEditorPage() {
                       </CardContent>
                     </Card>
 
+                    )}
+
                     {/* Issues Breakdown */}
-                    {qualityResults.issues && qualityResults.issues.length > 0 ? (
+                    {qualityResults.status !== 'pending' && qualityResults.issues && qualityResults.issues.length > 0 ? (
                       <Card>
                         <CardContent className="p-4">
                           <h4 className="font-medium mb-3">Issues ({qualityResults.issues.length})</h4>
@@ -2025,7 +2337,7 @@ export default function PlanEditorPage() {
                     ) : null}
 
                     {/* Recommendations */}
-                    {qualityResults.recommendations && qualityResults.recommendations.length > 0 && (
+                    {qualityResults.status !== 'pending' && qualityResults.recommendations && qualityResults.recommendations.length > 0 && (
                       <Card>
                         <CardContent className="p-4">
                           <h4 className="font-medium mb-2">Recommendations</h4>
@@ -2044,7 +2356,7 @@ export default function PlanEditorPage() {
                     )}
 
                     {/* Missing Details */}
-                    {qualityResults.missing_details && qualityResults.missing_details.length > 0 && (
+                    {qualityResults.status !== 'pending' && qualityResults.missing_details && qualityResults.missing_details.length > 0 && (
                       <Card>
                         <CardContent className="p-4">
                           <h4 className="font-medium mb-2 text-orange-600">Missing Details</h4>

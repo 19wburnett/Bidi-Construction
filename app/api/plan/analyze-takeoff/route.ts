@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import OpenAI from 'openai'
+import { getRelevantCostCodesForPrompt } from '@/lib/procore-cost-codes'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
 
 export async function POST(request: NextRequest) {
+  let planId: string | undefined
+  let userId: string | undefined
+  
   try {
     const supabase = await createServerSupabaseClient()
 
@@ -15,8 +19,13 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    
+    userId = user.id
 
-    const { planId, images, drawings } = await request.json()
+    const body = await request.json()
+    planId = body.planId
+    const images = body.images
+    const drawings = body.drawings
 
     if (!planId || !images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: 'Missing required fields: planId and images' }, { status: 400 })
@@ -27,7 +36,7 @@ export async function POST(request: NextRequest) {
       .from('plans')
       .select('*')
       .eq('id', planId)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single()
 
     if (planError || !plan) {
@@ -59,42 +68,64 @@ ANALYSIS APPROACH:
 3. Identify all construction materials, fixtures, and components
 4. Use standard construction estimating practices
 5. Cross-reference dimensions to ensure accuracy
+6. Assign appropriate Procore cost codes to each item
 
-WHAT TO EXTRACT AND QUANTIFY:
+3-LEVEL CATEGORIZATION STRUCTURE:
+
+**LEVEL 1: CATEGORY** (structural, exterior, interior, mep, finishes, other)
+**LEVEL 2: SUBCATEGORY** (specific work type)
+**LEVEL 3: LINE ITEMS** (individual materials with Procore cost codes)
+
+CATEGORIES AND SUBCATEGORIES:
 
 **STRUCTURAL:**
-- Foundation (concrete footings, slabs - calculate cubic yards)
-- Framing lumber (studs, plates, joists, rafters - count and measure linear feet)
-- Structural steel or beams (sizes and linear feet)
-- Columns and posts
+- Foundation (footings, slabs, piers, stem walls, basement walls)
+- Framing (studs, plates, joists, rafters, trusses, headers, blocking, sheathing)
+- Structural Steel (beams, columns, posts, connections)
+- Engineered Lumber (LVL, PSL, glulam beams)
 
 **EXTERIOR:**
-- Wall area (square feet for siding/cladding)
-- Windows (count, sizes, types)
-- Doors (count, sizes, types)
-- Roofing area (square feet or squares)
-- Gutters and downspouts (linear feet)
+- Siding & Cladding (lap siding, panel siding, shakes, stucco, brick veneer, stone)
+- Windows (sizes, types, styles, trim, glazing)
+- Exterior Doors (entry doors, patio doors, sliding doors, garage doors)
+- Roofing (shingles, underlayment, flashing, ridge vents, drip edge)
+- Gutters & Downspouts (aluminum, copper, leaf guards, downspout extensions)
+- Exterior Trim (fascia, soffit, corner boards, frieze boards)
+- Decks & Porches (framing, decking, railings, stairs, posts)
 
 **INTERIOR:**
-- Room dimensions and square footage
-- Interior walls (linear feet for framing, square feet for drywall)
-- Flooring by room (square feet, by type)
-- Ceiling area (square feet)
-- Interior doors (count and sizes)
-- Trim and molding (linear feet)
+- Interior Walls (framing, drywall, insulation, backing, corner bead)
+- Interior Doors (pre-hung, slab, pocket, bifold, hardware)
+- Flooring (hardwood, carpet, tile, LVT, underlayment, transitions)
+- Ceilings (drywall, texture, coffered, tray, suspended, acoustic)
+- Interior Trim (baseboards, casing, crown molding, chair rail, wainscoting)
+- Stairs (stringers, treads, risers, railings, balusters, newel posts)
+- Cabinets & Millwork (kitchen cabinets, bath vanities, built-ins, shelving)
+- Countertops (granite, quartz, laminate, butcher block, backsplash)
 
-**MEP (if visible):**
-- Electrical outlets and switches (count by room)
-- Light fixtures (count and types)
-- Plumbing fixtures (count: sinks, toilets, tubs, etc.)
-- HVAC vents and registers (count)
+**MEP:**
+- Electrical (service panels, circuits, outlets, switches, fixtures, wire, conduit, lighting)
+- Plumbing (fixtures, supply lines, drain pipes, vents, water heater, gas lines)
+- HVAC (furnace, air conditioner, ductwork, vents, registers, thermostat)
+- Fire Protection (sprinklers, smoke detectors, fire alarm, CO detectors)
+
+**FINISHES:**
+- Paint (primer, interior paint, exterior paint, stain, sealer, caulk)
+- Tile (floor tile, wall tile, backsplash, shower tile, grout, adhesive)
+- Wallcovering (wallpaper, wainscoting, paneling, beadboard)
+- Hardware (door hinges, knobs, handles, locks, deadbolts, closet rods)
+- Mirrors & Accessories (medicine cabinets, towel bars, toilet paper holders, hooks)
+- Appliances (range, refrigerator, dishwasher, microwave, disposal, washer, dryer)
 
 **OTHER:**
-- Cabinets (linear feet or count)
-- Countertops (linear feet or square feet)
-- Tile areas (square feet)
-- Paint coverage (square feet by surface type)
-- Hardware and accessories
+- Insulation (batt insulation, blown insulation, rigid foam, spray foam)
+- Weatherproofing (house wrap, vapor barrier, caulking, sealants, weatherstripping)
+- Site Work (excavation, grading, backfill, compaction, drainage)
+- Concrete (flatwork, walkways, driveways, patios, pads)
+- Landscaping (sod, plants, trees, mulch, irrigation, fencing)
+- Specialties (fireplace, chimney, garage door opener, shower doors)
+
+${getRelevantCostCodesForPrompt()}
 
 RESPONSE FORMAT:
 Return a JSON object with this EXACT structure:
@@ -107,6 +138,9 @@ Return a JSON object with this EXACT structure:
       "unit": "LF" or "SF" or "CF" or "CY" or "EA" or "SQ",
       "location": "Specific location (e.g., 'North Wall', 'Kitchen', 'Floor Plan Sheet 1')",
       "category": "structural|exterior|interior|mep|finishes|other",
+      "subcategory": "One of the subcategories listed above (e.g., 'Foundation', 'Framing', 'Windows', 'Electrical')",
+      "cost_code": "Procore cost code (e.g., '3,300', '6,100', '8,500')",
+      "cost_code_description": "Description from cost code (e.g., 'Footings', 'Rough Carpentry', 'Windows')",
       "notes": "Any relevant details about material grade, installation notes, or assumptions",
       "dimensions": "Original dimensions from plan if visible (e.g., '20\' x 30\'')"
     }
@@ -114,6 +148,7 @@ Return a JSON object with this EXACT structure:
   "summary": {
     "total_items": 0,
     "categories": {},
+    "subcategories": {},
     "total_area_sf": 0,
     "plan_scale": "detected scale if visible",
     "confidence": "high|medium|low",
@@ -121,11 +156,29 @@ Return a JSON object with this EXACT structure:
   }
 }
 
+COST CODE ASSIGNMENT RULES:
+- Foundation work → 3,300 series
+- Framing/Carpentry → 6,100 (rough) or 6,200 (finish)
+- Concrete → 3,210 or 3,320
+- Roofing → 7,300 to 7,700
+- Windows → 8,500
+- Doors → 8,100 to 8,300
+- Drywall → 9,250
+- Flooring → 9,600 to 9,680
+- Paint → 9,900
+- Plumbing → 15,100 to 15,400
+- HVAC → 15,500 to 15,900
+- Electrical → 16,100 to 16,800
+- Cabinets → 6,400 or 12,300
+- Site Work → 2,200 to 2,900
+
 IMPORTANT:
 - Be SPECIFIC: "2x6 Top Plate" not just "lumber"
 - SHOW YOUR MATH: Include dimensions used for calculations
 - USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
 - BE THOROUGH: Extract every measurable element visible in the plan
+- ASSIGN SUBCATEGORIES: Every item must have a subcategory from the list above
+- ASSIGN COST CODES: Use the Procore cost codes provided
 - INCLUDE LOCATIONS: Specify where each item is located
 - If dimensions are unclear or not visible, state "dimension not visible" in notes
 
@@ -266,7 +319,7 @@ Use the JSON structure specified in the system prompt. Start your response with 
       .from('plan_takeoff_analysis')
       .insert({
         plan_id: planId,
-        user_id: user.id,
+        user_id: userId,
         items: takeoffData.items || [],
         summary: takeoffData.summary || takeoffData,
         ai_model: 'gpt-4o',
@@ -280,6 +333,19 @@ Use the JSON structure specified in the system prompt. Start your response with 
       console.error('Error saving analysis:', analysisError)
     }
 
+    // Update plan status to completed
+    const { error: planUpdateError } = await supabase
+      .from('plans')
+      .update({ 
+        takeoff_analysis_status: 'completed',
+        has_takeoff_analysis: true
+      })
+      .eq('id', planId)
+
+    if (planUpdateError) {
+      console.error('Error updating plan status:', planUpdateError)
+    }
+
     return NextResponse.json({
       success: true,
       items: takeoffData.items || [],
@@ -289,6 +355,21 @@ Use the JSON structure specified in the system prompt. Start your response with 
 
   } catch (error) {
     console.error('Takeoff analysis error:', error)
+    
+    // Mark plan as failed if we have the planId and userId
+    if (planId && userId) {
+      try {
+        const supabase = await createServerSupabaseClient()
+        await supabase
+          .from('plans')
+          .update({ takeoff_analysis_status: 'failed' })
+          .eq('id', planId)
+          .eq('user_id', userId)
+      } catch (updateError) {
+        console.error('Error updating plan status to failed:', updateError)
+      }
+    }
+    
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Analysis failed' },
       { status: 500 }

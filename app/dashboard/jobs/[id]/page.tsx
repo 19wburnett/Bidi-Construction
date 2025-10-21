@@ -379,7 +379,7 @@ export default function JobDetailsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-black flex items-center justify-center">
         <div className="text-center">
           <FallingBlocksLoader text="Loading job details..." size="lg" />
         </div>
@@ -389,10 +389,10 @@ export default function JobDetailsPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-black flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <CardTitle className="text-red-600">Error</CardTitle>
+            <CardTitle className="text-red-600 dark:text-red-400">Error</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent className="text-center space-y-4">
@@ -419,7 +419,7 @@ export default function JobDetailsPage() {
 
   if (!jobRequest) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-black flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle>Job Not Found</CardTitle>
@@ -438,7 +438,7 @@ export default function JobDetailsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-black">
       <div className="container mx-auto px-4 py-4 sm:py-8 max-w-4xl">
         {/* Combined Job Overview, Project Summary & Key Insights */}
         <Card className="mb-8 border-l-4">
@@ -462,22 +462,22 @@ export default function JobDetailsPage() {
               {/* Project Overview Section */}
               <div className="space-y-4">
                 <div>
-                  <h3 className="font-semibold mb-2">Project Description</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{jobRequest.description}</p>
+                  <h3 className="font-semibold mb-2 dark:text-white">Project Description</h3>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{jobRequest.description}</p>
                 </div>
                 
                 {jobRequest.files && jobRequest.files.length > 0 && (
                   <div>
-                    <h3 className="font-semibold mb-2">Project Files</h3>
+                    <h3 className="font-semibold mb-2 dark:text-white">Project Files</h3>
                     <div className="space-y-2">
                       {jobRequest.files.map((fileUrl, index) => (
                         <div key={index} className="flex items-center space-x-2">
-                          <FileText className="h-4 w-4 text-gray-500" />
+                          <FileText className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                           <a 
                             href={fileUrl} 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline flex items-center space-x-1"
+                            className="text-blue-600 dark:text-blue-400 hover:underline flex items-center space-x-1"
                           >
                             <span>File {index + 1}</span>
                             <Download className="h-3 w-3" />
@@ -488,7 +488,7 @@ export default function JobDetailsPage() {
                   </div>
                 )}
                 
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-gray-500 dark:text-gray-400">
                   Posted on {formatDate(jobRequest.created_at)}
                 </div>
               </div>
@@ -496,12 +496,12 @@ export default function JobDetailsPage() {
               {/* Project Summary & Key Insights Section */}
               {bids.length > 0 && (
                 <>
-                  <div className="border-t pt-6">
-                    <h3 className="font-semibold mb-4 flex items-center">
+                  <div className="border-t dark:border-gray-800 pt-6">
+                    <h3 className="font-semibold mb-4 flex items-center dark:text-white">
                       <Target className="h-5 w-5 mr-2" />
                       Project Summary & Key Insights
                     </h3>
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                       Analysis of {bids.length} bids for {jobRequest.trade_category} work in {jobRequest.location}
                     </p>
                     
@@ -544,7 +544,7 @@ export default function JobDetailsPage() {
                             const PriorityIcon = priorityStyle.icon
                             
                             return (
-                              <div key={index} className="border rounded-lg p-4 bg-gray-50">
+                              <div key={index} className="border dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-900">
                                 <div className="flex items-start justify-between mb-2">
                                   <div className="flex items-center space-x-2">
                                     <Icon className={`h-4 w-4 ${typeStyle.color}`} />
@@ -558,16 +558,16 @@ export default function JobDetailsPage() {
                                       </Badge>
                                     )}
                                   </div>
-                                  <div className="flex items-center space-x-2 text-sm text-gray-600">
+                                  <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
                                     <Users className="h-4 w-4" />
                                     <span>{item.count} contractor{item.count > 1 ? 's' : ''}</span>
                                   </div>
                                 </div>
                                 
-                                <h4 className="font-medium text-gray-900 mb-1">{item.title}</h4>
-                                <p className="text-sm text-gray-700 mb-2">{item.description}</p>
+                                <h4 className="font-medium text-gray-900 dark:text-white mb-1">{item.title}</h4>
+                                <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">{item.description}</p>
                                 
-                                <div className="text-xs text-gray-500">
+                                <div className="text-xs text-gray-500 dark:text-gray-400">
                                   Mentioned by: {item.contractors.join(', ')}
                                 </div>
                               </div>
@@ -604,7 +604,7 @@ export default function JobDetailsPage() {
         {/* Bids Section */}
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Received Bids</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Received Bids</h2>
             <div className="flex items-center space-x-3">
               <Badge variant="secondary" className="self-start sm:self-auto">
                 {bids.length} {bids.length === 1 ? 'Bid' : 'Bids'}
@@ -619,9 +619,9 @@ export default function JobDetailsPage() {
           {bids.length === 0 ? (
             <Card>
               <CardContent className="text-center py-12">
-                <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids yet</h3>
-                <p className="text-gray-600">
+                <MessageSquare className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No bids yet</h3>
+                <p className="text-gray-600 dark:text-gray-400">
                   Bids from subcontractors will appear here once they respond to your job request.
                 </p>
               </CardContent>
@@ -641,10 +641,10 @@ export default function JobDetailsPage() {
                               <img 
                                 src={bid.profile_picture_url} 
                                 alt={bid.subcontractor_name || 'Contractor'} 
-                                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-gray-200"
+                                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
                               />
                             ) : (
-                              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-semibold text-lg sm:text-xl border-2 border-gray-200">
+                              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-semibold text-lg sm:text-xl border-2 border-gray-200 dark:border-gray-700">
                                 {(bid.subcontractor_name || bid.subcontractor_email).charAt(0).toUpperCase()}
                               </div>
                             )}
@@ -663,11 +663,11 @@ export default function JobDetailsPage() {
                         
                         {/* Bid Amount and Date */}
                         <div className="text-right flex-shrink-0">
-                          <div className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">
+                          <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
                             {new Date(bid.created_at).toLocaleDateString()}
                           </div>
                           {bid.bid_amount && (
-                            <div className="text-base sm:text-lg font-bold text-green-600 whitespace-nowrap">
+                            <div className="text-base sm:text-lg font-bold text-green-600 dark:text-green-400 whitespace-nowrap">
                               {formatCurrency(bid.bid_amount)}
                             </div>
                           )}
@@ -740,14 +740,14 @@ export default function JobDetailsPage() {
                       <div className="space-y-3">
                         {bid.notes && (
                           <div>
-                            <h4 className="font-medium text-sm mb-1">Notes:</h4>
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{bid.notes}</p>
+                            <h4 className="font-medium text-sm mb-1 dark:text-white">Notes:</h4>
+                            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{bid.notes}</p>
                           </div>
                         )}
                         {bid.ai_summary && (
                           <div>
-                            <h4 className="font-medium text-sm mb-1">AI Summary:</h4>
-                            <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                            <h4 className="font-medium text-sm mb-1 dark:text-white">AI Summary:</h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 p-2 rounded">
                               {bid.ai_summary}
                             </p>
                           </div>
@@ -757,7 +757,7 @@ export default function JobDetailsPage() {
                     
                     {/* Categorized Notes Section */}
                     {bid.bid_notes && bid.bid_notes.length > 0 && (
-                      <div className="mt-4 pt-4 border-t">
+                      <div className="mt-4 pt-4 border-t dark:border-gray-800">
                         <BidNotesDisplay 
                           notes={bid.bid_notes} 
                           bidId={bid.id}
@@ -782,7 +782,7 @@ export default function JobDetailsPage() {
                     
                     {/* Accept Bid Button */}
                     {jobRequest?.status === 'active' && bid.status !== 'accepted' && bid.status !== 'declined' && (
-                      <div className="mt-4 pt-4 border-t">
+                      <div className="mt-4 pt-4 border-t dark:border-gray-800">
                         <Button 
                           onClick={() => {
                             setSelectedBidForAcceptance(bid)
@@ -798,7 +798,7 @@ export default function JobDetailsPage() {
                     
                     {/* Status Badges */}
                     {(bid.status === 'accepted' || bid.status === 'declined') && (
-                      <div className="mt-4 pt-4 border-t">
+                      <div className="mt-4 pt-4 border-t dark:border-gray-800">
                         <Badge 
                           variant={bid.status === 'accepted' ? 'default' : 'secondary'}
                           className={bid.status === 'accepted' ? 'bg-green-600' : 'bg-gray-600'}
@@ -808,12 +808,12 @@ export default function JobDetailsPage() {
                       </div>
                     )}
                     
-                    <div className="mt-4 pt-4 border-t">
+                    <div className="mt-4 pt-4 border-t dark:border-gray-800">
                       <details className="group">
-                        <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-800">
+                        <summary className="cursor-pointer text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white">
                           View Raw Email
                         </summary>
-                        <div className="mt-2 p-3 bg-gray-50 rounded text-xs text-gray-700 whitespace-pre-wrap font-mono">
+                        <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono">
                           {bid.raw_email}
                         </div>
                       </details>

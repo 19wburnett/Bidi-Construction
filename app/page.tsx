@@ -44,11 +44,11 @@ export default function HomePage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-white relative overflow-hidden">
+    <div className="min-h-screen bg-white dark:bg-black relative overflow-hidden transition-colors duration-300">
       {/* Professional Construction Background Pattern */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         {/* Base gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 via-white to-orange-50/60"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 via-white to-orange-50/60 dark:from-black dark:via-black dark:to-orange-950/40"></div>
         
         {/* Top accent line */}
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange via-orange to-transparent"></div>
@@ -105,7 +105,7 @@ export default function HomePage() {
           </div>
         </div>
         
-        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black mb-6 tracking-tight transition-all duration-1000 delay-500 ${
+        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-500 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           AI-Powered Estimating & Takeoff
@@ -114,7 +114,7 @@ export default function HomePage() {
           </span>
         </h1>
         
-        <p className={`text-xl sm:text-2xl text-gray-600 mb-10 max-w-4xl mx-auto font-medium transition-all duration-1000 delay-700 ${
+        <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-4xl mx-auto font-medium transition-all duration-1000 delay-700 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           From automated plan analysis to final bid delivery — we handle everything
@@ -146,101 +146,101 @@ export default function HomePage() {
       </section>
 
       {/* Problem Section */}
-      <section className="bg-gray-50 py-12 sm:py-16 relative z-10 overflow-hidden">
+      <section className="bg-gray-50 dark:bg-black py-12 sm:py-16 relative z-10 overflow-hidden transition-colors duration-300">
         {/* Section decorative elements */}
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-orange/20 to-transparent"></div>
-        <div className="absolute bottom-0 right-0 w-48 h-48 bg-orange/12 rounded-full blur-3xl"></div>
-        <div className="absolute inset-0 construction-grid opacity-50 -z-10"></div>
+        <div className="absolute bottom-0 right-0 w-48 h-48 bg-orange/12 dark:bg-orange/20 rounded-full blur-3xl"></div>
+        <div className="absolute inset-0 construction-grid opacity-50 dark:opacity-30 -z-10"></div>
         <div className="container mx-auto px-4">
           <div className={`text-center mb-8 sm:mb-12 transition-all duration-1000 delay-1200 ${
-          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
-        }`}>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-black mb-3 sm:mb-4 tracking-tight px-4">
+            isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+          }`}>
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-black dark:text-white mb-3 sm:mb-4 tracking-tight px-4">
               Stop Losing Time on Manual Processes
             </h2>
-            <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto px-4">
+            <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300 max-w-3xl mx-auto px-4">
               General Contractors waste countless hours on tasks that should be automated
             </p>
-            </div>
+          </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 max-w-5xl mx-auto">
             {/* Problem 1: Manual Plan Analysis */}
-            <div className={`bg-white rounded-lg p-4 sm:p-6 border-2 border-red-200 transition-all duration-700 delay-1400 ${
+            <div className={`bg-white dark:bg-gray-950 rounded-lg p-4 sm:p-6 border-2 border-red-200 dark:border-red-900 transition-all duration-700 delay-1400 ${
               isVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
-            } hover:border-red-300 group`}>
+            } hover:border-red-300 dark:hover:border-red-700 group`}>
               <div className="flex flex-col items-center justify-center min-h-[160px] sm:min-h-[180px]">
                 <div className="relative mb-3 sm:mb-4">
                   {/* Spinning clock showing time wasting */}
-                  <Clock className="h-12 w-12 sm:h-16 sm:w-16 text-red-500 animate-slow-spin" />
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 sm:w-6 sm:h-6 bg-red-100 rounded-full flex items-center justify-center animate-pulse">
-                    <span className="text-red-600 text-[10px] sm:text-xs font-bold">8h</span>
-                    </div>
+                  <Clock className="h-12 w-12 sm:h-16 sm:w-16 text-red-500 dark:text-red-400 animate-slow-spin" />
+                  <div className="absolute -bottom-1 -right-1 w-5 h-5 sm:w-6 sm:h-6 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center animate-pulse">
+                    <span className="text-red-600 dark:text-red-300 text-[10px] sm:text-xs font-bold">8h</span>
                   </div>
-                <h3 className="text-base sm:text-lg font-bold text-red-600 mb-1">Manual Plan Analysis</h3>
-                <p className="text-xs sm:text-sm text-gray-600 text-center px-2">Hours spent reviewing every detail</p>
+                </div>
+                <h3 className="text-base sm:text-lg font-bold text-red-600 dark:text-red-400 mb-1">Manual Plan Analysis</h3>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 text-center px-2">Hours spent reviewing every detail</p>
               </div>
             </div>
 
             {/* Problem 2: Missing Critical Details */}
-            <div className={`bg-white rounded-lg p-4 sm:p-6 border-2 border-red-200 transition-all duration-700 delay-1600 ${
+            <div className={`bg-white dark:bg-gray-950 rounded-lg p-4 sm:p-6 border-2 border-red-200 dark:border-red-900 transition-all duration-700 delay-1600 ${
               isVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
-            } hover:border-red-300 group`}>
+            } hover:border-red-300 dark:hover:border-red-700 group`}>
               <div className="flex flex-col items-center justify-center min-h-[160px] sm:min-h-[180px]">
                 <div className="relative mb-3 sm:mb-4">
                   {/* Document with holes/missing pieces */}
                   <div className="relative">
-                    <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-red-500" />
+                    <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-red-500 dark:text-red-400" />
                     {/* Missing pieces indicators */}
-                    <div className="absolute top-1 sm:top-2 right-1 sm:right-2 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 rounded-full animate-ping"></div>
-                    <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 rounded-full animate-ping" style={{ animationDelay: '0.5s' }}></div>
-                    <div className="absolute top-1/2 left-1/2 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 rounded-full animate-ping" style={{ animationDelay: '1s' }}></div>
-                    </div>
+                    <div className="absolute top-1 sm:top-2 right-1 sm:right-2 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 dark:bg-red-400 rounded-full animate-ping"></div>
+                    <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 dark:bg-red-400 rounded-full animate-ping" style={{ animationDelay: '0.5s' }}></div>
+                    <div className="absolute top-1/2 left-1/2 w-2 h-2 sm:w-3 sm:h-3 bg-red-600 dark:bg-red-400 rounded-full animate-ping" style={{ animationDelay: '1s' }}></div>
                   </div>
-                <h3 className="text-base sm:text-lg font-bold text-red-600 mb-1">Missing Critical Details</h3>
-                <p className="text-xs sm:text-sm text-gray-600 text-center px-2">Incomplete specs lead to change orders</p>
                 </div>
-                    </div>
+                <h3 className="text-base sm:text-lg font-bold text-red-600 dark:text-red-400 mb-1">Missing Critical Details</h3>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 text-center px-2">Incomplete specs lead to change orders</p>
+              </div>
+            </div>
 
             {/* Problem 3: Sub Communication Overload */}
-            <div className={`bg-white rounded-lg p-4 sm:p-6 border-2 border-red-200 transition-all duration-700 delay-1800 ${
+            <div className={`bg-white dark:bg-gray-950 rounded-lg p-4 sm:p-6 border-2 border-red-200 dark:border-red-900 transition-all duration-700 delay-1800 ${
               isVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
-            } hover:border-red-300 group`}>
+            } hover:border-red-300 dark:hover:border-red-700 group`}>
               <div className="flex flex-col items-center justify-center min-h-[160px] sm:min-h-[180px]">
                 <div className="relative mb-3 sm:mb-4">
                   {/* Multiple overlapping mail icons */}
                   <div className="relative w-16 h-12 sm:w-20 sm:h-16">
-                    <Mail className="absolute top-0 left-0 h-10 w-10 sm:h-12 sm:w-12 text-red-400 animate-bounce" />
-                    <Mail className="absolute top-1 sm:top-2 left-3 sm:left-4 h-10 w-10 sm:h-12 sm:w-12 text-red-500 animate-bounce" style={{ animationDelay: '0.2s' }} />
-                    <Mail className="absolute top-2 sm:top-4 left-6 sm:left-8 h-10 w-10 sm:h-12 sm:w-12 text-red-600 animate-bounce" style={{ animationDelay: '0.4s' }} />
+                    <Mail className="absolute top-0 left-0 h-10 w-10 sm:h-12 sm:w-12 text-red-400 dark:text-red-300 animate-bounce" />
+                    <Mail className="absolute top-1 sm:top-2 left-3 sm:left-4 h-10 w-10 sm:h-12 sm:w-12 text-red-500 dark:text-red-400 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    <Mail className="absolute top-2 sm:top-4 left-6 sm:left-8 h-10 w-10 sm:h-12 sm:w-12 text-red-600 dark:text-red-500 animate-bounce" style={{ animationDelay: '0.4s' }} />
                   </div>
                   {/* Badge showing count */}
-                  <div className="absolute -top-2 -right-2 w-7 h-7 sm:w-8 sm:h-8 bg-red-600 text-white rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs animate-pulse">
+                  <div className="absolute -top-2 -right-2 w-7 h-7 sm:w-8 sm:h-8 bg-red-600 dark:bg-red-500 text-white rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs animate-pulse">
                     47
-                </div>
-                    </div>
-                <h3 className="text-base sm:text-lg font-bold text-red-600 mb-1">Communication Overload</h3>
-                <p className="text-xs sm:text-sm text-gray-600 text-center px-2">Endless emails, calls & follow-ups</p>
                   </div>
                 </div>
+                <h3 className="text-base sm:text-lg font-bold text-red-600 dark:text-red-400 mb-1">Communication Overload</h3>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 text-center px-2">Endless emails, calls & follow-ups</p>
+              </div>
+            </div>
 
             {/* Problem 4: Difficult Bid Comparison */}
-            <div className={`bg-white rounded-lg p-4 sm:p-6 border-2 border-red-200 transition-all duration-700 delay-2000 ${
+            <div className={`bg-white dark:bg-gray-950 rounded-lg p-4 sm:p-6 border-2 border-red-200 dark:border-red-900 transition-all duration-700 delay-2000 ${
               isVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
-            } hover:border-red-300 group`}>
+            } hover:border-red-300 dark:hover:border-red-700 group`}>
               <div className="flex flex-col items-center justify-center min-h-[160px] sm:min-h-[180px]">
                 <div className="relative mb-3 sm:mb-4">
                   {/* Scattered/disorganized documents */}
                   <div className="relative w-16 h-12 sm:w-20 sm:h-16">
-                    <div className="absolute top-0 left-1 sm:left-2 w-8 h-11 sm:w-10 sm:h-14 bg-red-100 border-2 border-red-300 rounded transform -rotate-12 animate-wiggle"></div>
-                    <div className="absolute top-0.5 sm:top-1 left-4 sm:left-6 w-8 h-11 sm:w-10 sm:h-14 bg-red-200 border-2 border-red-400 rounded transform rotate-6 animate-wiggle" style={{ animationDelay: '0.3s' }}></div>
-                    <div className="absolute top-1 sm:top-2 left-7 sm:left-10 w-8 h-11 sm:w-10 sm:h-14 bg-red-300 border-2 border-red-500 rounded transform rotate-12 animate-wiggle" style={{ animationDelay: '0.6s' }}></div>
-                    </div>
-                  <DollarSign className="absolute bottom-0 right-0 h-7 w-7 sm:h-8 sm:w-8 text-red-600 animate-pulse" />
+                    <div className="absolute top-0 left-1 sm:left-2 w-8 h-11 sm:w-10 sm:h-14 bg-red-100 dark:bg-red-900 border-2 border-red-300 dark:border-red-700 rounded transform -rotate-12 animate-wiggle"></div>
+                    <div className="absolute top-0.5 sm:top-1 left-4 sm:left-6 w-8 h-11 sm:w-10 sm:h-14 bg-red-200 dark:bg-red-800 border-2 border-red-400 dark:border-red-600 rounded transform rotate-6 animate-wiggle" style={{ animationDelay: '0.3s' }}></div>
+                    <div className="absolute top-1 sm:top-2 left-7 sm:left-10 w-8 h-11 sm:w-10 sm:h-14 bg-red-300 dark:bg-red-700 border-2 border-red-500 rounded transform rotate-12 animate-wiggle" style={{ animationDelay: '0.6s' }}></div>
                   </div>
-                <h3 className="text-base sm:text-lg font-bold text-red-600 mb-1">Difficult Comparison</h3>
-                <p className="text-xs sm:text-sm text-gray-600 text-center px-2">Inconsistent formats & confusion</p>
+                  <DollarSign className="absolute bottom-0 right-0 h-7 w-7 sm:h-8 sm:w-8 text-red-600 dark:text-red-400 animate-pulse" />
                 </div>
+                <h3 className="text-base sm:text-lg font-bold text-red-600 dark:text-red-400 mb-1">Difficult Comparison</h3>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 text-center px-2">Inconsistent formats & confusion</p>
               </div>
+            </div>
           </div>
         </div>
       </section>
@@ -254,10 +254,10 @@ export default function HomePage() {
         <div className={`text-center mb-12 sm:mb-16 transition-all duration-1000 delay-1800 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
-          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-black mb-3 sm:mb-4 tracking-tight px-4">
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-black dark:text-white mb-3 sm:mb-4 tracking-tight px-4">
             How <span className="font-bidi bidi-orange-text">BIDI</span> Works
           </h2>
-          <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto px-4">
+          <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300 max-w-3xl mx-auto px-4">
             Five automated steps from plan upload to bid delivery
           </p>
         </div>
@@ -324,18 +324,18 @@ export default function HomePage() {
                       }`} />
                           </div>
                         </div>
-                  <h3 className="text-lg sm:text-xl lg:text-2xl font-bold text-black mb-2 sm:mb-3">{workflow.title}</h3>
-                  <p className="text-sm sm:text-base text-gray-600 leading-relaxed">{workflow.description}</p>
+                  <h3 className="text-lg sm:text-xl lg:text-2xl font-bold text-black dark:text-white mb-2 sm:mb-3">{workflow.title}</h3>
+                  <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300 leading-relaxed">{workflow.description}</p>
                 </div>
                 <div className="flex-1 w-full">
                   {/* Component Visualization based on step */}
                   {index === 0 && (
-                    <div className="bg-white rounded-xl p-4 sm:p-6 border-2 border-gray-200 min-h-[180px] sm:min-h-[200px] shadow-sm">
+                    <div className="bg-white dark:bg-gray-950 rounded-xl p-4 sm:p-6 border-2 border-gray-200 dark:border-gray-700 min-h-[180px] sm:min-h-[200px] shadow-sm transition-colors duration-300">
                       {/* Plan Upload Preview */}
                       <div className="space-y-2 sm:space-y-3">
                         <div className={`flex items-center justify-between mb-4 ${isSectionVisible ? 'animate-fade-in' : 'opacity-0'}`}>
-                          <h4 className="font-semibold text-sm text-gray-700">Commercial_Building_Plans.pdf</h4>
-                          <Badge variant="secondary" className={`text-xs ${isSectionVisible ? 'animate-pulse' : ''}`}>42 pages</Badge>
+                          <h4 className="font-semibold text-sm text-gray-700 dark:text-gray-200">Commercial_Building_Plans.pdf</h4>
+                          <Badge variant="secondary" className={`text-xs dark:bg-gray-700 dark:text-gray-200 ${isSectionVisible ? 'animate-pulse' : ''}`}>42 pages</Badge>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           {[
@@ -413,12 +413,12 @@ export default function HomePage() {
             </div>
                   )}
                   {index === 1 && (
-                    <div className="bg-white rounded-xl p-4 sm:p-6 border-2 border-orange-200 min-h-[180px] sm:min-h-[200px] shadow-sm bg-gradient-to-br from-orange-50 to-white">
+                    <div className="bg-white dark:bg-gray-950 rounded-xl p-4 sm:p-6 border-2 border-orange-200 dark:border-orange-900 min-h-[180px] sm:min-h-[200px] shadow-sm bg-gradient-to-br from-orange-50 to-white dark:from-orange-950/40 dark:to-black transition-colors duration-300">
                       {/* AI Analysis Preview */}
                       <div className="space-y-2 sm:space-y-3">
                         <div className={`flex items-center mb-3 ${isSectionVisible ? 'animate-fade-in' : 'opacity-0'}`}>
                           <Brain className={`h-5 w-5 text-orange mr-2 ${isSectionVisible ? 'animate-pulse' : ''}`} />
-                          <h4 className="font-semibold text-sm text-gray-900">Analysis Results</h4>
+                          <h4 className="font-semibold text-sm text-gray-900 dark:text-gray-100">Analysis Results</h4>
                         </div>
                         <div className="space-y-2 text-xs">
                           <div className={`bg-white p-2 rounded border border-gray-200 hover:shadow-md transition-shadow duration-300 ${isSectionVisible ? 'animate-slide-up' : 'opacity-0'}`} style={{ animationDelay: isSectionVisible ? '200ms' : '0ms' }}>
@@ -448,10 +448,10 @@ export default function HomePage() {
                     </div>
                   )}
                   {index === 2 && (
-                    <div className="bg-white rounded-xl p-4 sm:p-6 border-2 border-gray-200 min-h-[180px] sm:min-h-[200px] shadow-sm">
+                    <div className="bg-white dark:bg-gray-950 rounded-xl p-4 sm:p-6 border-2 border-gray-200 dark:border-gray-700 min-h-[180px] sm:min-h-[200px] shadow-sm transition-colors duration-300">
                       {/* Subs Contact List */}
                       <div className="space-y-2 sm:space-y-3">
-                        <h4 className={`font-semibold text-sm text-gray-700 mb-3 ${isSectionVisible ? 'animate-fade-in' : 'opacity-0'}`}>Contacting Subcontractors</h4>
+                        <h4 className={`font-semibold text-sm text-gray-700 dark:text-gray-200 mb-3 ${isSectionVisible ? 'animate-fade-in' : 'opacity-0'}`}>Contacting Subcontractors</h4>
                         {['Elite Construction', 'Premier Builders', 'Metro Construction'].map((sub, i) => (
                           <div 
                             key={i} 
@@ -471,7 +471,7 @@ export default function HomePage() {
                     </div>
                   )}
                   {index === 3 && (
-                    <div className="bg-white rounded-xl p-4 sm:p-6 border-2 border-gray-200 min-h-[180px] sm:min-h-[200px] shadow-sm flex items-center justify-center">
+                    <div className="bg-white dark:bg-gray-950 rounded-xl p-4 sm:p-6 border-2 border-gray-200 dark:border-gray-700 min-h-[180px] sm:min-h-[200px] shadow-sm flex items-center justify-center transition-colors duration-300">
                       {/* Back and Forth Communication Visualization */}
                       <div className="w-full flex items-center justify-between px-2 sm:px-4">
                         {/* Bidi Side */}
@@ -523,12 +523,12 @@ export default function HomePage() {
                     </div>
                   )}
                   {index === 4 && (
-                    <div className="bg-white rounded-xl p-4 sm:p-6 border-2 border-green-200 min-h-[180px] sm:min-h-[200px] shadow-sm">
+                    <div className="bg-white dark:bg-gray-950 rounded-xl p-4 sm:p-6 border-2 border-green-200 dark:border-green-900 min-h-[180px] sm:min-h-[200px] shadow-sm transition-colors duration-300">
                       {/* Bid Comparison */}
                       <div className="space-y-2 sm:space-y-3">
                         <div className={`flex items-center mb-3 ${isSectionVisible ? 'animate-fade-in' : 'opacity-0'}`}>
                           <CheckCircle className={`h-5 w-5 text-green-600 mr-2 ${isSectionVisible ? 'animate-pulse' : ''}`} />
-                          <h4 className="font-semibold text-sm text-gray-700">5 Bids Received</h4>
+                          <h4 className="font-semibold text-sm text-gray-700 dark:text-gray-200">5 Bids Received</h4>
                         </div>
                         <div className="space-y-2 text-xs">
                           {[
@@ -573,15 +573,12 @@ export default function HomePage() {
 
       {/* Demo Section */}
       <section id="demo-section" className="container mx-auto px-4 py-16 relative z-10 overflow-hidden">
-        {/* Decorative elements */}
-        <div className="absolute top-10 left-0 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-10 right-0 w-80 h-80 bg-orange/10 rounded-full blur-3xl"></div>
         {/* Demo Header */}
         <div className="text-center mb-12">
-          <h2 className="text-3xl sm:text-4xl font-bold text-black mb-4">
+          <h2 className="text-3xl sm:text-4xl font-bold text-black dark:text-white mb-4">
             See <span className="font-bidi bidi-orange-text">BIDI</span> in Action
           </h2>
-          <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto font-medium">
+          <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto font-medium">
             Watch how our AI analyzes your plans, generates estimates, and manages the entire bid collection process automatically.
           </p>
         </div>
@@ -591,23 +588,23 @@ export default function HomePage() {
       </section>
 
             {/* CTA Section */}
-            <section className="bg-white text-black py-16 relative overflow-hidden">
+            <section className="bg-white dark:bg-black text-black dark:text-white py-16 relative overflow-hidden transition-colors duration-300">
         {/* Decorative background elements */}
-        <div className="absolute inset-0 bg-gradient-to-br from-orange/8 via-transparent to-orange-500/8"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-orange/8 via-transparent to-orange-500/8 dark:from-orange/12 dark:to-orange-500/12"></div>
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-orange via-transparent to-orange opacity-50"></div>
-        <div className="absolute -top-20 left-10 w-40 h-40 opacity-[0.10] rotate-45 text-orange">
+        <div className="absolute -top-20 left-10 w-40 h-40 opacity-[0.10] dark:opacity-[0.15] rotate-45 text-orange">
           <TireTrackPattern />
         </div>
-        <div className="absolute -bottom-20 right-10 w-40 h-40 opacity-[0.10] -rotate-12 text-orange">
+        <div className="absolute -bottom-20 right-10 w-40 h-40 opacity-[0.10] dark:opacity-[0.15] -rotate-12 text-orange">
           <TireTrackPattern />
         </div>
-        <div className="container mx-auto px-4 text-center">
+        <div className="container mx-auto px-4 text-center relative z-10">
           <h2 className={`text-3xl sm:text-4xl font-bold mb-6 tracking-tight transition-all duration-1000 delay-3400 ${
             isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}>
             Ready to Transform Your Estimating Process?
           </h2>
-          <p className={`text-xl sm:text-2xl mb-10 font-medium transition-all duration-1000 delay-3600 ${
+          <p className={`text-xl sm:text-2xl text-gray-700 dark:text-gray-300 mb-10 font-medium transition-all duration-1000 delay-3600 ${
             isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}>
             Join leading General Contractors who trust <span className="font-bidi bidi-orange-text">BIDI</span> for AI-powered estimating and complete bid management.

@@ -186,8 +186,8 @@ export default function SettingsPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-2xl">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-black">Settings</h2>
-        <p className="text-gray-600">Manage your account preferences and notifications</p>
+        <h2 className="text-2xl font-bold text-black dark:text-white">Settings</h2>
+        <p className="text-gray-600 dark:text-gray-300">Manage your account preferences and notifications</p>
       </div>
 
       {/* Message */}
@@ -203,9 +203,9 @@ export default function SettingsPage() {
 
       <div className="space-y-6">
         {/* Personal Information */}
-        <Card className="border-2 border-gray-200 bg-white">
+        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
           <CardHeader>
-            <CardTitle className="flex items-center text-black">
+            <CardTitle className="flex items-center">
               <User className="h-5 w-5 mr-2" />
               Personal Information
             </CardTitle>
@@ -252,9 +252,9 @@ export default function SettingsPage() {
         </Card>
 
         {/* Notification Settings */}
-        <Card className="border-2 border-gray-200 bg-white">
+        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
           <CardHeader>
-            <CardTitle className="flex items-center text-black">
+            <CardTitle className="flex items-center">
               <Bell className="h-5 w-5 mr-2" />
               Notification Preferences
             </CardTitle>
@@ -304,7 +304,7 @@ export default function SettingsPage() {
         {/* Payment Method */}
         <Card className="border-2 border-gray-200 bg-white">
           <CardHeader>
-            <CardTitle className="flex items-center text-black">
+            <CardTitle className="flex items-center">
               <CreditCard className="h-5 w-5 mr-2" />
               Payment Method
             </CardTitle>
@@ -324,7 +324,7 @@ export default function SettingsPage() {
                       <CreditCard className="h-5 w-5 text-gray-700" />
                     )}
                     <div>
-                      <p className="font-medium text-black">
+                      <p className="font-medium text-black dark:text-white">
                         {settings.payment_type === 'credits' ? 'Credits' : 'Subscription'}
                       </p>
                       <p className="text-sm text-gray-600">
@@ -340,7 +340,7 @@ export default function SettingsPage() {
 
               {/* Payment Method Options */}
               <div className="space-y-2">
-                <Label className="text-sm font-medium text-black">Switch Payment Method:</Label>
+                <Label className="text-sm font-medium text-black dark:text-white">Switch Payment Method:</Label>
                 <div className="flex space-x-3">
                   <Button
                     variant={settings.payment_type === 'subscription' ? 'orange' : 'construction'}
@@ -400,7 +400,7 @@ export default function SettingsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-md border-2 border-gray-200 bg-white">
             <CardHeader>
-              <CardTitle className="flex items-center text-black">
+              <CardTitle className="flex items-center">
                 {newPaymentType === 'credits' ? (
                   <Coins className="h-5 w-5 mr-2 text-orange" />
                 ) : (

@@ -5,7 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { FileText, Download, Eye, Users, Building2, Edit } from 'lucide-react'
-import PlanAnnotatorModal from './plan-annotator-modal'
+import dynamic from 'next/dynamic'
+
+const PlanAnnotatorModal = dynamic(() => import('./plan-annotator-modal'), { ssr: false })
 
 interface BidNote {
   id: string
@@ -81,16 +83,16 @@ export default function PlansViewer({ jobRequestId, planFiles, bids }: PlansView
             {planFiles.map((fileUrl, index) => (
               <div
                 key={index}
-                className="border rounded-lg p-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                className="border rounded-lg p-3 hover:bg-muted transition-colors cursor-pointer"
                 onClick={() => handleFileSelect(fileUrl)}
               >
                 <div className="flex items-center space-x-3">
                   <FileText className="h-8 w-8 text-orange-600 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
+                    <p className="text-sm font-medium text-foreground truncate">
                       Plan {index + 1}
                     </p>
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-xs text-muted-foreground truncate">
                       {fileUrl.split('/').pop()}
                     </p>
                   </div>
@@ -139,9 +141,9 @@ export default function PlansViewer({ jobRequestId, planFiles, bids }: PlansView
 
           {/* Selected File Viewer */}
           {selectedFile && (
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+            <div className="mt-6 p-4 bg-muted rounded-lg">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-gray-900">Viewing Plan</h3>
+                <h3 className="font-medium text-foreground">Viewing Plan</h3>
                 <Button
                   variant="outline"
                   size="sm"
@@ -152,12 +154,12 @@ export default function PlansViewer({ jobRequestId, planFiles, bids }: PlansView
               </div>
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
-                  <FileText className="h-4 w-4 text-gray-500" />
-                  <span className="text-sm text-gray-600">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
                     {selectedFile.split('/').pop()}
                   </span>
                 </div>
-                <div className="bg-white rounded border p-4">
+                <div className="bg-background rounded border p-4">
                   <iframe
                     src={selectedFile}
                     className="w-full h-96 border-0 rounded"

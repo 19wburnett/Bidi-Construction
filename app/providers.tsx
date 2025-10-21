@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useRef, useMemo } from 
 import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import { PostHogProvider } from '@/components/posthog-provider'
+import { ThemeProvider } from 'next-themes'
 
 interface AuthContextType {
   user: User | null
@@ -57,13 +58,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
 
     // Listen for auth state changes (important for OAuth callbacks)
+    // Use shouldTriggerChange option to prevent unnecessary refreshes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (mounted) {
+          // Only update on actual auth state changes, not on token refresh
           if (event === 'SIGNED_IN' && session?.user) {
             setUser(session.user)
           } else if (event === 'SIGNED_OUT') {
             setUser(null)
+          } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+            // Silently refresh token without triggering re-render if user is same
+            if (user?.id !== session.user.id) {
+              setUser(session.user)
+            }
           }
           setLoading(false)
         }
@@ -83,10 +91,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const contextValue = useMemo(() => ({ user, loading }), [user, loading])
 
   return (
-    <AuthContext.Provider value={contextValue}>
-      <PostHogProvider>
-        {children}
-      </PostHogProvider>
-    </AuthContext.Provider>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      <AuthContext.Provider value={contextValue}>
+        <PostHogProvider>
+          {children}
+        </PostHogProvider>
+      </AuthContext.Provider>
+    </ThemeProvider>
   )
 }
