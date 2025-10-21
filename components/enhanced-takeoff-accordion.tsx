@@ -95,6 +95,11 @@ interface EnhancedTakeoffAccordionProps {
   consensus?: ConsensusMetadata
   specializedInsights?: SpecializedInsight[]
   recommendations?: string[]
+  metadata?: {
+    providersRun: string[]
+    successfulProviders: number
+    totalTokensUsed: number
+  }
   onItemHighlight?: (bbox: BoundingBox) => void
 }
 

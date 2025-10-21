@@ -59,12 +59,17 @@ export async function POST(request: NextRequest) {
         disagreements: consensusResult.disagreements,
         modelAgreements: consensusResult.modelAgreements
       },
-      results: {
-        items: consensusResult.items,
-        issues: consensusResult.issues,
-        specializedInsights: consensusResult.specializedInsights,
-        recommendations: consensusResult.recommendations
-      },
+      results: taskType === 'takeoff' 
+        ? {
+            items: consensusResult.items,
+            specializedInsights: consensusResult.specializedInsights,
+            recommendations: consensusResult.recommendations
+          }
+        : {
+            issues: consensusResult.issues,
+            specializedInsights: consensusResult.specializedInsights,
+            recommendations: consensusResult.recommendations
+          },
       metadata: {
         totalModels: consensusResult.consensusCount,
         processingTimeMs: processingTime,

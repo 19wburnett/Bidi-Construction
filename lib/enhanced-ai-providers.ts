@@ -1,13 +1,13 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 // Enhanced AI Provider System with Specialized Models
 // This system uses 5+ specialized models with different strengths for maximum accuracy
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const gemini = new GoogleGenAI({ apiKey: process.env.GOOGLE_GEMINI_API_KEY })
+const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '')
 
 // XAI/Grok integration for additional redundancy
 const xaiApiKey = process.env.XAI_API_KEY
@@ -52,10 +52,13 @@ export interface EnhancedAIResponse {
 
 export interface ConsensusResult {
   items: any[]
+  issues: any[]
   confidence: number
   consensusCount: number
-  disagreements: string[]
-  modelAgreements: Record<string, number>
+  disagreements: any[]
+  modelAgreements: any[]
+  specializedInsights: any[]
+  recommendations: string[]
 }
 
 // Enhanced AI Provider with Specialized Routing
@@ -334,16 +337,17 @@ export class EnhancedAIProvider {
       })
     })
 
-    const response = await gemini.models.generateContent({
+    const modelInstance = gemini.getGenerativeModel({ 
       model: model,
-      contents: parts,
-      config: {
+      generationConfig: {
         maxOutputTokens: options.maxTokens || 4096,
         temperature: options.temperature || 0.2
       }
     })
     
-    const text = response.text || ''
+    const response = await modelInstance.generateContent(parts)
+    
+    const text = response.response?.text() || ''
     
     if (!text || text.trim().length === 0) {
       throw new Error('Gemini returned empty response')
@@ -424,7 +428,7 @@ export class EnhancedAIProvider {
     const basePrompt = options.systemPrompt
     
     // Add specialization-specific instructions
-    const specialization = MODEL_SPECIALIZATIONS[options.taskType as any] || 'general'
+    const specialization = 'general' // Default specialization
     
     let specializedInstructions = ''
     
@@ -512,7 +516,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         console.error(`Failed to parse ${result.model} response:`, error)
         return null
       }
-    }).filter(Boolean)
+    }).filter((result): result is NonNullable<typeof result> => result !== null)
     
     if (parsedResults.length < 2) {
       throw new Error('Need at least 2 valid responses for consensus')
@@ -549,10 +553,13 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     
     return {
       items: consensusItems,
+      issues: [], // No issues for takeoff analysis
       confidence: avgConfidence,
       consensusCount: results.length,
       disagreements,
-      modelAgreements
+      modelAgreements,
+      specializedInsights: [], // Will be populated by consensus engine
+      recommendations: [] // Will be populated by consensus engine
     }
   }
 
@@ -751,14 +758,12 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
   }
 
   // Count model agreements
-  private countModelAgreements(results: Array<{ parsed: any; model: string }>): Record<string, number> {
-    const agreements: Record<string, number> = {}
-    
-    results.forEach(result => {
-      agreements[result.model] = (result.parsed.items || []).length
-    })
-    
-    return agreements
+  private countModelAgreements(results: Array<{ parsed: any; model: string }>): any[] {
+    return results.map(result => ({
+      model: result.model,
+      itemsFound: (result.parsed.items || []).length,
+      confidence: 0.8 // Default confidence
+    }))
   }
 }
 

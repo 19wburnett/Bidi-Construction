@@ -17,7 +17,7 @@ export default function TestEnhancedPage() {
       const results = await response.json()
       setTestResults(results)
     } catch (error) {
-      setTestResults({ success: false, error: error.message })
+      setTestResults({ success: false, error: error instanceof Error ? error.message : 'Unknown error' })
     } finally {
       setIsTesting(false)
     }
@@ -42,7 +42,7 @@ export default function TestEnhancedPage() {
       const results = await response.json()
       setTestResults({ success: true, modelTest: results })
     } catch (error) {
-      setTestResults({ success: false, error: error.message })
+      setTestResults({ success: false, error: error instanceof Error ? error.message : 'Unknown error' })
     } finally {
       setIsTesting(false)
     }

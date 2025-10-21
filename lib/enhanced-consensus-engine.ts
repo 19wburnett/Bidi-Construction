@@ -492,7 +492,7 @@ export class EnhancedConsensusEngine {
       if (items.length < 2) return
       
       const categories = items.map(item => item.category)
-      const uniqueCategories = [...new Set(categories)]
+      const uniqueCategories = Array.from(new Set(categories))
       
       if (uniqueCategories.length > 1) {
         disagreements.push({
@@ -534,7 +534,7 @@ export class EnhancedConsensusEngine {
       if (issues.length < 2) return
       
       const severities = issues.map(issue => issue.severity)
-      const uniqueSeverities = [...new Set(severities)]
+      const uniqueSeverities = Array.from(new Set(severities))
       
       if (uniqueSeverities.length > 1) {
         disagreements.push({
