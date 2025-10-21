@@ -253,10 +253,12 @@ export function findCostCode(
   
   // If we have category and subcategory, try to find from the mapping
   if (category && subcategory) {
-    const categoryMap = CATEGORY_DIVISION_MAP[category.toLowerCase() as keyof typeof CATEGORY_DIVISION_MAP]
+    const categoryKey = category.toLowerCase()
+    const subcatKey = subcategory.toLowerCase()
+    const categoryMap = (CATEGORY_DIVISION_MAP as any)[categoryKey]
     if (categoryMap) {
-      const subcatMap = categoryMap[subcategory.toLowerCase() as keyof typeof categoryMap]
-      if (subcatMap && subcatMap.length > 0) {
+      const subcatMap = categoryMap[subcatKey]
+      if (Array.isArray(subcatMap) && subcatMap.length > 0) {
         return COST_CODES.find(code => code.fullCode === subcatMap[0]) || null
       }
     }

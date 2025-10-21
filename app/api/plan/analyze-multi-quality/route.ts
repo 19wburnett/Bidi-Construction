@@ -223,8 +223,8 @@ export async function POST(request: NextRequest) {
     console.log(`Merged to ${merged.issues.length} unique issues (removed ${merged.metadata.duplicatesRemoved} duplicates)`)
 
     // Combine missing details and recommendations from all providers
-    const allMissingDetails = [...new Set(parsedResults.flatMap(r => r.missing_details))]
-    const allRecommendations = [...new Set(parsedResults.flatMap(r => r.recommendations))]
+    const allMissingDetails = Array.from(new Set(parsedResults.flatMap(r => r.missing_details)))
+    const allRecommendations = Array.from(new Set(parsedResults.flatMap(r => r.recommendations)))
 
     // Calculate overall score as average
     const avgScore = parsedResults.reduce((sum, r) => sum + r.overall_score, 0) / parsedResults.length

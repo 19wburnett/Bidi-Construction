@@ -95,7 +95,13 @@ export default function AdminAnalyzePlansPage() {
 
       if (error) throw error
 
-      setPlans(data || [])
+      // Transform the data to match PlanWithUser interface
+      const transformedData = (data || []).map(plan => ({
+        ...plan,
+        users: Array.isArray(plan.users) ? plan.users[0] : plan.users
+      }))
+
+      setPlans(transformedData)
     } catch (error) {
       console.error('Error loading plans:', error)
     } finally {

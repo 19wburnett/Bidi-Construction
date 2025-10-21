@@ -453,7 +453,7 @@ export default function AdminAnalyzePlanPage() {
         // Calculate summary
         const summary = {
           total_items: takeoffItems.length,
-          categories: [...new Set(takeoffItems.map(i => i.category))],
+          categories: Array.from(new Set(takeoffItems.map(i => i.category))),
           total_cost: takeoffItems.reduce((sum, i) => sum + (i.quantity * (i.unit_cost || 0)), 0)
         }
 

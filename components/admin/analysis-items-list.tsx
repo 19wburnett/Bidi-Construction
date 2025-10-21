@@ -39,7 +39,7 @@ export default function AnalysisItemsList({
       const takeoffItem = item as TakeoffItem
       return sum + ((takeoffItem.quantity || 0) * (takeoffItem.unit_cost || 0))
     }, 0),
-    categories: [...new Set(items.map(item => (item as TakeoffItem).category))].length
+    categories: Array.from(new Set(items.map(item => (item as TakeoffItem).category))).length
   } : null
 
   return (
