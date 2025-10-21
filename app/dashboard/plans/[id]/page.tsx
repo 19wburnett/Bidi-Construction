@@ -1238,7 +1238,7 @@ export default function PlanEditorPage() {
       // Show pending status immediately
       setTakeoffResults({
         status: 'pending',
-        message: 'Converting PDF to images for analysis...',
+        message: 'Converting PDF to images for enhanced multi-model analysis...',
         requested_at: new Date().toISOString()
       })
 
@@ -1249,15 +1249,15 @@ export default function PlanEditorPage() {
         throw new Error('Failed to convert PDF to images')
       }
 
-      // Update status
+      // Update status with enhanced analysis info
       setTakeoffResults({
         status: 'pending',
-        message: `Analyzing ${images.length} page${images.length > 1 ? 's' : ''} with AI...`,
+        message: `Running enhanced consensus analysis with 5+ specialized AI models on ${images.length} page${images.length > 1 ? 's' : ''}...`,
         requested_at: new Date().toISOString()
       })
 
-      // Call the multi-provider API to perform the analysis
-      const response = await fetch('/api/plan/analyze-multi-takeoff', {
+      // Call the enhanced multi-model API
+      const response = await fetch('/api/plan/analyze-enhanced', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1265,13 +1265,14 @@ export default function PlanEditorPage() {
         body: JSON.stringify({
           planId: planId,
           images: images,
-          drawings: drawings // Include any user annotations
+          drawings: drawings, // Include any user annotations
+          taskType: 'takeoff'
         })
       })
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.error || 'Analysis failed')
+        throw new Error(errorData.error || 'Enhanced analysis failed')
       }
 
       const data = await response.json()
@@ -1285,20 +1286,30 @@ export default function PlanEditorPage() {
         })
         .eq('id', planId)
 
-      // Show results
+      // Show enhanced results with consensus metadata
       setTakeoffResults({
         status: 'completed',
-        message: 'Analysis complete!',
-        items: data.items || [],
-        summary: data.summary || {},
+        message: 'Enhanced consensus analysis complete!',
+        items: data.results?.items || [],
+        summary: data.results?.summary || {},
         analysisId: data.analysisId,
-        completed_at: new Date().toISOString()
+        completed_at: new Date().toISOString(),
+        // Enhanced metadata
+        consensus: data.consensus,
+        metadata: data.metadata,
+        specializedInsights: data.results?.specializedInsights || [],
+        recommendations: data.results?.recommendations || []
       })
 
-      alert('✅ Takeoff Analysis Complete!\n\nYour plan has been successfully analyzed. View the results in the sidebar.')
+      // Show enhanced success message with consensus info
+      const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
+      const modelCount = data.consensus?.consensusCount || 0
+      const disagreements = data.consensus?.disagreements?.length || 0
+      
+      alert(`✅ Enhanced Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
 
     } catch (error) {
-      console.error('Error requesting takeoff analysis:', error)
+      console.error('Error requesting enhanced takeoff analysis:', error)
       
       // Mark as failed in database
       const supabase = createClient()
@@ -1311,11 +1322,11 @@ export default function PlanEditorPage() {
 
       setTakeoffResults({
         status: 'failed',
-        message: error instanceof Error ? error.message : 'Analysis failed',
+        message: error instanceof Error ? error.message : 'Enhanced analysis failed',
         requested_at: new Date().toISOString()
       })
 
-      alert('❌ Analysis Failed\n\n' + (error instanceof Error ? error.message : 'Failed to analyze plan. Please try again.'))
+      alert('❌ Enhanced Analysis Failed\n\n' + (error instanceof Error ? error.message : 'Failed to analyze plan with enhanced multi-model system. Please try again.'))
     } finally {
       setIsAnalyzing(false)
     }
