@@ -23,6 +23,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check request size limits - limit to 3 images max to avoid 413 errors
+    if (images.length > 3) {
+      return NextResponse.json(
+        { 
+          error: 'Too many images for enhanced analysis',
+          details: `Enhanced analysis is limited to 3 pages maximum. You provided ${images.length} pages. Please select the most important pages or use the standard AI analysis for larger plans.`,
+          maxImages: 3,
+          providedImages: images.length
+        },
+        { status: 413 }
+      )
+    }
+
     // Check environment variables for enhanced AI providers
     const requiredEnvVars = [
       'OPENAI_API_KEY',

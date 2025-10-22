@@ -1326,7 +1326,20 @@ export default function PlanEditorPage() {
         requested_at: new Date().toISOString()
       })
 
-      alert('❌ Enhanced Analysis Failed\n\n' + (error instanceof Error ? error.message : 'Failed to analyze plan with enhanced multi-model system. Please try again.'))
+      // Check error type and show appropriate message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      
+      if (errorMessage.includes('Too many images') || errorMessage.includes('413')) {
+        alert('⚠️ Plan Too Large for Enhanced Analysis\n\n' + 
+              'The enhanced multi-model system is limited to 3 pages maximum to ensure optimal performance.\n\n' +
+              'Please select the most important pages (1-3) for analysis, or use the standard AI analysis for larger plans.')
+      } else if (errorMessage.includes('Enhanced AI system not configured')) {
+        alert('⚠️ Enhanced AI System Not Configured\n\n' + 
+              'The enhanced multi-model system requires additional API keys to be configured on the server.\n\n' +
+              'Please contact your administrator to set up the enhanced AI system, or use the standard AI analysis instead.')
+      } else {
+        alert('❌ Enhanced Analysis Failed\n\n' + errorMessage)
+      }
     } finally {
       setIsAnalyzing(false)
     }
