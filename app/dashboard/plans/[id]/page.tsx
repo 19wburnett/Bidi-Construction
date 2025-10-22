@@ -1249,71 +1249,132 @@ export default function PlanEditorPage() {
         throw new Error('Failed to convert PDF to images')
       }
 
-      // Update status with enhanced analysis info
-      setTakeoffResults({
-        status: 'pending',
-        message: `Running enhanced consensus analysis with 5+ specialized AI models on ${images.length} page${images.length > 1 ? 's' : ''}...`,
-        requested_at: new Date().toISOString()
-      })
-
-      // Call the enhanced multi-model API
-      const response = await fetch('/api/plan/analyze-enhanced', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          planId: planId,
-          images: images,
-          drawings: drawings, // Include any user annotations
-          taskType: 'takeoff'
-        })
-      })
-
-      if (!response.ok) {
-        let errorMessage = 'Enhanced analysis failed'
-        try {
-          const errorData = await response.json()
-          errorMessage = errorData.error || errorData.details || errorMessage
-        } catch (parseError) {
-          // If response is not JSON, use status text
-          errorMessage = response.statusText || `HTTP ${response.status} Error`
-        }
-        throw new Error(errorMessage)
-      }
-
-      const data = await response.json()
-
-      // Update plan status to completed
-      await supabase
-        .from('plans')
-        .update({ 
-          takeoff_analysis_status: 'completed',
-          has_takeoff_analysis: true
-        })
-        .eq('id', planId)
-
-      // Show enhanced results with consensus metadata
-      setTakeoffResults({
-        status: 'completed',
-        message: 'Enhanced consensus analysis complete!',
-        items: data.results?.items || [],
-        summary: data.results?.summary || {},
-        analysisId: data.analysisId,
-        completed_at: new Date().toISOString(),
-        // Enhanced metadata
-        consensus: data.consensus,
-        metadata: data.metadata,
-        specializedInsights: data.results?.specializedInsights || [],
-        recommendations: data.results?.recommendations || []
-      })
-
-      // Show enhanced success message with consensus info
-      const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
-      const modelCount = data.consensus?.consensusCount || 0
-      const disagreements = data.consensus?.disagreements?.length || 0
+      // Determine if we need batch processing (more than 5 pages)
+      const needsBatchProcessing = images.length > 5
       
-      alert(`✅ Enhanced Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+      if (needsBatchProcessing) {
+        // Show batch processing status
+        setTakeoffResults({
+          status: 'pending',
+          message: `Running enhanced consensus analysis with batch processing on ${images.length} pages...`,
+          requested_at: new Date().toISOString()
+        })
+
+        // Call the batch processing API
+        const response = await fetch('/api/plan/analyze-enhanced-batch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            planId: planId,
+            images: images,
+            drawings: drawings, // Include any user annotations
+            taskType: 'takeoff'
+          })
+        })
+
+        if (!response.ok) {
+          let errorMessage = 'Batch enhanced analysis failed'
+          try {
+            const errorData = await response.json()
+            errorMessage = errorData.error || errorData.details || errorMessage
+          } catch (parseError) {
+            errorMessage = response.statusText || `HTTP ${response.status} Error`
+          }
+          throw new Error(errorMessage)
+        }
+
+        const data = await response.json()
+
+        // Update plan status to completed
+        await supabase
+          .from('plans')
+          .update({ 
+            takeoff_analysis_status: 'completed',
+            finish_takeoff_analysis: true
+          })
+          .eq('id', planId)
+
+        // Show enhanced results with batch processing metadata
+        setTakeoffResults({
+          status: 'completed',
+          message: 'Enhanced batch analysis complete!',
+          items: data.results?.items || [],
+          summary: data.results?.summary || {},
+          analysisId: data.analysisId,
+          requested_at: new Date().toISOString(),
+          completed_at: new Date().toISOString()
+        })
+
+        const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
+        const modelCount = data.consensus?.consensusCount || 0
+        const disagreements = data.consensus?.disagreements?.length || 0
+        const batchesProcessed = data.batchProcessing?.totalBatches || 0
+        
+        alert(`✅ Enhanced Batch Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n📊 Processed ${batchesProcessed} batches of pages\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+
+      } else {
+        // Use regular enhanced analysis for smaller plans
+        setTakeoffResults({
+          status: 'pending',
+          message: `Running enhanced consensus analysis with 5+ specialized AI models on ${images.length} page${images.length > 1 ? 's' : ''}...`,
+          requested_at: new Date().toISOString()
+        })
+
+        // Call the enhanced multi-model API
+        const response = await fetch('/api/plan/analyze-enhanced', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            planId: planId,
+            images: images,
+            drawings: drawings, // Include any user annotations
+            taskType: 'takeoff'
+          })
+        })
+
+        if (!response.ok) {
+          let errorMessage = 'Enhanced analysis failed'
+          try {
+            const errorData = await response.json()
+            errorMessage = errorData.error || errorData.details || errorMessage
+          } catch (parseError) {
+            errorMessage = response.statusText || `HTTP ${response.status} Error`
+          }
+          throw new Error(errorMessage)
+        }
+
+        const data = await response.json()
+
+        // Update plan status to completed
+        await supabase
+          .from('plans')
+          .update({ 
+            takeoff_analysis_status: 'completed',
+            finish_takeoff_analysis: true
+          })
+          .eq('id', planId)
+
+        // Show enhanced results with consensus metadata
+        setTakeoffResults({
+          status: 'completed',
+          message: 'Enhanced consensus analysis complete!',
+          items: data.results?.items || [],
+          summary: data.results?.summary || {},
+          analysisId: data.analysisId,
+          requested_at: new Date().toISOString(),
+          completed_at: new Date().toISOString()
+        })
+
+        const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
+        const modelCount = data.consensus?.consensusCount || 0
+        const disagreements = data.consensus?.disagreements?.length || 0
+        
+        alert(`✅ Enhanced Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+      }
 
     } catch (error) {
       console.error('Error requesting enhanced takeoff analysis:', error)
