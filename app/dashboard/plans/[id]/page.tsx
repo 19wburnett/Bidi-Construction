@@ -1271,8 +1271,15 @@ export default function PlanEditorPage() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Enhanced analysis failed')
+        let errorMessage = 'Enhanced analysis failed'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorData.details || errorMessage
+        } catch (parseError) {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || `HTTP ${response.status} Error`
+        }
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
