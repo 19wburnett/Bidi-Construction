@@ -23,6 +23,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check environment variables for enhanced AI providers
+    const requiredEnvVars = [
+      'OPENAI_API_KEY',
+      'ANTHROPIC_API_KEY',
+      'GOOGLE_GEMINI_API_KEY',
+      'XAI_API_KEY'
+    ]
+    
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName])
+    
+    if (missingVars.length > 0) {
+      console.error('Missing environment variables for enhanced AI:', missingVars)
+      return NextResponse.json(
+        { 
+          error: 'Enhanced AI system not configured',
+          details: `Missing environment variables: ${missingVars.join(', ')}. Please configure all required API keys for the enhanced multi-model system.`,
+          fallback: 'Please use the standard AI analysis instead'
+        },
+        { status: 503 }
+      )
+    }
+
     console.log(`Starting enhanced analysis for plan ${planId} with ${images.length} images`)
 
     // Build specialized prompts based on task type
