@@ -42,10 +42,22 @@ export async function POST(request: NextRequest) {
 
     // Run enhanced consensus analysis
     const startTime = Date.now()
-    const consensusResult = await enhancedAIProvider.analyzeWithConsensus(images, analysisOptions)
-    const processingTime = Date.now() - startTime
-
-    console.log(`Enhanced analysis completed in ${processingTime}ms`)
+    console.log('Starting enhanced analysis with options:', analysisOptions)
+    console.log('Images count:', images.length)
+    
+    try {
+      const consensusResult = await enhancedAIProvider.analyzeWithConsensus(images, analysisOptions)
+      const processingTime = Date.now() - startTime
+      console.log(`Enhanced analysis completed in ${processingTime}ms`)
+      console.log('Consensus result:', {
+        itemsCount: consensusResult.items.length,
+        confidence: consensusResult.confidence,
+        consensusCount: consensusResult.consensusCount
+      })
+    } catch (error) {
+      console.error('Enhanced analysis failed:', error)
+      throw error
+    }
 
     // Build response with enhanced metadata
     const response = {

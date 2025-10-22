@@ -16,12 +16,8 @@ const xaiApiKey = process.env.XAI_API_KEY
 export const MODEL_SPECIALIZATIONS = {
   'gpt-5': 'general_construction', // Best overall construction analysis (your GPT-5!)
   'gpt-4o': 'general_construction', // Best overall construction analysis
-  'claude-3.5-sonnet': 'code_compliance', // Best at building codes and regulations
-  'gemini-1.5-pro': 'measurements', // Best at dimensions and calculations
-  'gpt-4-vision': 'symbol_recognition', // Best at reading plan symbols
-  'claude-3-opus': 'cost_estimation', // Best at pricing and cost analysis
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
-  'claude-3-haiku': 'fast_processing', // Fastest for simple tasks
+  'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
   'grok-2': 'alternative_analysis' // Alternative perspective model (XAI)
 } as const
 
@@ -86,34 +82,6 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.88
       },
-      'claude-3.5-sonnet': {
-        takeoff: 0.88,
-        quality: 0.92,
-        bid_analysis: 0.90,
-        code_compliance: 0.98,
-        cost_estimation: 0.85
-      },
-      'gemini-1.5-pro': {
-        takeoff: 0.92,
-        quality: 0.85,
-        bid_analysis: 0.88,
-        code_compliance: 0.80,
-        cost_estimation: 0.90
-      },
-      'gpt-4-vision': {
-        takeoff: 0.98,
-        quality: 0.95,
-        bid_analysis: 0.85,
-        code_compliance: 0.75,
-        cost_estimation: 0.80
-      },
-      'claude-3-opus': {
-        takeoff: 0.90,
-        quality: 0.88,
-        bid_analysis: 0.95,
-        code_compliance: 0.92,
-        cost_estimation: 0.98
-      },
       'gpt-4-turbo': {
         takeoff: 0.88,
         quality: 0.95,
@@ -121,7 +89,7 @@ export class EnhancedAIProvider {
         code_compliance: 0.80,
         cost_estimation: 0.82
       },
-      'claude-3-haiku': {
+      'claude-3-haiku-20240307': {
         takeoff: 0.85,
         quality: 0.80,
         bid_analysis: 0.82,
@@ -173,17 +141,30 @@ export class EnhancedAIProvider {
     
     console.log(`Using specialized models for ${options.taskType}:`, enabledModels)
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
+    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
     // Run analysis with selected models in parallel
-    const analysisPromises = enabledModels.map(model => 
-      this.analyzeWithModel(images, options, model)
-    )
+    const analysisPromises = enabledModels.map(async (model, index) => {
+      console.log(`Starting analysis with model ${index + 1}/${enabledModels.length}: ${model}`)
+      try {
+        const result = await this.analyzeWithModel(images, options, model)
+        console.log(`Model ${model} succeeded: ${result.content.length} chars`)
+        return result
+      } catch (error) {
+        console.error(`Model ${model} failed:`, error)
+        throw error
+      }
+    })
     
     const results = await Promise.allSettled(analysisPromises)
     
     const successfulResults = results
       .filter(r => r.status === 'fulfilled')
       .map(r => (r as PromiseFulfilledResult<EnhancedAIResponse>).value)
+    
+    const failedResults = results
+      .filter(r => r.status === 'rejected')
+      .map(r => (r as PromiseRejectedResult).reason)
     
     const processingTime = Date.now() - startTime
     
@@ -193,6 +174,9 @@ export class EnhancedAIProvider {
     })
     
     console.log(`Enhanced analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${processingTime}ms`)
+    if (failedResults.length > 0) {
+      console.log(`Failed models:`, failedResults.map(r => r.message || r))
+    }
     
     return successfulResults
   }
@@ -212,12 +196,8 @@ export class EnhancedAIProvider {
         case 'gpt-4-vision':
         case 'gpt-4-turbo':
           return await this.analyzeWithOpenAI(images, options, model)
-        case 'claude-3.5-sonnet':
-        case 'claude-3-opus':
-        case 'claude-3-haiku':
+        case 'claude-3-haiku-20240307':
           return await this.analyzeWithClaude(images, options, model)
-        case 'gemini-1.5-pro':
-          return await this.analyzeWithGemini(images, options, model)
         case 'grok-2':
           return await this.analyzeWithXAI(images, options, model)
         default:
@@ -235,37 +215,50 @@ export class EnhancedAIProvider {
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
+    console.log(`OpenAI analysis starting with model: ${model}`)
+    
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OpenAI API key not configured')
+    }
+    
     const imageContent = images.map(img => ({
       type: 'image_url' as const,
       image_url: { url: img, detail: 'high' as const }
     }))
 
-    const response = await openai.chat.completions.create({
-      model: model,
-      messages: [
-        { role: 'system', content: this.buildSpecializedPrompt(options) },
-        { 
-          role: 'user', 
-          content: [
-            { type: 'text', text: options.userPrompt },
-            ...imageContent
-          ] 
-        }
-      ],
-      max_completion_tokens: options.maxTokens || 4096,
-      temperature: options.temperature || 0.2,
-      response_format: { type: 'json_object' }
-    })
-
-    return {
-      provider: 'openai',
-      model: model,
-      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-      content: response.choices[0].message.content || '',
-      finishReason: response.choices[0].finish_reason,
-      tokensUsed: response.usage?.total_tokens,
-      confidence: this.calculateConfidence(response.choices[0].message.content || ''),
-      taskType: options.taskType
+    try {
+      const response = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: 'system', content: this.buildSpecializedPrompt(options) },
+          { 
+            role: 'user', 
+            content: [
+              { type: 'text', text: options.userPrompt },
+              ...imageContent
+            ] 
+          }
+        ],
+        max_completion_tokens: options.maxTokens || 4096,
+        temperature: options.temperature || 0.2,
+        response_format: { type: 'json_object' }
+      })
+      
+      console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
+      
+      return {
+        provider: 'openai',
+        model: model,
+        specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+        content: response.choices[0].message.content || '',
+        finishReason: response.choices[0].finish_reason,
+        tokensUsed: response.usage?.total_tokens,
+        confidence: this.calculateConfidence(response.choices[0].message.content || ''),
+        taskType: options.taskType
+      }
+    } catch (error) {
+      console.error(`OpenAI ${model} failed:`, error)
+      throw error
     }
   }
 
@@ -275,6 +268,12 @@ export class EnhancedAIProvider {
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
+    console.log(`Claude analysis starting with model: ${model}`)
+    
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Anthropic API key not configured')
+    }
+    
     const imageContent = images.map(img => {
       const base64Data = img.split(',')[1] || img
       const mediaType = img.includes('jpeg') ? 'image/jpeg' : 'image/png'
@@ -324,6 +323,12 @@ export class EnhancedAIProvider {
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
+    console.log(`Gemini analysis starting with model: ${model}`)
+    
+    if (!process.env.GOOGLE_GEMINI_API_KEY) {
+      throw new Error('Google Gemini API key not configured')
+    }
+    
     const parts: any[] = [
       { text: `${this.buildSpecializedPrompt(options)}\n\n${options.userPrompt}\n\nIMPORTANT: Respond with ONLY a JSON object, no other text.` }
     ]
@@ -371,6 +376,8 @@ export class EnhancedAIProvider {
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
+    console.log(`XAI analysis starting with model: ${model}`)
+    
     if (!xaiApiKey) {
       throw new Error('XAI API key not configured')
     }

@@ -27,6 +27,7 @@
     "@types/xlsx": "^0.0.36",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
+    "dotenv": "^17.2.3",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.2",
     "lucide-react": "^0.460.0",
