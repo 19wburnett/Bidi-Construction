@@ -181,7 +181,7 @@ function mergeBatchResults(batchResults: any[], taskType: string): any {
     disagreements: allDisagreements,
     modelAgreements: batchResults[0]?.result.modelAgreements || [],
     specializedInsights: allSpecializedInsights,
-    recommendations: [...new Set(allRecommendations)] // Remove duplicates
+    recommendations: Array.from(new Set(allRecommendations)) // Remove duplicates
   }
 }
 
