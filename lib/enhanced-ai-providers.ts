@@ -91,11 +91,11 @@ export class EnhancedAIProvider {
         cost_estimation: 0.80
       },
       'grok-2': {
-        takeoff: 0.87,        // Alternative perspective model
-        quality: 0.85,
-        bid_analysis: 0.88,
-        code_compliance: 0.82,
-        cost_estimation: 0.85
+        takeoff: 0.90,        // Grok-2 is back with working API key!
+        quality: 0.88,
+        bid_analysis: 0.92,
+        code_compliance: 0.85,
+        cost_estimation: 0.88
       },
       'gemini-1.5-pro': {
         takeoff: 0.82,        // Good for measurements and calculations
@@ -128,8 +128,8 @@ export class EnhancedAIProvider {
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (limit to 4 for better consensus)
-    const selectedModels = this.getBestModelsForTask(options.taskType, 4)
+    // Get best models for this task type (limit to 5 for maximum consensus)
+    const selectedModels = this.getBestModelsForTask(options.taskType, 5)
     
     // Filter out disabled providers
     const enabledModels = selectedModels.filter(model => {

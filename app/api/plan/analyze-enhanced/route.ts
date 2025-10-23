@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
-import { createServerSupabaseClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase'
 import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced-consensus-engine'
 
 // Enhanced Multi-Model Analysis API
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Save analysis results to database
-    const supabase = await createServerSupabaseClient()
+    const supabase = createClient()
     
     if (taskType === 'takeoff') {
       // Save takeoff analysis
