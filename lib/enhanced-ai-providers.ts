@@ -227,7 +227,8 @@ export class EnhancedAIProvider {
     }))
 
     try {
-      const response = await openai.chat.completions.create({
+      // GPT-5 doesn't support custom temperature, use default for it
+      const requestConfig: any = {
         model: model,
         messages: [
           { role: 'system', content: this.buildSpecializedPrompt(options) },
@@ -239,10 +240,16 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: options.maxTokens || 4096,
-        temperature: options.temperature || 0.2,
+        max_completion_tokens: options.maxTokens || 8192,
         response_format: { type: 'json_object' }
-      })
+      }
+      
+      // Only add temperature for models that support it (not GPT-5)
+      if (model !== 'gpt-5') {
+        requestConfig.temperature = options.temperature || 0.2
+      }
+      
+      const response = await openai.chat.completions.create(requestConfig)
       
       console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
       
@@ -406,13 +413,17 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: options.maxTokens || 4096,
+        max_completion_tokens: options.maxTokens || 8192,
         temperature: options.temperature || 0.2,
         response_format: { type: 'json_object' }
       })
     })
 
     if (!response.ok) {
+      if (response.status === 403) {
+        console.warn('XAI API access forbidden - skipping Grok model')
+        throw new Error('XAI API access forbidden')
+      }
       throw new Error(`XAI API error: ${response.statusText}`)
     }
 
@@ -534,18 +545,52 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         }
       }
       
-      throw new Error('Need at least 2 models for consensus analysis')
+      // If no models succeeded, try to use the standard AI analysis as fallback
+      console.log('No enhanced models succeeded, falling back to standard AI analysis')
+      throw new Error('Enhanced analysis failed - falling back to standard analysis')
     }
     
-    // Parse all responses
+    // Parse all responses with improved JSON extraction
     const parsedResults = results.map(result => {
       try {
+        // Try to extract JSON from the response (handle markdown code blocks)
+        let jsonText = result.content
+        
+        // Remove markdown code blocks if present
+        const codeBlockMatch = result.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+        if (codeBlockMatch) {
+          jsonText = codeBlockMatch[1]
+        } else {
+          // Try to find JSON object in the text
+          const jsonMatch = result.content.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            jsonText = jsonMatch[0]
+          }
+        }
+        
+        // Validate JSON is not empty
+        if (!jsonText || jsonText.trim().length === 0) {
+          throw new Error('Empty JSON response')
+        }
+        
+        const parsed = JSON.parse(jsonText)
+        
+        // Validate the parsed JSON has the expected structure
+        if (!parsed.items && !parsed.issues && !parsed.summary) {
+          console.warn(`Invalid JSON structure from ${result.model} - attempting to fix`)
+          // Try to create a minimal valid structure
+          parsed.items = parsed.items || []
+          parsed.issues = parsed.issues || []
+          parsed.summary = parsed.summary || { total_items: 0, notes: 'Analysis completed with minimal data' }
+        }
+        
         return {
           ...result,
-          parsed: JSON.parse(result.content)
+          parsed: parsed
         }
       } catch (error) {
         console.error(`Failed to parse ${result.model} response:`, error)
+        console.error(`Raw response (first 500 chars):`, result.content.substring(0, 500))
         return null
       }
     }).filter((result): result is NonNullable<typeof result> => result !== null)

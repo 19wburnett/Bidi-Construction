@@ -1122,7 +1122,7 @@ export default function PlanEditorPage() {
       
       for (let pageNum = 1; pageNum <= pagesToConvert; pageNum++) {
         const page = await pdf.getPage(pageNum)
-        const viewport = page.getViewport({ scale: 1.5 }) // Reduced scale for Vercel payload limits
+        const viewport = page.getViewport({ scale: 1.0 }) // Minimal scale for Vercel payload limits
         
         // Create a temporary canvas
         const canvas = document.createElement('canvas')
@@ -1138,8 +1138,8 @@ export default function PlanEditorPage() {
           viewport: viewport
         }).promise
         
-        // Convert to JPEG base64 with compression for Vercel payload limits
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6) // Reduced quality for smaller payload
+        // Convert to JPEG base64 with aggressive compression for Vercel payload limits
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.4) // More aggressive compression for large plans
         images.push(dataUrl)
       }
       
@@ -1155,10 +1155,10 @@ export default function PlanEditorPage() {
     const payloadSize = JSON.stringify({ images }).length
     const sizeInMB = payloadSize / (1024 * 1024)
     
-    if (sizeInMB > 4.0) {
+    if (sizeInMB > 3.0) { // More aggressive limit
       return {
         size: sizeInMB,
-        warning: `Payload size (${sizeInMB.toFixed(2)}MB) is approaching Vercel's 4.5MB limit. Consider using fewer pages or contact support.`
+        warning: `Payload size (${sizeInMB.toFixed(2)}MB) exceeds Vercel's 4.5MB limit. Applying additional compression...`
       }
     }
     
@@ -1169,7 +1169,7 @@ export default function PlanEditorPage() {
   const compressImagesForVercel = async (images: string[]): Promise<string[]> => {
     const payloadCheck = checkPayloadSize(images)
     
-    if (payloadCheck.size > 4.0) {
+    if (payloadCheck.size > 3.0) {
       console.log(`Payload too large (${payloadCheck.size.toFixed(2)}MB), applying additional compression...`)
       
       const compressedImages: string[] = []
@@ -1191,14 +1191,14 @@ export default function PlanEditorPage() {
                 return
               }
               
-              // Resize to 50% of original size
-              canvas.width = img.width * 0.5
-              canvas.height = img.height * 0.5
+              // Resize to 30% of original size for Vercel limits
+              canvas.width = img.width * 0.3
+              canvas.height = img.height * 0.3
               
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
               
-              // Convert with very aggressive compression
-              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4)
+              // Convert with maximum compression
+              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.2)
               compressedImages.push(compressedDataUrl)
               resolve(void 0)
             }

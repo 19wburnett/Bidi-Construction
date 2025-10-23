@@ -95,8 +95,8 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('Enhanced analysis failed:', error)
       
-      // If it's a "Need at least 2 models" error, try fallback to ChatGPT only
-      if (error instanceof Error && error.message.includes('Need at least 2 models')) {
+      // If it's a "Need at least 2 models" error or enhanced analysis failed, try fallback to ChatGPT only
+      if (error instanceof Error && (error.message.includes('Need at least 2 models') || error.message.includes('Enhanced analysis failed'))) {
         console.log('Falling back to ChatGPT-only analysis')
         try {
           // Import ChatGPT provider as fallback
@@ -104,12 +104,26 @@ export async function POST(request: NextRequest) {
           const chatgptResult = await analyzeWithOpenAI(images, {
             systemPrompt,
             userPrompt,
-            maxTokens: 4096,
+            maxTokens: 8192,
             temperature: 0.2
           })
           
-          // Parse ChatGPT response
-          const parsed = JSON.parse(chatgptResult.content)
+          // Parse ChatGPT response with improved JSON extraction
+          let jsonText = chatgptResult.content
+          
+          // Remove markdown code blocks if present
+          const codeBlockMatch = chatgptResult.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+          if (codeBlockMatch) {
+            jsonText = codeBlockMatch[1]
+          } else {
+            // Try to find JSON object in the text
+            const jsonMatch = chatgptResult.content.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              jsonText = jsonMatch[0]
+            }
+          }
+          
+          const parsed = JSON.parse(jsonText)
           
           // Convert ChatGPT result to enhanced format
           consensusResult = {
