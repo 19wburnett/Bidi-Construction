@@ -1118,11 +1118,11 @@ export default function PlanEditorPage() {
       const loadingTask = pdfjsLib.getDocument(planUrl)
       const pdf = await loadingTask.promise
       
-      const pagesToConvert = Math.min(pdf.numPages, 5) // Limit to 5 pages
+      const pagesToConvert = pdf.numPages // Convert all pages
       
       for (let pageNum = 1; pageNum <= pagesToConvert; pageNum++) {
         const page = await pdf.getPage(pageNum)
-        const viewport = page.getViewport({ scale: 2 }) // Higher quality
+        const viewport = page.getViewport({ scale: 1.5 }) // Reduced scale for Vercel payload limits
         
         // Create a temporary canvas
         const canvas = document.createElement('canvas')
@@ -1138,8 +1138,8 @@ export default function PlanEditorPage() {
           viewport: viewport
         }).promise
         
-        // Convert to JPEG base64
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+        // Convert to JPEG base64 with compression for Vercel payload limits
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6) // Reduced quality for smaller payload
         images.push(dataUrl)
       }
       
@@ -1148,6 +1148,74 @@ export default function PlanEditorPage() {
       console.error('Error converting PDF to images:', error)
       throw new Error('Failed to convert PDF pages to images')
     }
+  }
+
+  // Check payload size and warn if approaching Vercel limits
+  const checkPayloadSize = (images: string[]): { size: number, warning?: string } => {
+    const payloadSize = JSON.stringify({ images }).length
+    const sizeInMB = payloadSize / (1024 * 1024)
+    
+    if (sizeInMB > 4.0) {
+      return {
+        size: sizeInMB,
+        warning: `Payload size (${sizeInMB.toFixed(2)}MB) is approaching Vercel's 4.5MB limit. Consider using fewer pages or contact support.`
+      }
+    }
+    
+    return { size: sizeInMB }
+  }
+
+  // Further compress images if payload is too large
+  const compressImagesForVercel = async (images: string[]): Promise<string[]> => {
+    const payloadCheck = checkPayloadSize(images)
+    
+    if (payloadCheck.size > 4.0) {
+      console.log(`Payload too large (${payloadCheck.size.toFixed(2)}MB), applying additional compression...`)
+      
+      const compressedImages: string[] = []
+      
+      for (const imageDataUrl of images) {
+        try {
+          // Create a temporary image element to resize
+          const img = new Image()
+          img.src = imageDataUrl
+          
+          await new Promise((resolve) => {
+            img.onload = () => {
+              const canvas = document.createElement('canvas')
+              const ctx = canvas.getContext('2d')
+              
+              if (!ctx) {
+                compressedImages.push(imageDataUrl)
+                resolve(void 0)
+                return
+              }
+              
+              // Resize to 50% of original size
+              canvas.width = img.width * 0.5
+              canvas.height = img.height * 0.5
+              
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+              
+              // Convert with very aggressive compression
+              const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.4)
+              compressedImages.push(compressedDataUrl)
+              resolve(void 0)
+            }
+          })
+        } catch (error) {
+          console.error('Error compressing image:', error)
+          compressedImages.push(imageDataUrl) // Use original if compression fails
+        }
+      }
+      
+      const newPayloadCheck = checkPayloadSize(compressedImages)
+      console.log(`After compression: ${newPayloadCheck.size.toFixed(2)}MB`)
+      
+      return compressedImages
+    }
+    
+    return images
   }
 
   async function runTakeoffAnalysis() {
@@ -1178,6 +1246,17 @@ export default function PlanEditorPage() {
       
       if (images.length === 0) {
         throw new Error('Failed to convert PDF to images')
+      }
+
+      // Check payload size for Vercel limits and compress if needed
+      const payloadCheck = checkPayloadSize(images)
+      if (payloadCheck.warning) {
+        console.warn('Payload size warning:', payloadCheck.warning)
+        // Apply additional compression for Vercel limits
+        const compressedImages = await compressImagesForVercel(images)
+        images.length = 0 // Clear original array
+        images.push(...compressedImages) // Replace with compressed images
+        console.log('Applied additional compression for Vercel payload limits')
       }
 
       // Determine if we need batch processing (more than 5 pages)
