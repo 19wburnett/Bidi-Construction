@@ -509,6 +509,31 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     const results = await this.analyzeWithSpecializedModels(images, options)
     
     if (results.length < 2) {
+      console.error(`Only ${results.length} models succeeded. Need at least 2 for consensus analysis.`)
+      console.error('Available results:', results.map(r => ({ model: r.model, provider: r.provider, success: !!r.content })))
+      
+      // If we have at least 1 model, use it without consensus
+      if (results.length === 1) {
+        console.log('Falling back to single model analysis (no consensus)')
+        const singleResult = results[0]
+        try {
+          const parsed = JSON.parse(singleResult.content)
+          return {
+            items: parsed.items || [],
+            issues: parsed.issues || [],
+            confidence: singleResult.confidence || 0.7,
+            consensusCount: 1,
+            disagreements: [],
+            modelAgreements: [singleResult.model],
+            specializedInsights: parsed.specializedInsights || [],
+            recommendations: parsed.recommendations || []
+          }
+        } catch (error) {
+          console.error('Failed to parse single model response:', error)
+          throw new Error('Single model analysis failed to parse response')
+        }
+      }
+      
       throw new Error('Need at least 2 models for consensus analysis')
     }
     

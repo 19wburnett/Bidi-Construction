@@ -132,16 +132,56 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response)
 
-  } catch (error) {
-    console.error('Enhanced analysis error:', error)
-    return NextResponse.json(
-      { 
-        error: 'Enhanced analysis failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    )
-  }
+    } catch (error) {
+      console.error('Enhanced analysis error:', error)
+      
+      // If it's a "Need at least 2 models" error, try fallback to standard AI
+      if (error instanceof Error && error.message.includes('Need at least 2 models')) {
+        console.log('Falling back to standard AI analysis')
+        try {
+          // Import standard AI provider as fallback
+          const { aiProvider } = await import('@/lib/ai-providers')
+          const standardResult = await aiProvider.analyzeImages(images, {
+            systemPrompt,
+            userPrompt,
+            maxTokens: 4096,
+            temperature: 0.2
+          })
+          
+          // Convert standard result to enhanced format
+          consensusResult = {
+            items: standardResult.items || [],
+            issues: standardResult.issues || [],
+            confidence: 0.8, // Single model confidence
+            consensusCount: 1,
+            disagreements: [],
+            modelAgreements: ['standard-ai-fallback'],
+            specializedInsights: standardResult.specializedInsights || [],
+            recommendations: standardResult.recommendations || []
+          }
+          
+          processingTime = Date.now() - startTime
+          console.log(`Fallback analysis completed in ${processingTime}ms`)
+        } catch (fallbackError) {
+          console.error('Fallback analysis also failed:', fallbackError)
+          return NextResponse.json(
+            { 
+              error: 'Enhanced analysis failed',
+              details: error instanceof Error ? error.message : 'Unknown error'
+            },
+            { status: 500 }
+          )
+        }
+      } else {
+        return NextResponse.json(
+          { 
+            error: 'Enhanced analysis failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+          },
+          { status: 500 }
+        )
+      }
+    }
 }
 
 // Build specialized system prompt based on task type
