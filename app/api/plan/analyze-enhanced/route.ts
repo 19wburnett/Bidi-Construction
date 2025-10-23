@@ -94,7 +94,44 @@ export async function POST(request: NextRequest) {
       })
     } catch (error) {
       console.error('Enhanced analysis failed:', error)
-      throw error
+      
+      // If it's a "Need at least 2 models" error, try fallback to ChatGPT only
+      if (error instanceof Error && error.message.includes('Need at least 2 models')) {
+        console.log('Falling back to ChatGPT-only analysis')
+        try {
+          // Import ChatGPT provider as fallback
+          const { analyzeWithOpenAI } = await import('@/lib/ai-providers')
+          const chatgptResult = await analyzeWithOpenAI(images, {
+            systemPrompt,
+            userPrompt,
+            maxTokens: 4096,
+            temperature: 0.2
+          })
+          
+          // Parse ChatGPT response
+          const parsed = JSON.parse(chatgptResult.content)
+          
+          // Convert ChatGPT result to enhanced format
+          consensusResult = {
+            items: parsed.items || [],
+            issues: parsed.issues || [],
+            confidence: 0.8, // Single model confidence
+            consensusCount: 1,
+            disagreements: [],
+            modelAgreements: ['chatgpt-fallback'],
+            specializedInsights: parsed.specializedInsights || [],
+            recommendations: parsed.recommendations || []
+          }
+          
+          processingTime = Date.now() - startTime
+          console.log(`ChatGPT fallback analysis completed in ${processingTime}ms`)
+        } catch (fallbackError) {
+          console.error('ChatGPT fallback analysis also failed:', fallbackError)
+          throw error // Re-throw original error
+        }
+      } else {
+        throw error // Re-throw if it's not a "Need at least 2 models" error
+      }
     }
 
     // Build response with enhanced metadata
@@ -132,59 +169,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response)
 
-    } catch (error) {
-      console.error('Enhanced analysis error:', error)
-      
-      // If it's a "Need at least 2 models" error, try fallback to ChatGPT only
-      if (error instanceof Error && error.message.includes('Need at least 2 models')) {
-        console.log('Falling back to ChatGPT-only analysis')
-        try {
-          // Import ChatGPT provider as fallback
-          const { analyzeWithOpenAI } = await import('@/lib/ai-providers')
-          const chatgptResult = await analyzeWithOpenAI(images, {
-            systemPrompt,
-            userPrompt,
-            maxTokens: 4096,
-            temperature: 0.2
-          })
-          
-          // Parse ChatGPT response
-          const parsed = JSON.parse(chatgptResult.content)
-          
-          // Convert ChatGPT result to enhanced format
-          consensusResult = {
-            items: parsed.items || [],
-            issues: parsed.issues || [],
-            confidence: 0.8, // Single model confidence
-            consensusCount: 1,
-            disagreements: [],
-            modelAgreements: ['chatgpt-fallback'],
-            specializedInsights: parsed.specializedInsights || [],
-            recommendations: parsed.recommendations || []
-          }
-          
-          processingTime = Date.now() - startTime
-          console.log(`ChatGPT fallback analysis completed in ${processingTime}ms`)
-        } catch (fallbackError) {
-          console.error('ChatGPT fallback analysis also failed:', fallbackError)
-          return NextResponse.json(
-            { 
-              error: 'Enhanced analysis failed',
-              details: error instanceof Error ? error.message : 'Unknown error'
-            },
-            { status: 500 }
-          )
-        }
-      } else {
-        return NextResponse.json(
-          { 
-            error: 'Enhanced analysis failed',
-            details: error instanceof Error ? error.message : 'Unknown error'
-          },
-          { status: 500 }
-        )
-      }
-    }
+  } catch (error) {
+    console.error('Enhanced analysis error:', error)
+    return NextResponse.json(
+      { 
+        error: 'Enhanced analysis failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    )
+  }
 }
 
 // Build specialized system prompt based on task type
