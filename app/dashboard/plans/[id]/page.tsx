@@ -1321,8 +1321,13 @@ export default function PlanEditorPage() {
         const modelCount = data.consensus?.consensusCount || 0
         const disagreements = data.consensus?.disagreements?.length || 0
         const batchesProcessed = data.batchProcessing?.totalBatches || 0
+        const isFallback = data.consensus?.modelAgreements?.includes('chatgpt-fallback')
         
-        alert(`✅ Enhanced Batch Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n📊 Processed ${batchesProcessed} batches of pages\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+        if (isFallback) {
+          alert(`✅ Analysis Complete! (ChatGPT Fallback)\n\n🤖 Enhanced multi-model system unavailable\n🔄 Used ChatGPT-only analysis as fallback\n📊 Processed ${batchesProcessed} batches of pages\n🎯 Confidence Score: ${consensusScore}%\n📊 View detailed results in the sidebar`)
+        } else {
+          alert(`✅ Enhanced Batch Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n📊 Processed ${batchesProcessed} batches of pages\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+        }
 
       } else {
         // Use regular enhanced analysis for smaller plans
@@ -1382,8 +1387,13 @@ export default function PlanEditorPage() {
         const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
         const modelCount = data.consensus?.consensusCount || 0
         const disagreements = data.consensus?.disagreements?.length || 0
-        
-        alert(`✅ Enhanced Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+        const isFallback = data.consensus?.modelAgreements?.includes('chatgpt-fallback')
+
+        if (isFallback) {
+          alert(`✅ Analysis Complete! (ChatGPT Fallback)\n\n🤖 Enhanced multi-model system unavailable\n🔄 Used ChatGPT-only analysis as fallback\n🎯 Confidence Score: ${consensusScore}%\n📊 View detailed results in the sidebar`)
+        } else {
+          alert(`✅ Enhanced Analysis Complete!\n\n🤖 ${modelCount} AI models analyzed your plan\n🎯 Consensus Score: ${consensusScore}%\n${disagreements > 0 ? `⚠️ ${disagreements} disagreements flagged for review\n` : ''}📊 View detailed results in the sidebar`)
+        }
       }
 
     } catch (error) {

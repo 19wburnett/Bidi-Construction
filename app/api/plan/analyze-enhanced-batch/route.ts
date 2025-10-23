@@ -97,29 +97,32 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error(`Batch ${batchIndex + 1} failed:`, error)
         
-        // If it's a "Need at least 2 models" error, try fallback to standard AI
+        // If it's a "Need at least 2 models" error, try fallback to ChatGPT only
         if (error instanceof Error && error.message.includes('Need at least 2 models')) {
-          console.log(`Batch ${batchIndex + 1}: Falling back to standard AI analysis`)
+          console.log(`Batch ${batchIndex + 1}: Falling back to ChatGPT-only analysis`)
           try {
-            // Import standard AI provider as fallback
-            const { aiProvider } = await import('@/lib/ai-providers')
-            const standardResult = await aiProvider.analyzeImages(batch, {
+            // Import ChatGPT provider as fallback
+            const { analyzeWithOpenAI } = await import('@/lib/ai-providers')
+            const chatgptResult = await analyzeWithOpenAI(batch, {
               systemPrompt,
               userPrompt,
               maxTokens: 4096,
               temperature: 0.2
             })
             
-            // Convert standard result to enhanced format
+            // Parse ChatGPT response
+            const parsed = JSON.parse(chatgptResult.content)
+            
+            // Convert ChatGPT result to enhanced format
             const fallbackResult = {
-              items: standardResult.items || [],
-              issues: standardResult.issues || [],
+              items: parsed.items || [],
+              issues: parsed.issues || [],
               confidence: 0.8, // Single model confidence
               consensusCount: 1,
               disagreements: [],
-              modelAgreements: ['standard-ai-fallback'],
-              specializedInsights: standardResult.specializedInsights || [],
-              recommendations: standardResult.recommendations || []
+              modelAgreements: ['chatgpt-fallback'],
+              specializedInsights: parsed.specializedInsights || [],
+              recommendations: parsed.recommendations || []
             }
             
             const processingTime = Date.now() - startTime
@@ -133,10 +136,10 @@ export async function POST(request: NextRequest) {
               result: fallbackResult
             })
             
-            console.log(`Batch ${batchIndex + 1} completed with fallback in ${processingTime}ms`)
+            console.log(`Batch ${batchIndex + 1} completed with ChatGPT fallback in ${processingTime}ms`)
             continue
           } catch (fallbackError) {
-            console.error(`Batch ${batchIndex + 1} fallback also failed:`, fallbackError)
+            console.error(`Batch ${batchIndex + 1} ChatGPT fallback also failed:`, fallbackError)
             throw new Error(`Batch ${batchIndex + 1} processing failed: ${error.message}`)
           }
         }

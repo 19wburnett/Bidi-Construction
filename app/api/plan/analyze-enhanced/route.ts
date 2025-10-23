@@ -135,35 +135,38 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('Enhanced analysis error:', error)
       
-      // If it's a "Need at least 2 models" error, try fallback to standard AI
+      // If it's a "Need at least 2 models" error, try fallback to ChatGPT only
       if (error instanceof Error && error.message.includes('Need at least 2 models')) {
-        console.log('Falling back to standard AI analysis')
+        console.log('Falling back to ChatGPT-only analysis')
         try {
-          // Import standard AI provider as fallback
-          const { aiProvider } = await import('@/lib/ai-providers')
-          const standardResult = await aiProvider.analyzeImages(images, {
+          // Import ChatGPT provider as fallback
+          const { analyzeWithOpenAI } = await import('@/lib/ai-providers')
+          const chatgptResult = await analyzeWithOpenAI(images, {
             systemPrompt,
             userPrompt,
             maxTokens: 4096,
             temperature: 0.2
           })
           
-          // Convert standard result to enhanced format
+          // Parse ChatGPT response
+          const parsed = JSON.parse(chatgptResult.content)
+          
+          // Convert ChatGPT result to enhanced format
           consensusResult = {
-            items: standardResult.items || [],
-            issues: standardResult.issues || [],
+            items: parsed.items || [],
+            issues: parsed.issues || [],
             confidence: 0.8, // Single model confidence
             consensusCount: 1,
             disagreements: [],
-            modelAgreements: ['standard-ai-fallback'],
-            specializedInsights: standardResult.specializedInsights || [],
-            recommendations: standardResult.recommendations || []
+            modelAgreements: ['chatgpt-fallback'],
+            specializedInsights: parsed.specializedInsights || [],
+            recommendations: parsed.recommendations || []
           }
           
           processingTime = Date.now() - startTime
-          console.log(`Fallback analysis completed in ${processingTime}ms`)
+          console.log(`ChatGPT fallback analysis completed in ${processingTime}ms`)
         } catch (fallbackError) {
-          console.error('Fallback analysis also failed:', fallbackError)
+          console.error('ChatGPT fallback analysis also failed:', fallbackError)
           return NextResponse.json(
             { 
               error: 'Enhanced analysis failed',
