@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
-import { createClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 
 // Enhanced Multi-Model Analysis API with Batch Processing
 // This endpoint processes large plans in batches of 5 pages each
@@ -20,25 +20,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get user authentication
-    const supabase = createClient()
-    const authHeader = request.headers.get('authorization')
+    // Get user authentication from Supabase session
+    const supabase = await createServerSupabaseClient()
+    const { data: { user }, error } = await supabase.auth.getUser()
     
-    if (authHeader) {
-      const token = authHeader.replace('Bearer ', '')
-      const { data: { user }, error } = await supabase.auth.getUser(token)
-      
-      if (user && !error) {
-        userId = user.id
-      }
-    }
-
-    if (!userId) {
+    if (error || !user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
+    
+    userId = user.id
 
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json(
