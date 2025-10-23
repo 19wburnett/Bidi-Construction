@@ -93,6 +93,73 @@ export interface Database {
           created_at?: string
         }
       }
+      guest_users: {
+        Row: {
+          id: string
+          session_token: string
+          guest_name: string
+          email: string | null
+          created_at: string
+          last_seen_at: string
+        }
+        Insert: {
+          id?: string
+          session_token: string
+          guest_name: string
+          email?: string | null
+          created_at?: string
+          last_seen_at?: string
+        }
+        Update: {
+          id?: string
+          session_token?: string
+          guest_name?: string
+          email?: string | null
+          created_at?: string
+          last_seen_at?: string
+        }
+      }
+      plan_shares: {
+        Row: {
+          id: string
+          plan_id: string
+          share_token: string
+          created_by: string
+          created_at: string
+          expires_at: string | null
+          allow_comments: boolean
+          allow_drawings: boolean
+          is_active: boolean
+          access_count: number
+          last_accessed_at: string | null
+        }
+        Insert: {
+          id?: string
+          plan_id: string
+          share_token?: string
+          created_by: string
+          created_at?: string
+          expires_at?: string | null
+          allow_comments?: boolean
+          allow_drawings?: boolean
+          is_active?: boolean
+          access_count?: number
+          last_accessed_at?: string | null
+        }
+        Update: {
+          id?: string
+          plan_id?: string
+          share_token?: string
+          created_by?: string
+          created_at?: string
+          expires_at?: string | null
+          allow_comments?: boolean
+          allow_drawings?: boolean
+          is_active?: boolean
+          access_count?: number
+          last_accessed_at?: string | null
+        }
+      }
       plan_annotations: {
         Row: {
           id: string
@@ -105,6 +172,7 @@ export interface Database {
           content: string
           created_at: string
           created_by: string | null
+          guest_user_id: string | null
         }
         Insert: {
           id?: string
@@ -117,6 +185,7 @@ export interface Database {
           content: string
           created_at?: string
           created_by?: string | null
+          guest_user_id?: string | null
         }
         Update: {
           id?: string
@@ -129,6 +198,7 @@ export interface Database {
           content?: string
           created_at?: string
           created_by?: string | null
+          guest_user_id?: string | null
         }
       }
       plan_annotation_responses: {
@@ -138,6 +208,7 @@ export interface Database {
           content: string
           created_at: string
           created_by: string | null
+          guest_user_id: string | null
         }
         Insert: {
           id?: string
@@ -145,6 +216,7 @@ export interface Database {
           content: string
           created_at?: string
           created_by?: string | null
+          guest_user_id?: string | null
         }
         Update: {
           id?: string
@@ -152,6 +224,7 @@ export interface Database {
           content?: string
           created_at?: string
           created_by?: string | null
+          guest_user_id?: string | null
         }
       }
       bids: {

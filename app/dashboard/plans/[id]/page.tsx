@@ -204,6 +204,101 @@ export default function PlanEditorPage() {
   const [pdfJsReady, setPdfJsReady] = useState(false)
   const [documentReady, setDocumentReady] = useState(false)
   const [pdfError, setPdfError] = useState(false)
+  const pdfDocumentRef = useRef<any>(null)
+  
+  // Debounce zoom changes to prevent flickering
+  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Figma-style simple redraw system
+  const redrawAllCanvases = useCallback(() => {
+    console.log('🎨 Figma-style redraw:', { drawings: drawings.length, current: currentDrawing ? 'yes' : 'no', zoom })
+    
+    canvasRefs.current.forEach((canvas, pageNum) => {
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
+      // Clear canvas completely
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0) // Reset transform
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.restore()
+      
+      // Apply transform
+      ctx.save()
+      ctx.translate(viewport.x, viewport.y)
+      ctx.scale(zoom, zoom)
+
+      // Draw all saved drawings for this page
+      drawings.forEach(drawing => {
+        if (drawing.page_number !== pageNum) return
+        
+        const geom = drawing.geometry
+        let x1, y1, x2, y2
+        
+        if (geom.isRelative) {
+          // Legacy relative coordinates
+          x1 = geom.x1 * canvas.width
+          y1 = geom.y1 * canvas.height
+          x2 = geom.x2 ? geom.x2 * canvas.width : x1
+          y2 = geom.y2 ? geom.y2 * canvas.height : y1
+        } else {
+          // Absolute coordinates (Figma style)
+          x1 = geom.x1
+          y1 = geom.y1
+          x2 = geom.x2 || x1
+          y2 = geom.y2 || y1
+        }
+
+        ctx.strokeStyle = drawing.style.color
+        ctx.lineWidth = drawing.style.strokeWidth / zoom
+        ctx.globalAlpha = drawing.style.opacity
+
+        if (drawing.type === 'line' || drawing.type === 'measurement') {
+          ctx.beginPath()
+          ctx.moveTo(x1, y1)
+          ctx.lineTo(x2, y2)
+          ctx.stroke()
+        } else if (drawing.type === 'rectangle' && geom.x2 && geom.y2) {
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+        }
+      })
+
+      // Draw current drawing in progress
+      if (currentDrawing && currentDrawing.geometry && currentDrawing.page_number === pageNum) {
+        const geom = currentDrawing.geometry
+        ctx.strokeStyle = currentDrawing.style?.color || '#3b82f6'
+        ctx.lineWidth = (currentDrawing.style?.strokeWidth || 2) / zoom
+        ctx.globalAlpha = currentDrawing.style?.opacity || 1
+
+        const x1 = geom.x1
+        const y1 = geom.y1
+        const x2 = geom.x2 || x1
+        const y2 = geom.y2 || y1
+
+        if ((currentDrawing.type === 'line' || currentDrawing.type === 'measurement') && geom.x2 && geom.y2) {
+          ctx.beginPath()
+          ctx.moveTo(x1, y1)
+          ctx.lineTo(x2, y2)
+          ctx.stroke()
+        } else if (currentDrawing.type === 'rectangle' && geom.x2 && geom.y2) {
+          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+        }
+      }
+      
+      ctx.restore()
+    })
+  }, [drawings, currentDrawing, zoom, viewport])
+
+  // Debounced redraw for zoom changes
+  const debouncedRedraw = useCallback(() => {
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current)
+    }
+    zoomTimeoutRef.current = setTimeout(() => {
+      console.log('🎨 Debounced redraw after zoom change')
+      redrawAllCanvases()
+    }, 16) // ~60fps
+  }, [redrawAllCanvases])
 
   // Analysis state
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('takeoff')
@@ -219,7 +314,6 @@ export default function PlanEditorPage() {
   
   // Zoom feedback state
   const [showZoomIndicator, setShowZoomIndicator] = useState(false)
-  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Scale state
   const [scale, setScale] = useState({ ratio: `1/4" = 1'`, pixelsPerUnit: 48 })
@@ -459,223 +553,18 @@ export default function PlanEditorPage() {
     }
   }
 
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    console.log('📄 PDF Document loaded successfully with', numPages, 'pages')
-    setNumPages(numPages)
-    // Set document ready to true now that the PDF is actually loaded
-    setDocumentReady(true)
+  const onDocumentLoadSuccess = (pdf: any) => {
+    console.log('📄 PDF Document loaded successfully with', pdf.numPages, 'pages')
+    pdfDocumentRef.current = pdf
+    setNumPages(pdf.numPages)
+    // Set document ready to true after a small delay to ensure PDF.js is fully initialized
+    setTimeout(() => {
+      setDocumentReady(true)
+      console.log('✅ Document ready to render pages')
+    }, 100)
   }
 
-  // Redraw all drawings on all canvases using transform matrix
-  const redrawCanvas = useCallback(() => {
-    console.log('🎨 Redrawing with transform matrix. Drawings:', drawings.length, 'Zoom:', zoom, 'Tool:', activeTool)
-    
-    canvasRefs.current.forEach((canvas, pageNum) => {
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        console.warn(`No context for canvas ${pageNum}`)
-        return
-      }
 
-      // Clear entire canvas
-      ctx.save()
-      ctx.setTransform(1, 0, 0, 1, 0, 0) // Reset to identity
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.restore()
-      
-      console.log(`📄 Canvas ${pageNum}: ${canvas.width}x${canvas.height}, Viewport: (${viewport.x}, ${viewport.y})`)
-
-      // Apply viewport transform (Figma-style!)
-      ctx.save()
-      ctx.translate(viewport.x, viewport.y)
-      ctx.scale(zoom, zoom)
-
-      const canvasWidth = canvas.width
-      const canvasHeight = canvas.height
-
-      // Draw all saved drawings for this page
-      drawings.forEach(drawing => {
-        // Only draw if this drawing belongs to this page
-        if (drawing.page_number !== pageNum) return
-
-        const geom = drawing.geometry
-        
-        // Handle legacy relative coordinates (migrate on-the-fly)
-        let x1, y1, x2, y2
-        if (geom.isRelative) {
-          // Legacy: Convert relative (0-1) to absolute
-          x1 = geom.x1 * canvasWidth / zoom
-          y1 = geom.y1 * canvasHeight / zoom
-          x2 = geom.x2 ? geom.x2 * canvasWidth / zoom : x1
-          y2 = geom.y2 ? geom.y2 * canvasHeight / zoom : y1
-        } else {
-          // New: Use absolute coordinates directly
-          x1 = geom.x1
-          y1 = geom.y1
-          x2 = geom.x2 || x1
-          y2 = geom.y2 || y1
-        }
-
-        ctx.strokeStyle = drawing.style.color
-        // Keep line width consistent regardless of zoom
-        ctx.lineWidth = drawing.style.strokeWidth / zoom
-        ctx.globalAlpha = drawing.style.opacity
-
-        // Draw analysis markers (circular pins with numbers)
-        if (drawing.analysis_item_id && drawing.type === 'note') {
-          const markerRadius = 15 / zoom
-          
-          // Draw circle
-          ctx.beginPath()
-          ctx.arc(x1, y1, markerRadius, 0, 2 * Math.PI)
-          ctx.fillStyle = drawing.style.color
-          ctx.fill()
-          ctx.strokeStyle = '#ffffff'
-          ctx.lineWidth = 2 / zoom
-          ctx.stroke()
-          
-          // Draw number label
-          const sameTypeMarkers = drawings.filter(d => 
-            d.analysis_type === drawing.analysis_type &&
-            d.analysis_item_id &&
-            (d.page_number || 1) <= pageNum
-          )
-          const markerIndex = sameTypeMarkers.indexOf(drawing) + 1
-          
-          ctx.fillStyle = '#ffffff'
-          ctx.font = `bold ${12 / zoom}px Arial`
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.fillText(markerIndex.toString(), x1, y1)
-          
-          return // Don't draw other shapes for markers
-        }
-
-        if (drawing.type === 'line' || drawing.type === 'measurement') {
-          ctx.beginPath()
-          ctx.moveTo(x1, y1)
-          ctx.lineTo(x2, y2)
-          ctx.stroke()
-
-          // Display measurement label for measurement tool
-          if (drawing.type === 'measurement' && drawing.label) {
-            const midX = (x1 + x2) / 2
-            const midY = (y1 + y2) / 2
-            
-            // Calculate angle for text rotation
-            const angle = Math.atan2(y2 - y1, x2 - x1)
-            
-            // Text styling
-            ctx.save()
-            ctx.translate(midX, midY)
-            ctx.rotate(angle)
-            
-            // Scale font size with zoom (but keep readable)
-            const fontSize = Math.max(12, 16 / zoom)
-            ctx.font = `bold ${fontSize}px Arial`
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'bottom'
-            
-            // Draw text background
-            const textMetrics = ctx.measureText(drawing.label)
-            const padding = 4 / zoom
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(
-              -textMetrics.width / 2 - padding,
-              -fontSize - padding,
-              textMetrics.width + padding * 2,
-              fontSize + padding * 2
-            )
-            
-            // Draw text
-            ctx.fillStyle = drawing.style.color
-            ctx.fillText(drawing.label, 0, -padding)
-            
-            ctx.restore()
-          }
-        } else if (drawing.type === 'rectangle' && geom.x2 && geom.y2) {
-          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
-        }
-      })
-
-      // Draw current drawing in progress on the correct page
-      if (currentDrawing && currentDrawing.geometry && currentDrawing.page_number === pageNum) {
-        const geom = currentDrawing.geometry
-        
-        ctx.strokeStyle = currentDrawing.style?.color || '#3b82f6'
-        ctx.lineWidth = (currentDrawing.style?.strokeWidth || 2) / zoom
-        ctx.globalAlpha = currentDrawing.style?.opacity || 1
-
-        const x1 = geom.x1
-        const y1 = geom.y1
-        const x2 = geom.x2 || x1
-        const y2 = geom.y2 || y1
-
-        if ((currentDrawing.type === 'line' || currentDrawing.type === 'measurement') && geom.x2 && geom.y2) {
-          ctx.beginPath()
-          ctx.moveTo(x1, y1)
-          ctx.lineTo(x2, y2)
-          ctx.stroke()
-
-          // Show live measurement preview while drawing
-          if (currentDrawing.type === 'measurement') {
-            const dx = Math.abs(x2 - x1)
-            const dy = Math.abs(y2 - y1)
-            const pixelLength = Math.sqrt(dx * dx + dy * dy)
-            const realLength = pixelLength / scale.pixelsPerUnit
-            
-            // Format preview
-            let preview: string
-            if (scale.ratio.includes(':')) {
-              preview = `${realLength.toFixed(2)}m`
-            } else {
-              const feet = Math.floor(realLength)
-              const inches = Math.round((realLength - feet) * 12)
-              if (inches === 0) {
-                preview = `${feet}'`
-              } else if (inches === 12) {
-                preview = `${feet + 1}'`
-              } else {
-                preview = `${feet}'-${inches}"`
-              }
-            }
-
-            const midX = (x1 + x2) / 2
-            const midY = (y1 + y2) / 2
-            const angle = Math.atan2(y2 - y1, x2 - x1)
-            
-            ctx.save()
-            ctx.translate(midX, midY)
-            ctx.rotate(angle)
-            
-            const fontSize = Math.max(12, 16 / zoom)
-            ctx.font = `bold ${fontSize}px Arial`
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'bottom'
-            
-            const textMetrics = ctx.measureText(preview)
-            const padding = 4 / zoom
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.9)'
-            ctx.fillRect(
-              -textMetrics.width / 2 - padding,
-              -fontSize - padding,
-              textMetrics.width + padding * 2,
-              fontSize + padding * 2
-            )
-            
-            ctx.fillStyle = 'white'
-            ctx.fillText(preview, 0, -padding)
-            
-            ctx.restore()
-          }
-        } else if (currentDrawing.type === 'rectangle' && geom.x2 && geom.y2) {
-          ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
-        }
-      }
-      
-      ctx.restore()
-    })
-  }, [drawings, currentDrawing, zoom, viewport, activeTool, scale])
 
   // Handle item highlight - scrolls to page and sets highlighted box
   const handleItemHighlight = useCallback((bbox: BoundingBox) => {
@@ -707,7 +596,7 @@ export default function PlanEditorPage() {
     if (!ctx) return
     
     // Redraw base canvas first to clear any previous highlights
-    redrawCanvas()
+    redrawAllCanvases()
     
     // Get the PDF page element to calculate proper coordinates
     const pdfPageElement = canvas.parentElement
@@ -739,9 +628,9 @@ export default function PlanEditorPage() {
     ctx.fillRect(x, y, w, h)
     
     ctx.restore()
-  }, [highlightedBox, redrawCanvas])
+  }, [highlightedBox, redrawAllCanvases])
 
-  // Update canvas sizes when PDF pages size changes
+  // Figma-style: Update canvas sizes when PDF pages size changes
   useEffect(() => {
     const updateCanvasSizes = () => {
       canvasRefs.current.forEach((canvas, pageNum) => {
@@ -754,7 +643,8 @@ export default function PlanEditorPage() {
           }
         }
       })
-      redrawCanvas()
+      // Direct redraw after canvas resize
+      redrawAllCanvases()
     }
 
     // Update on mount and when zoom/pages change
@@ -770,21 +660,29 @@ export default function PlanEditorPage() {
       clearTimeout(timer3)
       window.removeEventListener('resize', updateCanvasSizes)
     }
-  }, [zoom, planUrl, numPages])
+  }, [zoom, planUrl, numPages, redrawAllCanvases])
 
-  // Redraw whenever anything visual changes
+  // Figma-style: Redraw whenever anything visual changes
   useEffect(() => {
-    console.log('Visual state changed, redrawing...', { 
+    console.log('🎨 Figma-style visual change:', { 
       drawingsCount: drawings.length,
+      hasCurrentDrawing: currentDrawing ? 'yes' : 'no',
       zoom,
-      activeTool,
-      viewport,
-      scale: scale.ratio
+      activeTool
     })
-    // Small delay to ensure canvases are ready
-    const timer = setTimeout(redrawCanvas, 50)
-    return () => clearTimeout(timer)
-  }, [drawings.length, zoom, viewport.x, viewport.y, activeTool, scale.ratio, redrawCanvas])
+    
+    // Always use direct redraw - keep it simple
+    redrawAllCanvases()
+  }, [drawings.length, zoom, viewport.x, viewport.y, activeTool, redrawAllCanvases])
+
+
+  // Figma-style: Handle currentDrawing updates during active drawing
+  useEffect(() => {
+    if (isDrawing && currentDrawing) {
+      // Direct redraw for smooth preview - no animation frames
+      redrawAllCanvases()
+    }
+  }, [isDrawing, currentDrawing, redrawAllCanvases])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -830,21 +728,35 @@ export default function PlanEditorPage() {
     const container = containerRef.current
     if (!container) return
 
-    // Handle wheel events for zooming (Ctrl+wheel or pinch gesture)
+    // Figma-style wheel handling - zoom with trackpad, pan with Shift
     const handleWheel = (e: WheelEvent) => {
-      // Check if this is a zoom gesture (Ctrl+wheel or pinch on trackpad)
-      if (e.ctrlKey || e.metaKey) {
+      console.log('🖱️ Wheel event:', { 
+        deltaY: e.deltaY, 
+        deltaX: e.deltaX,
+        deltaMode: e.deltaMode, 
+        ctrlKey: e.ctrlKey, 
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey
+      })
+      
+      // Figma-style: Ctrl/Cmd+wheel = zoom, no modifiers = let browser handle (for now we'll make trackpad pinch zoom)
+      const isPinchZoom = e.ctrlKey || e.metaKey
+      
+      if (isPinchZoom) {
         e.preventDefault()
         e.stopPropagation()
         
-        // Determine zoom direction and amount
+        // Calculate zoom with exponential scaling (like Figma)
         const delta = -e.deltaY
-        const zoomSpeed = 0.001
-        const zoomChange = delta * zoomSpeed
+        const zoomFactor = 1 + (delta * 0.01) // Smooth exponential zoom
+        
+        console.log('🔍 Zoom factor:', zoomFactor)
         
         setZoom(prevZoom => {
-          const newZoom = prevZoom + zoomChange
-          return Math.max(0.25, Math.min(3, newZoom))
+          const newZoom = prevZoom * zoomFactor
+          const clampedZoom = Math.max(0.1, Math.min(10, newZoom))
+          console.log('📏 Zoom:', prevZoom.toFixed(2), '->', clampedZoom.toFixed(2))
+          return clampedZoom
         })
 
         // Show zoom indicator
@@ -856,7 +768,6 @@ export default function PlanEditorPage() {
           setShowZoomIndicator(false)
         }, 1000)
       }
-      // Regular scroll for panning is handled naturally by the container
     }
 
     // Also prevent browser zoom with gesturestart/gesturechange events (Safari)
@@ -869,6 +780,15 @@ export default function PlanEditorPage() {
     const preventDocumentZoom = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    
+    // Prevent touchpad pinch-to-zoom more aggressively
+    const preventTouchZoom = (e: TouchEvent) => {
+      if (e.touches.length > 1) {
+        e.preventDefault()
+        e.stopPropagation()
       }
     }
 
@@ -887,12 +807,18 @@ export default function PlanEditorPage() {
     document.addEventListener('gesturestart', preventDocumentGesture, { passive: false })
     document.addEventListener('gesturechange', preventDocumentGesture, { passive: false })
     document.addEventListener('gestureend', preventDocumentGesture, { passive: false })
+    
+    // Add touch event listeners for better pinch detection
+    container.addEventListener('touchstart', preventTouchZoom, { passive: false })
+    container.addEventListener('touchmove', preventTouchZoom, { passive: false })
 
     return () => {
       container.removeEventListener('wheel', handleWheel)
       container.removeEventListener('gesturestart', preventGesture)
       container.removeEventListener('gesturechange', preventGesture)
       container.removeEventListener('gestureend', preventGesture)
+      container.removeEventListener('touchstart', preventTouchZoom)
+      container.removeEventListener('touchmove', preventTouchZoom)
       
       document.removeEventListener('wheel', preventDocumentZoom)
       document.removeEventListener('gesturestart', preventDocumentGesture)
@@ -902,7 +828,7 @@ export default function PlanEditorPage() {
   }, [])
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    console.log('🖱️ Mouse down:', { activeTool, isPanning })
+    console.log('🖱️ Mouse down:', { activeTool, isPanning, target: e.currentTarget.tagName })
     
     if (activeTool === 'select') {
       // Start panning
@@ -942,12 +868,14 @@ export default function PlanEditorPage() {
     }
 
     setIsDrawing(true)
-    setCurrentDrawing({
+    const newDrawing = {
       type: activeTool as any,
       geometry: { x1: worldX, y1: worldY, isRelative: false },
       style: { color: '#3b82f6', strokeWidth: 3, opacity: 0.8 },
       page_number: pageNum
-    })
+    }
+    console.log('🎯 Starting new drawing:', newDrawing)
+    setCurrentDrawing(newDrawing)
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -978,16 +906,19 @@ export default function PlanEditorPage() {
     const worldX = (screenX - viewport.x) / zoom
     const worldY = (screenY - viewport.y) / zoom
 
-    setCurrentDrawing({
+    const updatedDrawing = {
       ...currentDrawing,
       geometry: {
         ...currentDrawing.geometry!,
         x2: worldX,
         y2: worldY
       }
-    })
+    }
+    console.log('🖱️ Mouse move - updating drawing:', updatedDrawing)
+    setCurrentDrawing(updatedDrawing)
     
-    redrawCanvas()
+    // Request smooth redraw on next animation frame
+    requestRedraw()
   }
 
   const handleMouseUp = () => {
@@ -1691,7 +1622,7 @@ export default function PlanEditorPage() {
               >
                 {/* Render all pages - only after document is fully loaded */}
                 <div className="space-y-6">
-                  {documentReady && numPages ? (
+                  {documentReady && numPages && pdfJsReady && pdfDocumentRef.current ? (
                     Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
                     <div key={`page-${pageNum}`} className="relative bg-white dark:bg-gray-800 shadow-lg">
                       {/* Page number indicator */}
@@ -1716,7 +1647,7 @@ export default function PlanEditorPage() {
                                 if (rect.width > 0 && rect.height > 0) {
                                   canvas.width = rect.width
                                   canvas.height = rect.height
-                                  redrawCanvas()
+                                  redrawAllCanvases()
                                 }
                               }
                             }, 100)

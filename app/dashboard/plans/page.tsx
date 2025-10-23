@@ -16,10 +16,21 @@ import {
   CheckCircle,
   Clock,
   Trash2,
-  Download
+  Download,
+  Share2,
+  Copy,
+  CheckCheck
 } from 'lucide-react'
 import Link from 'next/link'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 
 interface Plan {
   id: string
@@ -44,6 +55,16 @@ export default function PlansPage() {
   const [loading, setLoading] = useState(true)
   const [plans, setPlans] = useState<Plan[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  
+  // Share modal state
+  const [shareModalOpen, setShareModalOpen] = useState(false)
+  const [sharingPlanId, setSharingPlanId] = useState<string | null>(null)
+  const [shareUrl, setShareUrl] = useState('')
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false)
+  const [expiresInDays, setExpiresInDays] = useState<number>(7)
+  const [allowComments, setAllowComments] = useState(true)
+  const [allowDrawings, setAllowDrawings] = useState(true)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -88,6 +109,57 @@ export default function PlansPage() {
     } catch (error) {
       console.error('Error deleting plan:', error)
       alert('Failed to delete plan')
+    }
+  }
+
+  async function handleSharePlan(planId: string) {
+    setSharingPlanId(planId)
+    setShareUrl('')
+    setLinkCopied(false)
+    setShareModalOpen(true)
+  }
+
+  async function generateShareLink() {
+    if (!sharingPlanId) return
+
+    setIsGeneratingLink(true)
+    try {
+      const response = await fetch('/api/plan/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: sharingPlanId,
+          expiresInDays: expiresInDays > 0 ? expiresInDays : null,
+          allowComments,
+          allowDrawings
+        })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to generate link')
+      }
+
+      setShareUrl(data.shareUrl)
+    } catch (error) {
+      console.error('Error generating share link:', error)
+      alert('Failed to generate share link. Please try again.')
+    } finally {
+      setIsGeneratingLink(false)
+    }
+  }
+
+  async function copyShareLink() {
+    if (!shareUrl) return
+
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    } catch (error) {
+      console.error('Error copying link:', error)
+      alert('Failed to copy link')
     }
   }
 
@@ -229,20 +301,31 @@ export default function PlansPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-4 border-t dark:border-gray-700">
-                    <Link href={`/dashboard/plans/${plan.id}`} className="flex-1">
+                  <div className="space-y-2 pt-4 border-t dark:border-gray-700">
+                    <Link href={`/dashboard/plans/${plan.id}`} className="block">
                       <Button variant="default" className="w-full" size="sm">
                         Open Plan
                       </Button>
                     </Link>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeletePlan(plan.id)}
-                      className="ml-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSharePlan(plan.id)}
+                        className="flex-1"
+                      >
+                        <Share2 className="h-4 w-4 mr-1" />
+                        Share
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeletePlan(plan.id)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
@@ -254,6 +337,148 @@ export default function PlansPage() {
           </div>
         )}
       </div>
+
+      {/* Share Modal */}
+      <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
+        <DialogContent className="p-4 sm:p-6 sm:max-w-md dark:bg-gray-900 dark:text-white">
+          <DialogHeader>
+            <DialogTitle>Share Plan</DialogTitle>
+            <DialogDescription>
+              Generate a shareable link that allows others to view and collaborate on this plan
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {!shareUrl ? (
+              <>
+                {/* Share settings */}
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="expires">Link Expiration</Label>
+                    <Input
+                      id="expires"
+                      type="number"
+                      min="0"
+                      value={expiresInDays}
+                      onChange={(e) => setExpiresInDays(parseInt(e.target.value) || 0)}
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Days until link expires (0 = never expires)
+                    </p>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="allowComments"
+                      checked={allowComments}
+                      onChange={(e) => setAllowComments(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label htmlFor="allowComments" className="cursor-pointer">
+                      Allow guests to add comments
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="allowDrawings"
+                      checked={allowDrawings}
+                      onChange={(e) => setAllowDrawings(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <Label htmlFor="allowDrawings" className="cursor-pointer">
+                      Allow guests to add drawings
+                    </Label>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={generateShareLink}
+                  className="w-full bg-orange-500 hover:bg-orange-600"
+                  disabled={isGeneratingLink}
+                >
+                  {isGeneratingLink ? (
+                    <>
+                      <Clock className="h-4 w-4 mr-2 animate-spin" />
+                      Generating Link...
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="h-4 w-4 mr-2" />
+                      Generate Share Link
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                {/* Share link display */}
+                <div className="space-y-3">
+                  <div>
+                    <Label>Share Link</Label>
+                    <div className="flex gap-2 mt-1">
+                      <Input
+                        value={shareUrl}
+                        readOnly
+                        className="flex-1 font-mono text-sm"
+                      />
+                      <Button
+                        onClick={copyShareLink}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {linkCopied ? (
+                          <>
+                            <CheckCheck className="h-4 w-4 mr-1" />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4 mr-1" />
+                            Copy
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Anyone with this link can view and collaborate on the plan
+                    </p>
+                  </div>
+
+                  <div className="bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                    <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+                      Link Permissions:
+                    </h4>
+                    <ul className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
+                      <li>✓ View plan files</li>
+                      {allowComments && <li>✓ Add comments</li>}
+                      {allowDrawings && <li>✓ Add drawings</li>}
+                      {expiresInDays > 0 && (
+                        <li>⏰ Expires in {expiresInDays} day{expiresInDays !== 1 ? 's' : ''}</li>
+                      )}
+                      {expiresInDays === 0 && <li>⏰ Never expires</li>}
+                    </ul>
+                  </div>
+
+                  <Button
+                    onClick={() => {
+                      setShareUrl('')
+                      setSharingPlanId(null)
+                    }}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Generate Another Link
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
