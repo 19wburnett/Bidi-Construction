@@ -96,6 +96,13 @@ export class EnhancedAIProvider {
         bid_analysis: 0.88,
         code_compliance: 0.82,
         cost_estimation: 0.85
+      },
+      'gemini-1.5-pro': {
+        takeoff: 0.82,        // Good for measurements and calculations
+        quality: 0.85,
+        bid_analysis: 0.80,
+        code_compliance: 0.75,
+        cost_estimation: 0.88
       }
     }
   }
@@ -121,8 +128,8 @@ export class EnhancedAIProvider {
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (limit to 3 for faster processing)
-    const selectedModels = this.getBestModelsForTask(options.taskType, 3)
+    // Get best models for this task type (limit to 4 for better consensus)
+    const selectedModels = this.getBestModelsForTask(options.taskType, 4)
     
     // Filter out disabled providers
     const enabledModels = selectedModels.filter(model => {
