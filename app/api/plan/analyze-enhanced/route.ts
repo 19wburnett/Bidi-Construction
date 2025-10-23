@@ -174,7 +174,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Save analysis results to database
-    const supabase = createClient()
     
     if (taskType === 'takeoff') {
       // Save takeoff analysis
