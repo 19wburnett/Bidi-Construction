@@ -150,7 +150,7 @@ export class EnhancedAIProvider {
       try {
         // Add timeout to prevent Vercel 300s limit
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Model timeout after 30 seconds')), 30000)
+          setTimeout(() => reject(new Error('Model timeout after 45 seconds')), 45000)
         )
         
         const result = await Promise.race([
@@ -210,6 +210,8 @@ export class EnhancedAIProvider {
           return await this.analyzeWithClaude(images, options, model)
         case 'grok-4':
           return await this.analyzeWithXAI(images, options, model)
+        case 'gemini-1.5-pro':
+          return await this.analyzeWithGemini(images, options, model)
         default:
           throw new Error(`Unknown model: ${model}`)
       }
@@ -268,6 +270,12 @@ export class EnhancedAIProvider {
       const response = await openai.chat.completions.create(requestConfig)
       
       console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
+      
+      // Check if response is empty and log details
+      if (!response.choices[0].message.content || response.choices[0].message.content.length === 0) {
+        console.warn(`OpenAI ${model} returned empty response. Finish reason: ${response.choices[0].finish_reason}`)
+        console.warn(`Response object:`, JSON.stringify(response, null, 2))
+      }
       
       return {
         provider: 'openai',
