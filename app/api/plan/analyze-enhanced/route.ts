@@ -7,13 +7,37 @@ import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection
 
 export async function POST(request: NextRequest) {
+  let planId: string | undefined
+  let userId: string | undefined
+
   try {
-    const { planId, images, drawings, taskType = 'takeoff' } = await request.json()
+    const { planId: requestPlanId, images, drawings, taskType = 'takeoff' } = await request.json()
+    planId = requestPlanId
 
     if (!planId) {
       return NextResponse.json(
         { error: 'Plan ID is required' },
         { status: 400 }
+      )
+    }
+
+    // Get user authentication
+    const supabase = createClient()
+    const authHeader = request.headers.get('authorization')
+    
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '')
+      const { data: { user }, error } = await supabase.auth.getUser(token)
+      
+      if (user && !error) {
+        userId = user.id
+      }
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
       )
     }
 
