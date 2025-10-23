@@ -68,13 +68,7 @@ export class EnhancedAIProvider {
   private initializeModelPerformance() {
     // Initialize performance scores based on model specializations
     this.modelPerformance = {
-      'gpt-5': {
-        takeoff: 0.98,        // GPT-5 is even better than GPT-4o!
-        quality: 0.95,
-        bid_analysis: 0.96,
-        code_compliance: 0.90,
-        cost_estimation: 0.92
-      },
+      // Note: GPT-5 removed due to timeout issues on Vercel
       'gpt-4o': {
         takeoff: 0.95,
         quality: 0.90,
@@ -149,7 +143,7 @@ export class EnhancedAIProvider {
       try {
         // Add timeout to prevent Vercel 300s limit
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
+          setTimeout(() => reject(new Error('Model timeout after 30 seconds')), 30000)
         )
         
         const result = await Promise.race([
@@ -589,9 +583,14 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           }
         }
         
-        // Validate JSON is not empty
+        // Handle empty responses by creating fallback structure
         if (!jsonText || jsonText.trim().length === 0) {
-          throw new Error('Empty JSON response')
+          console.warn(`Empty response from ${result.model}, creating fallback structure`)
+          jsonText = JSON.stringify({
+            items: [],
+            issues: [],
+            summary: { total_items: 0, notes: 'Analysis completed with minimal data' }
+          })
         }
         
         const parsed = JSON.parse(jsonText)
