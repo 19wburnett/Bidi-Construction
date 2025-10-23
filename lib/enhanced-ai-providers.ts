@@ -227,6 +227,12 @@ export class EnhancedAIProvider {
     }))
 
     try {
+      // Set model-specific token limits
+      let maxTokens = options.maxTokens || 8192
+      if (model === 'gpt-4-turbo') {
+        maxTokens = Math.min(maxTokens, 4096) // GPT-4-turbo max is 4096
+      }
+      
       // GPT-5 doesn't support custom temperature, use default for it
       const requestConfig: any = {
         model: model,
@@ -240,7 +246,7 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: options.maxTokens || 8192,
+        max_completion_tokens: maxTokens,
         response_format: { type: 'json_object' }
       }
       
@@ -295,9 +301,15 @@ export class EnhancedAIProvider {
       }
     })
 
+    // Set model-specific token limits for Claude
+    let maxTokens = options.maxTokens || 8192
+    if (model === 'claude-3-haiku-20240307') {
+      maxTokens = Math.min(maxTokens, 4096) // Claude-3-haiku max is 4096
+    }
+    
     const response = await anthropic.messages.create({
       model: model,
-      max_tokens: options.maxTokens || 4096,
+      max_tokens: maxTokens,
       temperature: options.temperature || 0.2,
       system: this.buildSpecializedPrompt(options),
       messages: [
@@ -413,7 +425,7 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: options.maxTokens || 8192,
+        max_completion_tokens: Math.min(options.maxTokens || 8192, 4096), // XAI models typically have lower limits
         temperature: options.temperature || 0.2,
         response_format: { type: 'json_object' }
       })
