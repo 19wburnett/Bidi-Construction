@@ -918,7 +918,7 @@ export default function PlanEditorPage() {
     setCurrentDrawing(updatedDrawing)
     
     // Request smooth redraw on next animation frame
-    requestRedraw()
+    redrawAllCanvases()
   }
 
   const handleMouseUp = () => {
