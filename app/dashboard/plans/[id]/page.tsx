@@ -46,7 +46,8 @@ import {
   User,
   ArrowLeftRight,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Check
 } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import TakeoffAccordion, { BoundingBox } from '@/components/takeoff-accordion'
@@ -2130,10 +2131,44 @@ export default function PlanEditorPage() {
                             </div>
                             <div className="flex-1">
                               <h4 className="font-semibold text-blue-900 mb-2 text-lg">AI Analysis In Progress</h4>
-                              <p className="text-blue-800 mb-3">
-                                Your takeoff analysis has been queued for processing. Our AI system is analyzing your plans to provide detailed quantity takeoffs and measurements.
+                              <p className="text-blue-800 mb-4">
+                                Our enhanced AI system is analyzing your plans with multiple specialized models for maximum accuracy.
                               </p>
-                              <div className="bg-white rounded-lg p-4 border border-blue-200 mb-3">
+                              
+                              {/* Progress Checklist */}
+                              <div className="bg-white rounded-lg p-4 border border-blue-200 mb-4">
+                                <h5 className="font-medium text-blue-900 mb-3">Analysis Progress:</h5>
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                      <Check className="h-3 w-3 text-white" />
+                                    </div>
+                                    <span className="text-green-700">✅ Plan uploaded and processed</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                                      <Check className="h-3 w-3 text-white" />
+                                    </div>
+                                    <span className="text-green-700">✅ Images optimized for AI analysis</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                    </div>
+                                    <span className="text-blue-700">🔄 Running enhanced AI analysis (3-5 minutes)</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <div className="w-4 h-4 bg-gray-300 rounded-full"></div>
+                                    <span className="text-gray-500">⏳ Building consensus from multiple AI models</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <div className="w-4 h-4 bg-gray-300 rounded-full"></div>
+                                    <span className="text-gray-500">⏳ Generating detailed takeoff report</span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                                 <div className="flex items-center gap-2 text-sm text-blue-900 mb-2">
                                   <Clock className="h-4 w-4" />
                                   <span className="font-medium">Requested:</span>
@@ -2141,12 +2176,8 @@ export default function PlanEditorPage() {
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-blue-900">
                                   <span className="font-medium">⏱️ Expected completion:</span>
-                                  <span>1-2 hours</span>
+                                  <span>3-5 minutes</span>
                                 </div>
-                              </div>
-                              <div className="flex items-start gap-2 text-sm text-blue-700">
-                                <span>📧</span>
-                                <p>You will receive an email notification at <strong>{user?.email}</strong> when the analysis is complete.</p>
                               </div>
                             </div>
                           </div>

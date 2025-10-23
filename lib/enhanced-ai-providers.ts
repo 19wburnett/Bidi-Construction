@@ -127,8 +127,8 @@ export class EnhancedAIProvider {
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type
-    const selectedModels = this.getBestModelsForTask(options.taskType, 5)
+    // Get best models for this task type (limit to 3 for faster processing)
+    const selectedModels = this.getBestModelsForTask(options.taskType, 3)
     
     // Filter out disabled providers
     const enabledModels = selectedModels.filter(model => {
@@ -143,11 +143,20 @@ export class EnhancedAIProvider {
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
     console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run analysis with selected models in parallel
+    // Run analysis with selected models in parallel with timeout
     const analysisPromises = enabledModels.map(async (model, index) => {
       console.log(`Starting analysis with model ${index + 1}/${enabledModels.length}: ${model}`)
       try {
-        const result = await this.analyzeWithModel(images, options, model)
+        // Add timeout to prevent Vercel 300s limit
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
+        )
+        
+        const result = await Promise.race([
+          this.analyzeWithModel(images, options, model),
+          timeoutPromise
+        ]) as EnhancedAIResponse
+        
         console.log(`Model ${model} succeeded: ${result.content.length} chars`)
         return result
       } catch (error) {
