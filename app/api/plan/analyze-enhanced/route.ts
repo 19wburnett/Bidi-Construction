@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
+import { createServerSupabaseClient } from '@/lib/supabase'
 import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced-consensus-engine'
 
 // Enhanced Multi-Model Analysis API
@@ -146,6 +147,86 @@ export async function POST(request: NextRequest) {
       } else {
         throw error // Re-throw if it's not a "Need at least 2 models" error
       }
+    }
+
+    // Save analysis results to database
+    const supabase = await createServerSupabaseClient()
+    
+    if (taskType === 'takeoff') {
+      // Save takeoff analysis
+      const { data: takeoffAnalysis, error: takeoffError } = await supabase
+        .from('plan_takeoff_analysis')
+        .insert({
+          plan_id: planId,
+          user_id: userId,
+          items: consensusResult.items || [],
+          summary: {
+            total_items: consensusResult.items?.length || 0,
+            confidence: consensusResult.confidence,
+            consensus_count: consensusResult.consensusCount,
+            model_agreements: consensusResult.modelAgreements,
+            specialized_insights: consensusResult.specializedInsights,
+            recommendations: consensusResult.recommendations
+          },
+          ai_model: 'enhanced-consensus',
+          confidence_scores: {
+            consensus: consensusResult.confidence,
+            model_count: consensusResult.consensusCount
+          },
+          processing_time_ms: processingTime
+        })
+        .select()
+        .single()
+
+      if (takeoffError) {
+        console.error('Error saving takeoff analysis:', takeoffError)
+      }
+
+      // Update plan status
+      await supabase
+        .from('plans')
+        .update({ 
+          takeoff_analysis_status: 'completed',
+          has_takeoff_analysis: true
+        })
+        .eq('id', planId)
+        .eq('user_id', userId)
+
+    } else if (taskType === 'quality') {
+      // Save quality analysis
+      const { data: qualityAnalysis, error: qualityError } = await supabase
+        .from('plan_quality_analysis')
+        .insert({
+          plan_id: planId,
+          user_id: userId,
+          overall_score: consensusResult.confidence,
+          issues: consensusResult.issues || [],
+          recommendations: consensusResult.recommendations || [],
+          findings_by_category: {},
+          findings_by_severity: {
+            critical: [],
+            warning: consensusResult.issues || [],
+            info: []
+          },
+          ai_model: 'enhanced-consensus',
+          processing_time_ms: processingTime
+        })
+        .select()
+        .single()
+
+      if (qualityError) {
+        console.error('Error saving quality analysis:', qualityError)
+      }
+
+      // Update plan status
+      await supabase
+        .from('plans')
+        .update({ 
+          quality_analysis_status: 'completed',
+          has_quality_analysis: true
+        })
+        .eq('id', planId)
+        .eq('user_id', userId)
     }
 
     // Build response with enhanced metadata
