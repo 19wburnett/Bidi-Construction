@@ -18,7 +18,7 @@ export const MODEL_SPECIALIZATIONS = {
   'gpt-4o': 'general_construction', // Best overall construction analysis
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
   'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
-  'grok-2': 'alternative_analysis' // Alternative perspective model (XAI)
+  'grok-4': 'alternative_analysis' // Alternative perspective model (XAI) - newest and most powerful
 } as const
 
 export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
@@ -90,13 +90,13 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.80
       },
-      'grok-2': {
-        takeoff: 0.90,        // Grok-2 is back with working API key!
-        quality: 0.88,
-        bid_analysis: 0.92,
-        code_compliance: 0.85,
-        cost_estimation: 0.88
-      },
+             'grok-4': {
+               takeoff: 0.95,        // Grok-4 is the newest and most powerful!
+               quality: 0.92,
+               bid_analysis: 0.95,
+               code_compliance: 0.90,
+               cost_estimation: 0.92
+             },
       'gemini-1.5-pro': {
         takeoff: 0.82,        // Good for measurements and calculations
         quality: 0.85,
@@ -208,7 +208,7 @@ export class EnhancedAIProvider {
           return await this.analyzeWithOpenAI(images, options, model)
         case 'claude-3-haiku-20240307':
           return await this.analyzeWithClaude(images, options, model)
-        case 'grok-2':
+        case 'grok-4':
           return await this.analyzeWithXAI(images, options, model)
         default:
           throw new Error(`Unknown model: ${model}`)
