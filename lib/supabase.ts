@@ -623,6 +623,168 @@ export interface Database {
           created_at?: string
         }
       }
+      plans: {
+        Row: {
+          id: string
+          user_id: string
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string
+          num_pages: number
+          title: string | null
+          description: string | null
+          project_name: string | null
+          project_location: string | null
+          status: string
+          processing_status: any
+          has_takeoff_analysis: boolean
+          has_quality_analysis: boolean
+          created_at: string
+          updated_at: string
+          last_accessed_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string
+          num_pages?: number
+          title?: string | null
+          description?: string | null
+          project_name?: string | null
+          project_location?: string | null
+          status?: string
+          processing_status?: any
+          has_takeoff_analysis?: boolean
+          has_quality_analysis?: boolean
+          created_at?: string
+          updated_at?: string
+          last_accessed_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          file_type?: string
+          num_pages?: number
+          title?: string | null
+          description?: string | null
+          project_name?: string | null
+          project_location?: string | null
+          status?: string
+          processing_status?: any
+          has_takeoff_analysis?: boolean
+          has_quality_analysis?: boolean
+          created_at?: string
+          updated_at?: string
+          last_accessed_at?: string
+        }
+      }
+      plan_takeoff_analysis: {
+        Row: {
+          id: string
+          plan_id: string
+          user_id: string
+          items: any
+          summary: any
+          ai_model: string | null
+          confidence_scores: any
+          processing_time_ms: number | null
+          edited_items: any
+          is_finalized: boolean
+          version: number
+          parent_version_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          plan_id: string
+          user_id: string
+          items?: any
+          summary?: any
+          ai_model?: string | null
+          confidence_scores?: any
+          processing_time_ms?: number | null
+          edited_items?: any
+          is_finalized?: boolean
+          version?: number
+          parent_version_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          plan_id?: string
+          user_id?: string
+          items?: any
+          summary?: any
+          ai_model?: string | null
+          confidence_scores?: any
+          processing_time_ms?: number | null
+          edited_items?: any
+          is_finalized?: boolean
+          version?: number
+          parent_version_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      plan_quality_analysis: {
+        Row: {
+          id: string
+          plan_id: string
+          user_id: string
+          overall_score: number | null
+          issues: any
+          missing_details: any
+          recommendations: any
+          findings_by_category: any
+          findings_by_severity: any
+          page_findings: any
+          ai_model: string | null
+          processing_time_ms: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          plan_id: string
+          user_id: string
+          overall_score?: number | null
+          issues?: any
+          missing_details?: any
+          recommendations?: any
+          findings_by_category?: any
+          findings_by_severity?: any
+          page_findings?: any
+          ai_model?: string | null
+          processing_time_ms?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          plan_id?: string
+          user_id?: string
+          overall_score?: number | null
+          issues?: any
+          missing_details?: any
+          recommendations?: any
+          findings_by_category?: any
+          findings_by_severity?: any
+          page_findings?: any
+          ai_model?: string | null
+          processing_time_ms?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
   }
 }
