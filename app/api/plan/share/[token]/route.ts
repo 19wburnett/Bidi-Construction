@@ -67,7 +67,7 @@ export async function GET(
       })
       .eq('id', data.id)
 
-    const plan = data.plans
+    const plan = data.plans[0] // Access the first (and only) plan from the array
 
     return NextResponse.json({
       success: true,
