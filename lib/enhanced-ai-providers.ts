@@ -1,0 +1,793 @@
+import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+
+// Enhanced AI Provider System with Specialized Models
+// This system uses 5+ specialized models with different strengths for maximum accuracy
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '')
+
+// XAI/Grok integration for additional redundancy
+const xaiApiKey = process.env.XAI_API_KEY
+
+// Model specializations for different construction analysis tasks
+export const MODEL_SPECIALIZATIONS = {
+  'gpt-5': 'general_construction', // Best overall construction analysis (your GPT-5!)
+  'gpt-4o': 'general_construction', // Best overall construction analysis
+  'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
+  'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
+  'grok-2': 'alternative_analysis' // Alternative perspective model (XAI)
+} as const
+
+export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
+export type TaskType = 'takeoff' | 'quality' | 'bid_analysis' | 'code_compliance' | 'cost_estimation'
+
+export interface EnhancedAnalysisOptions {
+  maxTokens?: number
+  temperature?: number
+  systemPrompt: string
+  userPrompt: string
+  taskType: TaskType
+  prioritizeAccuracy?: boolean
+  includeConsensus?: boolean
+}
+
+export interface EnhancedAIResponse {
+  provider: string
+  model: string
+  specialization: string
+  content: string
+  finishReason: string
+  tokensUsed?: number
+  confidence?: number
+  processingTime?: number
+  taskType: TaskType
+}
+
+export interface ConsensusResult {
+  items: any[]
+  issues: any[]
+  confidence: number
+  consensusCount: number
+  disagreements: any[]
+  modelAgreements: any[]
+  specializedInsights: any[]
+  recommendations: string[]
+}
+
+// Enhanced AI Provider with Specialized Routing
+export class EnhancedAIProvider {
+  private modelPerformance: Record<string, Record<TaskType, number>> = {}
+  
+  constructor() {
+    this.initializeModelPerformance()
+  }
+
+  private initializeModelPerformance() {
+    // Initialize performance scores based on model specializations
+    this.modelPerformance = {
+      'gpt-5': {
+        takeoff: 0.98,        // GPT-5 is even better than GPT-4o!
+        quality: 0.95,
+        bid_analysis: 0.96,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
+      },
+      'gpt-4o': {
+        takeoff: 0.95,
+        quality: 0.90,
+        bid_analysis: 0.92,
+        code_compliance: 0.85,
+        cost_estimation: 0.88
+      },
+      'gpt-4-turbo': {
+        takeoff: 0.88,
+        quality: 0.95,
+        bid_analysis: 0.85,
+        code_compliance: 0.80,
+        cost_estimation: 0.82
+      },
+      'claude-3-haiku-20240307': {
+        takeoff: 0.85,
+        quality: 0.80,
+        bid_analysis: 0.82,
+        code_compliance: 0.85,
+        cost_estimation: 0.80
+      },
+      'grok-2': {
+        takeoff: 0.87,        // Alternative perspective model
+        quality: 0.85,
+        bid_analysis: 0.88,
+        code_compliance: 0.82,
+        cost_estimation: 0.85
+      }
+    }
+  }
+
+  // Route tasks to best-performing models
+  private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
+    // Get max models from environment or default
+    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '5')
+    const actualCount = Math.min(count, maxModels)
+    
+    const modelScores = Object.entries(this.modelPerformance)
+      .map(([model, scores]) => ({ model, score: scores[taskType] }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, actualCount)
+    
+    return modelScores.map(m => m.model)
+  }
+
+  // Analyze with specialized models
+  async analyzeWithSpecializedModels(
+    images: string[],
+    options: EnhancedAnalysisOptions
+  ): Promise<EnhancedAIResponse[]> {
+    const startTime = Date.now()
+    
+    // Get best models for this task type
+    const selectedModels = this.getBestModelsForTask(options.taskType, 5)
+    
+    // Filter out disabled providers
+    const enabledModels = selectedModels.filter(model => {
+      if (model.includes('gpt') && process.env.ENABLE_OPENAI === 'false') return false
+      if (model.includes('claude') && process.env.ENABLE_ANTHROPIC === 'false') return false
+      if (model.includes('gemini') && process.env.ENABLE_GOOGLE === 'false') return false
+      if (model.includes('grok') && process.env.ENABLE_XAI === 'false') return false
+      return true
+    })
+    
+    console.log(`Using specialized models for ${options.taskType}:`, enabledModels)
+    console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
+    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
+    
+    // Run analysis with selected models in parallel
+    const analysisPromises = enabledModels.map(async (model, index) => {
+      console.log(`Starting analysis with model ${index + 1}/${enabledModels.length}: ${model}`)
+      try {
+        const result = await this.analyzeWithModel(images, options, model)
+        console.log(`Model ${model} succeeded: ${result.content.length} chars`)
+        return result
+      } catch (error) {
+        console.error(`Model ${model} failed:`, error)
+        throw error
+      }
+    })
+    
+    const results = await Promise.allSettled(analysisPromises)
+    
+    const successfulResults = results
+      .filter(r => r.status === 'fulfilled')
+      .map(r => (r as PromiseFulfilledResult<EnhancedAIResponse>).value)
+    
+    const failedResults = results
+      .filter(r => r.status === 'rejected')
+      .map(r => (r as PromiseRejectedResult).reason)
+    
+    const processingTime = Date.now() - startTime
+    
+    // Add processing time to all results
+    successfulResults.forEach(result => {
+      result.processingTime = processingTime
+    })
+    
+    console.log(`Enhanced analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${processingTime}ms`)
+    if (failedResults.length > 0) {
+      console.log(`Failed models:`, failedResults.map(r => r.message || r))
+    }
+    
+    return successfulResults
+  }
+
+  // Analyze with specific model
+  private async analyzeWithModel(
+    images: string[],
+    options: EnhancedAnalysisOptions,
+    model: string
+  ): Promise<EnhancedAIResponse> {
+    const startTime = Date.now()
+    
+    try {
+      switch (model) {
+        case 'gpt-5':
+        case 'gpt-4o':
+        case 'gpt-4-vision':
+        case 'gpt-4-turbo':
+          return await this.analyzeWithOpenAI(images, options, model)
+        case 'claude-3-haiku-20240307':
+          return await this.analyzeWithClaude(images, options, model)
+        case 'grok-2':
+          return await this.analyzeWithXAI(images, options, model)
+        default:
+          throw new Error(`Unknown model: ${model}`)
+      }
+    } catch (error) {
+      console.error(`Analysis failed for ${model}:`, error)
+      throw error
+    }
+  }
+
+  // Enhanced OpenAI analysis
+  private async analyzeWithOpenAI(
+    images: string[],
+    options: EnhancedAnalysisOptions,
+    model: string
+  ): Promise<EnhancedAIResponse> {
+    console.log(`OpenAI analysis starting with model: ${model}`)
+    
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OpenAI API key not configured')
+    }
+    
+    const imageContent = images.map(img => ({
+      type: 'image_url' as const,
+      image_url: { url: img, detail: 'high' as const }
+    }))
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: 'system', content: this.buildSpecializedPrompt(options) },
+          { 
+            role: 'user', 
+            content: [
+              { type: 'text', text: options.userPrompt },
+              ...imageContent
+            ] 
+          }
+        ],
+        max_completion_tokens: options.maxTokens || 4096,
+        temperature: options.temperature || 0.2,
+        response_format: { type: 'json_object' }
+      })
+      
+      console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
+      
+      return {
+        provider: 'openai',
+        model: model,
+        specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+        content: response.choices[0].message.content || '',
+        finishReason: response.choices[0].finish_reason,
+        tokensUsed: response.usage?.total_tokens,
+        confidence: this.calculateConfidence(response.choices[0].message.content || ''),
+        taskType: options.taskType
+      }
+    } catch (error) {
+      console.error(`OpenAI ${model} failed:`, error)
+      throw error
+    }
+  }
+
+  // Enhanced Claude analysis
+  private async analyzeWithClaude(
+    images: string[],
+    options: EnhancedAnalysisOptions,
+    model: string
+  ): Promise<EnhancedAIResponse> {
+    console.log(`Claude analysis starting with model: ${model}`)
+    
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Anthropic API key not configured')
+    }
+    
+    const imageContent = images.map(img => {
+      const base64Data = img.split(',')[1] || img
+      const mediaType = img.includes('jpeg') ? 'image/jpeg' : 'image/png'
+      
+      return {
+        type: 'image' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: mediaType as 'image/jpeg' | 'image/png',
+          data: base64Data
+        }
+      }
+    })
+
+    const response = await anthropic.messages.create({
+      model: model,
+      max_tokens: options.maxTokens || 4096,
+      temperature: options.temperature || 0.2,
+      system: this.buildSpecializedPrompt(options),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: options.userPrompt },
+            ...imageContent
+          ]
+        }
+      ]
+    })
+
+    const textContent = response.content.find(c => c.type === 'text')
+    return {
+      provider: 'anthropic',
+      model: model,
+      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+      content: (textContent as any)?.text || '',
+      finishReason: response.stop_reason || 'unknown',
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+      confidence: this.calculateConfidence((textContent as any)?.text || ''),
+      taskType: options.taskType
+    }
+  }
+
+  // Enhanced Gemini analysis
+  private async analyzeWithGemini(
+    images: string[],
+    options: EnhancedAnalysisOptions,
+    model: string
+  ): Promise<EnhancedAIResponse> {
+    console.log(`Gemini analysis starting with model: ${model}`)
+    
+    if (!process.env.GOOGLE_GEMINI_API_KEY) {
+      throw new Error('Google Gemini API key not configured')
+    }
+    
+    const parts: any[] = [
+      { text: `${this.buildSpecializedPrompt(options)}\n\n${options.userPrompt}\n\nIMPORTANT: Respond with ONLY a JSON object, no other text.` }
+    ]
+    
+    images.forEach(img => {
+      parts.push({
+        inlineData: {
+          mimeType: img.includes('jpeg') ? 'image/jpeg' : 'image/png',
+          data: img.split(',')[1] || img
+        }
+      })
+    })
+
+    const modelInstance = gemini.getGenerativeModel({ 
+      model: model,
+      generationConfig: {
+        maxOutputTokens: options.maxTokens || 4096,
+        temperature: options.temperature || 0.2
+      }
+    })
+    
+    const response = await modelInstance.generateContent(parts)
+    
+    const text = response.response?.text() || ''
+    
+    if (!text || text.trim().length === 0) {
+      throw new Error('Gemini returned empty response')
+    }
+    
+    return {
+      provider: 'google',
+      model: model,
+      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+      content: text,
+      finishReason: 'stop',
+      tokensUsed: undefined,
+      confidence: this.calculateConfidence(text),
+      taskType: options.taskType
+    }
+  }
+
+  // Enhanced XAI/Grok analysis
+  private async analyzeWithXAI(
+    images: string[],
+    options: EnhancedAnalysisOptions,
+    model: string
+  ): Promise<EnhancedAIResponse> {
+    console.log(`XAI analysis starting with model: ${model}`)
+    
+    if (!xaiApiKey) {
+      throw new Error('XAI API key not configured')
+    }
+
+    // XAI API integration (similar to OpenAI format)
+    const imageContent = images.map(img => ({
+      type: 'image_url' as const,
+      image_url: { url: img, detail: 'high' as const }
+    }))
+
+    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${xaiApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: this.buildSpecializedPrompt(options) },
+          { 
+            role: 'user', 
+            content: [
+              { type: 'text', text: options.userPrompt },
+              ...imageContent
+            ] 
+          }
+        ],
+        max_completion_tokens: options.maxTokens || 4096,
+        temperature: options.temperature || 0.2,
+        response_format: { type: 'json_object' }
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`XAI API error: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    
+    return {
+      provider: 'xai',
+      model: model,
+      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+      content: data.choices[0].message.content || '',
+      finishReason: data.choices[0].finish_reason,
+      tokensUsed: data.usage?.total_tokens,
+      confidence: this.calculateConfidence(data.choices[0].message.content || ''),
+      taskType: options.taskType
+    }
+  }
+
+  // Build specialized prompts based on task type and model specialization
+  private buildSpecializedPrompt(options: EnhancedAnalysisOptions): string {
+    const basePrompt = options.systemPrompt
+    
+    // Add specialization-specific instructions
+    const specialization = 'general' // Default specialization
+    
+    let specializedInstructions = ''
+    
+    switch (options.taskType) {
+      case 'takeoff':
+        specializedInstructions = `
+FOCUS ON: Material quantities, measurements, and specifications.
+PRIORITIZE: Accuracy in counting and measuring visible elements.
+OUTPUT: Detailed takeoff items with quantities, units, and locations.`
+        break
+      case 'quality':
+        specializedInstructions = `
+FOCUS ON: Code compliance, safety issues, and potential problems.
+PRIORITIZE: Identifying violations and recommending solutions.
+OUTPUT: Quality issues with severity levels and recommendations.`
+        break
+      case 'bid_analysis':
+        specializedInstructions = `
+FOCUS ON: Cost estimation, labor requirements, and timeline.
+PRIORITIZE: Realistic pricing and professional recommendations.
+OUTPUT: Bid amounts, materials, labor, and timeline estimates.`
+        break
+      case 'code_compliance':
+        specializedInstructions = `
+FOCUS ON: Building codes, regulations, and compliance requirements.
+PRIORITIZE: Identifying code violations and compliance issues.
+OUTPUT: Code compliance issues with specific code references.`
+        break
+      case 'cost_estimation':
+        specializedInstructions = `
+FOCUS ON: Material costs, labor rates, and market pricing.
+PRIORITIZE: Accurate cost calculations and market analysis.
+OUTPUT: Detailed cost breakdowns with pricing sources.`
+        break
+    }
+    
+    return `${basePrompt}\n\n${specializedInstructions}`
+  }
+
+  // Calculate confidence score based on response quality
+  private calculateConfidence(content: string): number {
+    try {
+      const parsed = JSON.parse(content)
+      
+      // Higher confidence for responses with more detailed information
+      let confidence = 0.5
+      
+      if (parsed.items && Array.isArray(parsed.items)) {
+        confidence += 0.2
+        if (parsed.items.length > 10) confidence += 0.1
+        if (parsed.items.length > 20) confidence += 0.1
+      }
+      
+      if (parsed.summary) confidence += 0.1
+      if (parsed.confidence) confidence += 0.1
+      
+      return Math.min(confidence, 1.0)
+    } catch {
+      return 0.3 // Lower confidence for invalid JSON
+    }
+  }
+
+  // Cross-validation and consensus analysis
+  async analyzeWithConsensus(
+    images: string[],
+    options: EnhancedAnalysisOptions
+  ): Promise<ConsensusResult> {
+    console.log(`Starting consensus analysis for ${options.taskType}...`)
+    
+    // Get results from all specialized models
+    const results = await this.analyzeWithSpecializedModels(images, options)
+    
+    if (results.length < 2) {
+      throw new Error('Need at least 2 models for consensus analysis')
+    }
+    
+    // Parse all responses
+    const parsedResults = results.map(result => {
+      try {
+        return {
+          ...result,
+          parsed: JSON.parse(result.content)
+        }
+      } catch (error) {
+        console.error(`Failed to parse ${result.model} response:`, error)
+        return null
+      }
+    }).filter((result): result is NonNullable<typeof result> => result !== null)
+    
+    if (parsedResults.length < 2) {
+      throw new Error('Need at least 2 valid responses for consensus')
+    }
+    
+    // Build consensus
+    const consensus = this.buildConsensus(parsedResults, options.taskType)
+    
+    console.log(`Consensus analysis complete: ${consensus.consensusCount}/${parsedResults.length} models agreed`)
+    
+    return consensus
+  }
+
+  // Build consensus from multiple model results
+  private buildConsensus(
+    results: Array<{ parsed: any; model: string; confidence?: number }>,
+    taskType: TaskType
+  ): ConsensusResult {
+    const items = results.map(r => r.parsed.items || []).flat()
+    const issues = results.map(r => r.parsed.issues || []).flat()
+    
+    // Find consensus items (agreed upon by multiple models)
+    const consensusItems = this.findConsensusItems(items, results.length)
+    const consensusIssues = this.findConsensusIssues(issues, results.length)
+    
+    // Calculate overall confidence
+    const avgConfidence = results.reduce((sum, r) => sum + (r.confidence || 0.5), 0) / results.length
+    
+    // Find disagreements
+    const disagreements = this.findDisagreements(results)
+    
+    // Count model agreements
+    const modelAgreements = this.countModelAgreements(results)
+    
+    return {
+      items: consensusItems,
+      issues: [], // No issues for takeoff analysis
+      confidence: avgConfidence,
+      consensusCount: results.length,
+      disagreements,
+      modelAgreements,
+      specializedInsights: [], // Will be populated by consensus engine
+      recommendations: [] // Will be populated by consensus engine
+    }
+  }
+
+  // Find items that multiple models agree on
+  private findConsensusItems(items: any[], totalModels: number): any[] {
+    // Group similar items
+    const groupedItems = this.groupSimilarItems(items)
+    
+    // Only include items with consensus (agreed upon by multiple models)
+    const consensusItems = groupedItems.filter(group => 
+      group.length >= Math.ceil(totalModels * 0.6) // 60% consensus threshold
+    )
+    
+    return consensusItems.map(group => this.mergeItemGroup(group))
+  }
+
+  // Find issues that multiple models agree on
+  private findConsensusIssues(issues: any[], totalModels: number): any[] {
+    const groupedIssues = this.groupSimilarIssues(issues)
+    
+    const consensusIssues = groupedIssues.filter(group => 
+      group.length >= Math.ceil(totalModels * 0.6)
+    )
+    
+    return consensusIssues.map(group => this.mergeIssueGroup(group))
+  }
+
+  // Group similar items for consensus analysis
+  private groupSimilarItems(items: any[]): any[][] {
+    const groups: any[][] = []
+    const processed = new Set<number>()
+    
+    items.forEach((item, index) => {
+      if (processed.has(index)) return
+      
+      const group = [item]
+      processed.add(index)
+      
+      for (let j = index + 1; j < items.length; j++) {
+        if (processed.has(j)) continue
+        
+        if (this.areItemsSimilar(item, items[j])) {
+          group.push(items[j])
+          processed.add(j)
+        }
+      }
+      
+      groups.push(group)
+    })
+    
+    return groups
+  }
+
+  // Group similar issues for consensus analysis
+  private groupSimilarIssues(issues: any[]): any[][] {
+    const groups: any[][] = []
+    const processed = new Set<number>()
+    
+    issues.forEach((issue, index) => {
+      if (processed.has(index)) return
+      
+      const group = [issue]
+      processed.add(index)
+      
+      for (let j = index + 1; j < issues.length; j++) {
+        if (processed.has(j)) continue
+        
+        if (this.areIssuesSimilar(issue, issues[j])) {
+          group.push(issues[j])
+          processed.add(j)
+        }
+      }
+      
+      groups.push(group)
+    })
+    
+    return groups
+  }
+
+  // Check if two items are similar
+  private areItemsSimilar(item1: any, item2: any): boolean {
+    if (item1.category !== item2.category) return false
+    
+    const nameSimilarity = this.calculateSimilarity(
+      item1.name?.toLowerCase() || '',
+      item2.name?.toLowerCase() || ''
+    )
+    
+    const descSimilarity = this.calculateSimilarity(
+      item1.description?.toLowerCase() || '',
+      item2.description?.toLowerCase() || ''
+    )
+    
+    return nameSimilarity > 0.7 || descSimilarity > 0.7
+  }
+
+  // Check if two issues are similar
+  private areIssuesSimilar(issue1: any, issue2: any): boolean {
+    if (issue1.severity !== issue2.severity) return false
+    if (issue1.category !== issue2.category) return false
+    
+    const descSimilarity = this.calculateSimilarity(
+      issue1.description?.toLowerCase() || '',
+      issue2.description?.toLowerCase() || ''
+    )
+    
+    return descSimilarity > 0.75
+  }
+
+  // Calculate string similarity
+  private calculateSimilarity(str1: string, str2: string): number {
+    if (str1 === str2) return 1.0
+    if (!str1 || !str2) return 0.0
+    
+    const longer = str1.length > str2.length ? str1 : str2
+    const shorter = str1.length > str2.length ? str2 : str1
+    
+    if (longer.length === 0) return 1.0
+    
+    const editDistance = this.levenshteinDistance(longer, shorter)
+    return (longer.length - editDistance) / longer.length
+  }
+
+  // Calculate Levenshtein distance
+  private levenshteinDistance(str1: string, str2: string): number {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null))
+    
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j
+    
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1,
+          matrix[j - 1][i] + 1,
+          matrix[j - 1][i - 1] + indicator
+        )
+      }
+    }
+    
+    return matrix[str2.length][str1.length]
+  }
+
+  // Merge a group of similar items
+  private mergeItemGroup(group: any[]): any {
+    const base = group[0]
+    const providers = group.map(item => item.ai_provider || 'unknown')
+    
+    // Average quantities
+    const avgQuantity = group.reduce((sum, item) => sum + (item.quantity || 0), 0) / group.length
+    
+    // Average confidence
+    const avgConfidence = group.reduce((sum, item) => sum + (item.confidence || 0.5), 0) / group.length
+    
+    return {
+      ...base,
+      quantity: Math.round(avgQuantity * 100) / 100,
+      confidence: avgConfidence,
+      ai_provider: providers.length > 1 ? 'consensus' : providers[0],
+      consensus_count: group.length,
+      notes: `Consensus from ${providers.join(', ')}${base.notes ? ` | ${base.notes}` : ''}`
+    }
+  }
+
+  // Merge a group of similar issues
+  private mergeIssueGroup(group: any[]): any {
+    const base = group[0]
+    const providers = group.map(issue => issue.ai_provider || 'unknown')
+    
+    const avgConfidence = group.reduce((sum, issue) => sum + (issue.confidence || 0.5), 0) / group.length
+    
+    return {
+      ...base,
+      confidence: avgConfidence,
+      ai_provider: providers.length > 1 ? 'consensus' : providers[0],
+      consensus_count: group.length
+    }
+  }
+
+  // Find disagreements between models
+  private findDisagreements(results: Array<{ parsed: any; model: string }>): string[] {
+    const disagreements: string[] = []
+    
+    // Compare item counts
+    const itemCounts = results.map(r => (r.parsed.items || []).length)
+    const avgItemCount = itemCounts.reduce((sum, count) => sum + count, 0) / itemCounts.length
+    
+    itemCounts.forEach((count, index) => {
+      if (Math.abs(count - avgItemCount) > avgItemCount * 0.5) {
+        disagreements.push(`${results[index].model} found ${count} items (avg: ${avgItemCount.toFixed(1)})`)
+      }
+    })
+    
+    return disagreements
+  }
+
+  // Count model agreements
+  private countModelAgreements(results: Array<{ parsed: any; model: string }>): any[] {
+    return results.map(result => ({
+      model: result.model,
+      itemsFound: (result.parsed.items || []).length,
+      confidence: 0.8 // Default confidence
+    }))
+  }
+}
+
+// Export singleton instance
+export const enhancedAIProvider = new EnhancedAIProvider()
+
+// Export individual functions for backward compatibility
+export async function analyzeWithEnhancedConsensus(
+  images: string[],
+  options: EnhancedAnalysisOptions
+): Promise<ConsensusResult> {
+  return enhancedAIProvider.analyzeWithConsensus(images, options)
+}
+
+export async function analyzeWithSpecializedModels(
+  images: string[],
+  options: EnhancedAnalysisOptions
+): Promise<EnhancedAIResponse[]> {
+  return enhancedAIProvider.analyzeWithSpecializedModels(images, options)
+}
