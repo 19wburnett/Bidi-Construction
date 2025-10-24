@@ -12,31 +12,7 @@ export const createClient = () => {
     throw new Error('Missing Supabase environment variables')
   }
   
-  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        if (typeof document === 'undefined') return []
-        return document.cookie
-          .split(';')
-          .map(cookie => cookie.trim().split('='))
-          .filter(([name]) => name)
-          .map(([name, value]) => ({ name, value }))
-      },
-      setAll(cookiesToSet) {
-        if (typeof document === 'undefined') return
-        cookiesToSet.forEach(({ name, value, options }) => {
-          let cookieString = `${name}=${value}`
-          if (options?.maxAge) cookieString += `; Max-Age=${options.maxAge}`
-          if (options?.path) cookieString += `; Path=${options.path}`
-          if (options?.domain) cookieString += `; Domain=${options.domain}`
-          if (options?.secure) cookieString += `; Secure`
-          if (options?.httpOnly) cookieString += `; HttpOnly`
-          if (options?.sameSite) cookieString += `; SameSite=${options.sameSite}`
-          document.cookie = cookieString
-        })
-      }
-    }
-  })
+  return createBrowserClient(supabaseUrl, supabaseAnonKey)
 }
 
 // Database types
