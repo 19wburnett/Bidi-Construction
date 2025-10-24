@@ -9,15 +9,19 @@ function PostHogTracker() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    // Track pageviews
+    // Track pageviews with error handling
     if (pathname) {
-      let url = window.origin + pathname
-      if (searchParams.toString()) {
-        url = url + `?${searchParams.toString()}`
+      try {
+        let url = window.origin + pathname
+        if (searchParams.toString()) {
+          url = url + `?${searchParams.toString()}`
+        }
+        posthog.capture('$pageview', {
+          $current_url: url,
+        })
+      } catch (error) {
+        console.warn('PostHog tracking failed:', error)
       }
-      posthog.capture('$pageview', {
-        $current_url: url,
-      })
     }
   }, [pathname, searchParams])
 

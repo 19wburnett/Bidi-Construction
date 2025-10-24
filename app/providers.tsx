@@ -93,10 +93,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <AuthContext.Provider value={contextValue}>
-        <PostHogProvider>
+        <PostHogProviderWrapper>
           {children}
-        </PostHogProvider>
+        </PostHogProviderWrapper>
       </AuthContext.Provider>
     </ThemeProvider>
   )
+}
+
+// Wrapper to handle PostHog errors gracefully
+function PostHogProviderWrapper({ children }: { children: React.ReactNode }) {
+  try {
+    return <PostHogProvider>{children}</PostHogProvider>
+  } catch (error) {
+    console.warn('PostHog failed to initialize, continuing without analytics:', error)
+    return <>{children}</>
+  }
 }
