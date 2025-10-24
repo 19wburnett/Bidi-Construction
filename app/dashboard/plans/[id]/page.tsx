@@ -410,6 +410,13 @@ export default function PlanEditorPage() {
     try {
       const supabase = createClient()
 
+      // Check if user is authenticated
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
+        console.error('User not authenticated:', authError)
+        throw new Error('User not authenticated')
+      }
+
       // Load plan details
       const { data: planData, error: planError } = await supabase
         .from('plans')
@@ -422,20 +429,30 @@ export default function PlanEditorPage() {
       setPlan(planData)
 
       // Get signed URL for the plan file
-      const { data: urlData } = await supabase.storage
+      const { data: urlData, error: urlError } = await supabase.storage
         .from('plans')
         .createSignedUrl(planData.file_path, 3600)
+
+      if (urlError) {
+        console.error('Error creating signed URL:', urlError)
+        throw new Error(`Failed to create signed URL: ${urlError.message}`)
+      }
 
       if (urlData) {
         setPlanUrl(urlData.signedUrl)
       }
 
       // Load existing drawings for all pages
-      const { data: drawingsData } = await supabase
+      const { data: drawingsData, error: drawingsError } = await supabase
         .from('plan_drawings')
         .select('*')
         .eq('plan_id', planId)
         .order('page_number', { ascending: true })
+
+      if (drawingsError) {
+        console.error('Error loading drawings:', drawingsError)
+        // Don't throw here, just log the error and continue without drawings
+      }
 
       if (drawingsData) {
         setDrawings(drawingsData.map((d: any) => {
