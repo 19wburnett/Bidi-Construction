@@ -1234,7 +1234,7 @@ export default function PlanEditorPage() {
   // Simulate model progress updates
   const simulateModelProgress = () => {
     const models = ['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash']
-    const intervals = [2000, 5000, 8000, 12000, 15000] // Different start times
+    const intervals = [1000, 3000, 6000, 9000, 12000] // Different start times
     
     models.forEach((model, index) => {
       setTimeout(() => {
@@ -1242,11 +1242,13 @@ export default function PlanEditorPage() {
         setCurrentModel(model)
       }, intervals[index])
       
-      // Simulate completion after 15-30 seconds
+      // Simulate completion after 2-4 seconds
       setTimeout(() => {
         setModelProgress(prev => ({ ...prev, [model]: 'completed' }))
-        setCurrentModel(null)
-      }, intervals[index] + 15000 + Math.random() * 15000)
+        if (index === models.length - 1) {
+          setCurrentModel(null)
+        }
+      }, intervals[index] + 2000 + Math.random() * 2000)
     })
   }
 
@@ -2171,73 +2173,59 @@ export default function PlanEditorPage() {
                                 Our enhanced AI system is analyzing your plans with multiple specialized models for maximum accuracy.
                               </p>
                               
-                              {/* Progress Checklist */}
+                              {/* Progress Bar */}
                               <div className="bg-white rounded-lg p-4 border border-blue-200 mb-4">
                                 <h5 className="font-medium text-blue-900 mb-3">Analysis Progress:</h5>
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                                      <Check className="h-3 w-3 text-white" />
-                                    </div>
-                                    <span className="text-green-700">✅ Plan uploaded and processed</span>
+                                
+                                {/* Main Progress Bar */}
+                                <div className="mb-4">
+                                  <div className="flex justify-between text-sm text-blue-800 mb-2">
+                                    <span>Enhanced AI Analysis</span>
+                                    <span>3-5 minutes</span>
                                   </div>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                                      <Check className="h-3 w-3 text-white" />
-                                    </div>
-                                    <span className="text-green-700">✅ Images optimized for AI analysis</span>
+                                  <div className="w-full bg-gray-200 rounded-full h-3">
+                                    <div 
+                                      className="bg-blue-500 h-3 rounded-full transition-all duration-1000 ease-out"
+                                      style={{ 
+                                        width: `${Math.min(100, Math.max(20, (Object.values(modelProgress).filter(status => status === 'completed').length / 5) * 100))}%` 
+                                      }}
+                                    ></div>
                                   </div>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
-                                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                                    </div>
-                                    <span className="text-blue-700">🔄 Running enhanced AI analysis (3-5 minutes)</span>
+                                </div>
+
+                                {/* Current Step */}
+                                <div className="mb-3">
+                                  <div className="flex items-center gap-2 text-sm text-blue-700">
+                                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                                    <span>
+                                      {currentModel ? `Analyzing with ${currentModel}...` : 'Preparing AI models...'}
+                                    </span>
                                   </div>
-                                  
-                                  {/* Model Progress Sub-checklist */}
-                                  <div className="ml-6 mt-2 space-y-1">
-                                    <div className="text-xs font-medium text-blue-800 mb-2">AI Models:</div>
-                                    {['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash'].map((model) => {
-                                      const status = modelProgress[model] || 'pending'
-                                      return (
-                                        <div key={model} className="flex items-center gap-2 text-xs">
-                                          <div className={`w-3 h-3 rounded-full flex items-center justify-center ${
-                                            status === 'completed' ? 'bg-green-500' :
-                                            status === 'running' ? 'bg-blue-500' :
-                                            status === 'failed' ? 'bg-red-500' :
-                                            'bg-gray-300'
-                                          }`}>
-                                            {status === 'completed' && <Check className="h-2 w-2 text-white" />}
-                                            {status === 'running' && <div className="w-1 h-1 bg-white rounded-full animate-pulse"></div>}
-                                            {status === 'failed' && <span className="text-white text-xs">✕</span>}
-                                          </div>
-                                          <span className={`${
-                                            status === 'completed' ? 'text-green-700' :
-                                            status === 'running' ? 'text-blue-700' :
-                                            status === 'failed' ? 'text-red-700' :
-                                            'text-gray-500'
-                                          }`}>
-                                            {status === 'running' && '🔄 '}
-                                            {status === 'completed' && '✅ '}
-                                            {status === 'failed' && '❌ '}
-                                            {model}
-                                            {status === 'running' && ' (analyzing...)'}
-                                            {status === 'completed' && ' (done)'}
-                                            {status === 'failed' && ' (failed)'}
-                                          </span>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <div className="w-4 h-4 bg-gray-300 rounded-full"></div>
-                                    <span className="text-gray-500">⏳ Building consensus from multiple AI models</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <div className="w-4 h-4 bg-gray-300 rounded-full"></div>
-                                    <span className="text-gray-500">⏳ Generating detailed takeoff report</span>
-                                  </div>
+                                </div>
+
+                                {/* Model Status Grid */}
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                  {['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash'].map((model) => {
+                                    const status = modelProgress[model] || 'pending'
+                                    return (
+                                      <div key={model} className="flex items-center gap-2">
+                                        <div className={`w-2 h-2 rounded-full ${
+                                          status === 'completed' ? 'bg-green-500' :
+                                          status === 'running' ? 'bg-blue-500 animate-pulse' :
+                                          status === 'failed' ? 'bg-red-500' :
+                                          'bg-gray-300'
+                                        }`}></div>
+                                        <span className={`${
+                                          status === 'completed' ? 'text-green-700' :
+                                          status === 'running' ? 'text-blue-700' :
+                                          status === 'failed' ? 'text-red-700' :
+                                          'text-gray-500'
+                                        }`}>
+                                          {model}
+                                        </span>
+                                      </div>
+                                    )
+                                  })}
                                 </div>
                               </div>
                               
