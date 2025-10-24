@@ -414,8 +414,10 @@ export default function PlanEditorPage() {
       const { data: { user }, error: authError } = await supabase.auth.getUser()
       if (authError || !user) {
         console.error('User not authenticated:', authError)
+        console.error('Auth error details:', authError)
         throw new Error('User not authenticated')
       }
+      console.log('✅ User authenticated:', user.email)
 
       // Load plan details
       const { data: planData, error: planError } = await supabase
@@ -429,14 +431,17 @@ export default function PlanEditorPage() {
       setPlan(planData)
 
       // Get signed URL for the plan file
+      console.log('📁 Attempting to create signed URL for file:', planData.file_path)
       const { data: urlData, error: urlError } = await supabase.storage
         .from('plans')
         .createSignedUrl(planData.file_path, 3600)
 
       if (urlError) {
-        console.error('Error creating signed URL:', urlError)
+        console.error('❌ Error creating signed URL:', urlError)
+        console.error('❌ URL error details:', urlError)
         throw new Error(`Failed to create signed URL: ${urlError.message}`)
       }
+      console.log('✅ Signed URL created successfully')
 
       if (urlData) {
         setPlanUrl(urlData.signedUrl)
