@@ -307,11 +307,18 @@ export default function PlanEditorPage() {
   const [takeoffResults, setTakeoffResults] = useState<any>(null)
   const [qualityResults, setQualityResults] = useState<any>(null)
   
-  // Model progress tracking
-  const [modelProgress, setModelProgress] = useState<{
-    [key: string]: 'pending' | 'running' | 'completed' | 'failed'
-  }>({})
-  const [currentModel, setCurrentModel] = useState<string | null>(null)
+  // Analysis progress tracking
+  const [analysisStep, setAnalysisStep] = useState<number>(0)
+  const [currentStepName, setCurrentStepName] = useState<string>('')
+  
+  // Define the 5 analysis steps
+  const analysisSteps = [
+    'Uploading Files',
+    'Preparing Files for AI Analysis', 
+    'AI Analyzing Files',
+    'Processing Results',
+    'Finalizing Analysis'
+  ]
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [sidebarWidth, setSidebarWidth] = useState<'normal' | 'wide' | 'full'>('normal')
   
@@ -1253,36 +1260,13 @@ export default function PlanEditorPage() {
     return images
   }
 
-  // Simulate model progress updates
-  const simulateModelProgress = () => {
-    const models = ['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash']
-    const intervals = [1000, 3000, 6000, 9000, 12000] // Different start times
-    
-    models.forEach((model, index) => {
-      setTimeout(() => {
-        setModelProgress(prev => ({ ...prev, [model]: 'running' }))
-        setCurrentModel(model)
-      }, intervals[index])
-      
-      // Simulate completion after 2-4 seconds
-      setTimeout(() => {
-        setModelProgress(prev => ({ ...prev, [model]: 'completed' }))
-        if (index === models.length - 1) {
-          setCurrentModel(null)
-        }
-      }, intervals[index] + 2000 + Math.random() * 2000)
-    })
-  }
 
   async function runTakeoffAnalysis() {
     setIsAnalyzing(true)
     
-    // Initialize model progress
-    setModelProgress({})
-    setCurrentModel(null)
-    
-    // Start simulating model progress
-    simulateModelProgress()
+    // Initialize step progress
+    setAnalysisStep(0)
+    setCurrentStepName('')
     setAnalysisMode('takeoff')
 
     try {
@@ -1297,13 +1281,19 @@ export default function PlanEditorPage() {
         })
         .eq('id', planId)
 
-      // Show pending status immediately
+      // Step 1: Uploading Files
+      setAnalysisStep(1)
+      setCurrentStepName('Uploading Files')
       setTakeoffResults({
         status: 'pending',
         message: 'Converting PDF to images for enhanced multi-model analysis...',
         requested_at: new Date().toISOString()
       })
 
+      // Step 2: Preparing Files for AI Analysis
+      setAnalysisStep(2)
+      setCurrentStepName('Preparing Files for AI Analysis')
+      
       // Convert PDF pages to images
       const images = await convertPdfPagesToImages()
       
@@ -1322,6 +1312,10 @@ export default function PlanEditorPage() {
         console.log('Applied additional compression for Vercel payload limits')
       }
 
+      // Step 3: AI Analyzing Files
+      setAnalysisStep(3)
+      setCurrentStepName('AI Analyzing Files')
+      
       // Determine if we need batch processing (more than 5 pages)
       const needsBatchProcessing = images.length > 5
       
@@ -1360,6 +1354,10 @@ export default function PlanEditorPage() {
 
         const data = await response.json()
 
+        // Step 4: Processing Results
+        setAnalysisStep(4)
+        setCurrentStepName('Processing Results')
+
         // Update plan status to completed
         await supabase
           .from('plans')
@@ -1368,6 +1366,10 @@ export default function PlanEditorPage() {
             finish_takeoff_analysis: true
           })
           .eq('id', planId)
+
+        // Step 5: Finalizing Analysis
+        setAnalysisStep(5)
+        setCurrentStepName('Finalizing Analysis')
 
         // Show enhanced results with batch processing metadata
         setTakeoffResults({
@@ -1380,9 +1382,9 @@ export default function PlanEditorPage() {
           completed_at: new Date().toISOString()
         })
         
-        // Reset model progress
-        setModelProgress({})
-        setCurrentModel(null)
+        // Reset analysis progress
+        setAnalysisStep(0)
+        setCurrentStepName('')
 
         const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
         const modelCount = data.consensus?.consensusCount || 0
@@ -1431,6 +1433,10 @@ export default function PlanEditorPage() {
 
         const data = await response.json()
 
+        // Step 4: Processing Results
+        setAnalysisStep(4)
+        setCurrentStepName('Processing Results')
+
         // Update plan status to completed
         await supabase
           .from('plans')
@@ -1439,6 +1445,10 @@ export default function PlanEditorPage() {
             finish_takeoff_analysis: true
           })
           .eq('id', planId)
+
+        // Step 5: Finalizing Analysis
+        setAnalysisStep(5)
+        setCurrentStepName('Finalizing Analysis')
 
         // Show enhanced results with consensus metadata
         setTakeoffResults({
@@ -2209,7 +2219,7 @@ export default function PlanEditorPage() {
                                     <div 
                                       className="bg-blue-500 h-3 rounded-full transition-all duration-1000 ease-out"
                                       style={{ 
-                                        width: `${Math.min(100, Math.max(20, (Object.values(modelProgress).filter(status => status === 'completed').length / 5) * 100))}%` 
+                                        width: `${Math.min(100, Math.max(20, (analysisStep / 5) * 100))}%` 
                                       }}
                                     ></div>
                                   </div>
@@ -2220,34 +2230,9 @@ export default function PlanEditorPage() {
                                   <div className="flex items-center gap-2 text-sm text-blue-700">
                                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                                     <span>
-                                      {currentModel ? `Analyzing with ${currentModel}...` : 'Preparing AI models...'}
+                                      {currentStepName || analysisSteps[analysisStep] || 'Starting analysis...'}
                                     </span>
                                   </div>
-                                </div>
-
-                                {/* Model Status Grid */}
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                  {['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash'].map((model) => {
-                                    const status = modelProgress[model] || 'pending'
-                                    return (
-                                      <div key={model} className="flex items-center gap-2">
-                                        <div className={`w-2 h-2 rounded-full ${
-                                          status === 'completed' ? 'bg-green-500' :
-                                          status === 'running' ? 'bg-blue-500 animate-pulse' :
-                                          status === 'failed' ? 'bg-red-500' :
-                                          'bg-gray-300'
-                                        }`}></div>
-                                        <span className={`${
-                                          status === 'completed' ? 'text-green-700' :
-                                          status === 'running' ? 'text-blue-700' :
-                                          status === 'failed' ? 'text-red-700' :
-                                          'text-gray-500'
-                                        }`}>
-                                          {model}
-                                        </span>
-                                      </div>
-                                    )
-                                  })}
                                 </div>
                               </div>
                               
