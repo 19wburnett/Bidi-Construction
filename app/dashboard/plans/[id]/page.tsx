@@ -1153,17 +1153,75 @@ export default function PlanEditorPage() {
     try {
       // Get file URL - try planUrl first, then get fresh signed URL from Supabase
       let fileUrl = planUrl
-      if (!fileUrl && plan) {
+      
+      // If planUrl exists but PDF reader failed, we can still use it for analysis
+      if (planUrl) {
+        console.log('📁 Using existing planUrl for analysis')
+        fileUrl = planUrl
+      } else if (plan) {
         console.log('📁 PDF reader not available, getting fresh signed URL from Supabase...')
+        console.log('📁 Plan file_path:', plan.file_path)
+        
         const supabase = createClient()
+        
+        // First, let's check if the file exists in storage
+        const { data: { user } } = await supabase.auth.getUser()
+        const { data: fileList, error: listError } = await supabase.storage
+          .from('plans')
+          .list(user?.id, { limit: 100 })
+        
+        if (listError) {
+          console.error('❌ Error listing files:', listError)
+        } else {
+          console.log('📁 Available files in storage:', fileList?.map(f => f.name))
+        }
+        
+        // Try to create signed URL
         const { data: urlData, error: urlError } = await supabase.storage
           .from('plans')
           .createSignedUrl(plan.file_path, 3600)
         
         if (urlError) {
-          throw new Error(`Failed to create signed URL: ${urlError.message}`)
+          console.error('❌ Error creating signed URL:', urlError)
+          console.error('❌ File path:', plan.file_path)
+          console.error('❌ User ID:', user?.id)
+          
+          // Try alternative file paths
+          const possiblePaths = [
+            plan.file_path,
+            `${user?.id}/${plan.file_name}`,
+            plan.file_name
+          ]
+          
+          for (const path of possiblePaths) {
+            console.log(`🔄 Trying alternative path: ${path}`)
+            const { data: altUrlData, error: altError } = await supabase.storage
+              .from('plans')
+              .createSignedUrl(path, 3600)
+            
+            if (!altError && altUrlData) {
+              console.log(`✅ Found file with alternative path: ${path}`)
+              fileUrl = altUrlData.signedUrl
+              break
+            }
+          }
+          
+          if (!fileUrl) {
+            // Last resort: try to recreate the signed URL the same way loadPlan does
+            console.log('🔄 Last resort: trying to recreate signed URL like loadPlan...')
+            const { data: lastResortUrl, error: lastResortError } = await supabase.storage
+              .from('plans')
+              .createSignedUrl(plan.file_path, 3600)
+            
+            if (lastResortError) {
+              throw new Error(`Failed to create signed URL. File not found in storage. Tried paths: ${possiblePaths.join(', ')}. Last error: ${lastResortError.message}`)
+            } else {
+              fileUrl = lastResortUrl.signedUrl
+            }
+          }
+        } else {
+          fileUrl = urlData.signedUrl
         }
-        fileUrl = urlData.signedUrl
       }
       
       if (!fileUrl) {
