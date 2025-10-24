@@ -667,7 +667,7 @@ export default function PlanEditorPage() {
       clearTimeout(timer3)
       window.removeEventListener('resize', updateCanvasSizes)
     }
-  }, [zoom, planUrl, numPages, redrawAllCanvases])
+  }, [zoom, planUrl, numPages]) // Removed redrawAllCanvases from deps
 
   // Figma-style: Redraw whenever anything visual changes
   useEffect(() => {
@@ -680,7 +680,7 @@ export default function PlanEditorPage() {
     
     // Always use direct redraw - keep it simple
     redrawAllCanvases()
-  }, [drawings.length, zoom, viewport.x, viewport.y, activeTool, redrawAllCanvases])
+  }, [drawings.length, zoom, viewport.x, viewport.y, activeTool]) // Removed redrawAllCanvases from deps
 
 
   // Figma-style: Handle currentDrawing updates during active drawing
@@ -689,7 +689,7 @@ export default function PlanEditorPage() {
       // Direct redraw for smooth preview - no animation frames
       redrawAllCanvases()
     }
-  }, [isDrawing, currentDrawing, redrawAllCanvases])
+  }, [isDrawing, currentDrawing]) // Removed redrawAllCanvases from deps
 
   // Keyboard shortcuts
   useEffect(() => {
