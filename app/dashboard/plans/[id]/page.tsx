@@ -306,6 +306,12 @@ export default function PlanEditorPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [takeoffResults, setTakeoffResults] = useState<any>(null)
   const [qualityResults, setQualityResults] = useState<any>(null)
+  
+  // Model progress tracking
+  const [modelProgress, setModelProgress] = useState<{
+    [key: string]: 'pending' | 'running' | 'completed' | 'failed'
+  }>({})
+  const [currentModel, setCurrentModel] = useState<string | null>(null)
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [sidebarWidth, setSidebarWidth] = useState<'normal' | 'wide' | 'full'>('normal')
   
@@ -496,28 +502,28 @@ export default function PlanEditorPage() {
       const supabase = createClient()
 
       // Load takeoff analysis
-      const { data: takeoffData } = await supabase
+      const { data: takeoffData, error: takeoffError } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
         .eq('plan_id', planId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
-      if (takeoffData) {
+      if (takeoffData && !takeoffError) {
         setTakeoffResults(takeoffData)
       }
 
       // Load quality analysis
-      const { data: qualityData } = await supabase
+      const { data: qualityData, error: qualityError } = await supabase
         .from('plan_quality_analysis')
         .select('*')
         .eq('plan_id', planId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
-      if (qualityData) {
+      if (qualityData && !qualityError) {
         setQualityResults(qualityData)
       }
 
@@ -1225,8 +1231,34 @@ export default function PlanEditorPage() {
     return images
   }
 
+  // Simulate model progress updates
+  const simulateModelProgress = () => {
+    const models = ['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash']
+    const intervals = [2000, 5000, 8000, 12000, 15000] // Different start times
+    
+    models.forEach((model, index) => {
+      setTimeout(() => {
+        setModelProgress(prev => ({ ...prev, [model]: 'running' }))
+        setCurrentModel(model)
+      }, intervals[index])
+      
+      // Simulate completion after 15-30 seconds
+      setTimeout(() => {
+        setModelProgress(prev => ({ ...prev, [model]: 'completed' }))
+        setCurrentModel(null)
+      }, intervals[index] + 15000 + Math.random() * 15000)
+    })
+  }
+
   async function runTakeoffAnalysis() {
     setIsAnalyzing(true)
+    
+    // Initialize model progress
+    setModelProgress({})
+    setCurrentModel(null)
+    
+    // Start simulating model progress
+    simulateModelProgress()
     setAnalysisMode('takeoff')
 
     try {
@@ -1323,6 +1355,10 @@ export default function PlanEditorPage() {
           requested_at: new Date().toISOString(),
           completed_at: new Date().toISOString()
         })
+        
+        // Reset model progress
+        setModelProgress({})
+        setCurrentModel(null)
 
         const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
         const modelCount = data.consensus?.consensusCount || 0
@@ -2157,6 +2193,43 @@ export default function PlanEditorPage() {
                                     </div>
                                     <span className="text-blue-700">🔄 Running enhanced AI analysis (3-5 minutes)</span>
                                   </div>
+                                  
+                                  {/* Model Progress Sub-checklist */}
+                                  <div className="ml-6 mt-2 space-y-1">
+                                    <div className="text-xs font-medium text-blue-800 mb-2">AI Models:</div>
+                                    {['GPT-4o', 'GPT-4-turbo', 'Grok-4', 'Claude-3-haiku', 'Gemini-1.5-Flash'].map((model) => {
+                                      const status = modelProgress[model] || 'pending'
+                                      return (
+                                        <div key={model} className="flex items-center gap-2 text-xs">
+                                          <div className={`w-3 h-3 rounded-full flex items-center justify-center ${
+                                            status === 'completed' ? 'bg-green-500' :
+                                            status === 'running' ? 'bg-blue-500' :
+                                            status === 'failed' ? 'bg-red-500' :
+                                            'bg-gray-300'
+                                          }`}>
+                                            {status === 'completed' && <Check className="h-2 w-2 text-white" />}
+                                            {status === 'running' && <div className="w-1 h-1 bg-white rounded-full animate-pulse"></div>}
+                                            {status === 'failed' && <span className="text-white text-xs">✕</span>}
+                                          </div>
+                                          <span className={`${
+                                            status === 'completed' ? 'text-green-700' :
+                                            status === 'running' ? 'text-blue-700' :
+                                            status === 'failed' ? 'text-red-700' :
+                                            'text-gray-500'
+                                          }`}>
+                                            {status === 'running' && '🔄 '}
+                                            {status === 'completed' && '✅ '}
+                                            {status === 'failed' && '❌ '}
+                                            {model}
+                                            {status === 'running' && ' (analyzing...)'}
+                                            {status === 'completed' && ' (done)'}
+                                            {status === 'failed' && ' (failed)'}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                  
                                   <div className="flex items-center gap-2 text-sm">
                                     <div className="w-4 h-4 bg-gray-300 rounded-full"></div>
                                     <span className="text-gray-500">⏳ Building consensus from multiple AI models</span>

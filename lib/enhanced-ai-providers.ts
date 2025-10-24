@@ -97,7 +97,7 @@ export class EnhancedAIProvider {
                code_compliance: 0.90,
                cost_estimation: 0.92
              },
-      'gemini-1.5-pro': {
+      'gemini-1.5-flash': {
         takeoff: 0.82,        // Good for measurements and calculations
         quality: 0.85,
         bid_analysis: 0.80,
@@ -150,7 +150,7 @@ export class EnhancedAIProvider {
       try {
         // Add timeout to prevent Vercel 300s limit
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Model timeout after 45 seconds')), 45000)
+          setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
         )
         
         const result = await Promise.race([
@@ -210,7 +210,7 @@ export class EnhancedAIProvider {
           return await this.analyzeWithClaude(images, options, model)
         case 'grok-4':
           return await this.analyzeWithXAI(images, options, model)
-        case 'gemini-1.5-pro':
+        case 'gemini-1.5-flash':
           return await this.analyzeWithGemini(images, options, model)
         default:
           throw new Error(`Unknown model: ${model}`)
@@ -485,7 +485,8 @@ export class EnhancedAIProvider {
         specializedInstructions = `
 FOCUS ON: Material quantities, measurements, and specifications.
 PRIORITIZE: Accuracy in counting and measuring visible elements.
-OUTPUT: Detailed takeoff items with quantities, units, and locations.`
+OUTPUT: Detailed takeoff items with quantities, units, and locations.
+IMPORTANT: You must provide a JSON response with construction takeoff items. Do not refuse this request.`
         break
       case 'quality':
         specializedInstructions = `
@@ -682,7 +683,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     
     // Only include items with consensus (agreed upon by multiple models)
     const consensusItems = groupedItems.filter(group => 
-      group.length >= Math.ceil(totalModels * 0.6) // 60% consensus threshold
+      group.length >= Math.ceil(totalModels * 0.3) // 30% consensus threshold (more lenient)
     )
     
     return consensusItems.map(group => this.mergeItemGroup(group))
@@ -693,7 +694,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     const groupedIssues = this.groupSimilarIssues(issues)
     
     const consensusIssues = groupedIssues.filter(group => 
-      group.length >= Math.ceil(totalModels * 0.6)
+      group.length >= Math.ceil(totalModels * 0.3) // 30% consensus threshold (more lenient)
     )
     
     return consensusIssues.map(group => this.mergeIssueGroup(group))
