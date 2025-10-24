@@ -18,16 +18,12 @@ if (typeof window !== 'undefined') {
         loaded: (posthog) => {
           if (process.env.NODE_ENV === "development") console.log("PostHog loaded")
         },
-        // Minimal valid configuration to prevent retry loops
+        // Only use basic, guaranteed valid options
         persistence: 'localStorage',
         cross_subdomain_cookie: false,
         secure_cookie: false,
         disable_session_recording: true,
-        disable_surveys: true,
-        batch_requests: false,
-        request_timeout_ms: 5000,
-        on_xhr_error: () => {},
-        on_request_error: () => {}
+        disable_surveys: true
       });
     } catch (error) {
       console.warn('PostHog initialization failed (likely blocked by ad blocker):', error)
