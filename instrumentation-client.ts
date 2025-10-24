@@ -18,12 +18,19 @@ if (typeof window !== 'undefined') {
         loaded: (posthog) => {
           if (process.env.NODE_ENV === "development") console.log("PostHog loaded")
         },
-        // Disable retry mechanism to prevent infinite loops
-        retry_queue: false,
-        // Reduce retry attempts
-        max_retry_attempts: 1,
-        // Disable automatic batching that can cause issues
-        batch_requests: false
+        // Use valid PostHog options to prevent retry loops
+        persistence: 'localStorage', // Use localStorage instead of cookies
+        cross_subdomain_cookie: false, // Disable cross-subdomain tracking
+        secure_cookie: false, // Disable secure cookies
+        disable_session_recording: true, // Disable session recording
+        disable_persistence: false, // Keep persistence but limit it
+        disable_surveys: true, // Disable surveys
+        disable_toolbar: true, // Disable toolbar
+        disable_compression: true, // Disable compression to reduce complexity
+        batch_requests: false, // Disable batching
+        request_timeout_ms: 5000, // Short timeout to prevent hanging
+        on_xhr_error: () => {}, // Silent error handling
+        on_request_error: () => {} // Silent error handling
       });
     } catch (error) {
       console.warn('PostHog initialization failed (likely blocked by ad blocker):', error)
