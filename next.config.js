@@ -1,13 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
-    domains: ['localhost', 'www.bidicontracting.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'www.bidicontracting.com',
+      },
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+      },
+    ],
   },
   skipTrailingSlashRedirect: true,
-  // Disable automatic router refresh on window focus
-  experimental: {
-    windowHistorySupport: true,
-  },
 }
 
 module.exports = nextConfig

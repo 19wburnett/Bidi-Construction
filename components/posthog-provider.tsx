@@ -4,6 +4,13 @@ import { useEffect, Suspense } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import posthog from 'posthog-js'
 
+// Extend Window interface to include posthog
+declare global {
+  interface Window {
+    posthog?: any
+  }
+}
+
 function PostHogTracker() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
