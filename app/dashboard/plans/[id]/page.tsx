@@ -310,14 +310,15 @@ export default function PlanEditorPage() {
   // Analysis progress tracking
   const [analysisStep, setAnalysisStep] = useState<number>(0)
   const [currentStepName, setCurrentStepName] = useState<string>('')
+  const [timeRemaining, setTimeRemaining] = useState<string>('3-5 minutes')
   
-  // Define the 5 analysis steps
+  // Define the 5 analysis steps with time estimates
   const analysisSteps = [
-    'Uploading Files',
-    'Preparing Files for AI Analysis', 
-    'AI Analyzing Files',
-    'Processing Results',
-    'Finalizing Analysis'
+    { name: 'Uploading Files', timeRemaining: '3-4 minutes' },
+    { name: 'Preparing Files for AI Analysis', timeRemaining: '2-3 minutes' },
+    { name: 'AI Analyzing Files', timeRemaining: '1-2 minutes' },
+    { name: 'Processing Results', timeRemaining: '30-60 seconds' },
+    { name: 'Finalizing Analysis', timeRemaining: 'Almost done' }
   ]
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [sidebarWidth, setSidebarWidth] = useState<'normal' | 'wide' | 'full'>('normal')
@@ -1267,6 +1268,7 @@ export default function PlanEditorPage() {
     // Initialize step progress
     setAnalysisStep(0)
     setCurrentStepName('')
+    setTimeRemaining('3-5 minutes')
     setAnalysisMode('takeoff')
 
     try {
@@ -1284,6 +1286,7 @@ export default function PlanEditorPage() {
       // Step 1: Uploading Files
       setAnalysisStep(1)
       setCurrentStepName('Uploading Files')
+      setTimeRemaining(analysisSteps[0].timeRemaining)
       setTakeoffResults({
         status: 'pending',
         message: 'Converting PDF to images for enhanced multi-model analysis...',
@@ -1293,6 +1296,7 @@ export default function PlanEditorPage() {
       // Step 2: Preparing Files for AI Analysis
       setAnalysisStep(2)
       setCurrentStepName('Preparing Files for AI Analysis')
+      setTimeRemaining(analysisSteps[1].timeRemaining)
       
       // Convert PDF pages to images
       const images = await convertPdfPagesToImages()
@@ -1315,6 +1319,7 @@ export default function PlanEditorPage() {
       // Step 3: AI Analyzing Files
       setAnalysisStep(3)
       setCurrentStepName('AI Analyzing Files')
+      setTimeRemaining(analysisSteps[2].timeRemaining)
       
       // Determine if we need batch processing (more than 5 pages)
       const needsBatchProcessing = images.length > 5
@@ -1357,6 +1362,7 @@ export default function PlanEditorPage() {
         // Step 4: Processing Results
         setAnalysisStep(4)
         setCurrentStepName('Processing Results')
+        setTimeRemaining(analysisSteps[3].timeRemaining)
 
         // Update plan status to completed
         await supabase
@@ -1370,6 +1376,7 @@ export default function PlanEditorPage() {
         // Step 5: Finalizing Analysis
         setAnalysisStep(5)
         setCurrentStepName('Finalizing Analysis')
+        setTimeRemaining(analysisSteps[4].timeRemaining)
 
         // Show enhanced results with batch processing metadata
         setTakeoffResults({
@@ -1385,6 +1392,7 @@ export default function PlanEditorPage() {
         // Reset analysis progress
         setAnalysisStep(0)
         setCurrentStepName('')
+        setTimeRemaining('3-5 minutes')
 
         const consensusScore = Math.round((data.consensus?.confidence || 0) * 100)
         const modelCount = data.consensus?.consensusCount || 0
@@ -1436,6 +1444,7 @@ export default function PlanEditorPage() {
         // Step 4: Processing Results
         setAnalysisStep(4)
         setCurrentStepName('Processing Results')
+        setTimeRemaining(analysisSteps[3].timeRemaining)
 
         // Update plan status to completed
         await supabase
@@ -1449,6 +1458,7 @@ export default function PlanEditorPage() {
         // Step 5: Finalizing Analysis
         setAnalysisStep(5)
         setCurrentStepName('Finalizing Analysis')
+        setTimeRemaining(analysisSteps[4].timeRemaining)
 
         // Show enhanced results with consensus metadata
         setTakeoffResults({
@@ -2213,7 +2223,7 @@ export default function PlanEditorPage() {
                                 <div className="mb-4">
                                   <div className="flex justify-between text-sm text-blue-800 mb-2">
                                     <span>Enhanced AI Analysis</span>
-                                    <span>3-5 minutes</span>
+                                    <span>{timeRemaining}</span>
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-3">
                                     <div 
@@ -2230,7 +2240,7 @@ export default function PlanEditorPage() {
                                   <div className="flex items-center gap-2 text-sm text-blue-700">
                                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                                     <span>
-                                      {currentStepName || analysisSteps[analysisStep] || 'Starting analysis...'}
+                                      {currentStepName || analysisSteps[analysisStep]?.name || 'Starting analysis...'}
                                     </span>
                                   </div>
                                 </div>
@@ -2244,7 +2254,7 @@ export default function PlanEditorPage() {
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-blue-900">
                                   <span className="font-medium">⏱️ Expected completion:</span>
-                                  <span>3-5 minutes</span>
+                                  <span>{timeRemaining}</span>
                                 </div>
                               </div>
                             </div>
