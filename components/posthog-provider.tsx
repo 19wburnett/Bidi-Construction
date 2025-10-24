@@ -9,8 +9,8 @@ function PostHogTracker() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    // Track pageviews with error handling
-    if (pathname) {
+    // Only track if PostHog is available and not blocked
+    if (pathname && typeof window !== 'undefined' && window.posthog) {
       try {
         let url = window.origin + pathname
         if (searchParams.toString()) {
