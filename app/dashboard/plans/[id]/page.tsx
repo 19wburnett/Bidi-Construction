@@ -1140,7 +1140,7 @@ export default function PlanEditorPage() {
   }
 
   async function convertPdfPagesToImages(): Promise<string[]> {
-    if (typeof window === 'undefined' || !planUrl) return []
+    if (typeof window === 'undefined') return []
     
     const images: string[] = []
     const pdfjsLib = await import('pdfjs-dist')
@@ -1151,8 +1151,27 @@ export default function PlanEditorPage() {
     }
     
     try {
+      // Get file URL - try planUrl first, then get fresh signed URL from Supabase
+      let fileUrl = planUrl
+      if (!fileUrl && plan) {
+        console.log('📁 PDF reader not available, getting fresh signed URL from Supabase...')
+        const supabase = createClient()
+        const { data: urlData, error: urlError } = await supabase.storage
+          .from('plans')
+          .createSignedUrl(plan.file_path, 3600)
+        
+        if (urlError) {
+          throw new Error(`Failed to create signed URL: ${urlError.message}`)
+        }
+        fileUrl = urlData.signedUrl
+      }
+      
+      if (!fileUrl) {
+        throw new Error('No file URL available for analysis')
+      }
+      
       // Load PDF document
-      const loadingTask = pdfjsLib.getDocument(planUrl)
+      const loadingTask = pdfjsLib.getDocument(fileUrl)
       const pdf = await loadingTask.promise
       
       // Limit pages for very large plans to avoid Vercel payload limits
@@ -1299,11 +1318,14 @@ export default function PlanEditorPage() {
       setTimeRemaining(analysisSteps[1].timeRemaining)
       
       // Convert PDF pages to images
+      console.log('🔄 Converting PDF to images for analysis...')
       const images = await convertPdfPagesToImages()
       
       if (images.length === 0) {
-        throw new Error('Failed to convert PDF to images')
+        throw new Error('Failed to convert PDF to images. Please ensure the file is accessible.')
       }
+      
+      console.log(`✅ Successfully converted ${images.length} pages to images`)
 
       // Check payload size for Vercel limits and compress if needed
       const payloadCheck = checkPayloadSize(images)
