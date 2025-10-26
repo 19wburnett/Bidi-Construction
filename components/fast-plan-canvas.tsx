@@ -126,9 +126,7 @@ export default function FastPlanCanvas({
         const pdfjs = await import('pdfjs-dist')
         pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
         
-        // Set memory limits to prevent crashes
-        pdfjs.GlobalWorkerOptions.maxImageSize = 1024 * 1024 // 1MB limit
-        pdfjs.GlobalWorkerOptions.disableFontFace = true // Disable font loading to save memory
+        // Set worker source
         
         const pdfDocument = await pdfjs.getDocument({
           url: pdfUrl,

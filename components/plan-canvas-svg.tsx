@@ -78,6 +78,8 @@ export default function PlanCanvas({
   const [selectedTool, setSelectedTool] = useState<DrawingTool>('select')
   const [isDrawing, setIsDrawing] = useState(false)
   const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null)
+  const [isPanning, setIsPanning] = useState(false)
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 })
   const [pageOffsets, setPageOffsets] = useState<number[]>([])
   const [highResImages, setHighResImages] = useState<(HTMLCanvasElement | SVGElement)[]>([])
   const [isLoadingHighRes, setIsLoadingHighRes] = useState(false)
@@ -352,12 +354,8 @@ export default function PlanCanvas({
 
     if (selectedTool === 'select') {
       // Start panning
-      setIsDrawing(true)
-      setCurrentDrawing({
-        id: 'pan',
-        lastX: screenX,
-        lastY: screenY
-      })
+      setIsPanning(true)
+      setLastPanPoint({ x: screenX, y: screenY })
     } else if (selectedTool === 'comment') {
       // Place comment pin
       onCommentPinClick(world.x, world.y, pageNumber)
@@ -386,8 +384,6 @@ export default function PlanCanvas({
   }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDrawing || !currentDrawing) return
-
     const container = containerRef.current
     if (!container) return
 
@@ -395,55 +391,54 @@ export default function PlanCanvas({
     const screenX = e.clientX - rect.left
     const screenY = e.clientY - rect.top
 
-    if (selectedTool === 'select' && currentDrawing.id === 'pan') {
+    if (isPanning) {
       // Pan the viewport
-      const lastX = currentDrawing.lastX || 0
-      const lastY = currentDrawing.lastY || 0
-      
       setViewport(prev => ({
         ...prev,
-        panX: prev.panX + (screenX - lastX),
-        panY: prev.panY + (screenY - lastY)
+        panX: prev.panX + (screenX - lastPanPoint.x),
+        panY: prev.panY + (screenY - lastPanPoint.y)
       }))
-      setCurrentDrawing(prev => ({
-        ...prev,
-        lastX: screenX,
-        lastY: screenY
-      }))
-    } else if (currentDrawing.type === 'rectangle') {
+      setLastPanPoint({ x: screenX, y: screenY })
+    } else if (isDrawing && currentDrawing) {
       const world = screenToWorld(screenX, screenY)
-      setCurrentDrawing(prev => ({
-        ...prev,
-        geometry: {
-          ...prev.geometry,
-          width: world.x - (prev.geometry.x || 0),
-          height: world.y - (prev.geometry.y || 0)
-        }
-      }))
-    } else if (currentDrawing.type === 'circle') {
-      const world = screenToWorld(screenX, screenY)
-      const radius = Math.sqrt(
-        Math.pow(world.x - (currentDrawing.geometry.x || 0), 2) + 
-        Math.pow(world.y - (currentDrawing.geometry.y || 0), 2)
-      )
-      setCurrentDrawing(prev => ({
-        ...prev,
-        geometry: {
-          ...prev.geometry,
-          radius
-        }
-      }))
+      
+      if (currentDrawing.type === 'rectangle') {
+        setCurrentDrawing(prev => {
+          if (!prev || !prev.geometry) return prev
+          return {
+            ...prev,
+            geometry: {
+              ...prev.geometry,
+              width: world.x - (prev.geometry.x || 0),
+              height: world.y - (prev.geometry.y || 0)
+            }
+          }
+        })
+      } else if (currentDrawing.type === 'circle' && currentDrawing.geometry) {
+        const world = screenToWorld(screenX, screenY)
+        const radius = Math.sqrt(
+          Math.pow(world.x - (currentDrawing.geometry.x || 0), 2) + 
+          Math.pow(world.y - (currentDrawing.geometry.y || 0), 2)
+        )
+        setCurrentDrawing(prev => {
+          if (!prev || !prev.geometry) return prev
+          return {
+            ...prev,
+            geometry: {
+              ...prev.geometry,
+              radius
+            }
+          }
+        })
     }
-  }, [isDrawing, currentDrawing, selectedTool, screenToWorld])
+    }
+  }, [isPanning, lastPanPoint, isDrawing, currentDrawing, screenToWorld])
 
   const handleMouseUp = useCallback(() => {
-    if (!isDrawing || !currentDrawing) return
-
-    if (selectedTool === 'select' && currentDrawing.id === 'pan') {
+    if (isPanning) {
       // End panning
-      setCurrentDrawing(null)
-      setIsDrawing(false)
-    } else if (currentDrawing.type && currentDrawing.type !== 'comment') {
+      setIsPanning(false)
+    } else if (isDrawing && currentDrawing && currentDrawing.type && currentDrawing.type !== 'comment' && currentDrawing.geometry && currentDrawing.style) {
       // Save the drawing
       const newDrawing: Drawing = {
         id: currentDrawing.id || Date.now().toString(),
@@ -457,7 +452,7 @@ export default function PlanCanvas({
       setCurrentDrawing(null)
       setIsDrawing(false)
     }
-  }, [isDrawing, currentDrawing, selectedTool, drawings, onDrawingsChange])
+  }, [isPanning, isDrawing, currentDrawing, drawings, onDrawingsChange])
 
   // Zoom controls
   const handleZoomIn = () => {

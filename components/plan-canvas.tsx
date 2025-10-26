@@ -14,38 +14,10 @@ import {
   ChevronLeft,
   Eraser
 } from 'lucide-react'
-import { canvasUtils } from '@/lib/canvas-utils'
+import { canvasUtils, Drawing } from '@/lib/canvas-utils'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 import PlanCanvasEfficient from './plan-canvas-efficient'
 
-export interface Drawing {
-  id: string
-  type: 'rectangle' | 'circle' | 'line' | 'comment'
-  geometry: {
-    x: number
-    y: number
-    width?: number
-    height?: number
-    radius?: number
-    points?: number[] // For lines: [x1, y1, x2, y2, ...]
-  }
-  style: {
-    color: string
-    strokeWidth: number
-    opacity?: number
-  }
-  pageNumber: number
-  // For comments
-  label?: string
-  notes?: string
-  noteType?: 'requirement' | 'concern' | 'suggestion' | 'other'
-  category?: string
-  location?: string
-  layerName?: string
-  zIndex?: number
-  isVisible?: boolean
-  isLocked?: boolean
-}
 
 export interface Viewport {
   zoom: number
@@ -64,7 +36,7 @@ interface PlanCanvasProps {
   useEfficientMode?: boolean // Option to use the new efficient canvas system
 }
 
-type DrawingTool = 'select' | 'rectangle' | 'circle' | 'line' | 'comment' | 'erase'
+type DrawingTool = 'select' | 'rectangle' | 'circle' | 'line' | 'comment' | 'erase' | 'pencil'
 
 export default function PlanCanvas({
   pdfImages,

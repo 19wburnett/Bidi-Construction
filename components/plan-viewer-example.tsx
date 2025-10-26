@@ -2,7 +2,7 @@
 // This replaces the SVG-based system that was causing memory issues
 
 import PlanCanvasEfficient from '@/components/plan-canvas-efficient'
-import { canvasUtils } from '@/lib/canvas-utils'
+import { canvasUtils, Drawing } from '@/lib/canvas-utils'
 import { useState, useEffect } from 'react'
 
 export default function PlanViewerExample({ pdfUrl }: { pdfUrl: string }) {

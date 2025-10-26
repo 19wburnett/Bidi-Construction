@@ -285,7 +285,10 @@ export const canvasUtils = {
   async pageToCanvas(page: any, scale: number = 2, pdfUrl: string, pageNumber: number): Promise<HTMLCanvasElement> {
     // Check cache first
     if (pdfCache[pdfUrl]?.pageCache[pageNumber]?.[scale.toString()]) {
-      return pdfCache[pdfUrl].pageCache[pageNumber][scale.toString()]
+      const cached = pdfCache[pdfUrl].pageCache[pageNumber][scale.toString()]
+      if (cached instanceof HTMLCanvasElement) {
+        return cached
+      }
     }
 
     const viewport = page.getViewport({ scale })
