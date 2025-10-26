@@ -75,8 +75,18 @@ export default function QualityIssueForm({
   }, [markerPosition, editingIssue])
 
   const handleSubmit = () => {
-    if (!formData.description) {
+    if (!formData.description || !formData.description.trim()) {
       alert('Please provide an issue description')
+      return
+    }
+
+    if (!formData.severity) {
+      alert('Please select a severity level')
+      return
+    }
+
+    if (!formData.category) {
+      alert('Please select a category')
       return
     }
 
@@ -84,9 +94,9 @@ export default function QualityIssueForm({
       id: editingIssue?.id || `issue-${Date.now()}`,
       severity: formData.severity as 'critical' | 'warning' | 'info',
       category: formData.category!,
-      description: formData.description!,
-      location: formData.location,
-      recommendation: formData.recommendation,
+      description: formData.description!.trim(),
+      location: formData.location?.trim(),
+      recommendation: formData.recommendation?.trim(),
       marker: formData.marker
     }
 

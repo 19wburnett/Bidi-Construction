@@ -93,7 +93,10 @@ export default function AdminAnalyzePlansPage() {
         `)
         .order('takeoff_requested_at', { ascending: true, nullsFirst: false })
 
-      if (error) throw error
+      if (error) {
+        console.error('Database error:', error)
+        throw error
+      }
 
       // Transform the data to match PlanWithUser interface
       const transformedData = (data || []).map(plan => ({

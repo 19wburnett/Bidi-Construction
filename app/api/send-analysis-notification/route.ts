@@ -1,23 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { Resend } from 'resend'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
-
+// POST /api/send-analysis-notification - Send email notification when analysis is completed
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient()
-
-    // Verify authentication (admin only)
+    
+    // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { planId, type, userEmail } = await request.json()
+    const body = await request.json()
+    const { planId, type, userEmail } = body
 
     if (!planId || !type || !userEmail) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return NextResponse.json({ 
+        error: 'Missing required fields: planId, type, userEmail' 
+      }, { status: 400 })
+    }
+
+    // Verify user is admin
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('is_admin')
+      .eq('id', user.id)
+      .single()
+
+    if (userError || !userData?.is_admin) {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
     // Get plan details
@@ -31,70 +43,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
-    const analysisType = type === 'takeoff' ? 'Takeoff Analysis' : 'Quality Check'
-    const planTitle = plan.title || plan.file_name
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bidicontracting.com'
-
-    // Send email using Resend
-    const { data, error } = await resend.emails.send({
-      from: 'Bidi Construction <notifications@bidicontracting.com>',
-      to: userEmail,
-      subject: `${analysisType} Complete: ${planTitle}`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background-color: #f97316; padding: 20px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">Your ${analysisType} is Ready!</h1>
-            </div>
-            
-            <div style="background-color: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px;">
-              <p style="font-size: 16px; margin-bottom: 20px;">
-                Great news! We've completed the ${type === 'takeoff' ? 'AI-powered takeoff analysis' : 'AI quality check'} for your construction plan:
-              </p>
-              
-              <div style="background-color: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #f97316;">
-                <h2 style="margin: 0 0 5px 0; font-size: 18px; color: #f97316;">${planTitle}</h2>
-                ${plan.project_name ? `<p style="margin: 0; color: #6b7280; font-size: 14px;">${plan.project_name}</p>` : ''}
-              </div>
-
-              <p style="font-size: 14px; margin-bottom: 20px;">
-                ${type === 'takeoff' 
-                  ? 'Our AI has analyzed your plans and extracted detailed quantity takeoffs, measurements, and material estimates.' 
-                  : 'Our AI has reviewed your plans for completeness, compliance, and potential quality issues.'}
-              </p>
-
-              <a href="${appUrl}/dashboard/plans/${planId}" 
-                 style="display: inline-block; background-color: #f97316; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-bottom: 20px;">
-                View ${type === 'takeoff' ? 'Takeoff' : 'Quality'} Results
-              </a>
-
-              <p style="font-size: 12px; color: #6b7280; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                Questions? Reply to this email or contact us at support@bidicontracting.com
-              </p>
-            </div>
-          </body>
-        </html>
-      `
+    // TODO: Integrate with email service (SendGrid, Resend, etc.)
+    // For now, just log the notification
+    console.log(`Analysis notification for ${type} analysis completed:`, {
+      planId,
+      planTitle: plan.title || plan.file_name,
+      projectName: plan.project_name,
+      userEmail,
+      completedBy: user.email,
+      timestamp: new Date().toISOString()
     })
 
-    if (error) {
-      console.error('Resend error:', error)
-      return NextResponse.json({ error: 'Failed to send email' }, { status: 500 })
-    }
+    // In a real implementation, you would send an email here:
+    // await sendEmail({
+    //   to: userEmail,
+    //   subject: `${type === 'takeoff' ? 'Takeoff' : 'Quality'} Analysis Complete`,
+    //   template: 'analysis-complete',
+    //   data: {
+    //     planTitle: plan.title || plan.file_name,
+    //     projectName: plan.project_name,
+    //     analysisType: type,
+    //     dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/plans/${planId}`
+    //   }
+    // })
 
-    return NextResponse.json({ success: true, messageId: data?.id })
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Notification logged successfully' 
+    })
 
   } catch (error) {
-    console.error('Error sending notification:', error)
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'Internal server error' 
-    }, { status: 500 })
+    console.error('Error sending analysis notification:', error)
+    return NextResponse.json(
+      { error: 'Failed to send notification' },
+      { status: 500 }
+    )
   }
 }
-
-

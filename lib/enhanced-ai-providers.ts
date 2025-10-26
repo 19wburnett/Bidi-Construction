@@ -131,12 +131,20 @@ export class EnhancedAIProvider {
     // Get best models for this task type (limit to 5 for maximum consensus)
     const selectedModels = this.getBestModelsForTask(options.taskType, 5)
     
-    // Filter out disabled providers
+    // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
+      // Check environment flags
       if (model.includes('gpt') && process.env.ENABLE_OPENAI === 'false') return false
       if (model.includes('claude') && process.env.ENABLE_ANTHROPIC === 'false') return false
       if (model.includes('gemini') && process.env.ENABLE_GOOGLE === 'false') return false
       if (model.includes('grok') && process.env.ENABLE_XAI === 'false') return false
+      
+      // Check API key availability
+      if (model.includes('gpt') && !process.env.OPENAI_API_KEY) return false
+      if (model.includes('claude') && !process.env.ANTHROPIC_API_KEY) return false
+      if (model.includes('gemini') && !process.env.GOOGLE_GEMINI_API_KEY) return false
+      if (model.includes('grok') && !process.env.XAI_API_KEY) return false
+      
       return true
     })
     
@@ -558,6 +566,21 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         console.log('Falling back to single model analysis (no consensus)')
         const singleResult = results[0]
         try {
+          // Handle empty responses gracefully
+          if (!singleResult.content || singleResult.content.trim().length === 0) {
+            console.warn(`Model ${singleResult.model} returned empty response, creating fallback structure`)
+            return {
+              items: [],
+              issues: [],
+              confidence: 0.3,
+              consensusCount: 1,
+              disagreements: [],
+              modelAgreements: [singleResult.model],
+              specializedInsights: [],
+              recommendations: ['Analysis completed with minimal data due to empty model response']
+            }
+          }
+          
           const parsed = JSON.parse(singleResult.content)
           return {
             items: parsed.items || [],
@@ -571,6 +594,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           }
         } catch (error) {
           console.error('Failed to parse single model response:', error)
+          console.error('Raw response:', singleResult.content?.substring(0, 200))
           throw new Error('Single model analysis failed to parse response')
         }
       }

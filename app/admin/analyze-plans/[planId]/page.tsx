@@ -106,6 +106,9 @@ export default function AdminAnalyzePlanPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
 
+  // Error handling
+  const [error, setError] = useState<string | null>(null)
+
   // Check admin status
   useEffect(() => {
     checkAdminStatus()
@@ -130,6 +133,7 @@ export default function AdminAnalyzePlanPage() {
       setIsAdmin(true)
     } catch (error) {
       console.error('Error checking admin status:', error)
+      setError('Failed to verify admin access')
       router.push('/dashboard')
     }
   }
@@ -144,7 +148,8 @@ export default function AdminAnalyzePlanPage() {
         const pdfjs = await import('react-pdf')
         pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
         
-        await new Promise(resolve => setTimeout(resolve, 3000))
+        // Reduced delay for better UX
+        await new Promise(resolve => setTimeout(resolve, 500))
         setPdfJsReady(true)
       } catch (error) {
         console.error('Error initializing PDF.js:', error)
@@ -160,10 +165,11 @@ export default function AdminAnalyzePlanPage() {
       
       const timer = setTimeout(async () => {
         await loadPlan()
+        // Reduced delay for better UX
         setTimeout(() => {
           setDocumentReady(true)
-        }, 1500)
-      }, 500)
+        }, 300)
+      }, 100)
       return () => clearTimeout(timer)
     }
   }, [user, planId, pdfJsReady])
@@ -179,13 +185,29 @@ export default function AdminAnalyzePlanPage() {
         .eq('id', planId)
         .single()
 
-      if (planError) throw planError
+      if (planError) {
+        console.error('Plan loading error:', planError)
+        setError(`Failed to load plan: ${planError.message}`)
+        return
+      }
+
+      if (!planData) {
+        setError('Plan not found')
+        return
+      }
+
       setPlan(planData)
 
       // Get signed URL
-      const { data: urlData } = await supabase.storage
+      const { data: urlData, error: urlError } = await supabase.storage
         .from('plans')
         .createSignedUrl(planData.file_path, 3600)
+
+      if (urlError) {
+        console.error('URL generation error:', urlError)
+        setError('Failed to generate plan URL')
+        return
+      }
 
       if (urlData) {
         setPlanUrl(urlData.signedUrl)
@@ -196,6 +218,7 @@ export default function AdminAnalyzePlanPage() {
 
     } catch (error) {
       console.error('Error loading plan:', error)
+      setError('An unexpected error occurred while loading the plan')
     } finally {
       setLoading(false)
     }
@@ -257,14 +280,8 @@ export default function AdminAnalyzePlanPage() {
       const ctx = canvas.getContext('2d')
       if (!ctx) return
 
-      ctx.save()
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.restore()
-
-      ctx.save()
-      ctx.translate(viewport.x, viewport.y)
-      ctx.scale(zoom, zoom)
 
       // Draw markers for this page
       drawings.forEach(drawing => {
@@ -273,13 +290,13 @@ export default function AdminAnalyzePlanPage() {
         const x = drawing.geometry.x1
         const y = drawing.geometry.y1
 
-        // Draw marker circle
+        // Draw marker circle with better visibility
         ctx.beginPath()
-        ctx.arc(x, y, 15 / zoom, 0, 2 * Math.PI)
+        ctx.arc(x, y, 12, 0, 2 * Math.PI)
         ctx.fillStyle = drawing.style.color
         ctx.fill()
         ctx.strokeStyle = '#ffffff'
-        ctx.lineWidth = 2 / zoom
+        ctx.lineWidth = 3
         ctx.stroke()
 
         // Draw number label
@@ -289,20 +306,18 @@ export default function AdminAnalyzePlanPage() {
         ).indexOf(drawing) + 1
 
         ctx.fillStyle = '#ffffff'
-        ctx.font = `bold ${12 / zoom}px Arial`
+        ctx.font = 'bold 12px Arial'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(itemIndex.toString(), x, y)
       })
-
-      ctx.restore()
     })
-  }, [drawings, zoom, viewport])
+  }, [drawings])
 
   useEffect(() => {
     const timer = setTimeout(redrawCanvas, 50)
     return () => clearTimeout(timer)
-  }, [drawings, zoom, viewport, redrawCanvas])
+  }, [drawings, redrawCanvas])
 
   // Update canvas sizes
   useEffect(() => {
@@ -312,23 +327,25 @@ export default function AdminAnalyzePlanPage() {
         if (pdfPageElement) {
           const rect = pdfPageElement.getBoundingClientRect()
           if (rect.width > 0 && rect.height > 0) {
+            // Set canvas size to match PDF page size
             canvas.width = rect.width
             canvas.height = rect.height
+            canvas.style.width = `${rect.width}px`
+            canvas.style.height = `${rect.height}px`
           }
         }
       })
       redrawCanvas()
     }
 
-    const timer1 = setTimeout(updateCanvasSizes, 100)
-    const timer2 = setTimeout(updateCanvasSizes, 300)
-    const timer3 = setTimeout(updateCanvasSizes, 500)
+    // Reduced delays for better responsiveness
+    const timer1 = setTimeout(updateCanvasSizes, 50)
+    const timer2 = setTimeout(updateCanvasSizes, 200)
     window.addEventListener('resize', updateCanvasSizes)
     
     return () => {
       clearTimeout(timer1)
       clearTimeout(timer2)
-      clearTimeout(timer3)
       window.removeEventListener('resize', updateCanvasSizes)
     }
   }, [zoom, planUrl, numPages, redrawCanvas])
@@ -346,8 +363,12 @@ export default function AdminAnalyzePlanPage() {
     
     const screenX = e.clientX - rect.left
     const screenY = e.clientY - rect.top
-    const worldX = (screenX - viewport.x) / zoom
-    const worldY = (screenY - viewport.y) / zoom
+    
+    // Convert screen coordinates to PDF coordinates
+    const worldX = screenX
+    const worldY = screenY
+
+    console.log('Marker placed at:', { x: worldX, y: worldY, page: pageNum })
 
     // Store marker position temporarily
     setTempMarkerPosition({ x: worldX, y: worldY, page: pageNum })
@@ -443,7 +464,10 @@ export default function AdminAnalyzePlanPage() {
 
   // Save draft
   async function saveDraft() {
-    if (!user || !plan) return
+    if (!user || !plan) {
+      console.error('Cannot save: missing user or plan')
+      return
+    }
 
     setIsSaving(true)
     try {
@@ -457,7 +481,7 @@ export default function AdminAnalyzePlanPage() {
           total_cost: takeoffItems.reduce((sum, i) => sum + (i.quantity * (i.unit_cost || 0)), 0)
         }
 
-        await supabase
+        const { error: takeoffError } = await supabase
           .from('plan_takeoff_analysis')
           .upsert({
             plan_id: planId,
@@ -466,9 +490,14 @@ export default function AdminAnalyzePlanPage() {
             summary
           }, { onConflict: 'plan_id' })
 
+        if (takeoffError) {
+          console.error('Error saving takeoff analysis:', takeoffError)
+          throw new Error('Failed to save takeoff analysis')
+        }
+
         // Save markers
         for (const marker of drawings.filter(d => d.analysis_type === 'takeoff')) {
-          await supabase
+          const { error: markerError } = await supabase
             .from('plan_drawings')
             .upsert({
               id: marker.id,
@@ -481,6 +510,10 @@ export default function AdminAnalyzePlanPage() {
               analysis_item_id: marker.analysis_item_id,
               analysis_type: marker.analysis_type
             }, { onConflict: 'id' })
+
+          if (markerError) {
+            console.error('Error saving marker:', markerError)
+          }
         }
       }
 
@@ -488,7 +521,7 @@ export default function AdminAnalyzePlanPage() {
         const overallScore = 1 - (qualityIssues.filter(i => i.severity === 'critical').length * 0.3 +
           qualityIssues.filter(i => i.severity === 'warning').length * 0.1) / qualityIssues.length
 
-        await supabase
+        const { error: qualityError } = await supabase
           .from('plan_quality_analysis')
           .upsert({
             plan_id: planId,
@@ -498,9 +531,14 @@ export default function AdminAnalyzePlanPage() {
             recommendations: qualityIssues.map(i => i.recommendation).filter(Boolean)
           }, { onConflict: 'plan_id' })
 
+        if (qualityError) {
+          console.error('Error saving quality analysis:', qualityError)
+          throw new Error('Failed to save quality analysis')
+        }
+
         // Save markers
         for (const marker of drawings.filter(d => d.analysis_type === 'quality')) {
-          await supabase
+          const { error: markerError } = await supabase
             .from('plan_drawings')
             .upsert({
               id: marker.id,
@@ -513,13 +551,17 @@ export default function AdminAnalyzePlanPage() {
               analysis_item_id: marker.analysis_item_id,
               analysis_type: marker.analysis_type
             }, { onConflict: 'id' })
+
+          if (markerError) {
+            console.error('Error saving marker:', markerError)
+          }
         }
       }
 
       alert('Draft saved successfully!')
     } catch (error) {
       console.error('Error saving draft:', error)
-      alert('Failed to save draft')
+      alert(`Failed to save draft: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsSaving(false)
     }
@@ -527,7 +569,10 @@ export default function AdminAnalyzePlanPage() {
 
   // Submit analysis
   async function submitAnalysis() {
-    if (!user || !plan) return
+    if (!user || !plan) {
+      console.error('Cannot submit: missing user or plan')
+      return
+    }
 
     const analysisType = activeTab as 'takeoff' | 'quality'
     const items = analysisType === 'takeoff' ? takeoffItems : qualityIssues
@@ -549,7 +594,7 @@ export default function AdminAnalyzePlanPage() {
       const supabase = createClient()
 
       // Update plan status
-      await supabase
+      const { error: updateError } = await supabase
         .from('plans')
         .update({ 
           [`${analysisType}_analysis_status`]: 'completed',
@@ -557,8 +602,13 @@ export default function AdminAnalyzePlanPage() {
         })
         .eq('id', planId)
 
+      if (updateError) {
+        console.error('Error updating plan status:', updateError)
+        throw new Error('Failed to update plan status')
+      }
+
       // Send email notification
-      await fetch('/api/send-analysis-notification', {
+      const notificationResponse = await fetch('/api/send-analysis-notification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -568,11 +618,16 @@ export default function AdminAnalyzePlanPage() {
         })
       })
 
+      if (!notificationResponse.ok) {
+        console.error('Failed to send notification email')
+        // Don't throw error here, just log it
+      }
+
       alert(`${analysisType === 'takeoff' ? 'Takeoff' : 'Quality'} analysis submitted successfully! User has been notified.`)
       router.push('/admin/analyze-plans')
     } catch (error) {
       console.error('Error submitting analysis:', error)
-      alert('Failed to submit analysis')
+      alert(`Failed to submit analysis: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsSaving(false)
     }
@@ -586,6 +641,26 @@ export default function AdminAnalyzePlanPage() {
           <p className="text-sm text-gray-600 mt-4">
             {!pdfJsReady ? 'Initializing PDF viewer...' : !documentReady ? 'Preparing document...' : 'Loading plan...'}
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center max-w-md mx-auto p-6">
+          <AlertTriangle className="h-16 w-16 mx-auto mb-4 text-red-500" />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Error Loading Plan</h2>
+          <p className="text-gray-600 dark:text-gray-300 mb-4">{error}</p>
+          <div className="space-x-2">
+            <Button onClick={() => window.location.reload()}>
+              Try Again
+            </Button>
+            <Button variant="outline" onClick={() => router.push('/admin/analyze-plans')}>
+              Back to Plans
+            </Button>
+          </div>
         </div>
       </div>
     )
@@ -625,7 +700,12 @@ export default function AdminAnalyzePlanPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setZoom(Math.max(0.25, zoom - 0.25))}
+            onClick={() => {
+              const newZoom = Math.max(0.25, zoom - 0.25)
+              console.log('Zoom out:', zoom, '->', newZoom)
+              setZoom(newZoom)
+            }}
+            disabled={isSaving}
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
@@ -635,7 +715,12 @@ export default function AdminAnalyzePlanPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setZoom(Math.min(3, zoom + 0.25))}
+            onClick={() => {
+              const newZoom = Math.min(3, zoom + 0.25)
+              console.log('Zoom in:', zoom, '->', newZoom)
+              setZoom(newZoom)
+            }}
+            disabled={isSaving}
           >
             <ZoomIn className="h-4 w-4" />
           </Button>
@@ -645,11 +730,11 @@ export default function AdminAnalyzePlanPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Plan Viewer */}
         <div 
-          className="flex-1 overflow-auto p-4 bg-gray-100 dark:bg-gray-900 relative" 
+          className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 relative" 
           ref={containerRef}
           style={{ cursor: isPlacingMarker ? 'crosshair' : 'default' }}
         >
-          <div className="relative inline-block">
+          <div className="flex justify-center p-4">
             {planUrl && (
               <Document
                 file={planUrl}
@@ -692,6 +777,7 @@ export default function AdminAnalyzePlanPage() {
                           renderTextLayer={false}
                           renderAnnotationLayer={false}
                           onLoadSuccess={() => {
+                            // Improved canvas initialization
                             setTimeout(() => {
                               const canvas = canvasRefs.current.get(pageNum)
                               if (canvas && canvas.parentElement) {
@@ -699,10 +785,12 @@ export default function AdminAnalyzePlanPage() {
                                 if (rect.width > 0 && rect.height > 0) {
                                   canvas.width = rect.width
                                   canvas.height = rect.height
+                                  canvas.style.width = `${rect.width}px`
+                                  canvas.style.height = `${rect.height}px`
                                   redrawCanvas()
                                 }
                               }
-                            }, 100)
+                            }, 50)
                           }}
                         />
 
@@ -716,6 +804,8 @@ export default function AdminAnalyzePlanPage() {
                                 if (rect.width > 0 && rect.height > 0) {
                                   el.width = rect.width
                                   el.height = rect.height
+                                  el.style.width = `${rect.width}px`
+                                  el.style.height = `${rect.height}px`
                                 }
                               }
                             } else {

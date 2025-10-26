@@ -79,12 +79,12 @@ export default function PastRequestsPage() {
     if (!user) return
 
     try {
-      // Get all closed job requests
+      // Get all closed jobs
       const { data: jobsData, error: jobsError } = await supabase
-        .from('job_requests')
+        .from('jobs')
         .select('*')
-        .eq('gc_id', user.id)
-        .eq('status', 'closed')
+        .eq('user_id', user.id)
+        .eq('status', 'completed')
         .order('created_at', { ascending: false })
 
       if (jobsError) {
@@ -92,20 +92,37 @@ export default function PastRequestsPage() {
         return
       }
 
-      // Then get bid counts for each job
+      // Then get bid counts for each job through bid_packages
       const jobsWithBidCounts = await Promise.all(
         (jobsData || []).map(async (job) => {
+          // First get bid packages for this job
+          const { data: bidPackages, error: packagesError } = await supabase
+            .from('bid_packages')
+            .select('id')
+            .eq('job_id', job.id)
+          
+          if (packagesError) {
+            console.error('Error fetching bid packages:', packagesError)
+            return { ...job, bidCount: 0 }
+          }
+          
+          const packageIds = bidPackages?.map(pkg => pkg.id) || []
+          if (packageIds.length === 0) {
+            return { ...job, bidCount: 0 }
+          }
+          
+          // Then get bid count for these packages
           const { count, error: countError } = await supabase
             .from('bids')
             .select('*', { count: 'exact', head: true })
-            .eq('job_request_id', job.id)
+            .in('bid_package_id', packageIds)
 
           if (countError) {
             console.error('Error counting bids:', countError)
-            return { ...job, bids_count: 0 }
+            return { ...job, bidCount: 0 }
           }
 
-          return { ...job, bids_count: count || 0 }
+          return { ...job, bidCount: count || 0 }
         })
       )
 
@@ -122,10 +139,10 @@ export default function PastRequestsPage() {
 
     try {
       const { error } = await supabase
-        .from('job_requests')
+        .from('jobs')
         .update({ status: 'active' })
         .eq('id', jobId)
-        .eq('gc_id', user.id)
+        .eq('user_id', user.id)
 
       if (error) {
         console.error('Error reopening job:', error)

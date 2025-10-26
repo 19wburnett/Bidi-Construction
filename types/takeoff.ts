@@ -6,6 +6,66 @@ export type DetectionSource = 'ai' | 'manual' | 'imported'
 export type CommentType = 'general' | 'question' | 'suggestion' | 'issue'
 export type ChatRole = 'user' | 'assistant' | 'system'
 
+// Job-centric types
+export type JobStatus = 'draft' | 'active' | 'completed' | 'archived'
+export type BidPackageStatus = 'draft' | 'sent' | 'receiving' | 'closed'
+export type SharePermissions = 'view_only' | 'markup' | 'comment' | 'all'
+
+export interface Job {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  location: string
+  budget_range: string | null
+  project_type: string | null
+  status: JobStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface BidPackage {
+  id: string
+  job_id: string
+  trade_category: string
+  description: string | null
+  minimum_line_items: any[] // JSONB array from takeoff
+  status: BidPackageStatus
+  sent_at: string | null
+  deadline: string | null
+  closed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlanShare {
+  id: string
+  plan_id: string
+  share_token: string
+  created_by: string
+  permissions: SharePermissions
+  expires_at: string | null
+  accessed_count: number
+  last_accessed_at: string | null
+  created_at: string
+}
+
+export interface Plan {
+  id: string
+  title: string | null
+  file_name: string
+  file_path: string
+  status: string
+  num_pages: number
+  project_name: string | null
+  project_location: string | null
+  takeoff_analysis_status?: string | null
+  takeoff_requested_at?: string | null
+  quality_analysis_status?: string | null
+  quality_requested_at?: string | null
+  job_id?: string | null // New field linking to jobs
+}
+
 export interface Takeoff {
   id: string
   project_id: string

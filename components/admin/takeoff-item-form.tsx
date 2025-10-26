@@ -85,19 +85,34 @@ export default function TakeoffItemForm({
   }, [markerPosition, editingItem])
 
   const handleSubmit = () => {
-    if (!formData.name || !formData.quantity) {
-      alert('Please fill in item name and quantity')
+    if (!formData.name || !formData.name.trim()) {
+      alert('Please enter an item name')
+      return
+    }
+
+    if (!formData.quantity || formData.quantity <= 0) {
+      alert('Please enter a valid quantity greater than 0')
+      return
+    }
+
+    if (!formData.category) {
+      alert('Please select a category')
+      return
+    }
+
+    if (!formData.unit) {
+      alert('Please select a unit')
       return
     }
 
     const item: TakeoffItem = {
       id: editingItem?.id || `item-${Date.now()}`,
-      name: formData.name!,
+      name: formData.name!.trim(),
       category: formData.category!,
       quantity: formData.quantity!,
       unit: formData.unit!,
       unit_cost: formData.unit_cost,
-      notes: formData.notes,
+      notes: formData.notes?.trim(),
       marker: formData.marker
     }
 

@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       console.error('Enhanced analysis failed:', error)
       
       // If it's a "Need at least 2 models" error or enhanced analysis failed, try fallback to ChatGPT only
-      if (error instanceof Error && (error.message.includes('Need at least 2 models') || error.message.includes('Enhanced analysis failed'))) {
+      if (error instanceof Error && (error.message.includes('Need at least 2 models') || error.message.includes('Enhanced analysis failed') || error.message.includes('Single model analysis failed'))) {
         console.log('Falling back to ChatGPT-only analysis')
         try {
           // Import ChatGPT provider as fallback

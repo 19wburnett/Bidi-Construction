@@ -11,22 +11,20 @@ import CreditsDisplay from '@/components/credits-display'
 import ThemeToggle from '@/components/theme-toggle'
 import {
   Home,
-  Briefcase,
-  Calculator,
+  Building2,
   Users,
-  FileText,
-  Mail,
-  Bell,
   Settings,
   CreditCard,
   ChevronLeft,
   ChevronRight,
   Plus,
-  Building2,
   MessageSquare,
   TrendingUp,
   Clock,
-  Archive
+  Archive,
+  FileText,
+  Package,
+  Bell
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
@@ -52,10 +50,10 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [stats, setStats] = useState({
     activeJobs: 0,
-    activePlans: 0,
-    pendingBids: 0,
     unreadNotifications: 0,
-    pendingAnalyses: 0
+    pendingAnalyses: 0,
+    activePlans: 0,
+    pendingBids: 0
   })
 
   const supabase = createClient()
@@ -93,41 +91,24 @@ export default function DashboardSidebar({ className }: SidebarProps) {
 
       // Load active jobs count
       const { count: jobsCount } = await supabase
-        .from('job_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('gc_id', user.id)
-        .eq('status', 'active')
-
-      // Load active plans count
-      const { count: plansCount } = await supabase
-        .from('plans')
+        .from('jobs')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
+        .eq('status', 'active')
 
-      // Load pending bids count
-      const { count: bidsCount } = await supabase
-        .from('bids')
-        .select('*, job_requests!inner(gc_id)', { count: 'exact', head: true })
-        .eq('job_requests.gc_id', user.id)
-        .is('seen_at', null)
-
-      // Load pending analyses count (for admin)
-      let pendingAnalysesCount = 0
-      if (isAdmin) {
-        const { count } = await supabase
-          .from('plans')
-          .select('*', { count: 'exact', head: true })
-          .or('takeoff_analysis_status.eq.pending,quality_analysis_status.eq.pending')
-        
-        pendingAnalysesCount = count || 0
-      }
+      // Load unread notifications count
+      const { count: notificationsCount } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false)
 
       setStats({
         activeJobs: jobsCount || 0,
-        activePlans: plansCount || 0,
-        pendingBids: bidsCount || 0,
-        unreadNotifications: 0, // You can implement this based on your notification system
-        pendingAnalyses: pendingAnalysesCount
+        unreadNotifications: notificationsCount || 0,
+        pendingAnalyses: 0,
+        activePlans: 0,
+        pendingBids: 0
       })
     } catch (error) {
       console.error('Error loading stats:', error)
@@ -141,22 +122,13 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       icon: Home
     },
     {
-      label: 'Plans',
-      href: '/dashboard/plans',
-      icon: FileText,
-      badge: stats.activePlans > 0 ? stats.activePlans : undefined,
-      subItems: [
-        { label: 'Upload Plan', href: '/dashboard/plans/new' },
-        { label: 'All Plans', href: '/dashboard/plans' }
-      ]
-    },
-    {
       label: 'Jobs',
       href: '/dashboard/jobs',
-      icon: Briefcase,
+      icon: Building2,
       badge: stats.activeJobs > 0 ? stats.activeJobs : undefined,
       subItems: [
-        { label: 'New Job', href: '/dashboard/new-job' }
+        { label: 'All Jobs', href: '/dashboard/jobs' },
+        { label: 'New Job', href: '/dashboard/jobs/new' }
       ]
     },
     {

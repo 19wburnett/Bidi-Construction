@@ -1,373 +1,349 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
-  Briefcase, 
+  Building2, 
   Plus, 
-  FileText, 
-  MapPin, 
-  DollarSign, 
-  Calendar, 
-  MessageSquare, 
-  CheckCircle,
-  XCircle,
-  TrendingUp,
-  AlertCircle
+  Search,
+  Filter,
+  MapPin,
+  Calendar,
+  FileText,
+  Package,
+  Users,
+  ArrowRight,
+  Loader2,
+  Eye,
+  Edit,
+  Trash2
 } from 'lucide-react'
 import Link from 'next/link'
-import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import { staggerContainer, staggerItem, cardHover, pageVariants, skeletonPulse } from '@/lib/animations'
+import { Job } from '@/types/takeoff'
 
-interface JobRequest {
-  id: string
-  trade_category: string
-  location: string
-  description: string
-  budget_range: string
-  created_at: string
-  bids_count?: number
-  status?: string
-  closed_at?: string
-  accepted_bid_id?: string | null
+interface JobWithCounts extends Job {
+  plan_count: number
+  bid_package_count: number
+  bid_count: number
 }
 
 export default function JobsPage() {
-  const [activeJobs, setActiveJobs] = useState<JobRequest[]>([])
-  const [closedJobs, setClosedJobs] = useState<JobRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('active')
   const { user } = useAuth()
-  const router = useRouter()
+  const [jobs, setJobs] = useState<JobWithCounts[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('created_at')
   const supabase = createClient()
 
   useEffect(() => {
-    if (!user) {
-      router.push('/auth/login')
-      return
+    if (user) {
+      loadJobs()
     }
+  }, [user, statusFilter, sortBy])
 
-    fetchJobs()
-  }, [user, router])
-
-  const fetchJobs = async () => {
-    if (!user) return
-
+  async function loadJobs() {
     try {
-      // Get all jobs
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('job_requests')
-        .select('*')
-        .eq('gc_id', user.id)
-        .order('created_at', { ascending: false })
+      let query = supabase
+        .from('jobs')
+        .select(`
+          *,
+          plans(count),
+          bid_packages(count)
+        `)
+        .eq('user_id', user?.id)
 
-      if (jobsError) {
-        console.error('Error fetching jobs:', jobsError)
-        return
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter)
       }
 
-      // Get bid counts for each job
-      const jobsWithBidCounts = await Promise.all(
-        (jobsData || []).map(async (job) => {
-          const { count, error: countError } = await supabase
-            .from('bids')
-            .select('*', { count: 'exact', head: true })
-            .eq('job_request_id', job.id)
+      query = query.order(sortBy, { ascending: false })
 
-          if (countError) {
-            console.error('Error counting bids:', countError)
-            return { ...job, bids_count: 0 }
+      const { data, error } = await query
+
+      if (error) throw error
+
+      // Calculate bid counts for each job through bid_packages
+      const formattedJobs = await Promise.all(
+        (data || []).map(async (job) => {
+          // Get bid packages for this job
+          const { data: jobBidPackages } = await supabase
+            .from('bid_packages')
+            .select('id')
+            .eq('job_id', job.id)
+          
+          const packageIds = jobBidPackages?.map(pkg => pkg.id) || []
+          let bidCount = 0
+          
+          if (packageIds.length > 0) {
+            const { count } = await supabase
+              .from('bids')
+              .select('*', { count: 'exact', head: true })
+              .in('bid_package_id', packageIds)
+            
+            bidCount = count || 0
           }
 
-          return { ...job, bids_count: count || 0 }
+          return {
+            ...job,
+            plan_count: job.plans?.[0]?.count || 0,
+            bid_package_count: job.bid_packages?.[0]?.count || 0,
+            bid_count: bidCount
+          }
         })
       )
 
-      // Separate active and closed jobs
-      const active = jobsWithBidCounts.filter(job => job.status === 'active')
-      const closed = jobsWithBidCounts.filter(job => job.status === 'closed')
+      setJobs(formattedJobs)
 
-      setActiveJobs(active)
-      setClosedJobs(closed)
-    } catch (err) {
-      console.error('Error:', err)
+    } catch (error) {
+      console.error('Error loading jobs:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const closeJob = async (jobId: string) => {
-    if (!user) return
-
-    try {
-      const { error } = await supabase
-        .from('job_requests')
-        .update({ status: 'closed', closed_at: new Date().toISOString() })
-        .eq('id', jobId)
-        .eq('gc_id', user.id)
-
-      if (error) {
-        console.error('Error closing job:', error)
-        return
-      }
-
-      // Refresh the jobs list
-      fetchJobs()
-    } catch (err) {
-      console.error('Error:', err)
-    }
-  }
-
-  const reopenJob = async (jobId: string) => {
-    if (!user) return
-
-    try {
-      const { error } = await supabase
-        .from('job_requests')
-        .update({ status: 'active' })
-        .eq('id', jobId)
-        .eq('gc_id', user.id)
-
-      if (error) {
-        console.error('Error reopening job:', error)
-        return
-      }
-
-      // Refresh the jobs list
-      fetchJobs()
-    } catch (err) {
-      console.error('Error:', err)
-    }
-  }
-
-  const renderJobCard = (job: JobRequest, isActive: boolean) => (
-    <Card key={job.id} className={`hover:shadow-md transition-shadow ${!isActive ? 'opacity-75' : ''}`}>
-      <CardHeader className="pb-3">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
-            <div className="flex-1">
-              <CardTitle className="text-lg leading-tight">{job.trade_category}</CardTitle>
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                <div className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
-                  {job.location}
-                </div>
-                <div className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  {job.budget_range}
-                </div>
-                {isActive ? (
-                  <div className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    Active
-                  </div>
-                ) : (
-                  <div className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs sm:text-sm flex items-center gap-1">
-                    <XCircle className="h-3 w-3" />
-                    Closed
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-col sm:items-end gap-2">
-              <div className="text-xs sm:text-sm text-gray-600 flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
-                {new Date(job.created_at).toLocaleDateString()}
-              </div>
-              <div className={`px-2 py-1 rounded text-xs sm:text-sm font-medium flex items-center gap-1 ${
-                job.bids_count === 0 
-                  ? 'bg-gray-100 text-gray-800' 
-                  : 'bg-blue-100 text-blue-800'
-              }`}>
-                <MessageSquare className="h-3 w-3" />
-                {job.bids_count || 0} {job.bids_count === 1 ? 'bid' : 'bids'}
-              </div>
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <p className="text-gray-700 mb-4 line-clamp-2 sm:line-clamp-3 text-sm sm:text-base leading-relaxed">
-          {job.description}
-        </p>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Link href={`/dashboard/jobs/${job.id}`} className="flex-1 sm:flex-none">
-            <Button variant="default" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-              View Details
-            </Button>
-          </Link>
-          <Link href={`/dashboard/jobs/${job.id}/edit`} className="flex-1 sm:flex-none">
-            <Button variant="outline" size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-              Edit Job
-            </Button>
-          </Link>
-          {isActive ? (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => closeJob(job.id)}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full sm:w-auto text-xs sm:text-sm"
-            >
-              <XCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              Close Job
-            </Button>
-          ) : (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => reopenJob(job.id)}
-              className="text-green-600 hover:text-green-700 hover:bg-green-50 w-full sm:w-auto text-xs sm:text-sm"
-            >
-              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              Reopen
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+  const filteredJobs = jobs.filter(job =>
+    job.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    job.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (job.description && job.description.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
-  if (!user) {
-    return null
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'draft': return 'bg-gray-100 text-gray-800'
+      case 'active': return 'bg-green-100 text-green-800'
+      case 'completed': return 'bg-blue-100 text-blue-800'
+      case 'archived': return 'bg-gray-100 text-gray-600'
+      default: return 'bg-gray-100 text-gray-800'
+    }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <FallingBlocksLoader text="Loading jobs..." size="lg" />
+      <motion.div
+        variants={pageVariants}
+        initial="initial"
+        animate="animate"
+        className="min-h-screen bg-gray-50"
+      >
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
+          <motion.div
+            variants={skeletonPulse}
+            animate="animate"
+            className="space-y-6"
+          >
+            <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+            <div className="h-12 bg-gray-200 rounded"></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="h-48 bg-gray-200 rounded"></div>
+              ))}
+            </div>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
-      <div className="container mx-auto px-4 py-4 sm:py-8">
-        {/* Header Section */}
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">My Jobs</h2>
-            <p className="text-gray-600 dark:text-gray-300">Manage your job requests and bids</p>
+    <motion.div
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="min-h-screen bg-gray-50"
+    >
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">Jobs</h1>
+              <p className="text-gray-600">Manage your construction projects</p>
+            </div>
+            <Link href="/dashboard/jobs/new">
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                New Job
+              </Button>
+            </Link>
           </div>
-          <Link href="/dashboard/new-job">
-            <Button className="w-full sm:w-auto">
-              <Plus className="h-4 w-4 mr-2" />
-              Post New Job
-            </Button>
-          </Link>
-        </div>
+        </motion.div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* Filters */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8"
+        >
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Jobs</CardTitle>
-              <Briefcase className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{activeJobs.length}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Closed Jobs</CardTitle>
-              <XCircle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{closedJobs.length}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Bids</CardTitle>
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {[...activeJobs, ...closedJobs].reduce((sum, job) => sum + (job.bids_count || 0), 0)}
+            <CardContent className="p-4">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search jobs by name, location, or description..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Sort by" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="created_at">Newest First</SelectItem>
+                      <SelectItem value="name">Name A-Z</SelectItem>
+                      <SelectItem value="location">Location</SelectItem>
+                      <SelectItem value="status">Status</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardContent>
           </Card>
+        </motion.div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Avg Bids/Job</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {[...activeJobs, ...closedJobs].length > 0 
-                  ? Math.round([...activeJobs, ...closedJobs].reduce((sum, job) => sum + (job.bids_count || 0), 0) / [...activeJobs, ...closedJobs].length * 10) / 10
-                  : 0
-                }
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Jobs Tabs */}
-        <Tabs defaultValue="active" className="w-full" onValueChange={setActiveTab}>
-          <TabsList className="grid w-full sm:w-[400px] grid-cols-2">
-            <TabsTrigger value="active">
-              Active ({activeJobs.length})
-            </TabsTrigger>
-            <TabsTrigger value="closed">
-              Closed ({closedJobs.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="active" className="mt-6">
-            {activeJobs.length === 0 ? (
-              <Card>
-                <CardContent className="text-center py-12">
-                  <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No active jobs</h3>
-                  <p className="text-gray-600 mb-4">
-                    Post a new job to start receiving bids from subcontractors.
-                  </p>
-                  <Link href="/dashboard/new-job">
+        {/* Jobs Grid */}
+        <motion.div
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
+          className="space-y-6"
+        >
+          <AnimatePresence>
+            {filteredJobs.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center py-12"
+              >
+                <Building2 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  {searchTerm || statusFilter !== 'all' ? 'No jobs found' : 'No jobs yet'}
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  {searchTerm || statusFilter !== 'all' 
+                    ? 'Try adjusting your search or filters'
+                    : 'Create your first job to get started'
+                  }
+                </p>
+                {!searchTerm && statusFilter === 'all' && (
+                  <Link href="/dashboard/jobs/new">
                     <Button>
                       <Plus className="h-4 w-4 mr-2" />
-                      Post New Job
+                      Create Your First Job
                     </Button>
                   </Link>
-                </CardContent>
-              </Card>
+                )}
+              </motion.div>
             ) : (
-              <div className="grid gap-6">
-                {activeJobs.map((job) => renderJobCard(job, true))}
-              </div>
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              >
+                {filteredJobs.map((job) => (
+                  <motion.div
+                    key={job.id}
+                    variants={staggerItem}
+                    whileHover="hover"
+                    whileTap="tap"
+                  >
+                    <Link href={`/dashboard/jobs/${job.id}`}>
+                      <Card className="cursor-pointer h-full">
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <CardTitle className="text-lg mb-1">{job.name}</CardTitle>
+                              <CardDescription className="flex items-center">
+                                <MapPin className="h-4 w-4 mr-1" />
+                                {job.location}
+                              </CardDescription>
+                            </div>
+                            <Badge className={getStatusColor(job.status)}>
+                              {job.status}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          {job.description && (
+                            <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                              {job.description}
+                            </p>
+                          )}
+                          
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <div className="flex items-center text-gray-600">
+                                <Calendar className="h-4 w-4 mr-1" />
+                                Created {new Date(job.created_at).toLocaleDateString()}
+                              </div>
+                              {job.budget_range && (
+                                <div className="text-gray-600">
+                                  {job.budget_range}
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center justify-between text-sm">
+                              <div className="flex items-center space-x-4">
+                                <div className="flex items-center text-gray-500">
+                                  <FileText className="h-4 w-4 mr-1" />
+                                  {job.plan_count}
+                                </div>
+                                <div className="flex items-center text-gray-500">
+                                  <Package className="h-4 w-4 mr-1" />
+                                  {job.bid_package_count}
+                                </div>
+                                <div className="flex items-center text-gray-500">
+                                  <Users className="h-4 w-4 mr-1" />
+                                  {job.bid_count}
+                                </div>
+                              </div>
+                              <ArrowRight className="h-4 w-4 text-gray-400" />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  </motion.div>
+                ))}
+              </motion.div>
             )}
-          </TabsContent>
-
-          <TabsContent value="closed" className="mt-6">
-            {closedJobs.length === 0 ? (
-              <Card>
-                <CardContent className="text-center py-12">
-                  <XCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No closed jobs</h3>
-                  <p className="text-gray-600">
-                    Closed jobs will appear here once you close them from the active list.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-6">
-                {closedJobs.map((job) => renderJobCard(job, false))}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+          </AnimatePresence>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   )
 }
-
