@@ -49,6 +49,13 @@ export default function EnhancedPlanViewer() {
   const [planUrl, setPlanUrl] = useState<string>('')
   const [commentFormOpen, setCommentFormOpen] = useState(false)
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
+  const [isRunningTakeoff, setIsRunningTakeoff] = useState(false)
+  const [isRunningQuality, setIsRunningQuality] = useState(false)
+  const [isGeneratingShare, setIsGeneratingShare] = useState(false)
+  const [takeoffResults, setTakeoffResults] = useState<any>(null)
+  const [qualityResults, setQualityResults] = useState<any>(null)
+  const [shareLink, setShareLink] = useState<string | null>(null)
+  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number }>({ step: '', percent: 0 })
   
   const drawingPersistenceRef = useRef<DrawingPersistence | null>(null)
   const supabase = createClient()
@@ -191,6 +198,204 @@ export default function EnhancedPlanViewer() {
     }
   }, [commentPosition, drawings, handleDrawingsChange])
 
+  // Helper function to convert PDF to images using PDF.js
+  const convertPdfToImages = async () => {
+    if (!planUrl) throw new Error('Plan URL not available')
+    
+    setAnalysisProgress({ step: 'Loading PDF pages...', percent: 10 })
+    
+    // Load PDF.js
+    const pdfjs = await import('pdfjs-dist')
+    
+    // Configure worker
+    if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+      pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
+    }
+    
+    setAnalysisProgress({ step: 'Rendering PDF pages...', percent: 20 })
+    
+    // Load PDF document
+    const loadingTask = pdfjs.getDocument(planUrl)
+    const pdf = await loadingTask.promise
+    
+    const images: string[] = []
+    const pagesToConvert = Math.min(pdf.numPages, 5) // Limit to 5 pages
+    
+    setAnalysisProgress({ step: `Converting ${pagesToConvert} page${pagesToConvert > 1 ? 's' : ''} to images...`, percent: 30 })
+    
+    for (let pageNum = 1; pageNum <= pagesToConvert; pageNum++) {
+      const progress = 30 + (pageNum / pagesToConvert) * 30
+      setAnalysisProgress({ step: `Processing page ${pageNum} of ${pagesToConvert}...`, percent: progress })
+      
+      const page = await pdf.getPage(pageNum)
+      const viewport = page.getViewport({ scale: 2 }) // 2x for high quality
+      
+      // Create temporary canvas
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')
+      
+      if (!context) {
+        throw new Error('Failed to get 2D context from canvas')
+      }
+      
+      canvas.height = viewport.height
+      canvas.width = viewport.width
+      
+      // Render PDF page to canvas
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise
+      
+      // Convert to JPEG base64
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+      images.push(dataUrl)
+    }
+    
+    setAnalysisProgress({ step: 'Images ready!', percent: 70 })
+    return images
+  }
+
+  // Handle AI takeoff analysis
+  const handleRunAITakeoff = async () => {
+    if (!plan || !planUrl) {
+      alert('Plan not loaded yet')
+      return
+    }
+
+    setIsRunningTakeoff(true)
+    setAnalysisProgress({ step: 'Starting analysis...', percent: 0 })
+
+    try {
+      // Step 1: Convert PDF to images (0-70%)
+      const images = await convertPdfToImages()
+
+      // Step 2: Send to AI (70-90%)
+      setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75 })
+      const startTime = Date.now()
+      
+      const analysisResponse = await fetch('/api/plan/analyze-enhanced', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: planId,
+          images: images,
+          drawings: drawings,
+          taskType: 'takeoff'
+        })
+      })
+
+      if (!analysisResponse.ok) {
+        const errorData = await analysisResponse.json()
+        throw new Error(errorData.error || 'Analysis failed')
+      }
+
+      setAnalysisProgress({ step: 'Processing results...', percent: 90 })
+      const analysisData = await analysisResponse.json()
+      
+      // Step 3: Complete (90-100%)
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1)
+      setAnalysisProgress({ step: 'Complete!', percent: 100 })
+      
+      setTakeoffResults(analysisData)
+      
+      // Show success after a brief delay
+      setTimeout(() => {
+        alert(`Takeoff analysis complete! Found ${analysisData.items?.length || 0} items in ${elapsedTime}s.`)
+        setAnalysisProgress({ step: '', percent: 0 })
+      }, 500)
+      
+    } catch (error) {
+      console.error('Error running AI takeoff:', error)
+      setAnalysisProgress({ step: '', percent: 0 })
+      alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setIsRunningTakeoff(false)
+    } finally {
+      // Keep running state until success message is shown
+    }
+  }
+
+  // Handle quality check analysis
+  const handleRunQualityCheck = async () => {
+    if (!plan || !planUrl) {
+      alert('Plan not loaded yet')
+      return
+    }
+
+    setIsRunningQuality(true)
+
+    try {
+      const images = await convertPdfToImages()
+
+      const analysisResponse = await fetch('/api/plan/analyze-enhanced', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: planId,
+          images: images,
+          drawings: drawings,
+          taskType: 'quality'
+        })
+      })
+
+      if (!analysisResponse.ok) {
+        const errorData = await analysisResponse.json()
+        throw new Error(errorData.error || 'Quality analysis failed')
+      }
+
+      const analysisData = await analysisResponse.json()
+      setQualityResults(analysisData)
+      const issueCount = analysisData.issues?.length || 0
+      alert(`Quality check complete! Found ${issueCount} issue${issueCount !== 1 ? 's' : ''}.`)
+      
+    } catch (error) {
+      console.error('Error running quality check:', error)
+      alert(`Failed to run quality check: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsRunningQuality(false)
+    }
+  }
+
+  // Handle share link generation
+  const handleGenerateShareLink = async () => {
+    if (!plan) {
+      alert('Plan not loaded yet')
+      return
+    }
+
+    setIsGeneratingShare(true)
+
+    try {
+      const response = await fetch('/api/share-link/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: planId,
+          type: 'plan'
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to generate share link')
+      }
+
+      const data = await response.json()
+      const fullUrl = `${window.location.origin}/share/${data.shareId}`
+      setShareLink(fullUrl)
+      
+      // Copy to clipboard
+      await navigator.clipboard.writeText(fullUrl)
+      alert(`Share link generated and copied to clipboard!`)
+      
+    } catch (error) {
+      console.error('Error generating share link:', error)
+      alert(`Failed to generate share link: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsGeneratingShare(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -329,10 +534,40 @@ export default function EnhancedPlanViewer() {
                     <div className="p-4 h-full overflow-y-auto">
                       <TabsContent value="takeoff" className="h-full">
                         <div className="space-y-4">
-                          <Button className="w-full">
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            Run AI Takeoff
+                          <Button 
+                            className="w-full" 
+                            onClick={handleRunAITakeoff}
+                            disabled={isRunningTakeoff}
+                          >
+                            {isRunningTakeoff ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Analyzing...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                Run AI Takeoff
+                              </>
+                            )}
                           </Button>
+                          {isRunningTakeoff && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-600">{analysisProgress.step}</span>
+                                <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                                <div 
+                                  className="bg-blue-600 h-2 transition-all duration-300 ease-out rounded-full"
+                                  style={{ width: `${analysisProgress.percent}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-gray-500">
+                                Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
+                              </p>
+                            </div>
+                          )}
                           <div className="text-center py-8">
                             <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                             <h4 className="font-semibold text-gray-900 mb-2">No takeoff data yet</h4>
@@ -343,9 +578,22 @@ export default function EnhancedPlanViewer() {
                       
                       <TabsContent value="quality" className="h-full">
                         <div className="space-y-4">
-                          <Button className="w-full">
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            Run Quality Check
+                          <Button 
+                            className="w-full"
+                            onClick={handleRunQualityCheck}
+                            disabled={isRunningQuality}
+                          >
+                            {isRunningQuality ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Checking...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                Run Quality Check
+                              </>
+                            )}
                           </Button>
                           <div className="text-center py-8">
                             <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
@@ -382,10 +630,29 @@ export default function EnhancedPlanViewer() {
                       
                       <TabsContent value="share" className="h-full">
                         <div className="space-y-4">
-                          <Button className="w-full">
-                            <Share2 className="h-4 w-4 mr-2" />
-                            Generate Share Link
+                          <Button 
+                            className="w-full"
+                            onClick={handleGenerateShareLink}
+                            disabled={isGeneratingShare}
+                          >
+                            {isGeneratingShare ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Generating...
+                              </>
+                            ) : (
+                              <>
+                                <Share2 className="h-4 w-4 mr-2" />
+                                Generate Share Link
+                              </>
+                            )}
                           </Button>
+                          {shareLink && (
+                            <div className="p-3 bg-gray-100 rounded-lg">
+                              <p className="text-xs text-gray-600 mb-1">Share link:</p>
+                              <code className="text-xs break-all">{shareLink}</code>
+                            </div>
+                          )}
                           <div className="text-center py-8">
                             <Share2 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                             <h4 className="font-semibold text-gray-900 mb-2">No share links yet</h4>

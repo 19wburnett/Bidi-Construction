@@ -103,14 +103,26 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 // Wrapper to handle PostHog errors gracefully
 function PostHogProviderWrapper({ children }: { children: React.ReactNode }) {
-  // Check if PostHog is blocked by ad blocker
-  const isPostHogBlocked = typeof window !== 'undefined' && 
-    (window.location.hostname.includes('localhost') || 
-     window.navigator.userAgent.includes('AdBlock') ||
-     window.navigator.userAgent.includes('uBlock'))
+  const [shouldLoadPostHog, setShouldLoadPostHog] = useState(true)
   
-  if (isPostHogBlocked) {
-    console.log('PostHog likely blocked by ad blocker, skipping analytics')
+  useEffect(() => {
+    // Client-side check for PostHog blocking
+    if (typeof window !== 'undefined') {
+      const isPostHogBlocked = 
+        window.location.hostname.includes('localhost') || 
+        window.navigator.userAgent.includes('AdBlock') ||
+        window.navigator.userAgent.includes('uBlock')
+      
+      if (isPostHogBlocked) {
+        console.log('PostHog likely blocked by ad blocker, skipping analytics')
+        setShouldLoadPostHog(false)
+      }
+    }
+  }, [])
+  
+  // On server render, always try to load PostHog to prevent hydration mismatch
+  // This will be corrected on client-side if blocked
+  if (!shouldLoadPostHog) {
     return <>{children}</>
   }
   

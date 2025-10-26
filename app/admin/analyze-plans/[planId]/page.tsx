@@ -730,7 +730,7 @@ export default function AdminAnalyzePlanPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Plan Viewer */}
         <div 
-          className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 relative" 
+          className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900" 
           ref={containerRef}
           style={{ cursor: isPlacingMarker ? 'crosshair' : 'default' }}
         >
@@ -763,12 +763,12 @@ export default function AdminAnalyzePlanPage() {
               >
                 <div className="space-y-6">
                   {numPages && Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
-                    <div key={`page-${pageNum}`} className="relative bg-white shadow-lg">
+                    <div key={`page-${pageNum}`} className="relative bg-white shadow-lg" style={{ zIndex: 1 }}>
                       <div className="absolute -top-8 left-0 text-sm text-gray-500 font-medium">
                         Page {pageNum} of {numPages}
                       </div>
                       
-                      <div className="relative">
+                      <div className="relative" style={{ isolation: 'isolate' }}>
                         <Page
                           key={`pdf-page-${pageNum}`}
                           pageNumber={pageNum}
@@ -818,7 +818,7 @@ export default function AdminAnalyzePlanPage() {
                           style={{
                             pointerEvents: isPlacingMarker ? 'auto' : 'none',
                             cursor: isPlacingMarker ? 'crosshair' : 'default',
-                            zIndex: 10
+                            zIndex: isPlacingMarker ? 10 : 1
                           }}
                         />
                       </div>
@@ -831,7 +831,7 @@ export default function AdminAnalyzePlanPage() {
         </div>
 
         {/* Right: Analysis Panel */}
-        <div className="w-96 bg-white dark:bg-gray-900 border-l dark:border-gray-800 flex flex-col">
+        <div className="w-96 bg-white dark:bg-gray-900 border-l dark:border-gray-800 flex flex-col" style={{ position: 'relative', zIndex: 20 }}>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
             <TabsList className="grid w-full grid-cols-2 m-4">
               <TabsTrigger value="takeoff">Takeoff</TabsTrigger>
