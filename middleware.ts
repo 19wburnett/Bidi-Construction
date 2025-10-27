@@ -36,7 +36,7 @@ export async function middleware(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
 
     // Define public paths
-    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card']
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/jobs']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
@@ -67,7 +67,7 @@ export async function middleware(request: NextRequest) {
     return response
   } catch (error) {
     // On error, allow access to public paths, redirect others to login
-    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card']
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/jobs']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     

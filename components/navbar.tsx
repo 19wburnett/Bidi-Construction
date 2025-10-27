@@ -51,6 +51,7 @@ export default function Navbar() {
     { name: 'Home', href: '/' },
     { name: 'For Subcontractors', href: '/subcontractors' },
     { name: 'Pricing', href: '/pricing' },
+    { name: 'Jobs', href: '/jobs' },
     ...(isSignedIn ? [
       { name: 'Dashboard', href: '/dashboard' },
       { name: 'Settings', href: '/settings' },
