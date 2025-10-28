@@ -692,75 +692,93 @@ export default function JobsPage() {
 
       {/* Share Modal */}
       <Dialog open={showShareModal} onOpenChange={setShowShareModal}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Share this job posting</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader className="text-center pb-2">
+            <DialogTitle className="text-xl font-bold">Share this job posting</DialogTitle>
+            <DialogDescription className="text-base">
               Help us spread the word about this opportunity!
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            {/* Copy Link */}
-            <div className="flex items-center space-x-2">
-              <div className="grid flex-1 gap-2">
-                <Label htmlFor="link" className="sr-only">
-                  Link
-                </Label>
+          
+          <div className="space-y-6 py-2">
+            {/* Copy Link Section */}
+            <div className="space-y-3">
+              <Label htmlFor="link" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Copy link
+              </Label>
+              <div className="flex items-center space-x-3">
                 <Input
                   id="link"
                   defaultValue={jobUrl}
                   readOnly
-                  className="h-9"
+                  className="h-10 text-sm bg-gray-50 dark:bg-gray-800"
                 />
+                <Button 
+                  onClick={copyToClipboard}
+                  size="sm" 
+                  className="px-4 h-10 min-w-[80px]"
+                  variant={copied ? "default" : "outline"}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </>
+                  )}
+                </Button>
               </div>
-              <Button 
-                type="submit" 
-                size="sm" 
-                className="px-3"
-                onClick={copyToClipboard}
-              >
-                <span className="sr-only">Copy</span>
-                {copied ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
+            </div>
+            
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                  Or share on social media
+                </span>
+              </div>
             </div>
             
             {/* Social Media Share Buttons */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               <Button
                 variant="outline"
                 onClick={shareToLinkedIn}
-                className="w-full"
+                className="w-full h-12 flex flex-col items-center justify-center space-y-1 hover:bg-blue-50 hover:border-blue-300 dark:hover:bg-blue-900/20"
               >
-                <Linkedin className="mr-2 h-4 w-4" />
-                LinkedIn
+                <Linkedin className="h-5 w-5 text-blue-600" />
+                <span className="text-sm font-medium">LinkedIn</span>
               </Button>
               <Button
                 variant="outline"
                 onClick={shareToTwitter}
-                className="w-full"
+                className="w-full h-12 flex flex-col items-center justify-center space-y-1 hover:bg-sky-50 hover:border-sky-300 dark:hover:bg-sky-900/20"
               >
-                <Twitter className="mr-2 h-4 w-4" />
-                Twitter
+                <Twitter className="h-5 w-5 text-sky-500" />
+                <span className="text-sm font-medium">Twitter</span>
               </Button>
               <Button
                 variant="outline"
                 onClick={shareToFacebook}
-                className="w-full"
+                className="w-full h-12 flex flex-col items-center justify-center space-y-1 hover:bg-blue-50 hover:border-blue-300 dark:hover:bg-blue-900/20"
               >
-                <Facebook className="mr-2 h-4 w-4" />
-                Facebook
+                <Facebook className="h-5 w-5 text-blue-600" />
+                <span className="text-sm font-medium">Facebook</span>
               </Button>
               <Button
                 variant="outline"
                 onClick={shareViaEmail}
-                className="w-full"
+                className="w-full h-12 flex flex-col items-center justify-center space-y-1 hover:bg-gray-50 hover:border-gray-300 dark:hover:bg-gray-800"
               >
-                <Mail className="mr-2 h-4 w-4" />
-                Email
+                <Mail className="h-5 w-5 text-gray-600" />
+                <span className="text-sm font-medium">Email</span>
               </Button>
             </div>
           </div>
