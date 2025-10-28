@@ -1,9 +1,13 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Navbar from '@/components/navbar'
 import Footer from '@/components/footer'
 import { 
@@ -17,10 +21,323 @@ import {
   Mail,
   Calendar,
   Users,
-  Building2
+  Building2,
+  Upload,
+  FileText,
+  Send
 } from 'lucide-react'
 
 export default function JobsPage() {
+  const [showApplicationForm, setShowApplicationForm] = useState(false)
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    location: '',
+    experience: '',
+    currentRole: '',
+    company: '',
+    linkedin: '',
+    github: '',
+    portfolio: '',
+    coverLetter: '',
+    resume: null as File | null
+  })
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null
+    setFormData(prev => ({ ...prev, resume: file }))
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    // Simulate form submission
+    setTimeout(() => {
+      setShowConfirmation(true)
+    }, 1000)
+  }
+
+  const handleBackToJob = () => {
+    setShowApplicationForm(false)
+    setShowConfirmation(false)
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      location: '',
+      experience: '',
+      currentRole: '',
+      company: '',
+      linkedin: '',
+      github: '',
+      portfolio: '',
+      coverLetter: '',
+      resume: null
+    })
+  }
+
+  // Show confirmation page
+  if (showConfirmation) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <Navbar />
+        <div className="container mx-auto px-4 py-16">
+          <div className="max-w-2xl mx-auto text-center">
+            <Card className="bg-white dark:bg-gray-800">
+              <CardContent className="pt-8 pb-8">
+                <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
+                </div>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+                  Application Submitted!
+                </h1>
+                <p className="text-lg text-gray-600 dark:text-gray-300 mb-8">
+                  Thank you for your interest in joining Bidi. We've received your application for the Software Engineer position and will review it carefully.
+                </p>
+                <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-6 mb-8">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">What happens next?</h3>
+                  <ul className="text-left text-gray-700 dark:text-gray-300 space-y-2">
+                    <li>• We'll review your application within 3-5 business days</li>
+                    <li>• If selected, we'll reach out to schedule an initial phone call</li>
+                    <li>• Our process typically includes a technical interview and culture fit discussion</li>
+                    <li>• We'll keep you updated throughout the process</li>
+                  </ul>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <Button onClick={handleBackToJob} variant="outline">
+                    View Other Positions
+                  </Button>
+                  <Button onClick={() => window.location.href = '/'}>
+                    Back to Home
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    )
+  }
+
+  // Show application form
+  if (showApplicationForm) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="mb-8">
+              <Button 
+                onClick={handleBackToJob} 
+                variant="outline" 
+                className="mb-4"
+              >
+                ← Back to Job Posting
+              </Button>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                Apply for Software Engineer
+              </h1>
+              <p className="text-gray-600 dark:text-gray-300">
+                Join Bidi and help build the future of construction tech
+              </p>
+            </div>
+
+            <Card className="bg-white dark:bg-gray-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Application Form
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Personal Information */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Personal Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="firstName">First Name *</Label>
+                        <Input
+                          id="firstName"
+                          value={formData.firstName}
+                          onChange={(e) => handleInputChange('firstName', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="lastName">Last Name *</Label>
+                        <Input
+                          id="lastName"
+                          value={formData.lastName}
+                          onChange={(e) => handleInputChange('lastName', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="email">Email Address *</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={formData.email}
+                          onChange={(e) => handleInputChange('email', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="phone">Phone Number</Label>
+                        <Input
+                          id="phone"
+                          type="tel"
+                          value={formData.phone}
+                          onChange={(e) => handleInputChange('phone', e.target.value)}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label htmlFor="location">Location *</Label>
+                        <Input
+                          id="location"
+                          value={formData.location}
+                          onChange={(e) => handleInputChange('location', e.target.value)}
+                          placeholder="City, State/Country"
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Professional Information */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Professional Information</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="experience">Years of Experience *</Label>
+                        <Select value={formData.experience} onValueChange={(value) => handleInputChange('experience', value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select experience level" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0-1">0-1 years</SelectItem>
+                            <SelectItem value="2-3">2-3 years</SelectItem>
+                            <SelectItem value="4-5">4-5 years</SelectItem>
+                            <SelectItem value="6-10">6-10 years</SelectItem>
+                            <SelectItem value="10+">10+ years</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="currentRole">Current Role</Label>
+                        <Input
+                          id="currentRole"
+                          value={formData.currentRole}
+                          onChange={(e) => handleInputChange('currentRole', e.target.value)}
+                          placeholder="e.g., Frontend Developer, Full Stack Engineer"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="company">Current Company</Label>
+                        <Input
+                          id="company"
+                          value={formData.company}
+                          onChange={(e) => handleInputChange('company', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Links */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Links & Portfolio</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="linkedin">LinkedIn Profile</Label>
+                        <Input
+                          id="linkedin"
+                          type="url"
+                          value={formData.linkedin}
+                          onChange={(e) => handleInputChange('linkedin', e.target.value)}
+                          placeholder="https://linkedin.com/in/yourname"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="github">GitHub Profile</Label>
+                        <Input
+                          id="github"
+                          type="url"
+                          value={formData.github}
+                          onChange={(e) => handleInputChange('github', e.target.value)}
+                          placeholder="https://github.com/yourname"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="portfolio">Portfolio Website</Label>
+                        <Input
+                          id="portfolio"
+                          type="url"
+                          value={formData.portfolio}
+                          onChange={(e) => handleInputChange('portfolio', e.target.value)}
+                          placeholder="https://yourportfolio.com"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resume Upload */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Resume</h3>
+                    <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                      <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <Label htmlFor="resume" className="cursor-pointer">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {formData.resume ? formData.resume.name : 'Click to upload resume'}
+                        </span>
+                        <input
+                          id="resume"
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                      </Label>
+                      <p className="text-xs text-gray-500 mt-1">PDF, DOC, or DOCX (max 10MB)</p>
+                    </div>
+                  </div>
+
+                  {/* Cover Letter */}
+                  <div>
+                    <Label htmlFor="coverLetter">Cover Letter</Label>
+                    <Textarea
+                      id="coverLetter"
+                      value={formData.coverLetter}
+                      onChange={(e) => handleInputChange('coverLetter', e.target.value)}
+                      placeholder="Tell us why you're excited about this role and what you can bring to Bidi..."
+                      rows={6}
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="flex justify-end">
+                    <Button type="submit" size="lg" className="w-full sm:w-auto">
+                      <Send className="mr-2 h-4 w-4" />
+                      Submit Application
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    )
+  }
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -53,12 +370,14 @@ export default function JobsPage() {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
-                <a href="mailto:jobs@bidi.com?subject=Software Engineer Application">
-                  <Button size="lg" className="w-full sm:w-auto">
-                    Apply Now
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </a>
+                <Button 
+                  onClick={() => setShowApplicationForm(true)}
+                  size="lg" 
+                  className="w-full sm:w-auto"
+                >
+                  Apply Now
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
                 <Button variant="outline" size="lg" className="w-full sm:w-auto">
                   <Mail className="mr-2 h-4 w-4" />
                   Share
@@ -230,12 +549,14 @@ export default function JobsPage() {
                     <p className="text-gray-700 dark:text-gray-300 mb-6">
                       If you want your code to power the future of construction and grow with a startup on the rise—join us.
                     </p>
-                    <a href="mailto:jobs@bidi.com?subject=Software Engineer Application">
-                      <Button size="lg" className="w-full sm:w-auto">
-                        Apply Now
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </Button>
-                    </a>
+                    <Button 
+                      onClick={() => setShowApplicationForm(true)}
+                      size="lg" 
+                      className="w-full sm:w-auto"
+                    >
+                      Apply Now
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
