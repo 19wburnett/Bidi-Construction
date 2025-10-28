@@ -37,7 +37,6 @@ export default function JobsPage() {
   const [showApplicationForm, setShowApplicationForm] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
-  const [showEmailModal, setShowEmailModal] = useState(false)
   const [copied, setCopied] = useState(false)
   const [formData, setFormData] = useState({
     firstName: '',
@@ -122,11 +121,12 @@ export default function JobsPage() {
   }
 
   const shareViaEmail = () => {
-    const subject = `Check out this job posting: ${jobTitle}`
-    const body = `${jobDescription}\n\nView the full posting: ${jobUrl}`
+    const subject = encodeURIComponent(`Check out this job posting: ${jobTitle}`)
+    const body = encodeURIComponent(`${jobDescription}\n\nView the full posting: ${jobUrl}`)
     
-    // Create a modal to show email content that users can copy
-    setShowEmailModal(true)
+    // Open Gmail in browser with pre-filled content
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=&su=${subject}&body=${body}`
+    window.open(gmailUrl, '_blank')
   }
 
   // Show confirmation page
@@ -770,95 +770,6 @@ export default function JobsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Email Modal */}
-      <Dialog open={showEmailModal} onOpenChange={setShowEmailModal}>
-        <DialogContent className="sm:max-w-lg p-8">
-          <DialogHeader className="pb-4">
-            <DialogTitle>Email this job posting</DialogTitle>
-            <DialogDescription>
-              Copy the email content below and paste it into your email client
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-6 py-2">
-            {/* Subject */}
-            <div className="space-y-3">
-              <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Subject
-              </Label>
-              <div className="flex items-center space-x-3">
-                <Input
-                  value={`Check out this job posting: ${jobTitle}`}
-                  readOnly
-                  className="h-10 text-sm bg-gray-50 dark:bg-gray-800"
-                />
-                <Button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(`Check out this job posting: ${jobTitle}`)
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                  size="sm" 
-                  className="px-4 h-10 min-w-[80px]"
-                  variant={copied ? "default" : "outline"}
-                >
-                  {copied ? (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-4 w-4 mr-2" />
-                      Copy
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div className="space-y-3">
-              <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Message Body
-              </Label>
-              <div className="space-y-3">
-                <Textarea
-                  value={`${jobDescription}\n\nView the full posting: ${jobUrl}`}
-                  readOnly
-                  rows={6}
-                  className="text-sm bg-gray-50 dark:bg-gray-800"
-                />
-                <Button 
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${jobDescription}\n\nView the full posting: ${jobUrl}`)
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                  size="sm" 
-                  className="w-full"
-                  variant="outline"
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copy Message Body
-                </Button>
-              </div>
-            </div>
-
-            {/* Instructions */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-              <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">How to use:</h4>
-              <ol className="text-sm text-blue-800 dark:text-blue-200 space-y-1 list-decimal list-inside">
-                <li>Copy the subject line above</li>
-                <li>Copy the message body above</li>
-                <li>Open your email client (Gmail, Outlook, Mail, etc.)</li>
-                <li>Paste the subject and body into a new email</li>
-                <li>Add your recipient and send!</li>
-              </ol>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
