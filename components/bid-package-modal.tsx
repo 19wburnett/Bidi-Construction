@@ -35,6 +35,15 @@ import { BidPackage, Job } from '@/types/takeoff'
 
 interface BidPackageModalProps {
   jobId: string
+  planId: string
+  takeoffItems: Array<{
+    id: string
+    category: string
+    description: string
+    quantity: number
+    unit: string
+    unit_cost?: number
+  }>
   isOpen: boolean
   onClose: () => void
   onPackageCreated?: (pkg: BidPackage) => void
@@ -72,7 +81,9 @@ const TRADE_CATEGORIES = [
 ]
 
 export default function BidPackageModal({ 
-  jobId, 
+  jobId,
+  planId,
+  takeoffItems: propsTakeoffItems,
   isOpen, 
   onClose, 
   onPackageCreated 
@@ -116,20 +127,12 @@ export default function BidPackageModal({
       const { data: subsData, error: subsError } = await supabase
         .from('gc_contacts')
         .select('*')
-        .eq('user_id', user?.id)
 
       if (subsError) throw subsError
       setSubcontractors(subsData || [])
 
-      // Load takeoff items (mock data for now)
-      setTakeoffItems([
-        { id: '1', category: 'Electrical', description: 'Light fixtures', quantity: 12, unit: 'ea', unit_cost: 150 },
-        { id: '2', category: 'Electrical', description: 'Electrical outlets', quantity: 24, unit: 'ea', unit_cost: 25 },
-        { id: '3', category: 'Plumbing', description: 'Toilet installation', quantity: 4, unit: 'ea', unit_cost: 300 },
-        { id: '4', category: 'Plumbing', description: 'Sink installation', quantity: 6, unit: 'ea', unit_cost: 200 },
-        { id: '5', category: 'Drywall', description: 'Drywall installation', quantity: 1200, unit: 'sq ft', unit_cost: 3.50 },
-        { id: '6', category: 'Flooring', description: 'Hardwood flooring', quantity: 800, unit: 'sq ft', unit_cost: 8.00 }
-      ])
+      // Use takeoff items from props
+      setTakeoffItems(propsTakeoffItems)
 
     } catch (err: any) {
       setError(err.message || 'Failed to load data')

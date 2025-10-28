@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
               name: 'Bidi Professional Plan',
               description: 'Monthly subscription for general contractors',
             },
-            unit_amount: 9900, // $99.00
+            unit_amount: 10000, // $100.00
             recurring: {
               interval: 'month',
             },

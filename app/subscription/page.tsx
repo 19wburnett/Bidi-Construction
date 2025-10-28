@@ -6,14 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Check, CreditCard } from 'lucide-react'
+import { Check, CreditCard } from 'lucide-react'
+import logo from '../../public/brand/Bidi Contracting Logo.svg'
 
 export default function SubscriptionPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showCanceledMessage, setShowCanceledMessage] = useState(false)
-  const [selectedPlan, setSelectedPlan] = useState<'subscription' | 'credits'>('subscription')
-  const [creditsToPurchase, setCreditsToPurchase] = useState(1)
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -45,53 +44,25 @@ export default function SubscriptionPage() {
     setError('')
 
     try {
-      if (selectedPlan === 'subscription') {
-        // Create Stripe checkout session for subscription
-        const response = await fetch('/api/stripe/create-checkout-session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            email: user.email,
-          }),
-        })
+      // Create Stripe checkout session for subscription
+      const response = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+        }),
+      })
 
-        const { url, error: stripeError } = await response.json()
+      const { url, error: stripeError } = await response.json()
 
-        if (stripeError) {
-          setError(stripeError)
-        } else if (url) {
-          // Redirect to Stripe checkout
-          window.location.href = url
-        }
-      } else {
-        // For credits, create checkout session
-        try {
-          const response = await fetch('/api/stripe/purchase-credits', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              userId: user.id,
-              email: user.email,
-              creditsToPurchase: creditsToPurchase,
-            }),
-          })
-
-          const { url, error: stripeError } = await response.json()
-
-          if (stripeError) {
-            setError(stripeError)
-          } else if (url) {
-            // Redirect to Stripe checkout
-            window.location.href = url
-          }
-        } catch (err) {
-          setError('Failed to create checkout session')
-        }
+      if (stripeError) {
+        setError(stripeError)
+      } else if (url) {
+        // Redirect to Stripe checkout
+        window.location.href = url
       }
     } catch (err) {
       setError('Failed to create checkout session')
@@ -108,16 +79,19 @@ export default function SubscriptionPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-black dark:to-orange-950/30 flex items-center justify-center p-4 transition-colors duration-300">
       <Card className="w-full max-w-2xl border-2 dark:border-gray-700">
         <CardHeader className="text-center">
-          <div className="flex items-center justify-center space-x-2 mb-4">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 dark:text-orange" />
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Bidi</h1>
-            <span className="bg-orange-100 text-orange-800 text-xs font-semibold px-2 py-1 rounded-full border border-orange-200">
+          <div className="flex items-center justify-center space-x-3 mb-4">
+            <div className="relative">
+              <img src={logo.src} alt="Bidi" className="h-10 w-10 sm:h-12 sm:w-12 transition-transform duration-300" />
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight font-bidi">BIDI</h1>
+            <span className="bg-orange-100 text-orange-800 text-xs font-semibold px-2 py-1 rounded-full border border-orange-200 dark:bg-orange/20 dark:text-orange-300 dark:border-orange/20">
               BETA
             </span>
           </div>
-          <CardTitle className="text-2xl sm:text-3xl dark:text-white">Choose Your Plan</CardTitle>
+          <CardTitle className="text-2xl sm:text-3xl dark:text-white">Subscribe to Bidi</CardTitle>
           <CardDescription className="text-base sm:text-lg dark:text-gray-300">
-            Choose how you'd like to pay for job requests and connecting with subcontractors
+            AI-Powered Estimating & Takeoff for General Contractors
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
@@ -132,85 +106,9 @@ export default function SubscriptionPage() {
           )}
 
           {/* Plan Selection */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Credits Option */}
-            <div 
-              className={`border-2 rounded-lg p-6 cursor-pointer transition-all duration-200 ${
-                selectedPlan === 'credits' 
-                  ? 'border-orange bg-orange-50 dark:bg-orange-950/30 shadow-lg' 
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 hover:border-orange/50 dark:hover:border-orange/50'
-              }`}
-              onClick={() => setSelectedPlan('credits')}
-            >
-              <div className="text-center mb-6">
-                <div className="flex justify-center mb-2">
-                  <span className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">
-                    Beta Pricing
-                  </span>
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Credit System</h3>
-                <div className="text-3xl font-bold text-orange mb-2">$20<span className="text-base text-gray-600 dark:text-gray-400">/credit</span></div>
-                <p className="text-gray-600 dark:text-gray-300">Perfect for occasional users</p>
-              </div>
-              
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">1 credit = 1 job posting</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Automatic subcontractor emails</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">AI bid analysis</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">File upload support</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Credits never expire</span>
-                </div>
-              </div>
-
-              {selectedPlan === 'credits' && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Number of Credits to Purchase:
-                  </label>
-                  <select
-                    value={creditsToPurchase}
-                    onChange={(e) => setCreditsToPurchase(parseInt(e.target.value))}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-black dark:text-white rounded-md focus:ring-2 focus:ring-orange focus:border-orange"
-                  >
-                    <option value={1}>1 Credit - $20</option>
-                    <option value={5}>5 Credits - $100</option>
-                    <option value={10}>10 Credits - $200</option>
-                    <option value={25}>25 Credits - $500</option>
-                    <option value={50}>50 Credits - $1,000</option>
-                  </select>
-                </div>
-              )}
-
-              <div className="text-center">
-                <div className={`w-4 h-4 mx-auto rounded-full border-2 ${
-                  selectedPlan === 'credits' ? 'border-orange bg-orange' : 'border-gray-300 dark:border-gray-600'
-                }`}></div>
-              </div>
-            </div>
-
+          <div className="flex justify-center">
             {/* Monthly Subscription Option */}
-            <div 
-              className={`border-2 rounded-lg p-6 cursor-pointer transition-all duration-200 ${
-                selectedPlan === 'subscription' 
-                  ? 'border-orange bg-orange-50 dark:bg-orange-950/30 shadow-lg' 
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 hover:border-orange/50 dark:hover:border-orange/50'
-              }`}
-              onClick={() => setSelectedPlan('subscription')}
-            >
+            <div className="border-2 border-orange rounded-lg p-6 w-full max-w-lg bg-orange-50 dark:bg-orange-950/30 shadow-lg">
               <div className="text-center mb-6">
                 <div className="flex justify-center mb-2">
                   <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">
@@ -219,36 +117,34 @@ export default function SubscriptionPage() {
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
                 <div className="text-3xl font-bold text-orange mb-2">$100<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
-                <p className="text-gray-600 dark:text-gray-300">Perfect for active contractors</p>
+                <p className="text-gray-600 dark:text-gray-300">Complete AI-powered estimating solution</p>
               </div>
               
               <div className="space-y-3 mb-6">
                 <div className="flex items-center space-x-3">
                   <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Unlimited job postings</span>
+                  <span className="text-sm dark:text-gray-300">Automated plan analysis & takeoff</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Automatic subcontractor emails</span>
+                  <span className="text-sm dark:text-gray-300">AI-powered cost estimating</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">AI bid analysis</span>
+                  <span className="text-sm dark:text-gray-300">Automatic subcontractor outreach</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">File upload support</span>
+                  <span className="text-sm dark:text-gray-300">Complete bid collection & leveling</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Priority support</span>
+                  <span className="text-sm dark:text-gray-300">Priority support & training</span>
                 </div>
               </div>
 
               <div className="text-center">
-                <div className={`w-4 h-4 mx-auto rounded-full border-2 ${
-                  selectedPlan === 'subscription' ? 'border-orange bg-orange' : 'border-gray-300 dark:border-gray-600'
-                }`}></div>
+                <div className="w-4 h-4 mx-auto rounded-full border-2 border-orange bg-orange"></div>
               </div>
             </div>
           </div>
@@ -266,15 +162,12 @@ export default function SubscriptionPage() {
               disabled={loading}
             >
               <CreditCard className="h-5 w-5 mr-2" />
-              {loading ? 'Processing...' : 
-                selectedPlan === 'subscription' ? 'Subscribe with Stripe' : `Purchase ${creditsToPurchase} Credit${creditsToPurchase > 1 ? 's' : ''}`
-              }
+              {loading ? 'Processing...' : 'Subscribe with Stripe'}
             </Button>
           </div>
 
           <div className="text-center text-sm text-gray-600 dark:text-gray-400">
-            <p>Credits: No subscription required, never expire. Monthly subscription: Cancel anytime.</p>
-            <p>Secure payment processing by Stripe.</p>
+            <p>Cancel anytime. Secure payment processing by Stripe.</p>
           </div>
         </CardContent>
       </Card>

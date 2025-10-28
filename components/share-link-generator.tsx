@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -48,17 +48,71 @@ export default function ShareLinkGenerator({
   onClose, 
   onShareCreated 
 }: ShareLinkGeneratorProps) {
+  console.log('ShareLinkGenerator rendered with isOpen:', isOpen)
+  
   const [permissions, setPermissions] = useState<SharePermissions>('view_only')
   const [expiresAt, setExpiresAt] = useState<string>('')
   const [hasExpiration, setHasExpiration] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [fetchingExistingShare, setFetchingExistingShare] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [generatedShare, setGeneratedShare] = useState<PlanShare | null>(null)
+  const [isExistingShare, setIsExistingShare] = useState(false)
   const [copied, setCopied] = useState(false)
   
   const { user } = useAuth()
   const supabase = createClient()
+
+  // Fetch existing share link when modal opens
+  useEffect(() => {
+    if (isOpen && planId && user) {
+      checkForExistingShare()
+    } else {
+      // Reset state when modal closes
+      setGeneratedShare(null)
+      setSuccess(false)
+      setIsExistingShare(false)
+      setError('')
+    }
+  }, [isOpen, planId, user])
+
+  const checkForExistingShare = async () => {
+    setFetchingExistingShare(true)
+    try {
+      // Get the most recent share for this plan
+      const { data: existingShares, error: fetchError } = await supabase
+        .from('plan_shares')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('created_by', user?.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (fetchError) {
+        console.error('Error checking for existing share:', fetchError)
+        // Don't show error, just proceed to create new link
+        return
+      }
+
+      if (existingShares && existingShares.length > 0) {
+        // Found an existing share, display it
+        const share = existingShares[0]
+        // Check if it's expired
+        const isExpired = share.expires_at ? new Date(share.expires_at) < new Date() : false
+        
+        if (!isExpired) {
+          setGeneratedShare(share as any)
+          setIsExistingShare(true)
+          setSuccess(true)
+        }
+      }
+    } catch (err) {
+      console.error('Error checking for existing share:', err)
+    } finally {
+      setFetchingExistingShare(false)
+    }
+  }
 
   const generateShareToken = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36)
@@ -71,6 +125,35 @@ export default function ShareLinkGenerator({
     setError('')
 
     try {
+      // First check if a share already exists for this plan
+      const { data: existingShares, error: checkError } = await supabase
+        .from('plan_shares')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (checkError) {
+        console.error('Error checking existing share:', checkError)
+      }
+
+      // If we found an existing share, use it instead of creating a new one
+      if (existingShares && existingShares.length > 0) {
+        const share = existingShares[0]
+        const isExpired = share.expires_at ? new Date(share.expires_at) < new Date() : false
+        
+        if (!isExpired) {
+          setGeneratedShare(share as any)
+          setIsExistingShare(true)
+          setSuccess(true)
+          onShareCreated?.(share as any)
+          setLoading(false)
+          return
+        }
+      }
+
+      // No existing share or it's expired, create a new one
       const shareToken = generateShareToken()
       const expiresAtValue = hasExpiration ? new Date(expiresAt).toISOString() : null
 
@@ -80,7 +163,7 @@ export default function ShareLinkGenerator({
           plan_id: planId,
           share_token: shareToken,
           created_by: user.id,
-          permissions,
+          permissions: permissions,
           expires_at: expiresAtValue
         })
         .select()
@@ -89,6 +172,7 @@ export default function ShareLinkGenerator({
       if (insertError) throw insertError
 
       setGeneratedShare(data)
+      setIsExistingShare(false)
       setSuccess(true)
       onShareCreated?.(data)
 
@@ -116,8 +200,12 @@ export default function ShareLinkGenerator({
   const handleClose = () => {
     setSuccess(false)
     setGeneratedShare(null)
+    setIsExistingShare(false)
     setError('')
     setCopied(false)
+    setPermissions('view_only')
+    setExpiresAt('')
+    setHasExpiration(false)
     onClose()
   }
 
@@ -160,7 +248,18 @@ export default function ShareLinkGenerator({
           
           <CardContent className="space-y-6">
             <AnimatePresence mode="wait">
-              {!success ? (
+              {fetchingExistingShare ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center py-8"
+                >
+                  <Clock className="h-8 w-8 animate-spin text-gray-400 mb-4" />
+                  <p className="text-gray-600">Checking for existing share link...</p>
+                </motion.div>
+              ) : !success ? (
                 <motion.div
                   key="form"
                   initial={{ opacity: 0 }}
@@ -280,8 +379,14 @@ export default function ShareLinkGenerator({
                     <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Check className="h-8 w-8 text-white" />
                     </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Share Link Created!</h3>
-                    <p className="text-gray-600">Your plan is now accessible via the link below</p>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      {isExistingShare ? 'Share Link Found!' : 'Share Link Created!'}
+                    </h3>
+                    <p className="text-gray-600">
+                      {isExistingShare 
+                        ? 'Your plan is already shared via the link below'
+                        : 'Your plan is now accessible via the link below'}
+                    </p>
                   </motion.div>
 
                   {/* Share Link */}

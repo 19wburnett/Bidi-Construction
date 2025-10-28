@@ -241,10 +241,14 @@ export class EnhancedAIProvider {
       throw new Error('OpenAI API key not configured')
     }
     
-    const imageContent = images.map(img => ({
-      type: 'image_url' as const,
-      image_url: { url: img, detail: 'high' as const }
-    }))
+    const imageContent = images.map(img => {
+      // Handle both data URLs and base64 strings
+      const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+      return {
+        type: 'image_url' as const,
+        image_url: { url: url, detail: 'high' as const }
+      }
+    })
 
     try {
       // Set model-specific token limits
@@ -428,10 +432,14 @@ export class EnhancedAIProvider {
     }
 
     // XAI API integration (similar to OpenAI format)
-    const imageContent = images.map(img => ({
-      type: 'image_url' as const,
-      image_url: { url: img, detail: 'high' as const }
-    }))
+    const imageContent = images.map(img => {
+      // Handle both data URLs and base64 strings
+      const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+      return {
+        type: 'image_url' as const,
+        image_url: { url: url, detail: 'high' as const }
+      }
+    })
 
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',

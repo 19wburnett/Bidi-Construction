@@ -16,34 +16,26 @@ export async function GET(
     const supabase = await createServerSupabaseClient()
 
     // Query the plan_shares table directly to validate token and get plan info
-    const { data, error } = await supabase
+    const { data: shareData, error: shareError } = await supabase
       .from('plan_shares')
       .select(`
         id,
         plan_id,
-        allow_comments,
-        allow_drawings,
+        permissions,
         expires_at,
-        is_active,
         created_at,
-        access_count,
-        plans(
-          id,
-          title,
-          file_name,
-          file_path
-        )
+        accessed_count,
+        created_by
       `)
       .eq('share_token', token)
-      .eq('is_active', true)
       .single()
 
-    if (error) {
-      console.error('Error validating share token:', error)
+    if (shareError) {
+      console.error('Error validating share token:', shareError)
       return NextResponse.json({ error: 'Failed to validate share token' }, { status: 500 })
     }
 
-    if (!data) {
+    if (!shareData) {
       return NextResponse.json({ 
         error: 'Invalid or expired share link',
         valid: false 
@@ -51,9 +43,24 @@ export async function GET(
     }
 
     // Check if link is expired
-    if (data.expires_at && new Date(data.expires_at) < new Date()) {
+    if (shareData.expires_at && new Date(shareData.expires_at) < new Date()) {
       return NextResponse.json({ 
         error: 'Share link has expired',
+        valid: false 
+      }, { status: 404 })
+    }
+
+    // Get the plan details
+    const { data: planData, error: planError } = await supabase
+      .from('plans')
+      .select('id, title, file_name, file_path')
+      .eq('id', shareData.plan_id)
+      .single()
+
+    if (planError || !planData) {
+      console.error('Error fetching plan:', planError)
+      return NextResponse.json({ 
+        error: 'Plan not found',
         valid: false 
       }, { status: 404 })
     }
@@ -62,27 +69,37 @@ export async function GET(
     await supabase
       .from('plan_shares')
       .update({ 
-        access_count: (data.access_count || 0) + 1,
+        accessed_count: (shareData.accessed_count || 0) + 1,
         last_accessed_at: new Date().toISOString()
       })
-      .eq('id', data.id)
+      .eq('id', shareData.id)
 
-    const plan = data.plans[0] // Access the first (and only) plan from the array
+    // Map permissions to allowComments and allowDrawings
+    const permissions = shareData.permissions || 'view_only'
+    const allowComments = permissions === 'comment' || permissions === 'all'
+    const allowDrawings = permissions === 'markup' || permissions === 'all'
+
+    // Get the owner's email
+    const { data: ownerData } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', shareData.created_by)
+      .single()
 
     return NextResponse.json({
       success: true,
       valid: true,
       plan: {
-        id: plan.id,
-        title: plan.title,
-        fileName: plan.file_name,
-        fileUrl: plan.file_path
+        id: planData.id,
+        title: planData.title,
+        fileName: planData.file_name,
+        fileUrl: planData.file_path
       },
       permissions: {
-        allowComments: data.allow_comments,
-        allowDrawings: data.allow_drawings
+        allowComments,
+        allowDrawings
       },
-      ownerName: 'Plan Owner' // We'll get this from a separate query if needed
+      ownerName: ownerData?.email || 'Plan Owner'
     })
 
   } catch (error) {

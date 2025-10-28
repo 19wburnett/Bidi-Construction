@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,12 +17,19 @@ import {
   Save,
   Send,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Share2,
+  Package,
+  FileText,
+  Download
 } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import TakeoffItemForm, { TakeoffItem } from '@/components/admin/takeoff-item-form'
 import QualityIssueForm, { QualityIssue } from '@/components/admin/quality-issue-form'
 import AnalysisItemsList from '@/components/admin/analysis-items-list'
+import ShareLinkGenerator from '@/components/share-link-generator'
+import BidPackageModal from '@/components/bid-package-modal'
+import BidComparisonModal from '@/components/bid-comparison-modal'
 
 // Dynamically import react-pdf
 const Document = dynamic(
@@ -51,6 +59,7 @@ interface Plan {
   num_pages: number
   takeoff_analysis_status: string | null
   quality_analysis_status: string | null
+  job_id: string | null
   users?: { email: string }
 }
 
@@ -105,9 +114,33 @@ export default function AdminAnalyzePlanPage() {
   const [editingQualityIssue, setEditingQualityIssue] = useState<QualityIssue | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+  
+  // Sidebar resize state
+  const [sidebarWidth, setSidebarWidth] = useState(384) // Default 384px (w-96)
+  const [isResizing, setIsResizing] = useState(false)
+  const [startX, setStartX] = useState(0)
+  const [startWidth, setStartWidth] = useState(384)
+  const sidebarRef = useRef<HTMLDivElement>(null)
+
+  // Modal states
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [showPackageModal, setShowPackageModal] = useState(false)
+  const [showBidsModal, setShowBidsModal] = useState(false)
 
   // Error handling
   const [error, setError] = useState<string | null>(null)
+
+  // Set mounted flag for portal
+  useEffect(() => {
+    setIsMounted(true)
+    console.log('Component mounted, portal ready')
+  }, [])
+
+  // Debug modal state changes
+  useEffect(() => {
+    console.log('showShareModal changed to:', showShareModal)
+  }, [showShareModal])
 
   // Check admin status
   useEffect(() => {
@@ -318,6 +351,45 @@ export default function AdminAnalyzePlanPage() {
     const timer = setTimeout(redrawCanvas, 50)
     return () => clearTimeout(timer)
   }, [drawings, redrawCanvas])
+
+  // Handle sidebar resize
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setStartX(e.clientX)
+    setStartWidth(sidebarWidth)
+    setIsResizing(true)
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return
+      
+      const deltaX = e.clientX - startX
+      const newWidth = startWidth - deltaX
+      
+      // Clamp width between 300px and 800px
+      const clampedWidth = Math.max(300, Math.min(800, newWidth))
+      setSidebarWidth(clampedWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'ew-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing, startX, startWidth])
 
   // Update canvas sizes
   useEffect(() => {
@@ -697,6 +769,76 @@ export default function AdminAnalyzePlanPage() {
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* Share Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              console.log('Share button clicked, current state:', showShareModal)
+              setShowShareModal(true)
+              console.log('After setting to true, new state will be:', true)
+              setTimeout(() => {
+                console.log('State after timeout (should be true):', showShareModal)
+              }, 100)
+            }}
+            disabled={isSaving}
+          >
+            <Share2 className="h-4 w-4 mr-2" />
+            Share
+          </Button>
+
+          {/* Create Package Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPackageModal(true)}
+            disabled={isSaving || !plan?.job_id}
+            title={!plan?.job_id ? "Plan must be linked to a job" : ""}
+          >
+            <Package className="h-4 w-4 mr-2" />
+            Create Package
+          </Button>
+
+          {/* View Bids Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowBidsModal(true)}
+            disabled={isSaving || !plan?.job_id}
+            title={!plan?.job_id ? "Plan must be linked to a job" : ""}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            View Bids
+          </Button>
+
+          {/* Save Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={saveDraft}
+            disabled={isSaving}
+          >
+            <Save className="h-4 w-4 mr-2" />
+            Save
+          </Button>
+
+          {/* Download Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (planUrl) {
+                window.open(planUrl, '_blank')
+              }
+            }}
+            disabled={!planUrl}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Download
+          </Button>
+
+          <div className="w-px h-6 bg-gray-300 mx-2" />
+
           <Button
             variant="outline"
             size="sm"
@@ -727,12 +869,15 @@ export default function AdminAnalyzePlanPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Left: Plan Viewer */}
         <div 
-          className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900" 
+          className="overflow-auto bg-gray-100 dark:bg-gray-900" 
           ref={containerRef}
-          style={{ cursor: isPlacingMarker ? 'crosshair' : 'default' }}
+          style={{ 
+            cursor: isPlacingMarker ? 'crosshair' : 'default',
+            width: `calc(100% - ${sidebarWidth}px)`
+          }}
         >
           <div className="flex justify-center p-4">
             {planUrl && (
@@ -830,8 +975,23 @@ export default function AdminAnalyzePlanPage() {
           </div>
         </div>
 
+        {/* Resize Handle */}
+        <div
+          className="w-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 cursor-ew-resize transition-colors"
+          onMouseDown={handleMouseDown}
+          style={{ position: 'relative', zIndex: 30 }}
+        />
+
         {/* Right: Analysis Panel */}
-        <div className="w-96 bg-white dark:bg-gray-900 border-l dark:border-gray-800 flex flex-col" style={{ position: 'relative', zIndex: 20 }}>
+        <div 
+          ref={sidebarRef}
+          className="bg-white dark:bg-gray-900 border-l dark:border-gray-800 flex flex-col" 
+          style={{ 
+            width: `${sidebarWidth}px`,
+            position: 'relative',
+            zIndex: 20
+          }}
+        >
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
             <TabsList className="grid w-full grid-cols-2 m-4">
               <TabsTrigger value="takeoff">Takeoff</TabsTrigger>
@@ -933,6 +1093,66 @@ export default function AdminAnalyzePlanPage() {
           </Tabs>
         </div>
       </div>
+
+      {/* Debug Test - Simple Modal to Test State */}
+      {showShareModal && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            backgroundColor: 'rgba(0,0,0,0.5)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            zIndex: 9999 
+          }}
+        >
+          <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '8px' }}>
+            <h2>TEST: Share Modal State = {showShareModal ? 'OPEN' : 'CLOSED'}</h2>
+            <p>If you see this, the state IS updating correctly!</p>
+            <Button onClick={() => setShowShareModal(false)}>Close</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Modals - Rendered in Portal to Avoid Z-Index Issues */}
+      {isMounted && typeof document !== 'undefined' ? createPortal(
+        <>
+          <ShareLinkGenerator
+            planId={planId}
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+          />
+
+          {plan?.job_id && (
+            <>
+              <BidPackageModal
+                jobId={plan.job_id}
+                planId={planId}
+                takeoffItems={takeoffItems.map(item => ({
+                  id: item.id,
+                  category: item.category,
+                  description: item.name,
+                  quantity: item.quantity,
+                  unit: item.unit,
+                  unit_cost: item.unit_cost
+                }))}
+                isOpen={showPackageModal}
+                onClose={() => setShowPackageModal(false)}
+              />
+              <BidComparisonModal
+                jobId={plan.job_id}
+                isOpen={showBidsModal}
+                onClose={() => setShowBidsModal(false)}
+              />
+            </>
+          )}
+        </>,
+        document.body
+      ) : null}
     </div>
   )
 }

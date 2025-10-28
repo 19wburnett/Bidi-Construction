@@ -13,7 +13,6 @@ import {
   Share2,
   Package,
   Eye,
-  Settings,
   Save,
   Download,
   BarChart3,
@@ -33,8 +32,12 @@ import FastPlanCanvas from '@/components/fast-plan-canvas'
 import CommentPinForm from '@/components/comment-pin-form'
 import { DrawingPersistence, canvasUtils } from '@/lib/canvas-utils'
 import { Drawing } from '@/lib/canvas-utils'
+import ShareLinkGenerator from '@/components/share-link-generator'
+import BidPackageModal from '@/components/bid-package-modal'
+import BidComparisonModal from '@/components/bid-comparison-modal'
+import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 
-type AnalysisMode = 'takeoff' | 'quality' | 'comments' | 'share'
+type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
 export default function EnhancedPlanViewer() {
   const params = useParams()
@@ -56,6 +59,24 @@ export default function EnhancedPlanViewer() {
   const [qualityResults, setQualityResults] = useState<any>(null)
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number }>({ step: '', percent: 0 })
+  const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
+  
+  // PDF quality settings
+  const [qualityMode, setQualityMode] = useState<QualityMode>('balanced')
+  const [scale, setScale] = useState(1.5)
+  
+  // Modal states
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [showPackageModal, setShowPackageModal] = useState(false)
+  const [showBidsModal, setShowBidsModal] = useState(false)
+  
+  // Sidebar resize state
+  const [sidebarWidth, setSidebarWidth] = useState(320) // Default 320px (w-80)
+  const [isResizing, setIsResizing] = useState(false)
+  const [startX, setStartX] = useState(0)
+  const [startWidth, setStartWidth] = useState(320)
+  const sidebarRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   
   const drawingPersistenceRef = useRef<DrawingPersistence | null>(null)
   const supabase = createClient()
@@ -81,6 +102,45 @@ export default function EnhancedPlanViewer() {
       loadData()
     }
   }, [user, jobId, planId])
+
+  // Handle sidebar resize
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setStartX(e.clientX)
+    setStartWidth(sidebarWidth)
+    setIsResizing(true)
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return
+      
+      const deltaX = e.clientX - startX
+      const newWidth = startWidth - deltaX
+      
+      // Clamp width between 250px and 800px
+      const clampedWidth = Math.max(250, Math.min(800, newWidth))
+      setSidebarWidth(clampedWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'ew-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing, startX, startWidth])
 
   async function loadData() {
     try {
@@ -143,6 +203,23 @@ export default function EnhancedPlanViewer() {
     }
   }
 
+  // Handle quality mode change
+  const handleQualityModeChange = useCallback((mode: QualityMode) => {
+    setQualityMode(mode)
+    // Map quality mode to scale: performance (1.0) -> balanced (1.5) -> quality (2.0)
+    const scaleMap = { performance: 1.0, balanced: 1.5, quality: 2.0 }
+    setScale(scaleMap[mode])
+  }, [])
+
+  // Handle clear cache
+  const handleClearCache = useCallback(() => {
+    // Clear the PDF pages and reload them
+    setPlanUrl('')
+    setTimeout(() => {
+      setPlanUrl(plan?.file_path || '')
+    }, 100)
+  }, [plan])
+
   // Handle drawings change and save
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
     setDrawings(newDrawings)
@@ -157,10 +234,18 @@ export default function EnhancedPlanViewer() {
     }
   }, [])
 
-  // Handle comment pin click
+  // Handle comment pin click (to place new comment)
   const handleCommentPinClick = useCallback((x: number, y: number, pageNumber: number) => {
     setCommentPosition({ x, y, pageNumber })
     setCommentFormOpen(true)
+  }, [])
+
+  // Handle comment click (to view existing comment)
+  const handleCommentClick = useCallback((comment: Drawing) => {
+    if (comment.notes) {
+      alert(comment.notes)
+    }
+    // You could also show a modal with full comment details here
   }, [])
 
   // Handle comment save
@@ -186,8 +271,15 @@ export default function EnhancedPlanViewer() {
         pageNumber: commentPosition.pageNumber,
         notes: comment.content,
         noteType: comment.noteType,
+        category: comment.category,
         label: comment.category,
-        layerName: comment.location
+        location: comment.location,
+        layerName: comment.location,
+        isVisible: true,
+        isLocked: false,
+        userId: user?.id,
+        userName: user?.email,
+        createdAt: new Date().toISOString()
       }
 
       await handleDrawingsChange([...drawings, newDrawing])
@@ -228,7 +320,7 @@ export default function EnhancedPlanViewer() {
       setAnalysisProgress({ step: `Processing page ${pageNum} of ${pagesToConvert}...`, percent: progress })
       
       const page = await pdf.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 2 }) // 2x for high quality
+      const viewport = page.getViewport({ scale: 1.5 }) // Reduced from 2 to 1.5 for smaller file size
       
       // Create temporary canvas
       const canvas = document.createElement('canvas')
@@ -247,9 +339,12 @@ export default function EnhancedPlanViewer() {
         viewport: viewport
       }).promise
       
-      // Convert to JPEG base64
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
-      images.push(dataUrl)
+      // Convert to JPEG base64 with lower quality (0.7 instead of 0.9) to reduce size
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7)
+      
+      // Remove data URL prefix to just get base64 string for smaller payload
+      const base64 = dataUrl.split(',')[1]
+      images.push(base64)
     }
     
     setAnalysisProgress({ step: 'Images ready!', percent: 70 })
@@ -438,15 +533,15 @@ export default function EnhancedPlanViewer() {
             </div>
             
             <div className="flex items-center space-x-2">
-              <Button variant="ghost" size="sm" onClick={() => console.log('Share clicked')}>
+              <Button variant="ghost" size="sm" onClick={() => setShowShareModal(true)}>
                 <Share2 className="h-4 w-4 mr-2" />
                 Share
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => console.log('Create Package clicked')}>
+              <Button variant="ghost" size="sm" onClick={() => setShowPackageModal(true)}>
                 <Package className="h-4 w-4 mr-2" />
                 Create Package
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => console.log('View Bids clicked')}>
+              <Button variant="ghost" size="sm" onClick={() => setShowBidsModal(true)}>
                 <Eye className="h-4 w-4 mr-2" />
                 View Bids
               </Button>
@@ -454,20 +549,29 @@ export default function EnhancedPlanViewer() {
                 <Save className="h-4 w-4 mr-2" />
                 Save
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => console.log('Download clicked')}>
+              <Button variant="ghost" size="sm" onClick={() => {
+                if (planUrl) {
+                  window.open(planUrl, '_blank')
+                }
+              }}>
                 <Download className="h-4 w-4 mr-2" />
                 Download
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => console.log('Settings clicked')}>
-                <Settings className="h-4 w-4" />
-              </Button>
+              <PdfQualitySettings
+                qualityMode={qualityMode}
+                onQualityModeChange={handleQualityModeChange}
+                onClearCache={handleClearCache}
+              />
             </div>
           </div>
         </div>
 
         {/* Canvas Area */}
-        <div className="flex-1 flex">
-          <div className="flex-1">
+        <div className="flex-1 flex relative" ref={containerRef}>
+          <div 
+            className="flex-1"
+            style={{ width: rightSidebarOpen ? `calc(100% - ${sidebarWidth}px - 1px)` : '100%' }}
+          >
             {planUrl ? (
               <FastPlanCanvas
                 pdfUrl={planUrl}
@@ -476,6 +580,10 @@ export default function EnhancedPlanViewer() {
                 rightSidebarOpen={rightSidebarOpen}
                 onRightSidebarToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
                 onCommentPinClick={handleCommentPinClick}
+                onCommentClick={handleCommentClick}
+                goToPage={goToPage}
+                scale={scale}
+                onClearCache={handleClearCache}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -487,15 +595,25 @@ export default function EnhancedPlanViewer() {
             )}
           </div>
 
+          {/* Resize Handle */}
+          {rightSidebarOpen && (
+            <div
+              className="w-1 bg-gray-200 hover:bg-gray-300 cursor-ew-resize transition-colors z-30"
+              onMouseDown={handleMouseDown}
+            />
+          )}
+
           {/* Right Sidebar */}
           <AnimatePresence>
             {rightSidebarOpen && (
               <motion.div
+                ref={sidebarRef}
                 variants={drawerSlide}
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="w-80 bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto"
+                className="bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto"
+                style={{ width: `${sidebarWidth}px` }}
               >
                 <div className="p-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
@@ -512,7 +630,7 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="h-full">
-                    <TabsList className="grid w-full grid-cols-4 m-4 mb-0">
+                    <TabsList className="grid w-full grid-cols-3 mx-4 mt-4 mb-0 gap-1 pr-4 mr-4">
                       <TabsTrigger value="takeoff" className="text-xs">
                         <BarChart3 className="h-4 w-4 mr-1" />
                         Takeoff
@@ -524,10 +642,6 @@ export default function EnhancedPlanViewer() {
                       <TabsTrigger value="comments" className="text-xs">
                         <MessageSquare className="h-4 w-4 mr-1" />
                         Comments
-                      </TabsTrigger>
-                      <TabsTrigger value="share" className="text-xs">
-                        <Share2 className="h-4 w-4 mr-1" />
-                        Share
                       </TabsTrigger>
                     </TabsList>
                     
@@ -604,60 +718,58 @@ export default function EnhancedPlanViewer() {
                       </TabsContent>
                       
                       <TabsContent value="comments" className="h-full">
-                        <div className="space-y-4">
-                          <div className="text-sm text-gray-600 mb-2">
-                            {drawings.filter(d => d.type === 'comment').length} comments placed
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-semibold text-gray-900">
+                              Comments ({drawings.filter(d => d.type === 'comment').length})
+                            </h4>
                           </div>
-                          {drawings.filter(d => d.type === 'comment').map(comment => (
-                            <div key={comment.id} className="p-3 bg-gray-50 rounded-lg">
-                              <div className="flex items-center space-x-2 mb-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {comment.noteType}
-                                </Badge>
-                                <span className="text-xs text-gray-500">Page {comment.pageNumber}</span>
-                              </div>
-                              <p className="text-sm text-gray-800">{comment.notes}</p>
-                              {comment.category && (
-                                <p className="text-xs text-gray-600 mt-1">Category: {comment.category}</p>
-                              )}
-                              {comment.location && (
-                                <p className="text-xs text-gray-600">Location: {comment.location}</p>
-                              )}
+                          {drawings.filter(d => d.type === 'comment').length === 0 ? (
+                            <div className="text-center py-12">
+                              <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                              <p className="text-sm text-gray-600">No comments yet</p>
+                              <p className="text-xs text-gray-500 mt-1">Click on the plan to add a comment</p>
                             </div>
-                          ))}
-                        </div>
-                      </TabsContent>
-                      
-                      <TabsContent value="share" className="h-full">
-                        <div className="space-y-4">
-                          <Button 
-                            className="w-full"
-                            onClick={handleGenerateShareLink}
-                            disabled={isGeneratingShare}
-                          >
-                            {isGeneratingShare ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Generating...
-                              </>
-                            ) : (
-                              <>
-                                <Share2 className="h-4 w-4 mr-2" />
-                                Generate Share Link
-                              </>
-                            )}
-                          </Button>
-                          {shareLink && (
-                            <div className="p-3 bg-gray-100 rounded-lg">
-                              <p className="text-xs text-gray-600 mb-1">Share link:</p>
-                              <code className="text-xs break-all">{shareLink}</code>
-                            </div>
+                          ) : (
+                            drawings
+                              .filter(d => d.type === 'comment')
+                              .sort((a, b) => b.pageNumber - a.pageNumber || (b.notes?.localeCompare(a.notes || '') || 0))
+                              .map(comment => (
+                                <div 
+                                  key={comment.id} 
+                                  className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-md transition-all cursor-pointer"
+                                  onClick={() => {
+                                    setGoToPage(comment.pageNumber)
+                                    setTimeout(() => setGoToPage(undefined), 100) // Reset after navigation
+                                  }}
+                                >
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div className="flex items-center space-x-2">
+                                      <Badge 
+                                        variant="outline" 
+                                        className="text-xs capitalize"
+                                      >
+                                        {comment.noteType || 'comment'}
+                                      </Badge>
+                                      <span className="text-xs text-gray-500">Page {comment.pageNumber}</span>
+                                    </div>
+                                  </div>
+                                  <p className="text-sm text-gray-800 mb-2">{comment.notes}</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {comment.category && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        {comment.category}
+                                      </Badge>
+                                    )}
+                                    {comment.location && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        📍 {comment.location}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
                           )}
-                          <div className="text-center py-8">
-                            <Share2 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                            <h4 className="font-semibold text-gray-900 mb-2">No share links yet</h4>
-                            <p className="text-sm text-gray-600">Create a share link to collaborate with others</p>
-                          </div>
                         </div>
                       </TabsContent>
                     </div>
@@ -677,6 +789,25 @@ export default function EnhancedPlanViewer() {
         y={commentPosition.y}
         pageNumber={commentPosition.pageNumber}
         onSave={handleCommentSave}
+      />
+
+      {/* Modals */}
+      <ShareLinkGenerator
+        planId={planId}
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+      />
+      <BidPackageModal
+        jobId={jobId}
+        planId={planId}
+        takeoffItems={[]} // TODO: Load actual takeoff items
+        isOpen={showPackageModal}
+        onClose={() => setShowPackageModal(false)}
+      />
+      <BidComparisonModal
+        jobId={jobId}
+        isOpen={showBidsModal}
+        onClose={() => setShowBidsModal(false)}
       />
     </div>
   )

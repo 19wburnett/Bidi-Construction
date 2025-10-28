@@ -15,9 +15,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { 
       planId, 
-      expiresInDays, 
-      allowComments = true, 
-      allowDrawings = true 
+      expiresInDays,
+      permissions = 'view_only'
     } = body
 
     if (!planId) {
@@ -53,11 +52,10 @@ export async function POST(request: NextRequest) {
       .insert({
         plan_id: planId,
         created_by: user.id,
-        expires_at: expiresAt,
-        allow_comments: allowComments,
-        allow_drawings: allowDrawings
+        permissions: permissions,
+        expires_at: expiresAt
       })
-      .select('share_token, created_at, expires_at, allow_comments, allow_drawings')
+      .select('share_token, created_at, expires_at, permissions')
       .single()
 
     if (shareError) {
@@ -74,8 +72,7 @@ export async function POST(request: NextRequest) {
       shareUrl,
       token: share.share_token,
       expiresAt: share.expires_at,
-      allowComments: share.allow_comments,
-      allowDrawings: share.allow_drawings
+      permissions: share.permissions
     })
 
   } catch (error) {
@@ -103,10 +100,8 @@ export async function GET(request: NextRequest) {
         share_token,
         created_at,
         expires_at,
-        allow_comments,
-        allow_drawings,
-        is_active,
-        access_count,
+        permissions,
+        accessed_count,
         last_accessed_at,
         plans (
           id,
@@ -159,21 +154,21 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Share ID is required' }, { status: 400 })
     }
 
-    // Deactivate the share (soft delete)
-    const { error: updateError } = await supabase
+    // Delete the share (hard delete since we don't have is_active column)
+    const { error: deleteError } = await supabase
       .from('plan_shares')
-      .update({ is_active: false })
+      .delete()
       .eq('id', shareId)
       .eq('created_by', user.id) // Ensure user owns this share
 
-    if (updateError) {
-      console.error('Error deactivating share:', updateError)
-      return NextResponse.json({ error: 'Failed to deactivate share' }, { status: 500 })
+    if (deleteError) {
+      console.error('Error deleting share:', deleteError)
+      return NextResponse.json({ error: 'Failed to delete share' }, { status: 500 })
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Share link deactivated'
+      message: 'Share link deleted'
     })
 
   } catch (error) {

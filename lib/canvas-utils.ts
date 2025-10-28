@@ -27,14 +27,30 @@ export interface Drawing {
   zIndex?: number
   isVisible?: boolean
   isLocked?: boolean
+  // User tracking
+  userId?: string
+  userName?: string
+  createdAt?: string
 }
+
+// Ensure default values for drawings
+export const DEFAULT_DRAWING_VISIBILITY = true
 
 export interface PlanDrawingRecord {
   id: string
   plan_id: string
   user_id: string
   page_number: number
-  drawing_data: Drawing
+  drawing_type?: string
+  geometry?: any
+  style?: any
+  label?: string | null
+  notes?: string | null
+  layer_name?: string | null
+  is_visible?: boolean | null
+  is_locked?: boolean | null
+  z_index?: number | null
+  measurement_data?: any
   created_at: string
   updated_at: string
 }
@@ -68,6 +84,10 @@ export class DrawingPersistence {
         return []
       }
 
+      if (!data || data.length === 0) {
+        return []
+      }
+
       return data.map(record => this.recordToDrawing(record))
     } catch (error) {
       console.error('Error loading drawings:', error)
@@ -93,11 +113,15 @@ export class DrawingPersistence {
           console.log('Executing saveDrawings timeout callback')
           
           // Delete existing drawings for this plan/user
-          await this.supabase
+          const { error: deleteError } = await this.supabase
             .from('plan_drawings')
             .delete()
             .eq('plan_id', this.planId)
             .eq('user_id', this.userId)
+
+          if (deleteError) {
+            console.error('Error deleting old drawings:', deleteError)
+          }
 
           // Insert new drawings
           if (drawings.length > 0) {
@@ -169,37 +193,65 @@ export class DrawingPersistence {
     }
   }
 
-  private recordToDrawing(record: PlanDrawingRecord): Drawing {
-    // The drawing data is stored in the drawing_data JSONB column
-    const drawing = record.drawing_data as Drawing
-    return {
+  private recordToDrawing(record: any): Drawing {
+    // Map record fields to Drawing object
+    console.log('Converting record to drawing:', record)
+    
+    // The actual database schema uses individual columns
+    const drawing: Drawing = {
       id: record.id,
-      type: drawing.type,
-      geometry: drawing.geometry,
-      style: drawing.style,
+      type: (record.drawing_type || 'comment') as Drawing['type'],
+      geometry: record.geometry || { x: 0, y: 0 },
+      style: record.style || { color: '#3b82f6', strokeWidth: 2, opacity: 1 },
       pageNumber: record.page_number,
-      label: drawing.label,
-      notes: drawing.notes,
-      layerName: drawing.layerName,
-      zIndex: drawing.zIndex,
-      isVisible: drawing.isVisible,
-      isLocked: drawing.isLocked,
-      // Extract comment-specific fields from notes
-      noteType: drawing.notes?.includes('requirement') ? 'requirement' : 
-                drawing.notes?.includes('concern') ? 'concern' :
-                drawing.notes?.includes('suggestion') ? 'suggestion' : 'other',
-      category: drawing.label,
-      location: drawing.layerName
+      label: record.label,
+      notes: record.notes,
+      layerName: record.layer_name,
+      isVisible: record.is_visible ?? true,
+      isLocked: record.is_locked ?? false,
+      zIndex: record.z_index || 0,
+      // Extract comment metadata from measurement_data JSONB field
+      noteType: record.measurement_data?.noteType,
+      category: record.measurement_data?.category,
+      location: record.measurement_data?.location,
+      userId: record.measurement_data?.userId,
+      userName: record.measurement_data?.userName,
+      createdAt: record.measurement_data?.createdAt
     }
+    
+    console.log('Converted drawing:', drawing)
+    
+    return drawing
   }
 
-  private drawingToRecord(drawing: Drawing): Partial<PlanDrawingRecord> {
-    return {
+  private drawingToRecord(drawing: Drawing): any {
+    // Map the Drawing to the database schema structure
+    // The actual database schema uses individual columns, not drawing_data JSONB
+    const record: any = {
       plan_id: this.planId,
       user_id: this.userId,
       page_number: drawing.pageNumber,
-      drawing_data: drawing
+      drawing_type: drawing.type,
+      geometry: drawing.geometry,
+      style: drawing.style,
+      label: drawing.label,
+      notes: drawing.notes,
+      layer_name: drawing.layerName,
+      is_visible: drawing.isVisible,
+      is_locked: drawing.isLocked,
+      z_index: drawing.zIndex || 0,
+      // Store comment-specific metadata in measurement_data JSONB field
+      measurement_data: {
+        noteType: drawing.noteType,
+        category: drawing.category,
+        location: drawing.location,
+        userId: drawing.userId,
+        userName: drawing.userName,
+        createdAt: drawing.createdAt
+      }
     }
+    
+    return record
   }
 
   cleanup() {

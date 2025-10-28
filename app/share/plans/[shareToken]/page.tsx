@@ -1,68 +1,32 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
-import dynamic from 'next/dynamic'
+import { motion } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/lib/supabase'
 import { 
   Eye,
   MessageSquare,
   Edit,
-  ZoomIn,
-  ZoomOut,
-  Move,
-  Square,
-  Circle as LucideCircle,
-  Pencil,
-  Save,
   User,
   Clock,
   AlertCircle,
-  CheckCircle
+  BarChart3,
+  AlertTriangle,
+  ChevronLeft
 } from 'lucide-react'
-import { staggerContainer, staggerItem, cardHover, successCheck } from '@/lib/animations'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 import { SharePermissions, PlanShare } from '@/types/takeoff'
+import FastPlanCanvas from '@/components/fast-plan-canvas'
+import CommentPinForm from '@/components/comment-pin-form'
+import { Drawing } from '@/lib/canvas-utils'
 
-// Dynamically import Konva components
-const Stage = dynamic(() => import('react-konva').then((mod) => mod.Stage), { ssr: false })
-const Layer = dynamic(() => import('react-konva').then((mod) => mod.Layer), { ssr: false })
-const Image = dynamic(() => import('react-konva').then((mod) => mod.Image), { ssr: false })
-const Rect = dynamic(() => import('react-konva').then((mod) => mod.Rect), { ssr: false })
-const KonvaCircle = dynamic(() => import('react-konva').then((mod) => mod.Circle), { ssr: false })
-const Line = dynamic(() => import('react-konva').then((mod) => mod.Line), { ssr: false })
-
-type DrawingTool = 'select' | 'rectangle' | 'circle' | 'line' | 'note'
-
-interface Drawing {
-  id: string
-  type: 'rectangle' | 'circle' | 'line' | 'note'
-  x: number
-  y: number
-  width?: number
-  height?: number
-  radius?: number
-  points?: number[]
-  color: string
-  strokeWidth: number
-  label?: string
-  notes?: string
-  guestName?: string
-}
-
-interface Comment {
-  id: string
-  content: string
-  guestName: string
-  created_at: string
-  x?: number
-  y?: number
-}
+type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
 export default function GuestPlanViewer() {
   const params = useParams()
@@ -72,19 +36,15 @@ export default function GuestPlanViewer() {
   const [error, setError] = useState('')
   const [guestName, setGuestName] = useState('')
   const [guestNameSubmitted, setGuestNameSubmitted] = useState(false)
-  const [pdfImage, setPdfImage] = useState<HTMLImageElement | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string>('')
   const [drawings, setDrawings] = useState<Drawing[]>([])
-  const [comments, setComments] = useState<Comment[]>([])
-  const [selectedTool, setSelectedTool] = useState<DrawingTool>('select')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null)
-  const [stageScale, setStageScale] = useState(1)
-  const [showComments, setShowComments] = useState(false)
-  const [newComment, setNewComment] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+  const [commentFormOpen, setCommentFormOpen] = useState(false)
+  const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
+  const [activeTab, setActiveTab] = useState<AnalysisMode>('takeoff')
+  const [takeoffData, setTakeoffData] = useState<any>(null)
+  const [qualityData, setQualityData] = useState<any>(null)
   
-  const stageRef = useRef<any>(null)
   const supabase = createClient()
 
   const shareToken = params.shareToken as string
@@ -123,12 +83,39 @@ export default function GuestPlanViewer() {
       if (planError) throw planError
       setPlan(planData)
 
-      // Load PDF as image
+      // Get signed URL for PDF
       if (planData?.file_path) {
-        const img = new window.Image()
-        img.crossOrigin = 'anonymous'
-        img.onload = () => setPdfImage(img)
-        img.src = planData.file_path
+        let pdfUrlValue = planData.file_path
+        
+        console.log('Loading PDF:', pdfUrlValue)
+        
+        // If it's already a full URL, use it directly
+        if (pdfUrlValue.startsWith('http')) {
+          setPdfUrl(pdfUrlValue)
+        } else {
+          // Try to get signed URL from storage
+          try {
+            const { data: urlData, error: urlError } = await supabase.storage
+              .from('job-plans')
+              .createSignedUrl(pdfUrlValue, 3600)
+
+            if (urlError) {
+              console.error('Error creating signed URL:', urlError)
+              // If creating signed URL fails, try using the path directly as it might be public
+              setPdfUrl(pdfUrlValue)
+            } else if (urlData) {
+              pdfUrlValue = urlData.signedUrl
+              console.log('Got signed URL:', pdfUrlValue)
+              setPdfUrl(pdfUrlValue)
+            }
+          } catch (storageError) {
+            console.error('Storage error:', storageError)
+            // Fallback: use the path directly
+            setPdfUrl(pdfUrlValue)
+          }
+        }
+      } else {
+        console.error('No file_path found in plan data')
       }
 
       // Update access count
@@ -139,6 +126,32 @@ export default function GuestPlanViewer() {
           last_accessed_at: new Date().toISOString()
         })
         .eq('id', shareData.id)
+      
+      // Load takeoff analysis if available
+      const { data: takeoffAnalysis } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('*')
+        .eq('plan_id', planData.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (takeoffAnalysis) {
+        setTakeoffData(takeoffAnalysis)
+      }
+      
+      // Load quality analysis if available
+      const { data: qualityAnalysis } = await supabase
+        .from('plan_quality_analysis')
+        .select('*')
+        .eq('plan_id', planData.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (qualityAnalysis) {
+        setQualityData(qualityAnalysis)
+      }
 
     } catch (err: any) {
       setError(err.message || 'Failed to load plan')
@@ -154,136 +167,61 @@ export default function GuestPlanViewer() {
     }
   }
 
-  const handleStageClick = (e: any) => {
-    if (!guestNameSubmitted || !share) return
-
-    if (selectedTool === 'select') {
-      const clickedOnEmpty = e.target === e.target.getStage()
-      if (clickedOnEmpty) {
-        setSelectedId(null)
-      }
-    } else if (share.permissions === 'markup' || share.permissions === 'all') {
-      // Start drawing
-      const pos = e.target.getStage().getPointerPosition()
-      setIsDrawing(true)
-      setCurrentDrawing({
-        id: Date.now().toString(),
-        type: selectedTool as any,
-        x: pos.x,
-        y: pos.y,
-        color: '#ff6b35',
-        strokeWidth: 2,
-        guestName
-      })
+  // Handle comment pin click (to place new comment)
+  const handleCommentPinClick = useCallback((x: number, y: number, pageNumber: number) => {
+    if (!share || (share.permissions !== 'comment' && share.permissions !== 'all')) {
+      return
     }
-  }
+    setCommentPosition({ x, y, pageNumber })
+    setCommentFormOpen(true)
+  }, [share])
 
-  const handleMouseMove = (e: any) => {
-    if (!isDrawing || !currentDrawing) return
-
-    const stage = e.target.getStage()
-    const pos = stage.getPointerPosition()
-    
-    setCurrentDrawing(prev => ({
-      ...prev,
-      width: pos.x - (prev?.x || 0),
-      height: pos.y - (prev?.y || 0)
-    }))
-  }
-
-  const handleMouseUp = () => {
-    if (isDrawing && currentDrawing) {
-      setDrawings(prev => [...prev, currentDrawing as Drawing])
-      setCurrentDrawing(null)
-      setIsDrawing(false)
-    }
-  }
-
-  const handleWheel = useCallback((e: any) => {
-    e.evt.preventDefault()
-    const stage = stageRef.current
-    const oldScale = stage.scaleX()
-    const pointer = stage.getPointerPosition()
-    
-    const newScale = e.evt.deltaY < 0 
-      ? oldScale * 1.1 
-      : oldScale / 1.1
-    
-    stage.scale({ x: newScale, y: newScale })
-    setStageScale(newScale)
-    
-    // Adjust position to zoom toward cursor
-    const newPos = {
-      x: pointer.x - (pointer.x - stage.x()) * (newScale / oldScale),
-      y: pointer.y - (pointer.y - stage.y()) * (newScale / oldScale)
-    }
-    stage.position(newPos)
-  }, [])
-
-  const handleAddComment = async () => {
-    if (!newComment.trim() || !guestNameSubmitted) return
-
-    setSaving(true)
+  // Handle comment save
+  const handleCommentSave = useCallback(async (comment: {
+    noteType: 'requirement' | 'concern' | 'suggestion' | 'other'
+    content: string
+    category?: string
+    location?: string
+  }) => {
     try {
-      const comment: Comment = {
+      const newDrawing: Drawing = {
         id: Date.now().toString(),
-        content: newComment,
-        guestName,
-        created_at: new Date().toISOString()
+        type: 'comment',
+        geometry: {
+          x: commentPosition.x,
+          y: commentPosition.y,
+        },
+        style: {
+          color: '#3b82f6',
+          strokeWidth: 2,
+          opacity: 1
+        },
+        pageNumber: commentPosition.pageNumber,
+        notes: comment.content,
+        noteType: comment.noteType,
+        category: comment.category,
+        label: comment.category,
+        location: comment.location,
+        layerName: comment.location,
+        isVisible: true,
+        isLocked: false,
+        userId: 'guest',
+        userName: guestName,
+        createdAt: new Date().toISOString()
       }
 
-      setComments(prev => [...prev, comment])
-      setNewComment('')
-      
-      // Here you would save to database
-      // For now, just show success
-      setTimeout(() => setSaving(false), 1000)
-    } catch (err) {
-      console.error('Error adding comment:', err)
-      setSaving(false)
+      await setDrawings([...drawings, newDrawing])
+      setCommentFormOpen(false)
+    } catch (error) {
+      console.error('Error saving comment:', error)
+      alert('Failed to save comment. Please try again.')
     }
-  }
+  }, [commentPosition, drawings, guestName])
 
-  const renderDrawing = (drawing: Drawing) => {
-    const commonProps = {
-      id: drawing.id,
-      x: drawing.x,
-      y: drawing.y,
-      stroke: drawing.color,
-      strokeWidth: drawing.strokeWidth,
-      fill: `${drawing.color}20`,
-      draggable: selectedTool === 'select' && (share?.permissions === 'markup' || share?.permissions === 'all'),
-      onClick: () => setSelectedId(drawing.id),
-      onTap: () => setSelectedId(drawing.id)
-    }
-
-    switch (drawing.type) {
-      case 'rectangle':
-        return (
-          <Rect
-            {...commonProps}
-            width={drawing.width || 0}
-            height={drawing.height || 0}
-          />
-        )
-      case 'circle':
-        return (
-          <KonvaCircle
-            {...commonProps}
-            radius={drawing.radius || 0}
-          />
-        )
-      case 'line':
-        return (
-          <Line
-            {...commonProps}
-            points={drawing.points || []}
-          />
-        )
-      default:
-        return null
-    }
-  }
+  // Handle drawings change
+  const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
+    setDrawings(newDrawings)
+  }, [])
 
   const getPermissionIcon = (permissions: SharePermissions) => {
     switch (permissions) {
@@ -394,6 +332,9 @@ export default function GuestPlanViewer() {
     )
   }
 
+  const canComment = share.permissions === 'comment' || share.permissions === 'all'
+  const canView = share.permissions === 'view_only' || share.permissions === 'markup' || share.permissions === 'comment' || share.permissions === 'all'
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
@@ -401,174 +342,204 @@ export default function GuestPlanViewer() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">{plan.title || plan.file_name}</h1>
-            <p className="text-sm text-gray-600">Shared by {share.created_by}</p>
+            <p className="text-sm text-gray-600">Shared plan • {guestName}</p>
           </div>
           <div className="flex items-center space-x-4">
             <div className="text-sm text-gray-600">
-              <span className="font-medium">{guestName}</span> • {Math.round(stageScale * 100)}%
+              {(() => {
+                const Icon = getPermissionIcon(share.permissions)
+                return (
+                  <div className="flex items-center space-x-2">
+                    <Icon className="h-4 w-4" />
+                    <span>
+                      {share.permissions === 'view_only' && 'View Only'}
+                      {share.permissions === 'markup' && 'Markup Access'}
+                      {share.permissions === 'comment' && 'Comment Access'}
+                      {share.permissions === 'all' && 'Full Access'}
+                    </span>
+                  </div>
+                )
+              })()}
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowComments(!showComments)}
-            >
-              <MessageSquare className="h-4 w-4 mr-2" />
-              Comments ({comments.length})
-            </Button>
           </div>
         </div>
       </div>
 
+      {/* Canvas Area */}
       <div className="flex-1 flex">
-        {/* Main Canvas */}
-        <div className="flex-1 relative">
-          {/* Toolbar */}
-          <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-2">
-            <div className="flex items-center space-x-2">
-              {(share.permissions === 'markup' || share.permissions === 'all') && (
-                <>
-                  <Button
-                    variant={selectedTool === 'select' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setSelectedTool('select')}
-                  >
-                    <Move className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={selectedTool === 'rectangle' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setSelectedTool('rectangle')}
-                  >
-                    <Square className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={selectedTool === 'circle' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setSelectedTool('circle')}
-                  >
-                    <LucideCircle className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={selectedTool === 'line' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setSelectedTool('line')}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-              <div className="w-px h-6 bg-gray-300 mx-1" />
-              <Button variant="ghost" size="sm" onClick={() => setStageScale(prev => prev * 1.2)}>
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setStageScale(prev => prev / 1.2)}>
-                <ZoomOut className="h-4 w-4" />
-              </Button>
+        <div className={`flex-1 ${rightSidebarOpen ? 'mr-80' : ''} transition-all`}>
+          {canView ? (
+            pdfUrl ? (
+              <FastPlanCanvas
+                pdfUrl={pdfUrl}
+                drawings={drawings}
+                onDrawingsChange={handleDrawingsChange}
+                rightSidebarOpen={rightSidebarOpen}
+                onRightSidebarToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
+                onCommentPinClick={canComment ? handleCommentPinClick : () => {}}
+                goToPage={undefined}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">PDF Not Available</h2>
+                  <p className="text-gray-600">The plan file could not be loaded. Please contact the plan owner.</p>
+                  <p className="text-sm text-gray-500 mt-2">Plan: {plan.title || plan.file_name}</p>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
+                <h2 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h2>
+                <p className="text-gray-600">You don't have permission to view this plan.</p>
+              </div>
             </div>
-          </div>
-
-          {/* Canvas */}
-          <Stage
-            ref={stageRef}
-            width={window.innerWidth - (showComments ? 320 : 0)}
-            height={window.innerHeight - 100}
-            onWheel={handleWheel}
-            onClick={handleStageClick}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            draggable={selectedTool === 'select'}
-          >
-            {/* Background Layer */}
-            <Layer listening={false}>
-              {pdfImage && (
-                <Image
-                  image={pdfImage}
-                  width={pdfImage.width}
-                  height={pdfImage.height}
-                />
-              )}
-            </Layer>
-            
-            {/* Drawings Layer */}
-            <Layer>
-              {drawings.map(renderDrawing)}
-              {currentDrawing && renderDrawing(currentDrawing as Drawing)}
-            </Layer>
-          </Stage>
+          )}
         </div>
-
-        {/* Comments Sidebar */}
-        <AnimatePresence>
-          {showComments && (
-            <motion.div
-              variants={staggerContainer}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="w-80 bg-white border-l border-gray-200 flex flex-col"
-            >
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-900">Comments</h3>
+        
+        {/* Right Sidebar with Analysis */}
+        {rightSidebarOpen && (
+          <div className="fixed right-0 top-16 bottom-0 w-80 bg-white border-l border-gray-200 overflow-y-auto z-10">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Analysis</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setRightSidebarOpen(false)}
+                >
+                  ×
+                </Button>
               </div>
               
-              <div className="flex-1 overflow-y-auto p-4">
-                <motion.div
-                  variants={staggerContainer}
-                  initial="initial"
-                  animate="animate"
-                  className="space-y-4"
-                >
-                  {comments.map((comment) => (
-                    <motion.div
-                      key={comment.id}
-                      variants={staggerItem}
-                      className="p-3 bg-gray-50 rounded-lg"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-sm">{comment.guestName}</span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(comment.created_at).toLocaleTimeString()}
-                        </span>
+              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)}>
+                <TabsList className="grid w-full grid-cols-3 mb-4">
+                  <TabsTrigger value="takeoff">
+                    <BarChart3 className="h-4 w-4 mr-1" />
+                    Takeoff
+                  </TabsTrigger>
+                  <TabsTrigger value="quality">
+                    <AlertTriangle className="h-4 w-4 mr-1" />
+                    Quality
+                  </TabsTrigger>
+                  <TabsTrigger value="comments">
+                    <MessageSquare className="h-4 w-4 mr-1" />
+                    Comments
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="takeoff" className="space-y-3">
+                  {takeoffData ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-gray-900">Takeoff Items</div>
+                      <div className="text-sm text-gray-600">
+                        {takeoffData.items?.length || 0} items found
                       </div>
-                      <p className="text-sm text-gray-700">{comment.content}</p>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              </div>
-
-              {(share.permissions === 'comment' || share.permissions === 'all') && (
-                <div className="p-4 border-t border-gray-200">
-                  <div className="space-y-3">
-                    <Textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Add a comment..."
-                      rows={3}
-                    />
-                    <Button
-                      onClick={handleAddComment}
-                      disabled={!newComment.trim() || saving}
-                      className="w-full"
-                    >
-                      {saving ? (
-                        <>
-                          <Clock className="h-4 w-4 mr-2 animate-spin" />
-                          Adding...
-                        </>
-                      ) : (
-                        <>
-                          <MessageSquare className="h-4 w-4 mr-2" />
-                          Add Comment
-                        </>
+                      {Array.isArray(takeoffData.items) && takeoffData.items.length > 0 && (
+                        <div className="space-y-2 mt-4">
+                          {takeoffData.items.slice(0, 10).map((item: any, index: number) => (
+                            <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                              <div className="font-medium text-sm">{item.description || item.name || 'Item'}</div>
+                              {item.quantity && (
+                                <div className="text-xs text-gray-600">
+                                  Quantity: {item.quantity} {item.unit || ''}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
-                    </Button>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <p className="text-sm text-gray-600">No takeoff analysis available</p>
+                    </div>
+                  )}
+                </TabsContent>
+                
+                <TabsContent value="quality" className="space-y-3">
+                  {qualityData ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-gray-900">Quality Analysis</div>
+                      <div className="text-sm text-gray-600">
+                        {Array.isArray(qualityData.issues) ? qualityData.issues.length : 0} issues found
+                      </div>
+                      {Array.isArray(qualityData.issues) && qualityData.issues.length > 0 && (
+                        <div className="space-y-2 mt-4">
+                          {qualityData.issues.slice(0, 10).map((issue: any, index: number) => (
+                            <div key={index} className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <div className="font-medium text-sm text-red-900">
+                                {issue.severity || issue.type || 'Issue'}
+                              </div>
+                              <div className="text-xs text-red-700 mt-1">{issue.description || issue.message}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <p className="text-sm text-gray-600">No quality analysis available</p>
+                    </div>
+                  )}
+                </TabsContent>
+                
+                <TabsContent value="comments" className="space-y-3">
+                  <div className="text-sm font-medium text-gray-900 mb-2">
+                    Comments ({drawings.filter(d => d.type === 'comment').length})
                   </div>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                  {drawings.filter(d => d.type === 'comment').length === 0 ? (
+                    <div className="text-center py-8">
+                      <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <p className="text-sm text-gray-600">No comments yet</p>
+                    </div>
+                  ) : (
+                    drawings
+                      .filter(d => d.type === 'comment')
+                      .map(comment => (
+                        <div key={comment.id} className="p-3 bg-white border border-gray-200 rounded-lg">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Badge variant="outline" className="text-xs">
+                              {comment.noteType || 'comment'}
+                            </Badge>
+                            <span className="text-xs text-gray-500">Page {comment.pageNumber}</span>
+                          </div>
+                          <p className="text-sm text-gray-800">{comment.notes}</p>
+                        </div>
+                      ))
+                  )}
+                </TabsContent>
+              </Tabs>
+            </div>
+          </div>
+        )}
+        
+        {!rightSidebarOpen && (
+          <button
+            onClick={() => setRightSidebarOpen(true)}
+            className="fixed right-4 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-l-lg px-2 py-4 shadow-md"
+          >
+            <ChevronLeft className="h-5 w-5 text-gray-600" />
+          </button>
+        )}
       </div>
+
+      {/* Comment Form Modal */}
+      {canComment && (
+        <CommentPinForm
+          open={commentFormOpen}
+          onOpenChange={setCommentFormOpen}
+          x={commentPosition.x}
+          y={commentPosition.y}
+          pageNumber={commentPosition.pageNumber}
+          onSave={handleCommentSave}
+        />
+      )}
     </div>
   )
 }

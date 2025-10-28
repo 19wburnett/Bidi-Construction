@@ -3,20 +3,17 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
-  Move, 
-  Square, 
-  Circle, 
-  Pencil, 
   MessageSquare,
   ZoomIn,
   ZoomOut,
   ChevronRight,
   ChevronLeft,
-  Eraser,
-  AlertTriangle
+  AlertTriangle,
+  X
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
+import CommentPopup from '@/components/comment-popup'
 
 export interface Viewport {
   zoom: number
@@ -31,9 +28,13 @@ interface FastPlanCanvasProps {
   rightSidebarOpen: boolean
   onRightSidebarToggle: () => void
   onCommentPinClick: (x: number, y: number, pageNumber: number) => void
+  onCommentClick?: (comment: Drawing) => void
+  goToPage?: number
+  scale?: number
+  onClearCache?: () => void
 }
 
-type DrawingTool = 'select' | 'rectangle' | 'circle' | 'line' | 'comment' | 'erase' | 'pencil'
+type DrawingTool = 'comment' | 'none'
 
 export default function FastPlanCanvas({
   pdfUrl,
@@ -41,16 +42,21 @@ export default function FastPlanCanvas({
   onDrawingsChange,
   rightSidebarOpen,
   onRightSidebarToggle,
-  onCommentPinClick
+  onCommentPinClick,
+  onCommentClick,
+  goToPage,
+  scale = 1.5,
+  onClearCache
 }: FastPlanCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 })
-  const [selectedTool, setSelectedTool] = useState<DrawingTool>('select')
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null)
+  const [selectedTool, setSelectedTool] = useState<DrawingTool>('comment')
   const [isPanning, setIsPanning] = useState(false)
   const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 })
+  const [selectedComment, setSelectedComment] = useState<Drawing | null>(null)
+  const [showCommentPopup, setShowCommentPopup] = useState(false)
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
   const [numPages, setNumPages] = useState(1) // Default to 1 page for drawing area
@@ -76,7 +82,7 @@ export default function FastPlanCanvas({
       setLoadingPages(new Set(loadingPagesRef.current))
       
       const page = await pdfDocument.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 1.5 })
+      const viewport = page.getViewport({ scale })
       
       // Create canvas for this page
       const canvas = document.createElement('canvas')
@@ -118,6 +124,13 @@ export default function FastPlanCanvas({
       setLoadingPages(new Set(loadingPagesRef.current))
     }
   }, [])
+
+  // Handle goToPage prop to navigate to a specific page
+  useEffect(() => {
+    if (goToPage && goToPage >= 1 && goToPage <= numPages) {
+      setCurrentPage(goToPage)
+    }
+  }, [goToPage, numPages])
 
   // Progressive PDF loading - load pages on demand
   useEffect(() => {
@@ -192,6 +205,28 @@ export default function FastPlanCanvas({
     loadPagesAroundCurrent()
   }, [currentPage, pdfLoaded, numPages, loadPage])
 
+  // Handle scale changes - clear and reload pages
+  useEffect(() => {
+    if (!pdfLoaded) return
+    
+    // Clear existing pages and reload with new scale
+    setPdfPages([])
+    loadedPagesRef.current.clear()
+    loadingPagesRef.current.clear()
+    setLoadedPages(new Set())
+    setLoadingPages(new Set())
+    
+    // Reload the current page and nearby pages
+    if (numPages > 0) {
+      const loadPagesAroundCurrent = () => {
+        for (let i = Math.max(1, currentPage - 1); i <= Math.min(numPages, currentPage + 1); i++) {
+          setTimeout(() => loadPage(i), (i - currentPage + 1) * 200)
+        }
+      }
+      loadPagesAroundCurrent()
+    }
+  }, [scale, pdfLoaded, numPages, currentPage, loadPage])
+
   // Render drawings on the drawing canvas
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
@@ -203,143 +238,43 @@ export default function FastPlanCanvas({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Save context state
-    ctx.save()
-
-    // Apply viewport transform
-    ctx.translate(viewport.panX, viewport.panY)
-    ctx.scale(viewport.zoom, viewport.zoom)
-
-    // Draw existing drawings for current page only
-    drawings.forEach(drawing => {
-      if (!drawing.isVisible || drawing.pageNumber !== currentPage) return
-
-      ctx.strokeStyle = drawing.style.color
-      ctx.fillStyle = `${drawing.style.color}20` // 20% opacity
-      ctx.lineWidth = drawing.style.strokeWidth / viewport.zoom
-
-      // No page offset needed since we only show current page
-      const x = drawing.geometry.x
-      const y = drawing.geometry.y
-
-      ctx.beginPath()
-
-      switch (drawing.type) {
-        case 'rectangle':
-          if (drawing.geometry.width && drawing.geometry.height) {
-            ctx.rect(x, y, drawing.geometry.width, drawing.geometry.height)
-            ctx.fill()
-            ctx.stroke()
-          }
-          break
-        case 'circle':
-          if (drawing.geometry.radius) {
-            ctx.arc(x, y, drawing.geometry.radius, 0, 2 * Math.PI)
-            ctx.fill()
-            ctx.stroke()
-          }
-          break
-        case 'line':
-          if (drawing.geometry.points && drawing.geometry.points.length >= 4) {
-            ctx.moveTo(drawing.geometry.points[0], drawing.geometry.points[1])
-            ctx.lineTo(drawing.geometry.points[2], drawing.geometry.points[3])
-            ctx.stroke()
-          }
-          break
-        case 'pencil':
-          if (drawing.geometry.points && drawing.geometry.points.length >= 2) {
-            ctx.beginPath()
-            ctx.moveTo(drawing.geometry.points[0], drawing.geometry.points[1])
-            for (let i = 2; i < drawing.geometry.points.length; i += 2) {
-              ctx.lineTo(drawing.geometry.points[i], drawing.geometry.points[i + 1])
-            }
-            ctx.stroke()
-          }
-          break
-        case 'comment':
-          // Draw comment pin
-          const pinRadius = 8 / viewport.zoom
-          const pinStemHeight = 15 / viewport.zoom
-          const pinBaseWidth = 10 / viewport.zoom
-
-          ctx.fillStyle = drawing.style.color
-          ctx.strokeStyle = 'white'
-          ctx.lineWidth = 2 / viewport.zoom
-
-          // Circle head
+    // Draw only comment drawings for current page
+    drawings
+      .filter(drawing => drawing.type === 'comment' && drawing.pageNumber === currentPage)
+      .forEach(drawing => {
+        // Check if geometry has valid x and y values
+        if (!drawing.geometry || typeof drawing.geometry.x === 'undefined' || typeof drawing.geometry.y === 'undefined') {
+          console.warn('Drawing missing valid geometry:', drawing)
+          return
+        }
+        
+        // Use world coordinates directly - the canvas transform handles the viewport
+        const worldX = drawing.geometry.x
+        const worldY = drawing.geometry.y
+        
+        // Draw comment bubble at world position
+        // Note: size is in world coordinates, actual pixel size will be scaled by canvas transform
+        const bubbleRadius = 12
+        
+        // Draw selection highlight if this comment is selected
+        if (selectedComment?.id === drawing.id) {
+          ctx.fillStyle = '#3b82f6'
           ctx.beginPath()
-          ctx.arc(x, y - pinStemHeight, pinRadius, 0, Math.PI * 2)
+          ctx.arc(worldX, worldY, bubbleRadius + 3, 0, Math.PI * 2)
           ctx.fill()
-          ctx.stroke()
+        }
+        
+        // Draw comment bubble
+        ctx.fillStyle = drawing.style.color
+        ctx.strokeStyle = 'white'
+        ctx.lineWidth = 2
 
-          // Stem
-          ctx.beginPath()
-          ctx.moveTo(x, y - pinStemHeight + pinRadius)
-          ctx.lineTo(x, y)
-          ctx.stroke()
-
-          // Base triangle
-          ctx.beginPath()
-          ctx.moveTo(x, y)
-          ctx.lineTo(x - pinBaseWidth / 2, y + pinBaseWidth / 2)
-          ctx.lineTo(x + pinBaseWidth / 2, y + pinBaseWidth / 2)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-          break
-      }
-    })
-
-    // Draw current drawing being created (only if on current page)
-    if (currentDrawing && currentDrawing.geometry && currentDrawing.pageNumber === currentPage) {
-      ctx.strokeStyle = currentDrawing.style?.color || '#ff6b35'
-      ctx.fillStyle = `${currentDrawing.style?.color || '#ff6b35'}20`
-      ctx.lineWidth = (currentDrawing.style?.strokeWidth || 2) / viewport.zoom
-
-      // No page offset needed since we only show current page
-      const x = currentDrawing.geometry.x
-      const y = currentDrawing.geometry.y
-
-      ctx.beginPath()
-
-      switch (currentDrawing.type) {
-        case 'rectangle':
-          if (currentDrawing.geometry.width && currentDrawing.geometry.height) {
-            ctx.rect(x, y, currentDrawing.geometry.width, currentDrawing.geometry.height)
-            ctx.fill()
-            ctx.stroke()
-          }
-          break
-        case 'circle':
-          if (currentDrawing.geometry.radius) {
-            ctx.arc(x, y, currentDrawing.geometry.radius, 0, 2 * Math.PI)
-            ctx.fill()
-            ctx.stroke()
-          }
-          break
-        case 'line':
-          if (currentDrawing.geometry.points && currentDrawing.geometry.points.length >= 4) {
-            ctx.moveTo(currentDrawing.geometry.points[0], currentDrawing.geometry.points[1])
-            ctx.lineTo(currentDrawing.geometry.points[2], currentDrawing.geometry.points[3])
-            ctx.stroke()
-          }
-          break
-        case 'pencil':
-          if (currentDrawing.geometry.points && currentDrawing.geometry.points.length >= 2) {
-            ctx.beginPath()
-            ctx.moveTo(currentDrawing.geometry.points[0], currentDrawing.geometry.points[1])
-            for (let i = 2; i < currentDrawing.geometry.points.length; i += 2) {
-              ctx.lineTo(currentDrawing.geometry.points[i], currentDrawing.geometry.points[i + 1])
-            }
-            ctx.stroke()
-          }
-          break
-      }
-    }
-
-    // Restore context state
-    ctx.restore()
-  }, [viewport, drawings, currentDrawing, currentPage])
+        ctx.beginPath()
+        ctx.arc(worldX, worldY, bubbleRadius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+      })
+  }, [drawings, currentPage, selectedComment])
 
   // Set canvas dimensions
   useEffect(() => {
@@ -365,11 +300,10 @@ export default function FastPlanCanvas({
         canvas.style.height = `${rect.height}px`
       }
       
-      // Set canvas style properties
+      // Canvas is positioned within its wrapper div
       canvas.style.position = 'absolute'
       canvas.style.top = '0'
       canvas.style.left = '0'
-      canvas.style.zIndex = '10' // Ensure it's above PDF canvas elements
     }
 
     resizeCanvas()
@@ -419,76 +353,17 @@ export default function FastPlanCanvas({
     }
   }, [viewport])
 
-  // Check if a point intersects with a drawing (only for current page)
-  const isPointInDrawing = useCallback((x: number, y: number, drawing: Drawing) => {
-    // Only check drawings on current page
-    if (drawing.pageNumber !== currentPage) return false
+  // Check if a point intersects with a comment (only for current page)
+  const isPointInComment = useCallback((worldX: number, worldY: number, drawing: Drawing) => {
+    // Only check comments on current page
+    if (drawing.pageNumber !== currentPage || drawing.type !== 'comment') return false
     
     const geom = drawing.geometry
-    // No page offset needed since we only show current page
-    const drawY = geom.y
-    const threshold = 5 / viewport.zoom // Click tolerance
-
-    switch (drawing.type) {
-      case 'rectangle':
-        if (!geom.width || !geom.height) return false
-        return x >= geom.x - threshold && 
-               x <= geom.x + geom.width + threshold &&
-               y >= drawY - threshold && 
-               y <= drawY + geom.height + threshold
-      
-      case 'circle':
-        if (!geom.radius) return false
-        const dist = Math.sqrt(Math.pow(x - geom.x, 2) + Math.pow(y - drawY, 2))
-        return dist <= geom.radius + threshold
-      
-      case 'line':
-        if (!geom.points || geom.points.length < 4) return false
-        // Check distance from point to line segment
-        const [x1, y1, x2, y2] = geom.points
-        // No page offset needed
-        const offsetY1 = y1
-        const offsetY2 = y2
-        const A = offsetY2 - offsetY1
-        const B = x1 - x2
-        const C = x2 * offsetY1 - x1 * offsetY2
-        const distToLine = Math.abs(A * x + B * y + C) / Math.sqrt(A * A + B * B)
-        // Also check if point is within the bounds of the line segment
-        const minX = Math.min(x1, x2)
-        const maxX = Math.max(x1, x2)
-        const minY = Math.min(offsetY1, offsetY2)
-        const maxY = Math.max(offsetY1, offsetY2)
-        return distToLine <= threshold && x >= minX - threshold && x <= maxX + threshold &&
-               y >= minY - threshold && y <= maxY + threshold
-      
-      case 'pencil':
-        if (!geom.points || geom.points.length < 4) return false
-        // Check distance from point to any line segment in the pencil path
-        for (let i = 0; i < geom.points.length - 2; i += 2) {
-          const [x1, y1, x2, y2] = [geom.points[i], geom.points[i + 1], geom.points[i + 2], geom.points[i + 3]]
-          const A = y2 - y1
-          const B = x1 - x2
-          const C = x2 * y1 - x1 * y2
-          const distToLine = Math.abs(A * x + B * y + C) / Math.sqrt(A * A + B * B)
-          const minX = Math.min(x1, x2)
-          const maxX = Math.max(x1, x2)
-          const minY = Math.min(y1, y2)
-          const maxY = Math.max(y1, y2)
-          if (distToLine <= threshold && x >= minX - threshold && x <= maxX + threshold &&
-              y >= minY - threshold && y <= maxY + threshold) {
-            return true
-          }
-        }
-        return false
-      
-      case 'comment':
-        const commentRadius = 15 / viewport.zoom
-        return Math.sqrt(Math.pow(x - geom.x, 2) + Math.pow(y - drawY + commentRadius, 2)) <= commentRadius
-      
-      default:
-        return false
-    }
-  }, [viewport.zoom, currentPage])
+    const threshold = 15 / viewport.zoom // Click tolerance for comment bubbles (scaled by zoom)
+    
+    const dist = Math.sqrt(Math.pow(worldX - geom.x, 2) + Math.pow(worldY - geom.y, 2))
+    return dist <= threshold
+  }, [viewport, currentPage])
 
   // Handle mouse events
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -499,61 +374,42 @@ export default function FastPlanCanvas({
     const screenX = e.clientX - rect.left
     const screenY = e.clientY - rect.top
     const world = screenToWorld(screenX, screenY)
-    // Always use current page since we only show one page at a time
     const pageNumber = currentPage
 
-    if (selectedTool === 'erase') {
-      // Find and remove drawing at this point
-      const clickedDrawing = drawings.find(d => 
-        d.pageNumber === pageNumber && isPointInDrawing(world.x, world.y, d)
+    if (selectedTool === 'comment') {
+      // Check if clicking on an existing comment
+      const clickedComment = drawings.find(d => 
+        d.type === 'comment' && d.pageNumber === pageNumber && isPointInComment(world.x, world.y, d)
       )
       
-      if (clickedDrawing) {
-        onDrawingsChange(drawings.filter(d => d.id !== clickedDrawing.id))
+      if (clickedComment) {
+        // Clicking on existing comment - show details
+        setSelectedComment(clickedComment)
+        setPopupPosition({ x: screenX, y: screenY })
+        setShowCommentPopup(true)
+        if (onCommentClick) {
+          onCommentClick(clickedComment)
+        }
+      } else {
+        // Place new comment pin
+        onCommentPinClick(world.x, world.y, pageNumber)
       }
-      return
-    }
-
-    if (selectedTool === 'select') {
+    } else if (selectedTool === 'none') {
       // Start panning
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
-    } else if (selectedTool === 'comment') {
-      // Place comment pin
-      onCommentPinClick(world.x, world.y, pageNumber)
-    } else {
-      // Start drawing
-      setIsDrawing(true)
-      setCurrentDrawing({
-        id: Date.now().toString(),
-        type: selectedTool as any,
-        geometry: {
-          x: world.x,
-          y: world.y,
-          width: 0,
-          height: 0,
-          radius: 0,
-          points: [world.x, world.y],
-        },
-        style: {
-          color: '#ff6b35',
-          strokeWidth: 2,
-          opacity: 1
-        },
-        pageNumber
-      })
     }
-  }, [selectedTool, screenToWorld, currentPage, onCommentPinClick, drawings, onDrawingsChange, isPointInDrawing])
+  }, [selectedTool, screenToWorld, currentPage, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const container = containerRef.current
-    if (!container) return
-
-    const rect = container.getBoundingClientRect()
-    const screenX = e.clientX - rect.left
-    const screenY = e.clientY - rect.top
-
     if (isPanning) {
+      const container = containerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+
       // Pan the viewport
       setViewport(prev => ({
         ...prev,
@@ -561,83 +417,14 @@ export default function FastPlanCanvas({
         panY: prev.panY + (screenY - lastPanPoint.y)
       }))
       setLastPanPoint({ x: screenX, y: screenY })
-    } else if (isDrawing && currentDrawing) {
-      const world = screenToWorld(screenX, screenY)
-      
-      if (currentDrawing.type === 'rectangle') {
-        setCurrentDrawing(prev => {
-          if (!prev || !prev.geometry) return prev
-          return {
-            ...prev,
-            geometry: {
-              ...prev.geometry,
-              width: world.x - (prev.geometry.x || 0),
-              height: world.y - (prev.geometry.y || 0)
-            }
-          }
-        })
-      } else if (currentDrawing.type === 'circle') {
-        const radius = Math.sqrt(
-          Math.pow(world.x - (currentDrawing.geometry?.x || 0), 2) + 
-          Math.pow(world.y - (currentDrawing.geometry?.y || 0), 2)
-        )
-        setCurrentDrawing(prev => {
-          if (!prev || !prev.geometry) return prev
-          return {
-            ...prev,
-            geometry: {
-              ...prev.geometry,
-              radius
-            }
-          }
-        })
-      } else if (currentDrawing.type === 'line') {
-        setCurrentDrawing(prev => {
-          if (!prev || !prev.geometry) return prev
-          return {
-            ...prev,
-            geometry: {
-              ...prev.geometry,
-              points: [(prev.geometry.x || 0), (prev.geometry.y || 0), world.x, world.y]
-            }
-          }
-        })
-      } else if (currentDrawing.type === 'pencil') {
-        setCurrentDrawing(prev => {
-          if (!prev || !prev.geometry) return prev
-          return {
-            ...prev,
-            geometry: {
-              ...prev.geometry,
-              points: [...(prev.geometry.points || []), world.x, world.y]
-            }
-          }
-        })
-      }
     }
-  }, [isPanning, isDrawing, currentDrawing, screenToWorld, lastPanPoint])
+  }, [isPanning, lastPanPoint])
 
   const handleMouseUp = useCallback(() => {
     if (isPanning) {
-      // End panning
       setIsPanning(false)
-    } else if (isDrawing && currentDrawing && currentDrawing.type && currentDrawing.type !== 'comment') {
-      // Save the drawing
-      if (currentDrawing.geometry && currentDrawing.style) {
-        const newDrawing: Drawing = {
-          id: currentDrawing.id || Date.now().toString(),
-          type: currentDrawing.type as any,
-          geometry: currentDrawing.geometry,
-          style: currentDrawing.style,
-          pageNumber: currentDrawing.pageNumber || 1
-        }
-        
-        onDrawingsChange([...drawings, newDrawing])
-      }
-      setCurrentDrawing(null)
-      setIsDrawing(false)
     }
-  }, [isPanning, isDrawing, currentDrawing, drawings, onDrawingsChange])
+  }, [isPanning])
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -672,50 +459,27 @@ export default function FastPlanCanvas({
             </div>
           )}
 
-          {/* Drawing Tools */}
+          {/* Comment Tool */}
           <div className="flex items-center space-x-1 border-r border-gray-200 pr-4">
-            <Button
-              variant={selectedTool === 'select' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('select')}
-            >
-              <Move className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={selectedTool === 'rectangle' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('rectangle')}
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={selectedTool === 'circle' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('circle')}
-            >
-              <Circle className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={selectedTool === 'line' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('line')}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
             <Button
               variant={selectedTool === 'comment' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setSelectedTool('comment')}
+              title="Add comment"
             >
-              <MessageSquare className="h-4 w-4" />
+              <MessageSquare className="h-4 w-4 mr-2" />
+              <span className="text-sm">Add Comment</span>
             </Button>
-            <Button
-              variant={selectedTool === 'erase' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('erase')}
-            >
-              <Eraser className="h-4 w-4" />
-            </Button>
+            {selectedTool === 'comment' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedTool('none')}
+                title="Pan view"
+              >
+                <span className="text-sm">Pan</span>
+              </Button>
+            )}
           </div>
 
           {/* Zoom Controls */}
@@ -786,8 +550,8 @@ export default function FastPlanCanvas({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         style={{ 
-          cursor: selectedTool === 'select' ? (isPanning ? 'grabbing' : 'grab') : 
-                 selectedTool === 'erase' ? 'grab' : 'crosshair'
+          cursor: selectedTool === 'none' ? (isPanning ? 'grabbing' : 'grab') : 
+                 selectedTool === 'comment' ? 'crosshair' : 'default'
         }}
       >
         {/* PDF Pages as Canvas Elements - Show only current page */}
@@ -857,22 +621,40 @@ export default function FastPlanCanvas({
         )}
 
         {/* Drawing Canvas Overlay */}
-        <canvas
-          ref={drawingCanvasRef}
-          className="absolute"
+        <div
+          className="absolute inset-0"
           style={{ 
             pointerEvents: 'auto',
-            width: '100%',
-            height: '100%',
             transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
             transformOrigin: '0 0',
-            zIndex: '10' // Ensure it's above PDF canvas elements
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-        />
+        >
+          <canvas
+            ref={drawingCanvasRef}
+            className="absolute"
+            style={{ 
+              width: '100%',
+              height: '100%',
+              zIndex: '10' // Ensure it's above PDF canvas elements
+            }}
+          />
+        </div>
+
+        {/* Comment Popup */}
+        {showCommentPopup && selectedComment && (
+          <CommentPopup
+            comment={selectedComment}
+            position={popupPosition}
+            onClose={() => {
+              setShowCommentPopup(false)
+              setSelectedComment(null)
+            }}
+          />
+        )}
       </div>
     </div>
   )

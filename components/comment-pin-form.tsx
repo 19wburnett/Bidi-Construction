@@ -63,15 +63,15 @@ export default function CommentPinForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="max-w-md p-6">
+        <DialogHeader className="pb-4">
           <DialogTitle className="flex items-center space-x-2">
             <MessageSquare className="h-5 w-5" />
             <span>Add Comment</span>
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 pt-2">
           <div className="text-sm text-gray-600">
             Position: Page {pageNumber} at ({Math.round(x)}, {Math.round(y)})
           </div>

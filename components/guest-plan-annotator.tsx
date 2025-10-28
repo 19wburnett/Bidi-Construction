@@ -141,16 +141,23 @@ export default function GuestPlanAnnotator({
 
   async function generatePdfUrl() {
     try {
+      // If planFile is already a full URL, use it directly
+      if (planFile.startsWith('http')) {
+        setPdfUrl(planFile)
+        return
+      }
+
       const supabase = createClient()
       
-      // Generate signed URL for the PDF file (works with private buckets)
+      // Try to generate signed URL for the PDF file
       const { data: urlData, error } = await supabase.storage
-        .from('plans')
+        .from('job-plans')
         .createSignedUrl(planFile, 3600) // 1 hour expiration
       
       if (error) {
         console.error('Error creating signed URL:', error)
-        setLoadError('Failed to generate PDF URL')
+        // Try to use the file path as-is (might be public)
+        setPdfUrl(planFile)
         return
       }
       
@@ -159,7 +166,8 @@ export default function GuestPlanAnnotator({
       }
     } catch (error) {
       console.error('Error generating PDF URL:', error)
-      setLoadError('Failed to generate PDF URL')
+      // Fallback: use the file path directly
+      setPdfUrl(planFile)
     }
   }
 
@@ -180,35 +188,18 @@ export default function GuestPlanAnnotator({
 
   async function loadAnnotations() {
     try {
-      const supabase = createClient()
+      // Simplified: Don't load annotations for now since the view doesn't exist
+      // You can implement this later when the database schema is set up
+      setAnnotations([])
       
-      // Load all annotations for this plan file
-      const { data, error } = await supabase
-        .from('plan_annotations_with_guest_context')
-        .select('*')
-        .eq('plan_file_url', planFile)
-        .order('created_at', { ascending: false })
-
-      if (error) {
-        console.error('Error loading annotations:', error)
-        return
-      }
-
-      // Transform to component format
-      const loadedAnnotations: Annotation[] = (data || []).map((ann: any) => ({
-        id: ann.id,
-        x: ann.x_coordinate,
-        y: ann.y_coordinate,
-        pageNumber: 1, // TODO: Add page number support
-        content: ann.content,
-        annotation_type: ann.annotation_type,
-        author_name: ann.author_name || 'Unknown',
-        author_type: ann.author_type || 'guest',
-        created_at: ann.created_at
-      }))
-
-      setAnnotations(loadedAnnotations)
-
+      // If you want to load annotations later, use plan_drawings table instead:
+      // const supabase = createClient()
+      // const { data, error } = await supabase
+      //   .from('plan_drawings')
+      //   .select('*')
+      //   .eq('plan_id', planId)
+      //   .order('created_at', { ascending: false })
+      
     } catch (error) {
       console.error('Error loading annotations:', error)
     }

@@ -94,64 +94,9 @@ export default function PricingPage() {
       {/* Pricing Cards */}
       <section className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
         <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            
-            {/* Per Job Pricing */}
-            <Card className="relative border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:scale-105 transition-all duration-300 hover:shadow-xl bg-white dark:bg-gray-950">
-              <CardHeader className="text-center pb-4">
-                <div className="flex justify-center mb-4">
-                  <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-semibold border border-gray-200">
-                    Pay Per Use
-                  </div>
-                </div>
-                <CardTitle className="text-2xl font-bold text-black dark:text-white mb-2">
-                  Per Job Request
-                </CardTitle>
-                <CardDescription className="text-gray-600 dark:text-gray-300 mb-4 font-medium">
-                  Perfect for occasional users or testing the platform
-                </CardDescription>
-                <div className="text-center">
-                  <span className="text-4xl font-bold text-black dark:text-white">$20</span>
-                  <span className="text-gray-600 dark:text-gray-400 ml-2 font-medium">per job request</span>
-                </div>
-                <div className="mt-2">
-                  <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-semibold">
-                    BETA PRICING
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <ul className="space-y-3">
-                  <li className="flex items-center space-x-3">
-                    <CheckCircle className="h-5 w-5 text-gray-700 flex-shrink-0" />
-                    <span className="text-gray-700 dark:text-gray-300">Send job to up to 10 subcontractors</span>
-                  </li>
-                  <li className="flex items-center space-x-3">
-                    <CheckCircle className="h-5 w-5 text-gray-700 flex-shrink-0" />
-                    <span className="text-gray-700 dark:text-gray-300">Receive organized bids</span>
-                  </li>
-                  <li className="flex items-center space-x-3">
-                    <CheckCircle className="h-5 w-5 text-gray-700 flex-shrink-0" />
-                    <span className="text-gray-700 dark:text-gray-300">Email notifications</span>
-                  </li>
-                  <li className="flex items-center space-x-3">
-                    <CheckCircle className="h-5 w-5 text-gray-700 flex-shrink-0" />
-                    <span className="text-gray-700 dark:text-gray-300">Basic support</span>
-                  </li>
-                </ul>
-                <div className="pt-4">
-                  <Link href="/auth/signup">
-                    <Button variant="orange" className="w-full text-lg py-3 font-bold">
-                      Start with Per Job
-                      <ArrowRight className="ml-2 h-5 w-5" />
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-
+          <div className="flex justify-center">
             {/* Monthly Pricing */}
-            <Card className="relative hover:scale-105 transition-all duration-300 hover:shadow-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+            <Card className="relative hover:scale-105 transition-all duration-300 hover:shadow-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 w-full max-w-lg">
               <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
                 <div className="bg-black text-white px-4 py-1 rounded-full text-sm font-semibold flex items-center space-x-1">
                   <Crown className="h-4 w-4" />
@@ -261,24 +206,12 @@ export default function PricingPage() {
           
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg dark:text-white">Can I switch between plans?</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600 dark:text-gray-300">
-                Yes! You can upgrade from per-job to monthly at any time, or downgrade 
-                from monthly to per-job at your next billing cycle.
-              </p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader>
               <CardTitle className="text-lg dark:text-white">Is there a free trial?</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-gray-600 dark:text-gray-300">
                 During our beta period, we're offering special pricing instead of a free trial. 
-                You can start with our per-job pricing at just $20 to test the platform.
+                You can cancel your subscription at any time.
               </p>
             </CardContent>
           </Card>
