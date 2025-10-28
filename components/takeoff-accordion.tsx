@@ -49,6 +49,7 @@ interface TakeoffAccordionProps {
     notes?: string
   }
   onItemHighlight?: (bbox: BoundingBox) => void
+  onPageNavigate?: (page: number) => void
 }
 
 // Category configuration for styling
@@ -61,7 +62,7 @@ const CATEGORY_CONFIG = {
   other: { color: 'bg-gray-100 text-gray-800', label: 'Other', icon: '📦' }
 }
 
-export default function TakeoffAccordion({ items, summary, onItemHighlight }: TakeoffAccordionProps) {
+export default function TakeoffAccordion({ items, summary, onItemHighlight, onPageNavigate }: TakeoffAccordionProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [openCategories, setOpenCategories] = useState<string[]>([])
   const [openSubcategories, setOpenSubcategories] = useState<string[]>([])
@@ -242,7 +243,11 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight }: Ta
                                             {item.name}
                                           </h5>
                                           {item.bounding_box && (
-                                            <Badge variant="outline" className="text-xs">
+                                            <Badge 
+                                              variant="outline" 
+                                              className="text-xs cursor-pointer hover:bg-blue-50 transition-colors"
+                                              onClick={() => onPageNavigate?.(item.bounding_box!.page)}
+                                            >
                                               <MapPin className="h-3 w-3 mr-1" />
                                               Page {item.bounding_box.page}
                                             </Badge>

@@ -35,6 +35,7 @@ import { Drawing } from '@/lib/canvas-utils'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
+import TakeoffAccordion from '@/components/takeoff-accordion'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
@@ -60,6 +61,11 @@ export default function EnhancedPlanViewer() {
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
+  
+  // Handle page navigation from takeoff items
+  const handlePageNavigate = useCallback((page: number) => {
+    setGoToPage(page)
+  }, [])
   
   // PDF quality settings
   const [qualityMode, setQualityMode] = useState<QualityMode>('balanced')
@@ -682,11 +688,51 @@ export default function EnhancedPlanViewer() {
                               </p>
                             </div>
                           )}
-                          <div className="text-center py-8">
-                            <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                            <h4 className="font-semibold text-gray-900 mb-2">No takeoff data yet</h4>
-                            <p className="text-sm text-gray-600">Run AI analysis to generate takeoff items</p>
-                          </div>
+                          {takeoffResults ? (
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-gray-900">
+                                  Takeoff Results ({takeoffResults.results?.items?.length || 0} items)
+                                </h4>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {takeoffResults.consensus?.confidence ? 
+                                      `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
+                                      'High confidence'
+                                    }
+                                  </Badge>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const dataStr = JSON.stringify(takeoffResults, null, 2)
+                                      const dataBlob = new Blob([dataStr], { type: 'application/json' })
+                                      const url = URL.createObjectURL(dataBlob)
+                                      const link = document.createElement('a')
+                                      link.href = url
+                                      link.download = `takeoff-analysis-${planId}.json`
+                                      link.click()
+                                      URL.revokeObjectURL(url)
+                                    }}
+                                  >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    Download JSON
+                                  </Button>
+                                </div>
+                              </div>
+                              <TakeoffAccordion
+                                items={takeoffResults.results?.items || []}
+                                summary={takeoffResults.results?.summary}
+                                onPageNavigate={handlePageNavigate}
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-center py-8">
+                              <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                              <h4 className="font-semibold text-gray-900 mb-2">No takeoff data yet</h4>
+                              <p className="text-sm text-gray-600">Run AI analysis to generate takeoff items</p>
+                            </div>
+                          )}
                         </div>
                       </TabsContent>
                       

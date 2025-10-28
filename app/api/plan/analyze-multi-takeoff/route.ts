@@ -178,6 +178,9 @@ ${imageCount > 1 ? 'The images are sequential pages from the same construction p
 }
 
 export async function POST(request: NextRequest) {
+  // DEPRECATED: This endpoint is deprecated. Use /api/plan/analyze-enhanced instead.
+  // This endpoint will be removed in a future version.
+  
   let planId: string | undefined
   let userId: string | undefined
   
@@ -200,129 +203,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: planId and images' }, { status: 400 })
     }
 
-    // Verify plan ownership
-    const { data: plan, error: planError } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('id', planId)
-      .eq('user_id', userId)
-      .single()
+    // Redirect to enhanced endpoint
+    console.warn('DEPRECATED: /api/plan/analyze-multi-takeoff is deprecated. Use /api/plan/analyze-enhanced instead.')
+    
+    // Forward the request to the enhanced endpoint
+    const enhancedResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/plan/analyze-enhanced`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        planId,
+        images,
+        taskType: 'takeoff',
+        jobType: 'residential' // Default to residential for backward compatibility
+      })
+    })
 
-    if (planError || !plan) {
-      return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
+    if (!enhancedResponse.ok) {
+      const errorData = await enhancedResponse.json()
+      return NextResponse.json({ error: errorData.error || 'Analysis failed' }, { status: enhancedResponse.status })
     }
 
-    // Build prompts
-    const systemPrompt = buildSystemPrompt()
-    const userPrompt = buildUserPrompt(images.length)
-
-    // Call all 3 AI providers in parallel
-    console.log('Starting multi-provider analysis...')
-    const responses = await analyzeWithAllProviders(images, {
-      systemPrompt,
-      userPrompt,
-      maxTokens: 4096,
-      temperature: 0.2
-    })
-
-    console.log(`Received ${responses.length} responses from AI providers`)
-
-    // Parse each response
-    const parsedResults = responses.map(resp => {
-      try {
-        let jsonText = resp.content
-        
-        // Remove markdown code blocks if present (```json ... ``` or ``` ... ```)
-        const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-        if (codeBlockMatch) {
-          jsonText = codeBlockMatch[1]
-        }
-        
-        // Trim whitespace
-        jsonText = jsonText.trim()
-        
-        // Skip if empty
-        if (!jsonText) {
-          console.error(`${resp.provider} returned empty content`)
-          return { provider: resp.provider, items: [], summary: {} }
-        }
-        
-        const data = JSON.parse(jsonText)
-        console.log(`${resp.provider}: ${data.items?.length || 0} items`)
-        return {
-          provider: resp.provider,
-          items: data.items || [],
-          summary: data.summary || {}
-        }
-      } catch (error) {
-        console.error(`Failed to parse ${resp.provider} response:`, error)
-        console.error(`First 200 chars of response:`, resp.content.substring(0, 200))
-        return { provider: resp.provider, items: [], summary: {} }
-      }
-    })
-
-    // Merge results
-    const merged = mergeAnalysisResults(
-      parsedResults.find(r => r.provider === 'openai')?.items || [],
-      parsedResults.find(r => r.provider === 'claude')?.items || [],
-      parsedResults.find(r => r.provider === 'gemini')?.items || []
-    )
-
-    console.log(`Merged to ${merged.items.length} unique items (removed ${merged.metadata.duplicatesRemoved} duplicates)`)
-
-    // Save to database
-    await supabase.from('plan_takeoff_analysis').insert({
-      plan_id: planId,
-      user_id: userId,
-      items: merged.items,
-      summary: {
-        ...merged.metadata,
-        by_provider: parsedResults.map(r => ({
-          provider: r.provider,
-          item_count: r.items.length
-        })),
-        total_items: merged.items.length
-      },
-      ai_model: 'multi-provider',
-      confidence_scores: {},
-      processing_time_ms: 0
-    })
-
-    // Update plan status
-    await supabase
-      .from('plans')
-      .update({ 
-        takeoff_analysis_status: 'completed',
-        has_takeoff_analysis: true 
-      })
-      .eq('id', planId)
-
+    const enhancedData = await enhancedResponse.json()
+    
+    // Transform response to match old format for backward compatibility
     return NextResponse.json({
       success: true,
-      items: merged.items,
+      items: enhancedData.results?.items || [],
       summary: {
-        total_items: merged.items.length,
-        ...merged.metadata
+        total_items: enhancedData.results?.items?.length || 0,
+        ...enhancedData.results?.summary
       }
     })
 
   } catch (error) {
     console.error('Multi-provider takeoff analysis error:', error)
-    
-    // Mark plan as failed if we have the planId and userId
-    if (planId && userId) {
-      try {
-        const supabase = await createServerSupabaseClient()
-        await supabase
-          .from('plans')
-          .update({ takeoff_analysis_status: 'failed' })
-          .eq('id', planId)
-          .eq('user_id', userId)
-      } catch (updateError) {
-        console.error('Error updating plan status to failed:', updateError)
-      }
-    }
-    
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Analysis failed' },
       { status: 500 }
