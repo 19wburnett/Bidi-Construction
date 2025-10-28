@@ -354,16 +354,43 @@ export default function EnhancedPlanViewer() {
     const pdf = await loadingTask.promise
     
     const images: string[] = []
-    const pagesToConvert = pdf.numPages // Process all pages for comprehensive analysis
+    // Smart page selection for comprehensive analysis while staying under payload limits
+    const totalPages = pdf.numPages
+    let pagesToProcess: number[] = []
+    
+    if (totalPages <= 10) {
+      // Small document - process all pages
+      pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
+    } else {
+      // Large document - select key pages strategically
+      // Always include: first page, last page, and every 3rd page in between
+      pagesToProcess = [1] // First page
+      
+      // Add every 3rd page (2, 5, 8, 11, etc.) up to page 20
+      for (let i = 2; i <= Math.min(totalPages, 20); i += 3) {
+        pagesToProcess.push(i)
+      }
+      
+      // Add the last page if not already included
+      if (totalPages > 1 && !pagesToProcess.includes(totalPages)) {
+        pagesToProcess.push(totalPages)
+      }
+      
+      // Limit to 10 pages max for payload size
+      pagesToProcess = pagesToProcess.slice(0, 10)
+    }
+    
+    const pagesToConvert = pagesToProcess.length
     
     setAnalysisProgress({ step: `Converting ${pagesToConvert} page${pagesToConvert > 1 ? 's' : ''} to images...`, percent: 30 })
     
-    for (let pageNum = 1; pageNum <= pagesToConvert; pageNum++) {
-      const progress = 30 + (pageNum / pagesToConvert) * 30
-      setAnalysisProgress({ step: `Processing page ${pageNum} of ${pagesToConvert}...`, percent: progress })
+    for (let i = 0; i < pagesToProcess.length; i++) {
+      const pageNum = pagesToProcess[i]
+      const progress = 30 + ((i + 1) / pagesToProcess.length) * 30
+      setAnalysisProgress({ step: `Processing page ${pageNum} of ${totalPages} (${i + 1}/${pagesToProcess.length} selected)...`, percent: progress })
       
       const page = await pdf.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 1.5 }) // Reduced from 2 to 1.5 for smaller file size
+      const viewport = page.getViewport({ scale: 1.0 }) // Further reduced to 1.0 for smaller payload
       
       // Create temporary canvas
       const canvas = document.createElement('canvas')
@@ -382,8 +409,8 @@ export default function EnhancedPlanViewer() {
         viewport: viewport
       }).promise
       
-      // Convert to JPEG base64 with lower quality (0.7 instead of 0.9) to reduce size
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7)
+      // Convert to JPEG base64 with very low quality to reduce payload size
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.5)
       
       // Remove data URL prefix to just get base64 string for smaller payload
       const base64 = dataUrl.split(',')[1]
@@ -424,7 +451,18 @@ export default function EnhancedPlanViewer() {
       })
 
       if (!analysisResponse.ok) {
-        const errorData = await analysisResponse.json()
+        if (analysisResponse.status === 413) {
+          throw new Error('Request too large - try with fewer pages or lower quality images')
+        }
+        
+        let errorData
+        try {
+          errorData = await analysisResponse.json()
+        } catch (parseError) {
+          // If JSON parsing fails, it might be an HTML error page
+          const errorText = await analysisResponse.text()
+          throw new Error(`Server error (${analysisResponse.status}): ${errorText.substring(0, 200)}...`)
+        }
         throw new Error(errorData.error || 'Analysis failed')
       }
 
