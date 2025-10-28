@@ -123,7 +123,18 @@ export default function JobsPage() {
   const shareViaEmail = () => {
     const subject = encodeURIComponent(`Check out this job posting: ${jobTitle}`)
     const body = encodeURIComponent(`${jobDescription}\n\nView the full posting: ${jobUrl}`)
-    window.location.href = `mailto:?subject=${subject}&body=${body}`
+    
+    // Try multiple methods to ensure email opens
+    try {
+      // Method 1: Direct window.location
+      window.location.href = `mailto:?subject=${subject}&body=${body}`
+    } catch (error) {
+      // Method 2: Create temporary link and click it
+      const mailtoLink = `mailto:?subject=${subject}&body=${body}`
+      const tempLink = document.createElement('a')
+      tempLink.href = mailtoLink
+      tempLink.click()
+    }
   }
 
   // Show confirmation page
