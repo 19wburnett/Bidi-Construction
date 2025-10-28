@@ -6,12 +6,12 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { analysisId: string } }
+  { params }: { params: Promise<{ analysisId: string }> }
 ) {
   let userId: string | undefined
 
   try {
-    const { analysisId } = params
+    const { analysisId } = await params
 
     if (!analysisId) {
       return NextResponse.json(
