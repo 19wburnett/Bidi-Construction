@@ -202,16 +202,20 @@ export class EnhancedConsensusEngine {
     // Group similar items
     const itemGroups = this.groupSimilarItems(allItems)
     
+    console.log(`Processing ${allItems.length} total items in ${itemGroups.length} groups`)
+    
     // Build consensus for each group
     const consensusItems: TakeoffItem[] = []
     
-    itemGroups.forEach(group => {
+    itemGroups.forEach((group, index) => {
       const consensusItem = this.buildItemConsensus(group, parsedResults)
       if (consensusItem) {
         consensusItems.push(consensusItem)
+        console.log(`Group ${index + 1}: "${consensusItem.name}" - ${(consensusItem.confidence * 100).toFixed(1)}% confidence`)
       }
     })
     
+    console.log(`Returning ${consensusItems.length} items (filtered from ${allItems.length} total)`)
     return consensusItems
   }
 
@@ -385,7 +389,10 @@ export class EnhancedConsensusEngine {
     )
     
     // Only return items that meet high confidence threshold
-    if (finalConfidence < this.highConfidenceThreshold) return null
+    if (finalConfidence < this.highConfidenceThreshold) {
+      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < threshold ${(this.highConfidenceThreshold * 100).toFixed(1)}%`)
+      return null
+    }
     
     return {
       ...base,

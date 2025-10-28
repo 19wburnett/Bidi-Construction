@@ -402,8 +402,10 @@ export default function EnhancedPlanViewer() {
       
       // Show success after a brief delay
       setTimeout(() => {
-        alert(`Takeoff analysis complete! Found ${analysisData.items?.length || 0} items in ${elapsedTime}s.`)
+        const itemCount = analysisData.results?.items?.length || 0
+        alert(`Takeoff analysis complete! Found ${itemCount} items in ${elapsedTime}s.`)
         setAnalysisProgress({ step: '', percent: 0 })
+        setIsRunningTakeoff(false)
       }, 500)
       
     } catch (error) {
@@ -412,7 +414,8 @@ export default function EnhancedPlanViewer() {
       alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setIsRunningTakeoff(false)
     } finally {
-      // Keep running state until success message is shown
+      // Analysis completed, but keep running state until success message is shown
+      // setIsRunningTakeoff(false) is called in the success timeout
     }
   }
 
