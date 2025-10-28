@@ -111,7 +111,7 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
                 <div className="flex items-center justify-center space-x-2 text-center">
                   <Calendar className="h-5 w-5 text-blue-600" />
                   <span className="font-semibold text-blue-600">
-                    Launching November 1st, 2024
+                    Launching November 1st, 2025
                   </span>
                 </div>
 
