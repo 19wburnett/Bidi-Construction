@@ -124,36 +124,12 @@ export default function JobsPage() {
     const subject = encodeURIComponent(`Check out this job posting: ${jobTitle}`)
     const body = encodeURIComponent(`${jobDescription}\n\nView the full posting: ${jobUrl}`)
     
-    console.log('Email share clicked')
-    console.log('Subject:', subject)
-    console.log('Body:', body)
-    console.log('Job URL:', jobUrl)
-    
     // Create the mailto link
     const mailtoLink = `mailto:?subject=${subject}&body=${body}`
-    console.log('Mailto link:', mailtoLink)
     
-    // Try to open email client
-    try {
-      // Method 1: Use window.open instead of window.location
-      window.open(mailtoLink, '_self')
-    } catch (error) {
-      console.error('Method 1 failed:', error)
-      try {
-        // Method 2: Create temporary link and click it
-        const tempLink = document.createElement('a')
-        tempLink.href = mailtoLink
-        tempLink.target = '_self'
-        document.body.appendChild(tempLink)
-        tempLink.click()
-        document.body.removeChild(tempLink)
-        console.log('Method 2 executed')
-      } catch (error2) {
-        console.error('Method 2 failed:', error2)
-        // Method 3: Fallback to window.location
-        window.location.href = mailtoLink
-      }
-    }
+    // Use window.location.href to open the default email client
+    // This should open the user's default email application
+    window.location.href = mailtoLink
   }
 
   // Show confirmation page
