@@ -748,7 +748,7 @@ export default function EnhancedPlanViewer() {
                         <div className="space-y-4">
                           <Button 
                             className="w-full" 
-                            onClick={handleRunAITakeoff}
+                            onClick={() => handleRunAITakeoff()}
                             disabled={isRunningTakeoff}
                           >
                             {isRunningTakeoff ? (
