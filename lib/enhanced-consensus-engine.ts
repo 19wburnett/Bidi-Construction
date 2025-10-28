@@ -211,7 +211,7 @@ export class EnhancedConsensusEngine {
       const consensusItem = this.buildItemConsensus(group, parsedResults)
       if (consensusItem) {
         consensusItems.push(consensusItem)
-        console.log(`Group ${index + 1}: "${consensusItem.name}" - ${(consensusItem.confidence * 100).toFixed(1)}% confidence`)
+        console.log(`Group ${index + 1}: "${consensusItem.name}" - ${((consensusItem.confidence || 0) * 100).toFixed(1)}% confidence`)
       }
     })
     
