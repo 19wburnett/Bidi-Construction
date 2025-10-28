@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import Navbar from '@/components/navbar'
 import Footer from '@/components/footer'
 import { 
@@ -24,12 +25,19 @@ import {
   Building2,
   Upload,
   FileText,
-  Send
+  Send,
+  Copy,
+  Check,
+  Twitter,
+  Linkedin,
+  Facebook
 } from 'lucide-react'
 
 export default function JobsPage() {
   const [showApplicationForm, setShowApplicationForm] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -81,6 +89,41 @@ export default function JobsPage() {
       coverLetter: '',
       resume: null
     })
+  }
+
+  const jobUrl = typeof window !== 'undefined' ? window.location.href : ''
+  const jobTitle = "Software Engineer - Build the Future of Construction Tech with Bidi"
+  const jobDescription = "Join Bidi and help modernize how general contractors and subcontractors connect, bid, and build. We're growing 200% month-over-month and need exceptional engineers!"
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(jobUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy: ', err)
+    }
+  }
+
+  const shareToLinkedIn = () => {
+    const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(jobUrl)}`
+    window.open(linkedinUrl, '_blank')
+  }
+
+  const shareToTwitter = () => {
+    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(jobTitle)}&url=${encodeURIComponent(jobUrl)}`
+    window.open(twitterUrl, '_blank')
+  }
+
+  const shareToFacebook = () => {
+    const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(jobUrl)}`
+    window.open(facebookUrl, '_blank')
+  }
+
+  const shareViaEmail = () => {
+    const subject = encodeURIComponent(`Check out this job posting: ${jobTitle}`)
+    const body = encodeURIComponent(`${jobDescription}\n\nView the full posting: ${jobUrl}`)
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
   }
 
   // Show confirmation page
@@ -378,7 +421,12 @@ export default function JobsPage() {
                   Apply Now
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="lg" className="w-full sm:w-auto">
+                <Button 
+                  onClick={() => setShowShareModal(true)}
+                  variant="outline" 
+                  size="lg" 
+                  className="w-full sm:w-auto"
+                >
                   <Mail className="mr-2 h-4 w-4" />
                   Share
                 </Button>
@@ -641,6 +689,83 @@ export default function JobsPage() {
       </div>
 
       <Footer />
+
+      {/* Share Modal */}
+      <Dialog open={showShareModal} onOpenChange={setShowShareModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share this job posting</DialogTitle>
+            <DialogDescription>
+              Help us spread the word about this opportunity!
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Copy Link */}
+            <div className="flex items-center space-x-2">
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="link" className="sr-only">
+                  Link
+                </Label>
+                <Input
+                  id="link"
+                  defaultValue={jobUrl}
+                  readOnly
+                  className="h-9"
+                />
+              </div>
+              <Button 
+                type="submit" 
+                size="sm" 
+                className="px-3"
+                onClick={copyToClipboard}
+              >
+                <span className="sr-only">Copy</span>
+                {copied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+            
+            {/* Social Media Share Buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                onClick={shareToLinkedIn}
+                className="w-full"
+              >
+                <Linkedin className="mr-2 h-4 w-4" />
+                LinkedIn
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareToTwitter}
+                className="w-full"
+              >
+                <Twitter className="mr-2 h-4 w-4" />
+                Twitter
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareToFacebook}
+                className="w-full"
+              >
+                <Facebook className="mr-2 h-4 w-4" />
+                Facebook
+              </Button>
+              <Button
+                variant="outline"
+                onClick={shareViaEmail}
+                className="w-full"
+              >
+                <Mail className="mr-2 h-4 w-4" />
+                Email
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
