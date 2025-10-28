@@ -106,6 +106,7 @@ export default function EnhancedPlanViewer() {
   useEffect(() => {
     if (user && jobId && planId) {
       loadData()
+      loadExistingAnalysis()
     }
   }, [user, jobId, planId])
 
@@ -206,6 +207,42 @@ export default function EnhancedPlanViewer() {
       console.error('Error loading data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Load existing takeoff analysis
+  const loadExistingAnalysis = async () => {
+    if (!planId || !user) return
+
+    try {
+      const { data: takeoffAnalysis } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (takeoffAnalysis) {
+        console.log('Loading existing takeoff analysis:', takeoffAnalysis)
+        setTakeoffResults({
+          success: true,
+          planId,
+          taskType: 'takeoff',
+          processingTime: takeoffAnalysis.processing_time_ms || 0,
+          consensus: {
+            confidence: takeoffAnalysis.confidence_scores?.consensus || 0.8,
+            consensusCount: takeoffAnalysis.confidence_scores?.model_count || 1
+          },
+          results: {
+            items: takeoffAnalysis.items || [],
+            summary: takeoffAnalysis.summary || {}
+          }
+        })
+      }
+    } catch (error) {
+      console.log('No existing takeoff analysis found')
     }
   }
 
@@ -317,7 +354,7 @@ export default function EnhancedPlanViewer() {
     const pdf = await loadingTask.promise
     
     const images: string[] = []
-    const pagesToConvert = Math.min(pdf.numPages, 5) // Limit to 5 pages
+    const pagesToConvert = pdf.numPages // Process all pages for comprehensive analysis
     
     setAnalysisProgress({ step: `Converting ${pagesToConvert} page${pagesToConvert > 1 ? 's' : ''} to images...`, percent: 30 })
     
@@ -400,10 +437,8 @@ export default function EnhancedPlanViewer() {
       
       setTakeoffResults(analysisData)
       
-      // Show success after a brief delay
+      // Complete analysis
       setTimeout(() => {
-        const itemCount = analysisData.results?.items?.length || 0
-        alert(`Takeoff analysis complete! Found ${itemCount} items in ${elapsedTime}s.`)
         setAnalysisProgress({ step: '', percent: 0 })
         setIsRunningTakeoff(false)
       }, 500)

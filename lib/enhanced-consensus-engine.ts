@@ -45,7 +45,7 @@ export class EnhancedConsensusEngine {
   private similarityThreshold = 0.7 // For item/issue name/description
   private quantityTolerance = 0.2 // 20% tolerance for quantity comparison
   private consensusThreshold = parseFloat(process.env.CONSENSUS_THRESHOLD || '0.4') // 40% consensus required (lowered for more items)
-  private highConfidenceThreshold = 0.6 // 60% minimum confidence for results (lowered for more inclusive results)
+  private highConfidenceThreshold = 0.4 // 40% minimum confidence for results (very inclusive for comprehensive takeoffs)
   private minModelsForHighConfidence = 3 // Minimum 3 models required for high-confidence mode
 
   private modelStrengths: Record<string, string[]> = {
@@ -378,10 +378,10 @@ export class EnhancedConsensusEngine {
     // Calculate weighted average confidence
     const avgModelConfidence = group.reduce((sum, item) => sum + (item.confidence || 0.5), 0) / group.length
     
-    // Enhanced confidence calculation for better coverage
-    const consensusBoost = Math.min(consensusScore * 0.3, 0.3) // +30% when models agree
-    const agreementBoost = group.length >= 2 ? 0.15 : 0 // +15% when 2+ models agree
-    const modelCountBoost = Math.min(parsedResults.length / 8, 0.15) // Boost for more models
+    // Enhanced confidence calculation for comprehensive coverage
+    const consensusBoost = Math.min(consensusScore * 0.4, 0.4) // +40% when models agree
+    const agreementBoost = group.length >= 1 ? 0.2 : 0 // +20% when 1+ models agree (very inclusive)
+    const modelCountBoost = Math.min(parsedResults.length / 6, 0.2) // Boost for more models
     
     const finalConfidence = Math.min(
       avgModelConfidence + consensusBoost + agreementBoost + modelCountBoost, 
