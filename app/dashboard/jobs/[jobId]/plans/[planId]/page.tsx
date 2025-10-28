@@ -334,7 +334,7 @@ export default function EnhancedPlanViewer() {
   }, [commentPosition, drawings, handleDrawingsChange])
 
   // Helper function to convert PDF to images using PDF.js
-  const convertPdfToImages = async () => {
+  const convertPdfToImages = async (retryCount = 0) => {
     if (!planUrl) throw new Error('Plan URL not available')
     
     setAnalysisProgress({ step: 'Loading PDF pages...', percent: 10 })
@@ -358,7 +358,10 @@ export default function EnhancedPlanViewer() {
     const totalPages = pdf.numPages
     let pagesToProcess: number[] = []
     
-    if (totalPages <= 10) {
+    // Adjust page count based on retry attempts
+    const maxPages = retryCount === 0 ? 5 : (retryCount === 1 ? 3 : 1)
+    
+    if (totalPages <= maxPages) {
       // Small document - process all pages
       pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
     } else {
@@ -376,8 +379,8 @@ export default function EnhancedPlanViewer() {
         pagesToProcess.push(totalPages)
       }
       
-      // Limit to 10 pages max for payload size
-      pagesToProcess = pagesToProcess.slice(0, 10)
+      // Limit based on retry count
+      pagesToProcess = pagesToProcess.slice(0, maxPages)
     }
     
     const pagesToConvert = pagesToProcess.length
@@ -390,7 +393,7 @@ export default function EnhancedPlanViewer() {
       setAnalysisProgress({ step: `Processing page ${pageNum} of ${totalPages} (${i + 1}/${pagesToProcess.length} selected)...`, percent: progress })
       
       const page = await pdf.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 1.0 }) // Further reduced to 1.0 for smaller payload
+      const viewport = page.getViewport({ scale: 0.8 }) // Very small scale for minimal payload
       
       // Create temporary canvas
       const canvas = document.createElement('canvas')
@@ -409,8 +412,8 @@ export default function EnhancedPlanViewer() {
         viewport: viewport
       }).promise
       
-      // Convert to JPEG base64 with very low quality to reduce payload size
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.5)
+      // Convert to JPEG base64 with extremely low quality to minimize payload
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.3)
       
       // Remove data URL prefix to just get base64 string for smaller payload
       const base64 = dataUrl.split(',')[1]
@@ -421,8 +424,8 @@ export default function EnhancedPlanViewer() {
     return images
   }
 
-  // Handle AI takeoff analysis
-  const handleRunAITakeoff = async () => {
+  // Handle AI takeoff analysis with retry mechanism
+  const handleRunAITakeoff = async (retryCount = 0) => {
     if (!plan || !planUrl) {
       alert('Plan not loaded yet')
       return
@@ -433,7 +436,7 @@ export default function EnhancedPlanViewer() {
 
     try {
       // Step 1: Convert PDF to images (0-70%)
-      const images = await convertPdfToImages()
+      const images = await convertPdfToImages(retryCount)
 
       // Step 2: Send to AI (70-90%)
       setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75 })
@@ -484,7 +487,20 @@ export default function EnhancedPlanViewer() {
     } catch (error) {
       console.error('Error running AI takeoff:', error)
       setAnalysisProgress({ step: '', percent: 0 })
-      alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      
+      // If it's a 413 error, automatically retry with fewer pages
+      if (error instanceof Error && error.message.includes('Request too large') && retryCount < 2) {
+        console.log(`Retrying with fewer pages (attempt ${retryCount + 1})`)
+        setIsRunningTakeoff(false)
+        setTimeout(() => {
+          handleRunAITakeoff(retryCount + 1)
+        }, 1000)
+        return
+      } else if (error instanceof Error && error.message.includes('Request too large')) {
+        alert(`Request still too large even with 1 page. The document may be too complex.`)
+      } else {
+        alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
       setIsRunningTakeoff(false)
     } finally {
       // Analysis completed, but keep running state until success message is shown
