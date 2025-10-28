@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Map project_type to job type: Commercial -> commercial, all others -> residential
+      // Map project_type to job type: Commercial -> commercial, all others -> residential (fixed TypeScript)
       const projectType = (plan as any).jobs?.project_type
       finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
     }
