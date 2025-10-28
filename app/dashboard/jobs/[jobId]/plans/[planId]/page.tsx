@@ -694,31 +694,12 @@ export default function EnhancedPlanViewer() {
                                 <h4 className="font-semibold text-gray-900">
                                   Takeoff Results ({takeoffResults.results?.items?.length || 0} items)
                                 </h4>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-xs">
-                                    {takeoffResults.consensus?.confidence ? 
-                                      `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
-                                      'High confidence'
-                                    }
-                                  </Badge>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      const dataStr = JSON.stringify(takeoffResults, null, 2)
-                                      const dataBlob = new Blob([dataStr], { type: 'application/json' })
-                                      const url = URL.createObjectURL(dataBlob)
-                                      const link = document.createElement('a')
-                                      link.href = url
-                                      link.download = `takeoff-analysis-${planId}.json`
-                                      link.click()
-                                      URL.revokeObjectURL(url)
-                                    }}
-                                  >
-                                    <Download className="h-4 w-4 mr-2" />
-                                    Download JSON
-                                  </Button>
-                                </div>
+                                <Badge variant="outline" className="text-xs">
+                                  {takeoffResults.consensus?.confidence ? 
+                                    `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
+                                    'High confidence'
+                                  }
+                                </Badge>
                               </div>
                               <TakeoffAccordion
                                 items={takeoffResults.results?.items || []}

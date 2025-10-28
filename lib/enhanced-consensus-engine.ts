@@ -44,8 +44,8 @@ export interface SpecializedInsight {
 export class EnhancedConsensusEngine {
   private similarityThreshold = 0.7 // For item/issue name/description
   private quantityTolerance = 0.2 // 20% tolerance for quantity comparison
-  private consensusThreshold = parseFloat(process.env.CONSENSUS_THRESHOLD || '0.6') // 60% consensus required
-  private highConfidenceThreshold = 0.8 // 80% minimum confidence for high-quality results
+  private consensusThreshold = parseFloat(process.env.CONSENSUS_THRESHOLD || '0.4') // 40% consensus required (lowered for more items)
+  private highConfidenceThreshold = 0.6 // 60% minimum confidence for results (lowered for more inclusive results)
   private minModelsForHighConfidence = 3 // Minimum 3 models required for high-confidence mode
 
   private modelStrengths: Record<string, string[]> = {
@@ -374,10 +374,10 @@ export class EnhancedConsensusEngine {
     // Calculate weighted average confidence
     const avgModelConfidence = group.reduce((sum, item) => sum + (item.confidence || 0.5), 0) / group.length
     
-    // Enhanced confidence calculation for 80-90% target
-    const consensusBoost = Math.min(consensusScore * 0.2, 0.2) // +20% when 3+ models agree
-    const agreementBoost = group.length >= 4 ? 0.1 : 0 // +10% when 4+ models agree
-    const modelCountBoost = Math.min(parsedResults.length / 10, 0.1) // Boost for more models
+    // Enhanced confidence calculation for better coverage
+    const consensusBoost = Math.min(consensusScore * 0.3, 0.3) // +30% when models agree
+    const agreementBoost = group.length >= 2 ? 0.15 : 0 // +15% when 2+ models agree
+    const modelCountBoost = Math.min(parsedResults.length / 8, 0.15) // Boost for more models
     
     const finalConfidence = Math.min(
       avgModelConfidence + consensusBoost + agreementBoost + modelCountBoost, 
@@ -410,9 +410,9 @@ export class EnhancedConsensusEngine {
     const providers = group.map(issue => issue.ai_provider || 'unknown')
     
     const avgModelConfidence = group.reduce((sum, issue) => sum + (issue.confidence || 0.5), 0) / group.length
-    const consensusBoost = Math.min(consensusScore * 0.2, 0.2)
-    const agreementBoost = group.length >= 4 ? 0.1 : 0
-    const modelCountBoost = Math.min(parsedResults.length / 10, 0.1)
+    const consensusBoost = Math.min(consensusScore * 0.3, 0.3)
+    const agreementBoost = group.length >= 2 ? 0.15 : 0
+    const modelCountBoost = Math.min(parsedResults.length / 8, 0.15)
     
     const finalConfidence = Math.min(
       avgModelConfidence + consensusBoost + agreementBoost + modelCountBoost,
