@@ -454,14 +454,14 @@ export default function JobsPage() {
                     About Bidi
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-gray-700 dark:text-gray-300">
-                    At Bidi, we're modernizing how general contractors and subcontractors connect, bid, and build—eliminating the chaos of email chains and spreadsheet bidding with intelligent plan analysis and bid-leveling tools that save teams hours every day.
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    We're growing 200% month-over-month and need exceptional engineers to help build technology transforming a trillion-dollar industry.
-                  </p>
-                </CardContent>
+                    <CardContent className="space-y-4">
+                      <p className="text-gray-700 dark:text-gray-300">
+                        Construction moves fast—but the tools haven't kept up. At Bidi, we're helping general contractors spend less time buried in spreadsheets and more time building. Our platform reads plans, organizes bids, and levels them automatically so teams can make smarter decisions without the chaos.
+                      </p>
+                      <p className="text-gray-700 dark:text-gray-300">
+                        We're growing 200% month-over-month and looking for exceptional engineers to help build technology transforming a trillion-dollar industry.
+                      </p>
+                    </CardContent>
               </Card>
 
               {/* Why Join Us */}
