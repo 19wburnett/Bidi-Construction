@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Map project_type to job type: Commercial -> commercial, all others -> residential
-      const projectType = plan.jobs?.project_type
+      const projectType = (plan as any).jobs?.project_type
       finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
     }
 
