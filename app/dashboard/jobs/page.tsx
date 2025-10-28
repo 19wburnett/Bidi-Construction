@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import UnderConstructionModal from '@/components/under-construction-modal'
 import { 
   Building2, 
   Plus, 
@@ -43,17 +42,7 @@ export default function JobsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('created_at')
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
   const supabase = createClient()
-
-  const handleNewJobClick = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setShowUnderConstruction(true)
-  }
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
-  }
 
   useEffect(() => {
     if (user) {
@@ -184,10 +173,12 @@ export default function JobsPage() {
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Jobs</h1>
               <p className="text-gray-600">Manage your construction projects</p>
             </div>
-            <Button onClick={handleNewJobClick}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Job
-            </Button>
+            <Link href="/dashboard/jobs/new">
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                New Job
+              </Button>
+            </Link>
           </div>
         </motion.div>
 
@@ -267,10 +258,12 @@ export default function JobsPage() {
                   }
                 </p>
                 {!searchTerm && statusFilter === 'all' && (
-                  <Button onClick={handleNewJobClick}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Your First Job
-                  </Button>
+                  <Link href="/dashboard/jobs/new">
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Your First Job
+                    </Button>
+                  </Link>
                 )}
               </motion.div>
             ) : (
@@ -351,12 +344,6 @@ export default function JobsPage() {
           </AnimatePresence>
         </motion.div>
       </div>
-
-      {/* Under Construction Modal */}
-      <UnderConstructionModal 
-        isOpen={showUnderConstruction}
-        onClose={handleCloseModal}
-      />
     </motion.div>
   )
 }

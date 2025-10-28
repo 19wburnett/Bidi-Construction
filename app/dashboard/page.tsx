@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import UnderConstructionModal from '@/components/under-construction-modal'
 import { 
   Building2, 
   Plus, 
@@ -66,17 +65,7 @@ export default function DashboardPage() {
     pendingBids: 0
   })
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([])
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
   const supabase = createClient()
-
-  const handleNewJobClick = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setShowUnderConstruction(true)
-  }
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
-  }
 
   useEffect(() => {
     if (user) {
@@ -280,20 +269,21 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <motion.div
-                    whileHover="hover"
-                    whileTap="tap"
-                    variants={cardHover}
-                    onClick={handleNewJobClick}
-                  >
-                    <Card className="cursor-pointer border-2 border-dashed border-gray-300 hover:border-orange-500 transition-colors">
-                      <CardContent className="p-6 text-center">
-                        <Plus className="h-8 w-8 mx-auto mb-3 text-orange-600" />
-                        <h3 className="font-semibold text-gray-900 mb-1">Create New Job</h3>
-                        <p className="text-sm text-gray-600">Start a new construction project</p>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
+                  <Link href="/dashboard/jobs/new">
+                    <motion.div
+                      whileHover="hover"
+                      whileTap="tap"
+                      variants={cardHover}
+                    >
+                      <Card className="cursor-pointer border-2 border-dashed border-gray-300 hover:border-orange-500 transition-colors">
+                        <CardContent className="p-6 text-center">
+                          <Plus className="h-8 w-8 mx-auto mb-3 text-orange-600" />
+                          <h3 className="font-semibold text-gray-900 mb-1">Create New Job</h3>
+                          <p className="text-sm text-gray-600">Start a new construction project</p>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  </Link>
                   
                   <Link href="/dashboard/jobs">
                     <motion.div
@@ -539,12 +529,6 @@ export default function DashboardPage() {
           </motion.div>
         </motion.div>
       </div>
-
-      {/* Under Construction Modal */}
-      <UnderConstructionModal 
-        isOpen={showUnderConstruction}
-        onClose={handleCloseModal}
-      />
     </motion.div>
   )
 }

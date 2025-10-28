@@ -54,10 +54,8 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
   const handleClose = () => {
     if (isAdmin) {
       onClose()
-    } else {
-      // For non-admin users, close the tab
-      window.close()
     }
+    // Non-admin users cannot close the modal
   }
 
   const handleEmailClick = () => {
@@ -141,21 +139,13 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
                 </div>
 
                 {/* Action buttons */}
-                <div className="flex flex-col space-y-2">
-                  {isAdmin ? (
+                {isAdmin && (
+                  <div className="flex flex-col space-y-2">
                     <Button onClick={onClose} className="w-full">
                       Continue as Admin
                     </Button>
-                  ) : (
-                    <Button 
-                      onClick={handleClose} 
-                      variant="destructive" 
-                      className="w-full"
-                    >
-                      Close Tab
-                    </Button>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Admin indicator */}
                 {isAdmin && (

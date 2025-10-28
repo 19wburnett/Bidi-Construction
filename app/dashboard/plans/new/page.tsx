@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import UnderConstructionModal from '@/components/under-construction-modal'
 import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
@@ -25,16 +24,6 @@ export default function UploadPlanPage() {
     projectLocation: ''
   })
   const [error, setError] = useState<string | null>(null)
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
-
-  // Show under construction modal on page load
-  useEffect(() => {
-    setShowUnderConstruction(true)
-  }, [])
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
-  }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -310,12 +299,6 @@ export default function UploadPlanPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Under Construction Modal */}
-      <UnderConstructionModal 
-        isOpen={showUnderConstruction}
-        onClose={handleCloseModal}
-      />
     </div>
   )
 }

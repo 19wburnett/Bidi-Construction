@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import { PostHogProvider } from '@/components/posthog-provider'
 import { ThemeProvider } from 'next-themes'
+import UnderConstructionModal from '@/components/under-construction-modal'
 
 interface AuthContextType {
   user: User | null
@@ -27,6 +28,7 @@ export const useAuth = () => {
 export function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
   const supabase = useRef(createClient()).current
   const initialized = useRef(false)
 
@@ -44,8 +46,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
         if (mounted) {
           if (error) {
             setUser(null)
+            setShowUnderConstruction(false)
           } else {
             setUser(user)
+            if (user) {
+              setShowUnderConstruction(true)
+            }
           }
           setLoading(false)
         }
@@ -65,8 +71,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
           // Only update on actual auth state changes, not on token refresh
           if (event === 'SIGNED_IN' && session?.user) {
             setUser(session.user)
+            setShowUnderConstruction(true)
           } else if (event === 'SIGNED_OUT') {
             setUser(null)
+            setShowUnderConstruction(false)
           } else if (event === 'TOKEN_REFRESHED' && session?.user) {
             // Silently refresh token without triggering re-render if user is same
             if (user?.id !== session.user.id) {
@@ -90,11 +98,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({ user, loading }), [user, loading])
 
+  const handleCloseModal = () => {
+    setShowUnderConstruction(false)
+  }
+
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <AuthContext.Provider value={contextValue}>
         <PostHogProviderWrapper>
           {children}
+          <UnderConstructionModal 
+            isOpen={showUnderConstruction}
+            onClose={handleCloseModal}
+          />
         </PostHogProviderWrapper>
       </AuthContext.Provider>
     </ThemeProvider>

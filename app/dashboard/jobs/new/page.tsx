@@ -11,7 +11,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import UnderConstructionModal from '@/components/under-construction-modal'
 import { 
   Building2, 
   ArrowLeft, 
@@ -53,23 +52,13 @@ export default function NewJobPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
 
-  // Show under construction modal on page load
-  useEffect(() => {
-    setShowUnderConstruction(true)
-  }, [])
-
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     setError('') // Clear error on input change
-  }
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -332,12 +321,6 @@ export default function NewJobPage() {
           </ul>
         </motion.div>
       </div>
-
-      {/* Under Construction Modal */}
-      <UnderConstructionModal 
-        isOpen={showUnderConstruction}
-        onClose={handleCloseModal}
-      />
     </motion.div>
   )
 }

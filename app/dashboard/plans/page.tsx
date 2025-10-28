@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import UnderConstructionModal from '@/components/under-construction-modal'
 import { 
   FileText, 
   Plus, 
@@ -66,16 +65,6 @@ export default function PlansPage() {
   const [allowComments, setAllowComments] = useState(true)
   const [allowDrawings, setAllowDrawings] = useState(true)
   const [linkCopied, setLinkCopied] = useState(false)
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
-
-  const handleUploadPlanClick = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setShowUnderConstruction(true)
-  }
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
-  }
 
   useEffect(() => {
     if (user) {
@@ -206,13 +195,12 @@ export default function PlansPage() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Plans</h1>
             <p className="text-gray-600 dark:text-gray-300">Manage your construction plans and takeoffs</p>
           </div>
-          <Button 
-            onClick={handleUploadPlanClick}
-            className="bg-orange-500 hover:bg-orange-600"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Upload Plan
-          </Button>
+          <Link href="/dashboard/plans/new">
+            <Button className="bg-orange-500 hover:bg-orange-600">
+              <Plus className="h-4 w-4 mr-2" />
+              Upload Plan
+            </Button>
+          </Link>
         </div>
 
         {/* Search */}
@@ -491,12 +479,6 @@ export default function PlansPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Under Construction Modal */}
-      <UnderConstructionModal 
-        isOpen={showUnderConstruction}
-        onClose={handleCloseModal}
-      />
     </div>
   )
 }
