@@ -35,6 +35,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const initialized = useRef(false)
   const pathname = usePathname()
 
+  // Check if modal should show based on user status and current page
+  const shouldShowModal = (user: User | null, adminStatus: boolean, currentPath: string) => {
+    if (!user) return false
+    
+    // Always show for admins
+    if (adminStatus) return true
+    
+    // Don't show on careers page for non-admin users
+    if (currentPath === '/careers') return false
+    
+    // Show for all other pages
+    return true
+  }
+
   useEffect(() => {
     if (initialized.current) return // Prevent multiple initializations
     
@@ -60,20 +74,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         console.error('Error checking admin status:', err)
         return false
       }
-    }
-
-    // Check if modal should show based on user status and current page
-    const shouldShowModal = (user: User | null, adminStatus: boolean, currentPath: string) => {
-      if (!user) return false
-      
-      // Always show for admins
-      if (adminStatus) return true
-      
-      // Don't show on careers page for non-admin users
-      if (currentPath === '/careers') return false
-      
-      // Show for all other pages
-      return true
     }
 
     // Initial auth check
