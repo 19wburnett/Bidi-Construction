@@ -44,7 +44,9 @@ export interface SpecializedInsight {
 export class EnhancedConsensusEngine {
   private similarityThreshold = 0.7 // For item/issue name/description
   private quantityTolerance = 0.2 // 20% tolerance for quantity comparison
-  private consensusThreshold = parseFloat(process.env.CONSENSUS_THRESHOLD || '0.6') // 60% consensus required
+  private consensusThreshold = parseFloat(process.env.CONSENSUS_THRESHOLD || '0.4') // 40% consensus required (lowered for more items)
+  private highConfidenceThreshold = 0.4 // 40% minimum confidence for results (very inclusive for comprehensive takeoffs)
+  private minModelsForHighConfidence = 3 // Minimum 3 models required for high-confidence mode
 
   private modelStrengths: Record<string, string[]> = {
     'gpt-5': ['general_analysis', 'comprehensive_coverage', 'detailed_descriptions', 'advanced_reasoning'],
@@ -76,6 +78,12 @@ export class EnhancedConsensusEngine {
     
     if (parsedResults.length < 2) {
       throw new Error('Need at least 2 valid responses for consensus analysis')
+    }
+
+    // Check if we have enough models for high-confidence mode
+    const isHighConfidenceMode = parsedResults.length >= this.minModelsForHighConfidence
+    if (!isHighConfidenceMode) {
+      console.warn(`Only ${parsedResults.length} models available, high-confidence mode requires ${this.minModelsForHighConfidence}+ models`)
     }
 
     // Extract items and issues from all models
@@ -194,16 +202,20 @@ export class EnhancedConsensusEngine {
     // Group similar items
     const itemGroups = this.groupSimilarItems(allItems)
     
+    console.log(`Processing ${allItems.length} total items in ${itemGroups.length} groups`)
+    
     // Build consensus for each group
     const consensusItems: TakeoffItem[] = []
     
-    itemGroups.forEach(group => {
+    itemGroups.forEach((group, index) => {
       const consensusItem = this.buildItemConsensus(group, parsedResults)
       if (consensusItem) {
         consensusItems.push(consensusItem)
+        console.log(`Group ${index + 1}: "${consensusItem.name}" - ${((consensusItem.confidence || 0) * 100).toFixed(1)}% confidence`)
       }
     })
     
+    console.log(`Returning ${consensusItems.length} items (filtered from ${allItems.length} total)`)
     return consensusItems
   }
 
@@ -353,7 +365,7 @@ export class EnhancedConsensusEngine {
     const consensusScore = group.length / parsedResults.length
     
     // Only include items with sufficient consensus (60% threshold)
-    if (consensusScore < 0.6) return null
+    if (consensusScore < this.consensusThreshold) return null
     
     const base = group[0]
     const providers = group.map(item => item.ai_provider || 'unknown')
@@ -364,18 +376,30 @@ export class EnhancedConsensusEngine {
       sum + (item.quantity * (item.confidence || 0.5)), 0) / totalWeight
     
     // Calculate weighted average confidence
-    const avgConfidence = group.reduce((sum, item) => sum + (item.confidence || 0.5), 0) / group.length
+    const avgModelConfidence = group.reduce((sum, item) => sum + (item.confidence || 0.5), 0) / group.length
     
-    // Boost confidence for consensus items
-    const consensusBoost = Math.min(consensusScore * 0.2, 0.2)
-    const finalConfidence = Math.min(avgConfidence + consensusBoost, 1.0)
+    // Enhanced confidence calculation for comprehensive coverage
+    const consensusBoost = Math.min(consensusScore * 0.4, 0.4) // +40% when models agree
+    const agreementBoost = group.length >= 1 ? 0.2 : 0 // +20% when 1+ models agree (very inclusive)
+    const modelCountBoost = Math.min(parsedResults.length / 6, 0.2) // Boost for more models
+    
+    const finalConfidence = Math.min(
+      avgModelConfidence + consensusBoost + agreementBoost + modelCountBoost, 
+      0.95 // Cap at 95% to leave room for manual verification
+    )
+    
+    // Only return items that meet high confidence threshold
+    if (finalConfidence < this.highConfidenceThreshold) {
+      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < threshold ${(this.highConfidenceThreshold * 100).toFixed(1)}%`)
+      return null
+    }
     
     return {
       ...base,
       quantity: Math.round(weightedQuantity * 100) / 100,
       confidence: finalConfidence,
       ai_provider: providers.length > 1 ? 'consensus' : providers[0],
-      notes: `Consensus from ${providers.join(', ')} (${consensusScore.toFixed(1)} agreement)${base.notes ? ` | ${base.notes}` : ''}`
+      notes: `High-confidence consensus from ${providers.join(', ')} (${consensusScore.toFixed(1)} agreement, ${(finalConfidence * 100).toFixed(0)}% confidence)${base.notes ? ` | ${base.notes}` : ''}`
     }
   }
 
@@ -387,14 +411,23 @@ export class EnhancedConsensusEngine {
     if (group.length === 0) return null
     
     const consensusScore = group.length / parsedResults.length
-    if (consensusScore < 0.6) return null
+    if (consensusScore < this.consensusThreshold) return null
     
     const base = group[0]
     const providers = group.map(issue => issue.ai_provider || 'unknown')
     
-    const avgConfidence = group.reduce((sum, issue) => sum + (issue.confidence || 0.5), 0) / group.length
-    const consensusBoost = Math.min(consensusScore * 0.2, 0.2)
-    const finalConfidence = Math.min(avgConfidence + consensusBoost, 1.0)
+    const avgModelConfidence = group.reduce((sum, issue) => sum + (issue.confidence || 0.5), 0) / group.length
+    const consensusBoost = Math.min(consensusScore * 0.3, 0.3)
+    const agreementBoost = group.length >= 2 ? 0.15 : 0
+    const modelCountBoost = Math.min(parsedResults.length / 8, 0.15)
+    
+    const finalConfidence = Math.min(
+      avgModelConfidence + consensusBoost + agreementBoost + modelCountBoost,
+      0.95
+    )
+    
+    // Only return issues that meet high confidence threshold
+    if (finalConfidence < this.highConfidenceThreshold) return null
     
     return {
       ...base,

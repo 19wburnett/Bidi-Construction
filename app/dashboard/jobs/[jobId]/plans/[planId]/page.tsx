@@ -36,6 +36,7 @@ import { CommentPersistence } from '@/lib/comment-persistence'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
+import TakeoffAccordion from '@/components/takeoff-accordion'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
@@ -64,6 +65,11 @@ export default function EnhancedPlanViewer() {
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
+  
+  // Handle page navigation from takeoff items
+  const handlePageNavigate = useCallback((page: number) => {
+    setGoToPage(page)
+  }, [])
   
   // PDF quality settings
   const [qualityMode, setQualityMode] = useState<QualityMode>('balanced')
@@ -102,6 +108,7 @@ export default function EnhancedPlanViewer() {
   useEffect(() => {
     if (user && jobId && planId) {
       loadData()
+      loadExistingAnalysis()
     }
   }, [user, jobId, planId])
 
@@ -214,6 +221,42 @@ export default function EnhancedPlanViewer() {
       console.error('Error loading data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Load existing takeoff analysis
+  const loadExistingAnalysis = async () => {
+    if (!planId || !user) return
+
+    try {
+      const { data: takeoffAnalysis } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (takeoffAnalysis) {
+        console.log('Loading existing takeoff analysis:', takeoffAnalysis)
+        setTakeoffResults({
+          success: true,
+          planId,
+          taskType: 'takeoff',
+          processingTime: takeoffAnalysis.processing_time_ms || 0,
+          consensus: {
+            confidence: takeoffAnalysis.confidence_scores?.consensus || 0.8,
+            consensusCount: takeoffAnalysis.confidence_scores?.model_count || 1
+          },
+          results: {
+            items: takeoffAnalysis.items || [],
+            summary: takeoffAnalysis.summary || {}
+          }
+        })
+      }
+    } catch (error) {
+      console.log('No existing takeoff analysis found')
     }
   }
 
@@ -384,7 +427,7 @@ export default function EnhancedPlanViewer() {
   }, [drawings, handleDrawingsChange, user])
 
   // Helper function to convert PDF to images using PDF.js
-  const convertPdfToImages = async () => {
+  const convertPdfToImages = async (retryCount = 0) => {
     if (!planUrl) throw new Error('Plan URL not available')
     
     setAnalysisProgress({ step: 'Loading PDF pages...', percent: 10 })
@@ -404,16 +447,46 @@ export default function EnhancedPlanViewer() {
     const pdf = await loadingTask.promise
     
     const images: string[] = []
-    const pagesToConvert = Math.min(pdf.numPages, 5) // Limit to 5 pages
+    // Smart page selection for comprehensive analysis while staying under payload limits
+    const totalPages = pdf.numPages
+    let pagesToProcess: number[] = []
+    
+    // Adjust page count based on retry attempts
+    const maxPages = retryCount === 0 ? 5 : (retryCount === 1 ? 3 : 1)
+    
+    if (totalPages <= maxPages) {
+      // Small document - process all pages
+      pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
+    } else {
+      // Large document - select key pages strategically
+      // Always include: first page, last page, and every 3rd page in between
+      pagesToProcess = [1] // First page
+      
+      // Add every 3rd page (2, 5, 8, 11, etc.) up to page 20
+      for (let i = 2; i <= Math.min(totalPages, 20); i += 3) {
+        pagesToProcess.push(i)
+      }
+      
+      // Add the last page if not already included
+      if (totalPages > 1 && !pagesToProcess.includes(totalPages)) {
+        pagesToProcess.push(totalPages)
+      }
+      
+      // Limit based on retry count
+      pagesToProcess = pagesToProcess.slice(0, maxPages)
+    }
+    
+    const pagesToConvert = pagesToProcess.length
     
     setAnalysisProgress({ step: `Converting ${pagesToConvert} page${pagesToConvert > 1 ? 's' : ''} to images...`, percent: 30 })
     
-    for (let pageNum = 1; pageNum <= pagesToConvert; pageNum++) {
-      const progress = 30 + (pageNum / pagesToConvert) * 30
-      setAnalysisProgress({ step: `Processing page ${pageNum} of ${pagesToConvert}...`, percent: progress })
+    for (let i = 0; i < pagesToProcess.length; i++) {
+      const pageNum = pagesToProcess[i]
+      const progress = 30 + ((i + 1) / pagesToProcess.length) * 30
+      setAnalysisProgress({ step: `Processing page ${pageNum} of ${totalPages} (${i + 1}/${pagesToProcess.length} selected)...`, percent: progress })
       
       const page = await pdf.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 1.5 }) // Reduced from 2 to 1.5 for smaller file size
+      const viewport = page.getViewport({ scale: 0.8 }) // Very small scale for minimal payload
       
       // Create temporary canvas
       const canvas = document.createElement('canvas')
@@ -432,8 +505,8 @@ export default function EnhancedPlanViewer() {
         viewport: viewport
       }).promise
       
-      // Convert to JPEG base64 with lower quality (0.7 instead of 0.9) to reduce size
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7)
+      // Convert to JPEG base64 with extremely low quality to minimize payload
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.3)
       
       // Remove data URL prefix to just get base64 string for smaller payload
       const base64 = dataUrl.split(',')[1]
@@ -444,8 +517,8 @@ export default function EnhancedPlanViewer() {
     return images
   }
 
-  // Handle AI takeoff analysis
-  const handleRunAITakeoff = async () => {
+  // Handle AI takeoff analysis with retry mechanism
+  const handleRunAITakeoff = async (retryCount = 0) => {
     if (!plan || !planUrl) {
       alert('Plan not loaded yet')
       return
@@ -456,7 +529,7 @@ export default function EnhancedPlanViewer() {
 
     try {
       // Step 1: Convert PDF to images (0-70%)
-      const images = await convertPdfToImages()
+      const images = await convertPdfToImages(retryCount)
 
       // Step 2: Send to AI (70-90%)
       setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75 })
@@ -474,7 +547,18 @@ export default function EnhancedPlanViewer() {
       })
 
       if (!analysisResponse.ok) {
-        const errorData = await analysisResponse.json()
+        if (analysisResponse.status === 413) {
+          throw new Error('Request too large - try with fewer pages or lower quality images')
+        }
+        
+        let errorData
+        try {
+          errorData = await analysisResponse.json()
+        } catch (parseError) {
+          // If JSON parsing fails, it might be an HTML error page
+          const errorText = await analysisResponse.text()
+          throw new Error(`Server error (${analysisResponse.status}): ${errorText.substring(0, 200)}...`)
+        }
         throw new Error(errorData.error || 'Analysis failed')
       }
 
@@ -487,19 +571,33 @@ export default function EnhancedPlanViewer() {
       
       setTakeoffResults(analysisData)
       
-      // Show success after a brief delay
+      // Complete analysis
       setTimeout(() => {
-        alert(`Takeoff analysis complete! Found ${analysisData.items?.length || 0} items in ${elapsedTime}s.`)
         setAnalysisProgress({ step: '', percent: 0 })
+        setIsRunningTakeoff(false)
       }, 500)
       
     } catch (error) {
       console.error('Error running AI takeoff:', error)
       setAnalysisProgress({ step: '', percent: 0 })
-      alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      
+      // If it's a 413 error, automatically retry with fewer pages
+      if (error instanceof Error && error.message.includes('Request too large') && retryCount < 2) {
+        console.log(`Retrying with fewer pages (attempt ${retryCount + 1})`)
+        setIsRunningTakeoff(false)
+        setTimeout(() => {
+          handleRunAITakeoff(retryCount + 1)
+        }, 1000)
+        return
+      } else if (error instanceof Error && error.message.includes('Request too large')) {
+        alert(`Request still too large even with 1 page. The document may be too complex.`)
+      } else {
+        alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
       setIsRunningTakeoff(false)
     } finally {
-      // Keep running state until success message is shown
+      // Analysis completed, but keep running state until success message is shown
+      // setIsRunningTakeoff(false) is called in the success timeout
     }
   }
 
@@ -743,7 +841,7 @@ export default function EnhancedPlanViewer() {
                         <div className="space-y-4">
                           <Button 
                             className="w-full" 
-                            onClick={handleRunAITakeoff}
+                            onClick={() => handleRunAITakeoff()}
                             disabled={isRunningTakeoff}
                           >
                             {isRunningTakeoff ? (
@@ -775,11 +873,32 @@ export default function EnhancedPlanViewer() {
                               </p>
                             </div>
                           )}
-                          <div className="text-center py-8">
-                            <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                            <h4 className="font-semibold text-gray-900 mb-2">No takeoff data yet</h4>
-                            <p className="text-sm text-gray-600">Run AI analysis to generate takeoff items</p>
-                          </div>
+                          {takeoffResults ? (
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-gray-900">
+                                  Takeoff Results ({takeoffResults.results?.items?.length || 0} items)
+                                </h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {takeoffResults.consensus?.confidence ? 
+                                    `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
+                                    'High confidence'
+                                  }
+                                </Badge>
+                              </div>
+                              <TakeoffAccordion
+                                items={takeoffResults.results?.items || []}
+                                summary={takeoffResults.results?.summary}
+                                onPageNavigate={handlePageNavigate}
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-center py-8">
+                              <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                              <h4 className="font-semibold text-gray-900 mb-2">No takeoff data yet</h4>
+                              <p className="text-sm text-gray-600">Run AI analysis to generate takeoff items</p>
+                            </div>
+                          )}
                         </div>
                       </TabsContent>
                       

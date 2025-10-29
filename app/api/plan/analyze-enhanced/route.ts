@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   let userId: string | undefined
 
   try {
-    const { planId: requestPlanId, images, drawings, taskType = 'takeoff' } = await request.json()
+    const { planId: requestPlanId, images, drawings, taskType = 'takeoff', jobType } = await request.json()
     planId = requestPlanId
 
     if (!planId) {
@@ -33,6 +33,31 @@ export async function POST(request: NextRequest) {
     }
     
     userId = user.id
+
+    // Determine job type - fetch from plan -> job relationship if not provided
+    let finalJobType = jobType
+    if (!finalJobType) {
+      const { data: plan, error: planError } = await supabase
+        .from('plans')
+        .select(`
+          job_id,
+          jobs!inner(project_type)
+        `)
+        .eq('id', planId)
+        .eq('user_id', userId)
+        .single()
+
+      if (planError || !plan) {
+        return NextResponse.json(
+          { error: 'Plan not found' },
+          { status: 404 }
+        )
+      }
+
+      // Map project_type to job type: Commercial -> commercial, all others -> residential
+      const projectType = (plan as any).jobs?.project_type
+      finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
+    }
 
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json(
@@ -76,10 +101,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`Starting enhanced analysis for plan ${planId} with ${images.length} images`)
+    console.log(`Starting enhanced analysis for plan ${planId} with ${images.length} images (job type: ${finalJobType})`)
 
-    // Build specialized prompts based on task type
-    const systemPrompt = buildSystemPrompt(taskType)
+    // Build specialized prompts based on task type and job type
+    const systemPrompt = buildSystemPrompt(taskType, finalJobType)
     const userPrompt = buildUserPrompt(images.length, drawings)
 
     // Configure analysis options
@@ -189,7 +214,8 @@ export async function POST(request: NextRequest) {
             consensus: consensusResult.confidence,
             model_count: consensusResult.consensusCount
           },
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
+          job_type: finalJobType
         })
         .select()
         .single()
@@ -225,7 +251,8 @@ export async function POST(request: NextRequest) {
             info: []
           },
           ai_model: 'enhanced-consensus',
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
+          job_type: finalJobType
         })
         .select()
         .single()
@@ -292,8 +319,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Build specialized system prompt based on task type
-function buildSystemPrompt(taskType: string): string {
+// Build specialized system prompt based on task type and job type
+function buildSystemPrompt(taskType: string, jobType: string = 'residential'): string {
   const basePrompt = `You are an expert construction analyst with specialized knowledge in construction plans, building codes, and material takeoffs. You are part of a multi-model consensus system that provides the most accurate analysis possible.
 
 CRITICAL INSTRUCTIONS:
@@ -359,10 +386,57 @@ Return ONLY a valid JSON object with this structure:
   }
 }`
 
+  // Add job type specific instructions
+  const jobTypePrompt = jobType === 'commercial' ? `
+
+COMMERCIAL PROJECT FOCUS:
+- Building codes & ADA compliance requirements
+- Fire protection systems (sprinklers, alarms, exits)
+- Commercial-grade MEP systems (3-phase electrical, commercial HVAC)
+- Accessibility features (ramps, elevators, ADA-compliant fixtures)
+- Life safety systems and emergency egress
+- Commercial finishes and durability requirements
+- Parking lot striping, signage, and ADA spaces
+- Commercial-grade windows, doors, and hardware
+- Tenant improvement allowances
+- Base building vs tenant scope distinctions
+- Commercial roofing systems (EPDM, TPO, built-up)
+- High-rise considerations (elevator shafts, mechanical floors)
+- Commercial lighting (LED, fluorescent, emergency lighting)
+- Commercial flooring (VCT, carpet tile, polished concrete)
+- Commercial restroom fixtures and accessibility
+- Commercial kitchen equipment and ventilation
+- Data/telecom infrastructure and cable management
+- Security systems and access control
+- Energy efficiency and LEED compliance
+- Commercial landscaping and site amenities` : `
+
+RESIDENTIAL PROJECT FOCUS:
+- Residential building codes and energy efficiency
+- Single-family or multi-family dwelling details
+- Residential appliances and fixtures
+- Custom finishes and millwork details
+- Landscaping and outdoor living spaces
+- Residential-grade HVAC, electrical (120/240V), plumbing
+- Insulation values and energy code compliance
+- Residential roofing details (composition, architectural)
+- Interior comfort features (fireplaces, built-ins)
+- Finish schedules for paint, flooring, countertops
+- Residential lighting (recessed, pendant, chandelier)
+- Residential flooring (hardwood, carpet, tile, LVT)
+- Residential cabinetry and countertops
+- Residential appliances (kitchen, laundry, HVAC)
+- Residential outdoor features (decks, patios, landscaping)
+- Residential security and smart home features
+- Energy efficient windows and doors
+- Residential insulation and air sealing
+- Residential plumbing fixtures and finishes
+- Custom millwork and built-in features`
+
   // Add task-specific instructions
   switch (taskType) {
     case 'takeoff':
-      return basePrompt + `
+      return basePrompt + jobTypePrompt + `
 
 TAKEOFF ANALYSIS FOCUS:
 - Extract ALL material quantities and measurements
@@ -387,7 +461,7 @@ INCLUDE LOCATIONS: Specify where each item is located
 PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates`
 
     case 'quality':
-      return basePrompt + `
+      return basePrompt + jobTypePrompt + `
 
 QUALITY ANALYSIS FOCUS:
 - Identify potential problems and code violations
@@ -410,7 +484,7 @@ INCLUDE LOCATIONS: Specify where each issue is located
 PROVIDE BOUNDING BOXES: Every issue must have a bounding_box with coordinates`
 
     case 'bid_analysis':
-      return basePrompt + `
+      return basePrompt + jobTypePrompt + `
 
 BID ANALYSIS FOCUS:
 - Provide realistic cost estimates and timelines
@@ -433,7 +507,7 @@ IDENTIFY RISKS: Highlight potential challenges and risks
 PROVIDE RECOMMENDATIONS: Give professional advice and suggestions`
 
     default:
-      return basePrompt
+      return basePrompt + jobTypePrompt
   }
 }
 
