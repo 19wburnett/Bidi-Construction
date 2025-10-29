@@ -9,7 +9,12 @@ import {
   ChevronRight,
   ChevronLeft,
   AlertTriangle,
-  X
+  X,
+  Info,
+  AlertCircle,
+  CheckCircle,
+  Lightbulb,
+  Star
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
@@ -227,6 +232,17 @@ export default function FastPlanCanvas({
     }
   }, [scale, pdfLoaded, numPages, currentPage, loadPage])
 
+  // Get icon for comment type
+  const getCommentIcon = (noteType?: string) => {
+    const iconMap: Record<string, any> = {
+      requirement: CheckCircle,
+      concern: AlertCircle,
+      suggestion: Lightbulb,
+      other: MessageSquare
+    }
+    return iconMap[noteType || 'other'] || MessageSquare
+  }
+
   // Render drawings on the drawing canvas
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
@@ -238,19 +254,32 @@ export default function FastPlanCanvas({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
+    // Debug: Draw a test marker at top-left to verify canvas is rendering
+    ctx.fillStyle = 'red'
+    ctx.fillRect(0, 0, 20, 20)
+
     // Draw only comment drawings for current page
-    drawings
-      .filter(drawing => drawing.type === 'comment' && drawing.pageNumber === currentPage)
-      .forEach(drawing => {
+    const commentsForPage = drawings.filter(drawing => drawing.type === 'comment' && drawing.pageNumber === currentPage)
+    
+    // Debug log
+    console.log('Rendering comments:', { 
+      total: commentsForPage.length, 
+      page: currentPage,
+      canvasSize: `${canvas.width}x${canvas.height}` 
+    })
+    
+    commentsForPage.forEach(drawing => {
         // Check if geometry has valid x and y values
         if (!drawing.geometry || typeof drawing.geometry.x === 'undefined' || typeof drawing.geometry.y === 'undefined') {
-          console.warn('Drawing missing valid geometry:', drawing)
+          console.warn('Comment missing geometry:', drawing)
           return
         }
         
         // Use world coordinates directly - the canvas transform handles the viewport
         const worldX = drawing.geometry.x
         const worldY = drawing.geometry.y
+        
+        console.log('Drawing comment at:', { worldX, worldY, pageNumber: drawing.pageNumber, canvas: { width: canvas.width, height: canvas.height } })
         
         // Draw comment bubble at world position
         // Note: size is in world coordinates, actual pixel size will be scaled by canvas transform
@@ -264,7 +293,7 @@ export default function FastPlanCanvas({
           ctx.fill()
         }
         
-        // Draw comment bubble
+        // Draw comment bubble background
         ctx.fillStyle = drawing.style.color
         ctx.strokeStyle = 'white'
         ctx.lineWidth = 2
@@ -273,6 +302,55 @@ export default function FastPlanCanvas({
         ctx.arc(worldX, worldY, bubbleRadius, 0, Math.PI * 2)
         ctx.fill()
         ctx.stroke()
+        
+        // Draw icon for comment type as a simple shape
+        ctx.strokeStyle = 'white'
+        ctx.fillStyle = 'white'
+        ctx.lineWidth = 2
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        
+        if (drawing.noteType === 'requirement') {
+          // Checkmark - thicker for visibility
+          ctx.beginPath()
+          ctx.moveTo(worldX - 4, worldY)
+          ctx.lineTo(worldX - 1, worldY + 3)
+          ctx.lineTo(worldX + 4, worldY - 3)
+          ctx.lineWidth = 2.5
+          ctx.stroke()
+        } else if (drawing.noteType === 'concern') {
+          // Exclamation mark
+          ctx.beginPath()
+          ctx.arc(worldX, worldY - 3, 1.5, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.beginPath()
+          ctx.moveTo(worldX, worldY)
+          ctx.lineTo(worldX, worldY + 5)
+          ctx.stroke()
+        } else if (drawing.noteType === 'suggestion') {
+          // Star/lightbulb shape
+          const sides = 4
+          const outerRadius = 3
+          ctx.beginPath()
+          for (let i = 0; i < sides * 2; i++) {
+            const radius = i % 2 === 0 ? outerRadius : outerRadius * 0.5
+            const angle = (i * Math.PI) / sides
+            const x = worldX + radius * Math.cos(angle)
+            const y = worldY + radius * Math.sin(angle)
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          ctx.closePath()
+          ctx.stroke()
+        } else {
+          // Default: message icon (two circles)
+          ctx.beginPath()
+          ctx.arc(worldX - 2, worldY - 1, 2, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(worldX + 2, worldY + 1, 2.5, 0, Math.PI * 2)
+          ctx.stroke()
+        }
       })
   }, [drawings, currentPage, selectedComment])
 
@@ -280,11 +358,12 @@ export default function FastPlanCanvas({
   useEffect(() => {
     const canvas = drawingCanvasRef.current
     const container = containerRef.current
-    if (!canvas || !container) return
+    if (!canvas || !container) {
+      console.log('Canvas setup failed:', { canvas: !!canvas, container: !!container })
+      return
+    }
 
     const resizeCanvas = () => {
-      const rect = container.getBoundingClientRect()
-      
       // Size canvas to match PDF dimensions if available, otherwise use container
       if (pdfPages.length > 0 && pdfPages[currentPage - 1]) {
         const pdfPage = pdfPages[currentPage - 1]
@@ -292,18 +371,12 @@ export default function FastPlanCanvas({
         canvas.height = pdfPage.height
         canvas.style.width = `${pdfPage.width}px`
         canvas.style.height = `${pdfPage.height}px`
+        console.log('Canvas sized for PDF:', { width: canvas.width, height: canvas.height, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
       } else {
-        // Fallback to container size
-        canvas.width = rect.width
-        canvas.height = rect.height
-        canvas.style.width = `${rect.width}px`
-        canvas.style.height = `${rect.height}px`
+        console.log('No PDF pages available yet, waiting...', { pdfPagesLength: pdfPages.length, currentPage })
+        // Don't resize canvas yet - wait for PDF pages to load
+        return
       }
-      
-      // Canvas is positioned within its wrapper div
-      canvas.style.position = 'absolute'
-      canvas.style.top = '0'
-      canvas.style.left = '0'
     }
 
     resizeCanvas()
@@ -315,6 +388,16 @@ export default function FastPlanCanvas({
   useEffect(() => {
     renderDrawings()
   }, [renderDrawings])
+
+  // Re-render when page changes
+  useEffect(() => {
+    renderDrawings()
+  }, [currentPage, renderDrawings])
+
+  // Re-render when drawings change
+  useEffect(() => {
+    renderDrawings()
+  }, [drawings, renderDrawings])
 
   // Convert screen coordinates to world coordinates
   const screenToWorld = useCallback((screenX: number, screenY: number) => {
@@ -330,14 +413,15 @@ export default function FastPlanCanvas({
     return Math.floor(y / pageHeight) + 1
   }, [])
 
-  // Handle wheel events for zoom
+  // Handle wheel events for zoom and pan
   const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    
+    const container = containerRef.current
+    if (!container) return
+    
     if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      
-      const container = containerRef.current
-      if (!container) return
-      
+      // Zoom when Ctrl/Cmd is pressed
       const rect = container.getBoundingClientRect()
       const mouseX = e.clientX - rect.left
       const mouseY = e.clientY - rect.top
@@ -349,6 +433,16 @@ export default function FastPlanCanvas({
         zoom: newZoom,
         panX: mouseX - (mouseX - prev.panX) * (newZoom / prev.zoom),
         panY: mouseY - (mouseY - prev.panY) * (newZoom / prev.zoom)
+      }))
+    } else {
+      // Pan when Ctrl/Cmd is not pressed
+      // Use deltaX for horizontal scrolling (shift+scroll or trackpad)
+      // Use deltaY for vertical scrolling (normal scroll)
+      const panSpeed = 0.5
+      setViewport(prev => ({
+        ...prev,
+        panX: prev.panX - e.deltaX * panSpeed,
+        panY: prev.panY - e.deltaY * panSpeed
       }))
     }
   }, [viewport])
@@ -493,6 +587,19 @@ export default function FastPlanCanvas({
             <Button variant="ghost" size="sm" onClick={handleZoomIn}>
               <ZoomIn className="h-4 w-4" />
             </Button>
+            <div className="group relative">
+              <Button variant="ghost" size="sm" className="px-2">
+                <Info className="h-4 w-4 text-gray-400" />
+              </Button>
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-50">
+                <div className="bg-gray-900 text-white text-xs rounded-lg p-2 w-48 shadow-lg">
+                  <div className="font-semibold mb-1">Navigation Tips:</div>
+                  <div>• Scroll to pan</div>
+                  <div>• Ctrl/Cmd + Scroll to zoom</div>
+                  <div>• Click comment tool to add notes</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Pagination Controls */}
@@ -622,11 +729,17 @@ export default function FastPlanCanvas({
 
         {/* Drawing Canvas Overlay */}
         <div
-          className="absolute inset-0"
+          className="absolute"
           style={{ 
+            top: 0,
+            left: 0,
             pointerEvents: 'auto',
-            transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
+            transform: pdfPages.length > 0 && pdfPages[currentPage - 1] ? `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` : 'none',
             transformOrigin: '0 0',
+            width: pdfPages[currentPage - 1] ? `${pdfPages[currentPage - 1].width}px` : '0px',
+            height: pdfPages[currentPage - 1] ? `${pdfPages[currentPage - 1].height}px` : '0px',
+            display: !pdfError && pdfPages.length > 0 && pdfPages[currentPage - 1] ? 'block' : 'none',
+            zIndex: 10 // Ensure it's above PDF canvas elements
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -635,11 +748,11 @@ export default function FastPlanCanvas({
         >
           <canvas
             ref={drawingCanvasRef}
-            className="absolute"
             style={{ 
-              width: '100%',
-              height: '100%',
-              zIndex: '10' // Ensure it's above PDF canvas elements
+              display: 'block',
+              position: 'absolute',
+              top: 0,
+              left: 0,
             }}
           />
         </div>

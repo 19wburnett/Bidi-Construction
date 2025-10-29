@@ -24,7 +24,9 @@ import { Badge } from '@/components/ui/badge'
 import { SharePermissions, PlanShare } from '@/types/takeoff'
 import FastPlanCanvas from '@/components/fast-plan-canvas'
 import CommentPinForm from '@/components/comment-pin-form'
+import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { Drawing } from '@/lib/canvas-utils'
+import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
@@ -217,6 +219,64 @@ export default function GuestPlanViewer() {
       alert('Failed to save comment. Please try again.')
     }
   }, [commentPosition, drawings, guestName])
+
+  // Handle comment reply
+  const handleCommentReply = useCallback(async (parentId: string, content: string) => {
+    try {
+      const parentComment = drawings.find(d => d.id === parentId)
+      if (!parentComment) {
+        throw new Error('Parent comment not found')
+      }
+
+      const newReply: Drawing = {
+        id: Date.now().toString(),
+        type: 'comment',
+        geometry: parentComment.geometry,
+        style: {
+          color: '#3b82f6',
+          strokeWidth: 2,
+          opacity: 1
+        },
+        pageNumber: parentComment.pageNumber,
+        notes: content,
+        noteType: 'other',
+        isVisible: true,
+        isLocked: false,
+        userId: 'guest',
+        userName: guestName,
+        createdAt: new Date().toISOString(),
+        parentCommentId: parentId
+      }
+
+      await setDrawings([...drawings, newReply])
+    } catch (error) {
+      console.error('Error saving reply:', error)
+      alert('Failed to save reply. Please try again.')
+    }
+  }, [drawings, guestName])
+
+  // Handle comment resolution
+  const handleCommentResolve = useCallback(async (commentId: string) => {
+    try {
+      const updatedDrawings = drawings.map(d => {
+        if (d.id === commentId) {
+          return {
+            ...d,
+            isResolved: true,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: 'guest',
+            resolvedByUsername: guestName
+          }
+        }
+        return d
+      })
+
+      await setDrawings(updatedDrawings)
+    } catch (error) {
+      console.error('Error resolving comment:', error)
+      alert('Failed to resolve comment. Please try again.')
+    }
+  }, [drawings, guestName])
 
   // Handle drawings change
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
@@ -491,28 +551,34 @@ export default function GuestPlanViewer() {
                 
                 <TabsContent value="comments" className="space-y-3">
                   <div className="text-sm font-medium text-gray-900 mb-2">
-                    Comments ({drawings.filter(d => d.type === 'comment').length})
+                    Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
                   </div>
-                  {drawings.filter(d => d.type === 'comment').length === 0 ? (
+                  {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                     <div className="text-center py-8">
                       <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                       <p className="text-sm text-gray-600">No comments yet</p>
                     </div>
-                  ) : (
-                    drawings
-                      .filter(d => d.type === 'comment')
+                  ) : (() => {
+                    const commentMap = new Map<string, Drawing>()
+                    drawings.filter(d => d.type === 'comment').forEach(c => commentMap.set(c.id, c))
+                    
+                    return organizeCommentsIntoThreads(drawings.filter(d => d.type === 'comment'))
                       .map(comment => (
-                        <div key={comment.id} className="p-3 bg-white border border-gray-200 rounded-lg">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <Badge variant="outline" className="text-xs">
-                              {comment.noteType || 'comment'}
-                            </Badge>
-                            <span className="text-xs text-gray-500">Page {comment.pageNumber}</span>
-                          </div>
-                          <p className="text-sm text-gray-800">{comment.notes}</p>
+                        <div key={comment.id}>
+                          <ThreadedCommentDisplay
+                            comment={comment}
+                            onReply={handleCommentReply}
+                            onResolve={handleCommentResolve}
+                            currentUserId={guestName}
+                            currentUserName={guestName}
+                            getReplyCount={(commentId) => {
+                              const foundComment = commentMap.get(commentId)
+                              return foundComment ? getReplyCount(foundComment) : 0
+                            }}
+                          />
                         </div>
                       ))
-                  )}
+                  })()}
                 </TabsContent>
               </Tabs>
             </div>

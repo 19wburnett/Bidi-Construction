@@ -1,15 +1,12 @@
 import { createClient } from '@/lib/supabase'
 
+// Drawing interface - now only used for comments
 export interface Drawing {
   id: string
-  type: 'rectangle' | 'circle' | 'line' | 'comment' | 'pencil'
+  type: 'comment'
   geometry: {
     x: number
     y: number
-    width?: number
-    height?: number
-    radius?: number
-    points?: number[] // For lines: [x1, y1, x2, y2, ...]
   }
   style: {
     color: string
@@ -17,7 +14,7 @@ export interface Drawing {
     opacity?: number
   }
   pageNumber: number
-  // For comments
+  // Comment fields
   label?: string
   notes?: string
   noteType?: 'requirement' | 'concern' | 'suggestion' | 'other'
@@ -31,236 +28,17 @@ export interface Drawing {
   userId?: string
   userName?: string
   createdAt?: string
+  // Thread support
+  parentCommentId?: string
+  replies?: Drawing[]
+  // Resolution status
+  isResolved?: boolean
+  resolvedAt?: string
+  resolvedBy?: string
+  resolvedByUsername?: string
 }
 
-// Ensure default values for drawings
-export const DEFAULT_DRAWING_VISIBILITY = true
-
-export interface PlanDrawingRecord {
-  id: string
-  plan_id: string
-  user_id: string
-  page_number: number
-  drawing_type?: string
-  geometry?: any
-  style?: any
-  label?: string | null
-  notes?: string | null
-  layer_name?: string | null
-  is_visible?: boolean | null
-  is_locked?: boolean | null
-  z_index?: number | null
-  measurement_data?: any
-  created_at: string
-  updated_at: string
-}
-
-export class DrawingPersistence {
-  private supabase = createClient()
-  private planId: string
-  private userId: string
-  private saveTimeout: NodeJS.Timeout | null = null
-
-  constructor(planId: string, userId: string) {
-    if (!planId || !userId) {
-      throw new Error('DrawingPersistence requires valid planId and userId')
-    }
-    this.planId = planId
-    this.userId = userId
-    console.log('DrawingPersistence initialized:', { planId, userId })
-  }
-
-  async loadDrawings(): Promise<Drawing[]> {
-    try {
-      const { data, error } = await this.supabase
-        .from('plan_drawings')
-        .select('*')
-        .eq('plan_id', this.planId)
-        .eq('user_id', this.userId)
-        .order('created_at', { ascending: true })
-
-      if (error) {
-        console.error('Error loading drawings:', error)
-        return []
-      }
-
-      if (!data || data.length === 0) {
-        return []
-      }
-
-      return data.map(record => this.recordToDrawing(record))
-    } catch (error) {
-      console.error('Error loading drawings:', error)
-      return []
-    }
-  }
-
-  async saveDrawings(drawings: Drawing[]): Promise<void> {
-    console.log('saveDrawings called with:', { 
-      drawingsCount: drawings.length, 
-      planId: this.planId, 
-      userId: this.userId 
-    })
-    
-    // Debounce saves to avoid too many database calls
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout)
-    }
-
-    return new Promise((resolve, reject) => {
-      this.saveTimeout = setTimeout(async () => {
-        try {
-          console.log('Executing saveDrawings timeout callback')
-          
-          // Delete existing drawings for this plan/user
-          const { error: deleteError } = await this.supabase
-            .from('plan_drawings')
-            .delete()
-            .eq('plan_id', this.planId)
-            .eq('user_id', this.userId)
-
-          if (deleteError) {
-            console.error('Error deleting old drawings:', deleteError)
-          }
-
-          // Insert new drawings
-          if (drawings.length > 0) {
-            const records = drawings.map(drawing => this.drawingToRecord(drawing))
-            console.log('Inserting records:', records)
-            
-            const { error } = await this.supabase
-              .from('plan_drawings')
-              .insert(records)
-
-            if (error) {
-              console.error('Error saving drawings:', error)
-              reject(error)
-              return
-            }
-          }
-          console.log('Drawings saved successfully')
-          resolve()
-        } catch (error) {
-          console.error('Error saving drawings:', error)
-          console.error('Error details:', {
-            message: error instanceof Error ? error.message : 'Unknown error',
-            stack: error instanceof Error ? error.stack : undefined,
-            drawingsCount: drawings.length,
-            planId: this.planId,
-            userId: this.userId
-          })
-          reject(error)
-        }
-      }, 1000) // 1 second debounce
-    })
-  }
-
-  async saveDrawing(drawing: Drawing): Promise<void> {
-    try {
-      const record = {
-        plan_id: this.planId,
-        user_id: this.userId,
-        drawing_data: drawing,
-        page_number: drawing.pageNumber
-      }
-
-      const { error } = await this.supabase
-        .from('plan_drawings')
-        .insert(record)
-
-      if (error) {
-        console.error('Error saving drawing:', error)
-      }
-    } catch (error) {
-      console.error('Error saving drawing:', error)
-    }
-  }
-
-  async deleteDrawing(drawingId: string): Promise<void> {
-    try {
-      const { error } = await this.supabase
-        .from('plan_drawings')
-        .delete()
-        .eq('plan_id', this.planId)
-        .eq('user_id', this.userId)
-        .eq('drawing_data->>id', drawingId)
-
-      if (error) {
-        console.error('Error deleting drawing:', error)
-      }
-    } catch (error) {
-      console.error('Error deleting drawing:', error)
-    }
-  }
-
-  private recordToDrawing(record: any): Drawing {
-    // Map record fields to Drawing object
-    console.log('Converting record to drawing:', record)
-    
-    // The actual database schema uses individual columns
-    const drawing: Drawing = {
-      id: record.id,
-      type: (record.drawing_type || 'comment') as Drawing['type'],
-      geometry: record.geometry || { x: 0, y: 0 },
-      style: record.style || { color: '#3b82f6', strokeWidth: 2, opacity: 1 },
-      pageNumber: record.page_number,
-      label: record.label,
-      notes: record.notes,
-      layerName: record.layer_name,
-      isVisible: record.is_visible ?? true,
-      isLocked: record.is_locked ?? false,
-      zIndex: record.z_index || 0,
-      // Extract comment metadata from measurement_data JSONB field
-      noteType: record.measurement_data?.noteType,
-      category: record.measurement_data?.category,
-      location: record.measurement_data?.location,
-      userId: record.measurement_data?.userId,
-      userName: record.measurement_data?.userName,
-      createdAt: record.measurement_data?.createdAt
-    }
-    
-    console.log('Converted drawing:', drawing)
-    
-    return drawing
-  }
-
-  private drawingToRecord(drawing: Drawing): any {
-    // Map the Drawing to the database schema structure
-    // The actual database schema uses individual columns, not drawing_data JSONB
-    const record: any = {
-      plan_id: this.planId,
-      user_id: this.userId,
-      page_number: drawing.pageNumber,
-      drawing_type: drawing.type,
-      geometry: drawing.geometry,
-      style: drawing.style,
-      label: drawing.label,
-      notes: drawing.notes,
-      layer_name: drawing.layerName,
-      is_visible: drawing.isVisible,
-      is_locked: drawing.isLocked,
-      z_index: drawing.zIndex || 0,
-      // Store comment-specific metadata in measurement_data JSONB field
-      measurement_data: {
-        noteType: drawing.noteType,
-        category: drawing.category,
-        location: drawing.location,
-        userId: drawing.userId,
-        userName: drawing.userName,
-        createdAt: drawing.createdAt
-      }
-    }
-    
-    return record
-  }
-
-  cleanup() {
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout)
-    }
-  }
-}
-
+// Removed DrawingPersistence class - drawing tools are no longer used, only comments
 // PDF rendering cache for different resolutions
 interface PdfPageCache {
   [pageNumber: number]: {

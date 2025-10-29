@@ -16,12 +16,13 @@ const Dialog = ({ open, onOpenChange, children }: DialogProps) => {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ pointerEvents: 'auto' }}>
       <div
         className="fixed inset-0 bg-black/80"
         onClick={() => onOpenChange(false)}
+        style={{ pointerEvents: 'auto' }}
       />
-      <div className="relative z-50 w-full flex items-center justify-center p-4">
+      <div className="relative z-[10000] w-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>

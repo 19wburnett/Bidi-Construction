@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ProfileDropdown from '@/components/profile-dropdown'
 import CreditsDisplay from '@/components/credits-display'
-import ThemeToggle from '@/components/theme-toggle'
 import {
   Home,
   Building2,
@@ -57,6 +56,14 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   })
 
   const supabase = createClient()
+
+  // Load sidebar state from localStorage after mount to avoid hydration mismatch
+  useEffect(() => {
+    const saved = localStorage.getItem('dashboard-sidebar-collapsed')
+    if (saved === 'true') {
+      setIsCollapsed(true)
+    }
+  }, [])
 
   // Load stats
   useEffect(() => {
@@ -135,12 +142,6 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       label: 'Contacts',
       href: '/dashboard/contacts',
       icon: Users
-    },
-    {
-      label: 'Notifications',
-      href: '/notifications',
-      icon: Bell,
-      badge: stats.unreadNotifications > 0 ? stats.unreadNotifications : undefined
     },
     {
       label: 'Settings',
@@ -321,23 +322,16 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         </div>
       )}
 
-      {/* Theme Toggle & Collapse */}
+      {/* Collapse Button */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 space-y-2">
-        {!isCollapsed && (
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Theme</span>
-            <ThemeToggle />
-          </div>
-        )}
-        {isCollapsed && (
-          <div className="flex justify-center mb-2">
-            <ThemeToggle />
-          </div>
-        )}
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={() => {
+            const newCollapsed = !isCollapsed
+            setIsCollapsed(newCollapsed)
+            localStorage.setItem('dashboard-sidebar-collapsed', String(newCollapsed))
+          }}
           className="w-full dark:text-gray-300 dark:hover:text-white"
         >
           {isCollapsed ? (

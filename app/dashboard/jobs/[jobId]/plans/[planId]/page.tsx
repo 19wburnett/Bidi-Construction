@@ -30,12 +30,16 @@ import { Job, Plan } from '@/types/takeoff'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import FastPlanCanvas from '@/components/fast-plan-canvas'
 import CommentPinForm from '@/components/comment-pin-form'
-import { DrawingPersistence, canvasUtils } from '@/lib/canvas-utils'
+import { canvasUtils } from '@/lib/canvas-utils'
 import { Drawing } from '@/lib/canvas-utils'
+import { CommentPersistence } from '@/lib/comment-persistence'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
+import ThreadedCommentDisplay from '@/components/threaded-comment-display'
+import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
+import { CheckCircle2 } from 'lucide-react'
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
@@ -78,21 +82,19 @@ export default function EnhancedPlanViewer() {
   const sidebarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   
-  const drawingPersistenceRef = useRef<DrawingPersistence | null>(null)
+  const commentPersistenceRef = useRef<CommentPersistence | null>(null)
   const supabase = createClient()
 
   const jobId = params.jobId as string
   const planId = params.planId as string
 
-  // Initialize drawing persistence
+  // Initialize comment persistence
   useEffect(() => {
     if (user && planId) {
-      drawingPersistenceRef.current = new DrawingPersistence(planId, user.id)
+      commentPersistenceRef.current = new CommentPersistence(planId, user.id)
     }
     return () => {
-      if (drawingPersistenceRef.current) {
-        drawingPersistenceRef.current.cleanup()
-      }
+      // Cleanup if needed
     }
   }, [user, planId])
 
@@ -189,10 +191,22 @@ export default function EnhancedPlanViewer() {
         
         setPlanUrl(pdfUrl)
         
-        // Load existing drawings
-        if (drawingPersistenceRef.current) {
-          const existingDrawings = await drawingPersistenceRef.current.loadDrawings()
-          setDrawings(existingDrawings)
+        // Load comments from the comment system
+        try {
+          let comments: Drawing[] = []
+          
+          // Load comments from new system
+          if (commentPersistenceRef.current) {
+            try {
+              comments = await commentPersistenceRef.current.loadComments()
+            } catch (error) {
+              console.warn('Could not load from plan_comments:', error)
+            }
+          }
+          
+          setDrawings(comments)
+        } catch (error) {
+          console.error('Error loading comments:', error)
         }
       }
 
@@ -223,15 +237,6 @@ export default function EnhancedPlanViewer() {
   // Handle drawings change and save
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
     setDrawings(newDrawings)
-    if (drawingPersistenceRef.current) {
-      try {
-        await drawingPersistenceRef.current.saveDrawings(newDrawings)
-      } catch (error) {
-        console.error('Error saving drawings:', error)
-        // Optionally show a toast notification to the user
-        // For now, we'll just log the error and continue
-      }
-    }
   }, [])
 
   // Handle comment pin click (to place new comment)
@@ -282,13 +287,101 @@ export default function EnhancedPlanViewer() {
         createdAt: new Date().toISOString()
       }
 
-      await handleDrawingsChange([...drawings, newDrawing])
+      // Save using comment persistence
+      if (commentPersistenceRef.current) {
+        await commentPersistenceRef.current.saveComment(newDrawing)
+        // Reload comments
+        const comments = await commentPersistenceRef.current.loadComments()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'comment'), ...comments])
+      } else {
+        // Fallback to old method
+        await handleDrawingsChange([...drawings, newDrawing])
+      }
     } catch (error) {
       console.error('Error saving comment:', error)
-      // Optionally show a toast notification to the user
       alert('Failed to save comment. Please try again.')
     }
-  }, [commentPosition, drawings, handleDrawingsChange])
+  }, [commentPosition, drawings, handleDrawingsChange, user])
+
+  // Handle comment reply
+  const handleCommentReply = useCallback(async (parentId: string, content: string) => {
+    try {
+      const parentComment = drawings.find(d => d.id === parentId)
+      if (!parentComment) {
+        throw new Error('Parent comment not found')
+      }
+
+      const newReply: Drawing = {
+        id: Date.now().toString(),
+        type: 'comment',
+        geometry: parentComment.geometry,
+        style: {
+          color: '#3b82f6',
+          strokeWidth: 2,
+          opacity: 1
+        },
+        pageNumber: parentComment.pageNumber,
+        notes: content,
+        noteType: 'other',
+        isVisible: true,
+        isLocked: false,
+        userId: user?.id,
+        userName: user?.email,
+        createdAt: new Date().toISOString(),
+        parentCommentId: parentId
+      }
+
+      // Save using comment persistence
+      if (commentPersistenceRef.current) {
+        await commentPersistenceRef.current.saveComment(newReply)
+        // Reload comments
+        const comments = await commentPersistenceRef.current.loadComments()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'comment'), ...comments])
+      } else {
+        // Fallback to old method
+        await handleDrawingsChange([...drawings, newReply])
+      }
+    } catch (error) {
+      console.error('Error saving reply:', error)
+      alert('Failed to save reply. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange, user])
+
+  // Handle comment resolution
+  const handleCommentResolve = useCallback(async (commentId: string) => {
+    try {
+      // Save using comment persistence
+      if (commentPersistenceRef.current) {
+        await commentPersistenceRef.current.updateComment(commentId, {
+          isResolved: true,
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: user?.id,
+          resolvedByUsername: user?.email
+        })
+        // Reload comments
+        const comments = await commentPersistenceRef.current.loadComments()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'comment'), ...comments])
+      } else {
+        // Fallback to old method
+        const updatedDrawings = drawings.map(d => {
+          if (d.id === commentId) {
+            return {
+              ...d,
+              isResolved: true,
+              resolvedAt: new Date().toISOString(),
+              resolvedBy: user?.id,
+              resolvedByUsername: user?.email
+            }
+          }
+          return d
+        })
+        await handleDrawingsChange(updatedDrawings)
+      }
+    } catch (error) {
+      console.error('Error resolving comment:', error)
+      alert('Failed to resolve comment. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange, user])
 
   // Helper function to convert PDF to images using PDF.js
   const convertPdfToImages = async () => {
@@ -721,55 +814,42 @@ export default function EnhancedPlanViewer() {
                         <div className="space-y-3">
                           <div className="flex items-center justify-between mb-2">
                             <h4 className="text-sm font-semibold text-gray-900">
-                              Comments ({drawings.filter(d => d.type === 'comment').length})
+                              Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
                             </h4>
                           </div>
-                          {drawings.filter(d => d.type === 'comment').length === 0 ? (
+                          {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                             <div className="text-center py-12">
                               <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                               <p className="text-sm text-gray-600">No comments yet</p>
                               <p className="text-xs text-gray-500 mt-1">Click on the plan to add a comment</p>
                             </div>
-                          ) : (
-                            drawings
-                              .filter(d => d.type === 'comment')
-                              .sort((a, b) => b.pageNumber - a.pageNumber || (b.notes?.localeCompare(a.notes || '') || 0))
+                          ) : (() => {
+                            const commentMap = new Map<string, Drawing>()
+                            drawings.filter(d => d.type === 'comment').forEach(c => commentMap.set(c.id, c))
+                            
+                            return organizeCommentsIntoThreads(drawings.filter(d => d.type === 'comment'))
                               .map(comment => (
-                                <div 
-                                  key={comment.id} 
-                                  className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-md transition-all cursor-pointer"
+                                <div
+                                  key={comment.id}
                                   onClick={() => {
                                     setGoToPage(comment.pageNumber)
-                                    setTimeout(() => setGoToPage(undefined), 100) // Reset after navigation
+                                    setTimeout(() => setGoToPage(undefined), 100)
                                   }}
                                 >
-                                  <div className="flex items-start justify-between mb-2">
-                                    <div className="flex items-center space-x-2">
-                                      <Badge 
-                                        variant="outline" 
-                                        className="text-xs capitalize"
-                                      >
-                                        {comment.noteType || 'comment'}
-                                      </Badge>
-                                      <span className="text-xs text-gray-500">Page {comment.pageNumber}</span>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm text-gray-800 mb-2">{comment.notes}</p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {comment.category && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {comment.category}
-                                      </Badge>
-                                    )}
-                                    {comment.location && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        📍 {comment.location}
-                                      </Badge>
-                                    )}
-                                  </div>
+                                  <ThreadedCommentDisplay
+                                    comment={comment}
+                                    onReply={handleCommentReply}
+                                    onResolve={handleCommentResolve}
+                                    currentUserId={user?.id}
+                                    currentUserName={user?.email}
+                                    getReplyCount={(commentId) => {
+                                      const foundComment = commentMap.get(commentId)
+                                      return foundComment ? getReplyCount(foundComment) : 0
+                                    }}
+                                  />
                                 </div>
                               ))
-                          )}
+                          })()}
                         </div>
                       </TabsContent>
                     </div>

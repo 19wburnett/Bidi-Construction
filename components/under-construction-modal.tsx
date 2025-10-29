@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { X, Construction, Mail, Calendar, ExternalLink } from 'lucide-react'
+import { X, Construction, Mail, Calendar, ExternalLink, LogOut } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface UnderConstructionModalProps {
@@ -18,6 +19,7 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
   const [loading, setLoading] = useState(true)
   const { user } = useAuth()
   const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => {
     if (user) {
@@ -60,6 +62,15 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
 
   const handleEmailClick = () => {
     window.location.href = 'mailto:savewithbidi@gmail.com?subject=Job Request - Under Construction Feature'
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut()
+      router.push('/')
+    } catch (error) {
+      console.error('Error signing out:', error)
+    }
   }
 
   if (loading) {
@@ -138,14 +149,24 @@ export default function UnderConstructionModal({ isOpen, onClose }: UnderConstru
                   </div>
                 </div>
 
+                
+
                 {/* Action buttons */}
-                {isAdmin && (
-                  <div className="flex flex-col space-y-2">
+                <div className="flex flex-col space-y-2">
+                  {isAdmin && (
                     <Button onClick={onClose} className="w-full">
                       Continue as Admin
                     </Button>
-                  </div>
-                )}
+                  )}
+                  <Button 
+                    onClick={handleSignOut} 
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </div>
 
                 {/* Admin indicator */}
                 {isAdmin && (

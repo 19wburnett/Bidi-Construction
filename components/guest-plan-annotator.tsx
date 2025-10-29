@@ -258,21 +258,41 @@ export default function GuestPlanAnnotator({
     try {
       const supabase = createClient()
       
+      // Calculate pixel coordinates from percentage
+      // Note: These are simplified pixel coordinates; adjust scale if needed
+      const pixelX = Math.round(pendingComment.x)
+      const pixelY = Math.round(pendingComment.y)
+      
+      const geometry = JSON.stringify({ x: pixelX, y: pixelY })
+      const style = JSON.stringify({ color: '#3b82f6', opacity: 1, strokeWidth: 2 })
+      const measurementData = JSON.stringify({
+        userId: guestUser.id,
+        noteType: commentForm.annotation_type,
+        userName: guestUser.name,
+        createdAt: new Date().toISOString()
+      })
+      
       const { data, error } = await supabase
-        .from('plan_annotations')
+        .from('plan_drawings')
         .insert({
-          plan_file_url: planFile,
-          annotation_type: commentForm.annotation_type,
-          x_coordinate: pendingComment.x,
-          y_coordinate: pendingComment.y,
-          content: commentForm.content.trim(),
-          guest_user_id: guestUser.id
+          plan_id: planId,
+          guest_user_id: guestUser.id,
+          page_number: pendingComment.pageNumber,
+          drawing_type: 'comment',
+          geometry: geometry,
+          style: style,
+          measurement_data: measurementData,
+          notes: commentForm.content.trim(),
+          layer_name: null,
+          is_visible: true,
+          is_locked: false,
+          z_index: 0
         })
         .select()
         .single()
 
       if (error) {
-        console.error('Error saving annotation:', error)
+        console.error('Error saving comment:', error)
         alert('Failed to save comment. Please try again.')
         return
       }
