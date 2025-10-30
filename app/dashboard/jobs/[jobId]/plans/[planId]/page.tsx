@@ -240,6 +240,11 @@ export default function EnhancedPlanViewer() {
 
       if (takeoffAnalysis) {
         console.log('Loading existing takeoff analysis:', takeoffAnalysis)
+        // Ensure items is always an array
+        const items = Array.isArray(takeoffAnalysis.items) 
+          ? takeoffAnalysis.items 
+          : []
+        
         setTakeoffResults({
           success: true,
           planId,
@@ -250,7 +255,7 @@ export default function EnhancedPlanViewer() {
             consensusCount: takeoffAnalysis.confidence_scores?.model_count || 1
           },
           results: {
-            items: takeoffAnalysis.items || [],
+            items: items,
             summary: takeoffAnalysis.summary || {}
           }
         })

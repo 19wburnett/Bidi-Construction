@@ -67,11 +67,14 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
   const [openCategories, setOpenCategories] = useState<string[]>([])
   const [openSubcategories, setOpenSubcategories] = useState<string[]>([])
 
+  // Ensure items is always an array
+  const safeItems = Array.isArray(items) ? items : []
+
   // Organize items into 3-level hierarchy
   const hierarchy = useMemo(() => {
     const organized: Record<string, Record<string, TakeoffItem[]>> = {}
     
-    items.forEach(item => {
+    safeItems.forEach(item => {
       const category = item.category?.toLowerCase() || 'other'
       const subcategory = item.subcategory || 'Uncategorized'
       
