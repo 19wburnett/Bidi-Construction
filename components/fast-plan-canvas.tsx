@@ -149,7 +149,7 @@ export default function FastPlanCanvas({
         
         const pdfDocument = await pdfjs.getDocument({
           url: pdfUrl,
-          maxImageSize: 1024 * 1024, // 1MB limit per image
+          maxImageSize: 10 * 1024 * 1024, // 10MB limit per image for large plans
           disableFontFace: true, // Disable font loading
           disableAutoFetch: true, // Disable auto-fetching
           disableStream: true // Disable streaming
