@@ -240,10 +240,20 @@ export default function EnhancedPlanViewer() {
 
       if (takeoffAnalysis) {
         console.log('Loading existing takeoff analysis:', takeoffAnalysis)
-        // Ensure items is always an array
-        const items = Array.isArray(takeoffAnalysis.items) 
-          ? takeoffAnalysis.items 
-          : []
+        
+        // Parse items if it's a string, otherwise use as-is
+        let parsedItems = []
+        try {
+          if (typeof takeoffAnalysis.items === 'string') {
+            const parsed = JSON.parse(takeoffAnalysis.items)
+            parsedItems = parsed.takeoffs || []
+          } else if (Array.isArray(takeoffAnalysis.items)) {
+            parsedItems = takeoffAnalysis.items
+          }
+        } catch (parseError) {
+          console.error('Error parsing takeoff items:', parseError)
+          parsedItems = []
+        }
         
         setTakeoffResults({
           success: true,
@@ -255,7 +265,7 @@ export default function EnhancedPlanViewer() {
             consensusCount: takeoffAnalysis.confidence_scores?.model_count || 1
           },
           results: {
-            items: items,
+            items: parsedItems,
             summary: takeoffAnalysis.summary || {}
           }
         })
