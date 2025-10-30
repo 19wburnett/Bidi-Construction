@@ -69,6 +69,7 @@ export default function FastPlanCanvas({
   const [currentPage, setCurrentPage] = useState(1)
   const [loadingPages, setLoadingPages] = useState<Set<number>>(new Set())
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
+  const hasAutoFitted = useRef(false) // Track if we've already auto-fitted
   
   // Use refs to avoid infinite loops
   const pdfDocumentRef = useRef<any>(null)
@@ -151,13 +152,15 @@ export default function FastPlanCanvas({
           maxImageSize: 1024 * 1024, // 1MB limit per image
           disableFontFace: true, // Disable font loading
           disableAutoFetch: true, // Disable auto-fetching
-          disableStream: true // Disable streaming
+          disableStream: true, // Disable streaming
+          standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/` // Suppress font warnings
         }).promise
         
         pdfDocumentRef.current = pdfDocument
         setNumPages(pdfDocument.numPages)
         setPdfLoaded(true)
         setPdfError(null)
+        hasAutoFitted.current = false // Reset auto-fit flag when loading new PDF
         
         // Load first page immediately
         loadPage(1)
@@ -186,6 +189,7 @@ export default function FastPlanCanvas({
       setLoadedPages(new Set())
       loadingPagesRef.current.clear()
       loadedPagesRef.current.clear()
+      hasAutoFitted.current = false // Reset on cleanup
     }
   }, [pdfUrl, loadPage])
 
@@ -354,7 +358,7 @@ export default function FastPlanCanvas({
       })
   }, [drawings, currentPage, selectedComment])
 
-  // Set canvas dimensions
+  // Set canvas dimensions and auto-fit zoom
   useEffect(() => {
     const canvas = drawingCanvasRef.current
     const container = containerRef.current
@@ -372,6 +376,30 @@ export default function FastPlanCanvas({
         canvas.style.width = `${pdfPage.width}px`
         canvas.style.height = `${pdfPage.height}px`
         console.log('Canvas sized for PDF:', { width: canvas.width, height: canvas.height, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
+        
+        // Auto-fit zoom on first page load
+        if (!hasAutoFitted.current) {
+          const containerRect = container.getBoundingClientRect()
+          const containerWidth = containerRect.width
+          const containerHeight = containerRect.height
+          
+          // Calculate zoom to fit page width with 5% padding
+          const scaleX = (containerWidth * 0.95) / pdfPage.width
+          const scaleY = (containerHeight * 0.95) / pdfPage.height
+          const fitZoom = Math.min(scaleX, scaleY)
+          
+          // Limit zoom to reasonable range
+          const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
+          
+          setViewport(prev => ({
+            zoom: finalZoom,
+            panX: 0,
+            panY: 0
+          }))
+          
+          hasAutoFitted.current = true
+          console.log('Auto-fitted zoom:', { finalZoom, containerWidth, containerHeight, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
+        }
       } else {
         console.log('No PDF pages available yet, waiting...', { pdfPagesLength: pdfPages.length, currentPage })
         // Don't resize canvas yet - wait for PDF pages to load
