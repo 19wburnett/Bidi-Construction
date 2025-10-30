@@ -102,10 +102,10 @@ export default function FastPlanCanvas({
         viewport: viewport
       }
       
-      // Add timeout to prevent hanging
+      // Add timeout to prevent hanging (increased to 30s for large plans)
       const renderPromise = page.render(renderContext).promise
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Render timeout')), 10000)
+        setTimeout(() => reject(new Error('Render timeout')), 30000)
       )
       
       await Promise.race([renderPromise, timeoutPromise])
@@ -152,8 +152,7 @@ export default function FastPlanCanvas({
           maxImageSize: 1024 * 1024, // 1MB limit per image
           disableFontFace: true, // Disable font loading
           disableAutoFetch: true, // Disable auto-fetching
-          disableStream: true, // Disable streaming
-          standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/` // Suppress font warnings
+          disableStream: true // Disable streaming
         }).promise
         
         pdfDocumentRef.current = pdfDocument
@@ -358,7 +357,7 @@ export default function FastPlanCanvas({
       })
   }, [drawings, currentPage, selectedComment])
 
-  // Set canvas dimensions and auto-fit zoom
+  // Set canvas dimensions
   useEffect(() => {
     const canvas = drawingCanvasRef.current
     const container = containerRef.current
@@ -376,30 +375,6 @@ export default function FastPlanCanvas({
         canvas.style.width = `${pdfPage.width}px`
         canvas.style.height = `${pdfPage.height}px`
         console.log('Canvas sized for PDF:', { width: canvas.width, height: canvas.height, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
-        
-        // Auto-fit zoom on first page load
-        if (!hasAutoFitted.current) {
-          const containerRect = container.getBoundingClientRect()
-          const containerWidth = containerRect.width
-          const containerHeight = containerRect.height
-          
-          // Calculate zoom to fit page width with 5% padding
-          const scaleX = (containerWidth * 0.95) / pdfPage.width
-          const scaleY = (containerHeight * 0.95) / pdfPage.height
-          const fitZoom = Math.min(scaleX, scaleY)
-          
-          // Limit zoom to reasonable range
-          const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
-          
-          setViewport(prev => ({
-            zoom: finalZoom,
-            panX: 0,
-            panY: 0
-          }))
-          
-          hasAutoFitted.current = true
-          console.log('Auto-fitted zoom:', { finalZoom, containerWidth, containerHeight, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
-        }
       } else {
         console.log('No PDF pages available yet, waiting...', { pdfPagesLength: pdfPages.length, currentPage })
         // Don't resize canvas yet - wait for PDF pages to load
@@ -410,6 +385,34 @@ export default function FastPlanCanvas({
     resizeCanvas()
     window.addEventListener('resize', resizeCanvas)
     return () => window.removeEventListener('resize', resizeCanvas)
+  }, [pdfPages.length, currentPage])
+
+  // Auto-fit zoom on first page load (separate effect)
+  useEffect(() => {
+    const container = containerRef.current
+    if (!hasAutoFitted.current && pdfPages.length > 0 && pdfPages[currentPage - 1] && container) {
+      const pdfPage = pdfPages[currentPage - 1]
+      const containerRect = container.getBoundingClientRect()
+      const containerWidth = containerRect.width
+      const containerHeight = containerRect.height
+      
+      // Calculate zoom to fit page with 5% padding
+      const scaleX = (containerWidth * 0.95) / pdfPage.width
+      const scaleY = (containerHeight * 0.95) / pdfPage.height
+      const fitZoom = Math.min(scaleX, scaleY)
+      
+      // Limit zoom to reasonable range
+      const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
+      
+      setViewport({
+        zoom: finalZoom,
+        panX: 0,
+        panY: 0
+      })
+      
+      hasAutoFitted.current = true
+      console.log('Auto-fitted zoom:', { finalZoom, containerWidth, containerHeight, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
+    }
   }, [pdfPages.length, currentPage])
 
   // Render drawings when dependencies change
