@@ -238,7 +238,7 @@ export default function BidComparisonModal({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-lg shadow-xl max-w-6xl w-[95vw] md:w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="border-0 shadow-none flex-1 flex flex-col">
@@ -275,9 +275,9 @@ export default function BidComparisonModal({
                 <p className="text-gray-600">No bids have been received for this job.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4 h-full overflow-hidden">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full overflow-hidden">
                 {/* Left: Bids List */}
-                <div className="border-r pr-4 overflow-y-auto">
+                <div className="border-r-0 md:border-r pr-0 md:pr-4 overflow-y-auto">
                   <h3 className="font-semibold mb-3">Bids ({bids.length})</h3>
                   <div className="space-y-3">
                     {bids.map((bid) => (

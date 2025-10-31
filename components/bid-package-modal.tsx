@@ -390,7 +390,7 @@ export default function BidPackageModal({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg shadow-xl max-w-4xl w-[95vw] md:w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="border-0 shadow-none">
@@ -527,16 +527,16 @@ export default function BidPackageModal({
                       variants={staggerContainer}
                       initial="initial"
                       animate="animate"
-                      className="space-y-6"
+                      className="space-y-4 md:space-y-6"
                     >
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">Minimum Line Items</h3>
-                        <Badge variant="outline">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <h3 className="text-base md:text-lg font-semibold">Minimum Line Items</h3>
+                        <Badge variant="outline" className="text-xs md:text-sm">
                           {selectedItems.length} selected
                         </Badge>
                       </div>
 
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
+                      <div className="space-y-2 md:space-y-3 max-h-64 overflow-y-auto">
                         {filteredTakeoffItems.map((item) => (
                           <motion.div
                             key={item.id}
@@ -568,8 +568,8 @@ export default function BidPackageModal({
                       </div>
 
                       {/* Add custom line item */}
-                      <div className="p-3 border rounded-lg space-y-3">
-                        <h4 className="font-semibold text-sm">Add Custom Line Item</h4>
+                      <div className="p-2 md:p-3 border rounded-lg space-y-2 md:space-y-3">
+                        <h4 className="font-semibold text-xs md:text-sm">Add Custom Line Item</h4>
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                           <Select
                             value={selectedTrades[0] || ''}
@@ -635,18 +635,18 @@ export default function BidPackageModal({
                         </div>
                       </div>
 
-                      <div className="flex space-x-3">
+                      <div className="flex flex-col sm:flex-row gap-2 md:space-x-3">
                         <Button 
                           variant="outline" 
                           onClick={() => setStep(1)}
-                          className="flex-1"
+                          className="flex-1 h-10 md:h-auto"
                         >
                           Back
                         </Button>
                         <Button 
                           onClick={() => setStep(3)}
                           disabled={!canProceedToStep3}
-                          className="flex-1"
+                          className="flex-1 h-10 md:h-auto"
                         >
                           Next: Select Subcontractors
                         </Button>
@@ -697,9 +697,9 @@ export default function BidPackageModal({
                       </div>
 
                       {/* Filters & directory toggles */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="p-3 border rounded-lg space-y-2">
-                          <h4 className="font-semibold text-sm">Directories</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3">
+                        <div className="p-2 md:p-3 border rounded-lg space-y-2">
+                          <h4 className="font-semibold text-xs md:text-sm">Directories</h4>
                           <label className="flex items-center space-x-2">
                             <Checkbox checked={includeMyContacts} onCheckedChange={(v: boolean) => setIncludeMyContacts(v)} />
                             <span className="text-sm">My Contacts</span>
@@ -709,8 +709,8 @@ export default function BidPackageModal({
                             <span className="text-sm">Bidi Directory</span>
                           </label>
                         </div>
-                        <div className="p-3 border rounded-lg space-y-2">
-                          <h4 className="font-semibold text-sm">Filters</h4>
+                        <div className="p-2 md:p-3 border rounded-lg space-y-2">
+                          <h4 className="font-semibold text-xs md:text-sm">Filters</h4>
                           <div className="space-y-2">
                             <div>
                               <div className="text-xs text-gray-600 mb-1">Min Google rating</div>
@@ -745,15 +745,15 @@ export default function BidPackageModal({
                       </div>
 
                       {/* Add Contact (personal) */}
-                      <div className="p-3 border rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-sm">Add Contact (My Contacts)</h4>
-                          <Button variant="outline" size="sm" onClick={() => setShowAddContact(s => !s)}>
+                      <div className="p-2 md:p-3 border rounded-lg">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h4 className="font-semibold text-xs md:text-sm">Add Contact (My Contacts)</h4>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddContact(s => !s)} className="h-8 md:h-9">
                             {showAddContact ? 'Close' : 'Add'}
                           </Button>
                         </div>
                         {showAddContact && (
-                          <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                          <div className="mt-2 md:mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
                             <Input placeholder="Name" value={newContact.name} onChange={(e) => setNewContact(v => ({ ...v, name: e.target.value }))} />
                             <Input placeholder="Email" value={newContact.email} onChange={(e) => setNewContact(v => ({ ...v, email: e.target.value }))} />
                             <Select value={newContact.trade_category} onValueChange={(val) => setNewContact(v => ({ ...v, trade_category: val }))}>
@@ -906,11 +906,11 @@ export default function BidPackageModal({
                         </div>
                       )}
 
-                      <div className="flex space-x-3">
+                      <div className="flex flex-col sm:flex-row gap-2 md:space-x-3">
                         <Button 
                           variant="outline" 
                           onClick={() => setStep(2)}
-                          className="flex-1"
+                          className="flex-1 h-10 md:h-auto"
                         >
                           Back
                         </Button>
@@ -918,14 +918,14 @@ export default function BidPackageModal({
                           variant="outline"
                           onClick={() => setPreviewOpen(true)}
                           disabled={!canCreatePackage || loading}
-                          className="flex-1"
+                          className="flex-1 h-10 md:h-auto"
                         >
                           Preview Email
                         </Button>
                         <Button 
                           onClick={handleCreatePackage}
                           disabled={!canCreatePackage || loading}
-                          className="flex-1"
+                          className="flex-1 h-10 md:h-auto"
                         >
                           {loading ? (
                             <>

@@ -398,20 +398,20 @@ export default function GuestPlanViewer() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">{plan.title || plan.file_name}</h1>
-            <p className="text-sm text-gray-600">Shared plan • {guestName}</p>
+      <div className="bg-white border-b border-gray-200 p-3 md:p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg md:text-xl font-semibold text-gray-900 truncate">{plan.title || plan.file_name}</h1>
+            <p className="text-xs md:text-sm text-gray-600">Shared plan • {guestName}</p>
           </div>
-          <div className="flex items-center space-x-4">
-            <div className="text-sm text-gray-600">
+          <div className="flex items-center space-x-2 md:space-x-4">
+            <div className="text-xs md:text-sm text-gray-600">
               {(() => {
                 const Icon = getPermissionIcon(share.permissions)
                 return (
-                  <div className="flex items-center space-x-2">
-                    <Icon className="h-4 w-4" />
-                    <span>
+                  <div className="flex items-center space-x-1 md:space-x-2">
+                    <Icon className="h-3 w-3 md:h-4 md:w-4" />
+                    <span className="hidden sm:inline">
                       {share.permissions === 'view_only' && 'View Only'}
                       {share.permissions === 'markup' && 'Markup Access'}
                       {share.permissions === 'comment' && 'Comment Access'}
@@ -426,8 +426,8 @@ export default function GuestPlanViewer() {
       </div>
 
       {/* Canvas Area */}
-      <div className="flex-1 flex">
-		<div className={`flex-1 ${rightSidebarOpen ? 'mr-96' : ''} transition-all`}>
+      <div className="flex-1 flex relative">
+		<div className={`flex-1 ${rightSidebarOpen ? 'mr-0 md:mr-96' : ''} transition-all min-w-0`}>
           {canView ? (
             pdfUrl ? (
               <FastPlanCanvas
@@ -460,34 +460,42 @@ export default function GuestPlanViewer() {
           )}
         </div>
         
-        {/* Right Sidebar with Analysis */}
+        {/* Right Sidebar with Analysis - Drawer on mobile/tablet */}
 		{rightSidebarOpen && (
-		  <div className="fixed right-0 top-16 bottom-0 w-96 bg-white border-l border-gray-200 overflow-y-auto z-10">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900">Analysis</h3>
+		  <>
+		    {/* Overlay for mobile/tablet */}
+		    <div 
+		      className="fixed inset-0 bg-black bg-opacity-50 z-40 md:z-10 block md:hidden"
+		      onClick={() => setRightSidebarOpen(false)}
+		    />
+		    
+		  <div className="fixed right-0 top-0 md:top-16 bottom-0 w-full md:w-[650px] max-w-sm md:max-w-none bg-white border-l border-gray-200 overflow-y-auto z-50 md:z-10 shadow-xl md:shadow-none">
+            <div className="p-3 md:p-4">
+              <div className="flex items-center justify-between mb-3 md:mb-4 sticky top-0 bg-white z-10 pb-2">
+                <h3 className="font-semibold text-gray-900 text-base md:text-lg">Analysis</h3>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setRightSidebarOpen(false)}
+                  className="h-9 w-9"
                 >
                   ×
                 </Button>
               </div>
               
               <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)}>
-                <TabsList className="grid w-full grid-cols-3 mb-4">
-                  <TabsTrigger value="takeoff">
-                    <BarChart3 className="h-4 w-4 mr-1" />
-                    Takeoff
+                <TabsList className="grid w-full grid-cols-3 mb-3 md:mb-4 gap-1">
+                  <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
+                    <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                    <span className="hidden sm:inline">Takeoff</span>
                   </TabsTrigger>
-                  <TabsTrigger value="quality">
-                    <AlertTriangle className="h-4 w-4 mr-1" />
-                    Quality
+                  <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-4">
+                    <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                    <span className="hidden sm:inline">Quality</span>
                   </TabsTrigger>
-                  <TabsTrigger value="comments">
-                    <MessageSquare className="h-4 w-4 mr-1" />
-                    Comments
+                  <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-4">
+                    <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                    <span className="hidden sm:inline">Comments</span>
                   </TabsTrigger>
                 </TabsList>
                 
@@ -583,14 +591,15 @@ export default function GuestPlanViewer() {
               </Tabs>
             </div>
           </div>
+          </>
         )}
         
         {!rightSidebarOpen && (
           <button
             onClick={() => setRightSidebarOpen(true)}
-            className="fixed right-4 top-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-l-lg px-2 py-4 shadow-md"
+            className="fixed bottom-4 right-4 md:right-4 md:top-1/2 md:-translate-y-1/2 bg-white border border-gray-200 rounded-full md:rounded-l-lg px-3 md:px-2 py-3 md:py-4 shadow-lg md:shadow-md z-40 h-12 w-12 md:h-auto md:w-auto flex items-center justify-center"
           >
-            <ChevronLeft className="h-5 w-5 text-gray-600" />
+            <ChevronLeft className="h-5 w-5 text-gray-600 rotate-180 md:rotate-0" />
           </button>
         )}
       </div>

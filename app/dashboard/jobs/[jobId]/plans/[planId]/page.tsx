@@ -78,6 +78,8 @@ export default function EnhancedPlanViewer() {
   // Handle page navigation from takeoff items
   const handlePageNavigate = useCallback((page: number) => {
     setGoToPage(page)
+    // Reset after navigation so it can be triggered again
+    setTimeout(() => setGoToPage(undefined), 100)
   }, [])
   
   // PDF quality settings
@@ -89,13 +91,41 @@ export default function EnhancedPlanViewer() {
   const [showPackageModal, setShowPackageModal] = useState(false)
   const [showBidsModal, setShowBidsModal] = useState(false)
   
-	// Sidebar resize state
+  // Sidebar resize state
 	const [sidebarWidth, setSidebarWidth] = useState(384) // Default 384px (w-96)
 	const [isResizing, setIsResizing] = useState(false)
 	const [startX, setStartX] = useState(0)
 	const [startWidth, setStartWidth] = useState(384)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  
+  // Mobile/tablet detection and responsive sidebar state
+  const [isMobile, setIsMobile] = useState(false)
+  const [isTablet, setIsTablet] = useState(false)
+  const rightSidebarOpenRef = useRef(rightSidebarOpen)
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    rightSidebarOpenRef.current = rightSidebarOpen
+  }, [rightSidebarOpen])
+  
+  useEffect(() => {
+    const checkScreenSize = () => {
+      const width = window.innerWidth
+      const mobile = width < 768
+      const tablet = width >= 768 && width < 1024
+      setIsMobile(mobile)
+      setIsTablet(tablet)
+      // On mobile, default sidebar to closed
+      if (mobile && rightSidebarOpenRef.current) {
+        setRightSidebarOpen(false)
+      }
+    }
+    
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    return () => window.removeEventListener('resize', checkScreenSize)
+  }, [])
   
   const commentPersistenceRef = useRef<CommentPersistence | null>(null)
   const supabase = createClient()
@@ -154,8 +184,8 @@ export default function EnhancedPlanViewer() {
       const deltaX = e.clientX - startX
       const newWidth = startWidth - deltaX
       
-      // Clamp width between 250px and 800px
-      const clampedWidth = Math.max(250, Math.min(800, newWidth))
+      // Clamp width between 600px and 800px
+      const clampedWidth = Math.max(600, Math.min(800, newWidth))
       setSidebarWidth(clampedWidth)
     }
 
@@ -883,54 +913,56 @@ export default function EnhancedPlanViewer() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row">
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top Toolbar */}
-        <div className="bg-white border-b border-gray-200 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+        <div className="bg-white border-b border-gray-200 p-2 md:p-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-2 md:space-x-4 min-w-0 flex-1">
               <Link href={`/dashboard/jobs/${jobId}`}>
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Job
+                <Button variant="ghost" size="sm" className="h-9">
+                  <ArrowLeft className="h-4 w-4 md:mr-2" />
+                  <span className="hidden md:inline">Back to Job</span>
                 </Button>
               </Link>
-              <div className="text-sm text-gray-600">
-                <span className="font-medium">{job.name}</span> - {plan.title || plan.file_name}
+              <div className="text-xs md:text-sm text-gray-600 truncate">
+                <span className="font-medium">{job.name}</span> - <span className="hidden sm:inline">{plan.title || plan.file_name}</span>
               </div>
             </div>
             
-            <div className="flex items-center space-x-2">
-              <Button variant="ghost" size="sm" onClick={() => setShowShareModal(true)}>
-                <Share2 className="h-4 w-4 mr-2" />
-                Share
+            <div className="flex items-center space-x-1 md:space-x-2 flex-wrap">
+              <Button variant="ghost" size="sm" onClick={() => setShowShareModal(true)} className="h-9">
+                <Share2 className="h-4 w-4" />
+                <span className="hidden lg:inline ml-2">Share</span>
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setShowPackageModal(true)}>
-                <Package className="h-4 w-4 mr-2" />
-                Create Package
+              <Button variant="ghost" size="sm" onClick={() => setShowPackageModal(true)} className="h-9">
+                <Package className="h-4 w-4" />
+                <span className="hidden lg:inline ml-2">Package</span>
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setShowBidsModal(true)}>
-                <Eye className="h-4 w-4 mr-2" />
-                View Bids
+              <Button variant="ghost" size="sm" onClick={() => setShowBidsModal(true)} className="h-9">
+                <Eye className="h-4 w-4" />
+                <span className="hidden lg:inline ml-2">Bids</span>
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => console.log('Save clicked')}>
-                <Save className="h-4 w-4 mr-2" />
-                Save
+              <Button variant="ghost" size="sm" onClick={() => console.log('Save clicked')} className="h-9 hidden md:flex">
+                <Save className="h-4 w-4 md:mr-2" />
+                <span className="hidden lg:inline">Save</span>
               </Button>
               <Button variant="ghost" size="sm" onClick={() => {
                 if (planUrl) {
                   window.open(planUrl, '_blank')
                 }
-              }}>
-                <Download className="h-4 w-4 mr-2" />
-                Download
+              }} className="h-9 hidden md:flex">
+                <Download className="h-4 w-4 md:mr-2" />
+                <span className="hidden lg:inline">Download</span>
               </Button>
-              <PdfQualitySettings
-                qualityMode={qualityMode}
-                onQualityModeChange={handleQualityModeChange}
-                onClearCache={handleClearCache}
-              />
+              <div className="hidden md:block">
+                <PdfQualitySettings
+                  qualityMode={qualityMode}
+                  onQualityModeChange={handleQualityModeChange}
+                  onClearCache={handleClearCache}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -938,8 +970,12 @@ export default function EnhancedPlanViewer() {
         {/* Canvas Area */}
         <div className="flex-1 flex relative" ref={containerRef}>
           <div 
-            className="flex-1"
-            style={{ width: rightSidebarOpen ? `calc(100% - ${sidebarWidth}px - 1px)` : '100%' }}
+            className="flex-1 min-w-0"
+            style={{ 
+              width: rightSidebarOpen && !isMobile && !isTablet 
+                ? `calc(100% - ${sidebarWidth}px - 1px)` 
+                : '100%' 
+            }}
           >
             {planUrl ? (
               <FastPlanCanvas
@@ -964,61 +1000,83 @@ export default function EnhancedPlanViewer() {
             )}
           </div>
 
-          {/* Resize Handle */}
-          {rightSidebarOpen && (
+          {/* Resize Handle - Hidden on mobile/tablet */}
+          {rightSidebarOpen && !isMobile && !isTablet && (
             <div
-              className="w-1 bg-gray-200 hover:bg-gray-300 cursor-ew-resize transition-colors z-30"
+              className="w-1 bg-gray-200 hover:bg-gray-300 cursor-ew-resize transition-colors z-30 hidden lg:block"
               onMouseDown={handleMouseDown}
             />
           )}
 
-          {/* Right Sidebar */}
+          {/* Right Sidebar - Drawer on mobile/tablet, sidebar on desktop */}
           <AnimatePresence>
             {rightSidebarOpen && (
-              <motion.div
-                ref={sidebarRef}
-                variants={drawerSlide}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className="bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto"
-                style={{ width: `${sidebarWidth}px` }}
-              >
-                <div className="p-4 border-b border-gray-200">
+              <>
+                {/* Mobile/Tablet Overlay */}
+                {(isMobile || isTablet) && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 bg-black bg-opacity-50 z-40 md:z-30"
+                    onClick={() => setRightSidebarOpen(false)}
+                  />
+                )}
+                
+                <motion.div
+                  ref={sidebarRef}
+                  variants={drawerSlide}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className={`bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto ${
+                    isMobile || isTablet 
+                      ? 'fixed right-0 top-0 bottom-0 w-full max-w-sm z-50 shadow-xl' 
+                      : 'relative'
+                  }`}
+                  style={{ 
+                    width: isMobile || isTablet 
+                      ? '90vw' 
+                      : `${sidebarWidth}px` 
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                <div className="p-3 md:p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-900">Analysis</h3>
+                    <h3 className="font-semibold text-gray-900 text-base md:text-lg">Analysis</h3>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setRightSidebarOpen(false)}
+                      className="h-9 w-9"
                     >
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />
                     </Button>
                   </div>
                 </div>
                 
                 <div className="flex-1 overflow-hidden">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="h-full">
-                    <TabsList className="grid w-full grid-cols-3 mx-4 mt-4 mb-0 gap-1 pr-4 mr-4">
-                      <TabsTrigger value="takeoff" className="text-xs">
-                        <BarChart3 className="h-4 w-4 mr-1" />
-                        Takeoff
+                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1">
+                      <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
+                        <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                        <span className="hidden sm:inline">Takeoff</span>
                       </TabsTrigger>
-                      <TabsTrigger value="quality" className="text-xs">
-                        <AlertTriangle className="h-4 w-4 mr-1" />
-                        Quality
+                      <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-4">
+                        <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                        <span className="hidden sm:inline">Quality</span>
                       </TabsTrigger>
-                      <TabsTrigger value="comments" className="text-xs">
-                        <MessageSquare className="h-4 w-4 mr-1" />
-                        Comments
+                      <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-4">
+                        <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                        <span className="hidden sm:inline">Comments</span>
                       </TabsTrigger>
                     </TabsList>
                     
-                    <div className="p-4 h-full overflow-y-auto">
+                    <div className="p-2 md:p-4 h-full overflow-y-auto">
                       <TabsContent value="takeoff" className="h-full">
-                        <div className="space-y-4">
+                        <div className="space-y-3 md:space-y-4">
                           <Button 
-                            className="w-full" 
+                            className="w-full h-10 md:h-auto" 
                             onClick={() => handleRunAITakeoff()}
                             disabled={isRunningTakeoff}
                           >
@@ -1223,9 +1281,21 @@ export default function EnhancedPlanViewer() {
                     </div>
                   </Tabs>
                 </div>
-              </motion.div>
+                </motion.div>
+                </>
             )}
           </AnimatePresence>
+            
+            {/* Floating button to open sidebar on mobile/tablet */}
+            {!rightSidebarOpen && (isMobile || isTablet) && (
+              <Button
+                className="fixed bottom-4 right-4 z-40 h-12 w-12 rounded-full shadow-lg"
+                onClick={() => setRightSidebarOpen(true)}
+                size="lg"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </Button>
+            )}
         </div>
       </div>
 

@@ -574,26 +574,27 @@ export default function FastPlanCanvas({
   return (
     <div className="flex flex-col h-full">
       {/* Top Toolbar */}
-      <div className="flex items-center justify-between p-4 bg-white border-b border-gray-200">
-        <div className="flex items-center space-x-2">
+      <div className="flex items-center justify-between p-2 md:p-4 bg-white border-b border-gray-200 flex-wrap gap-2">
+        <div className="flex items-center space-x-1 md:space-x-2 flex-wrap min-w-0 flex-1">
           {/* PDF Error Warning */}
           {pdfError && (
-            <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-100 border border-yellow-300 rounded-md">
-              <AlertTriangle className="h-4 w-4 text-yellow-600" />
-              <span className="text-sm text-yellow-700">{pdfError}</span>
+            <div className="flex items-center space-x-1 md:space-x-2 px-2 md:px-3 py-1 bg-yellow-100 border border-yellow-300 rounded-md text-xs md:text-sm">
+              <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 text-yellow-600 flex-shrink-0" />
+              <span className="text-yellow-700 truncate">{pdfError}</span>
             </div>
           )}
 
           {/* Comment Tool */}
-          <div className="flex items-center space-x-1 border-r border-gray-200 pr-4">
+          <div className="flex items-center space-x-1 border-r border-gray-200 pr-2 md:pr-4">
             <Button
               variant={selectedTool === 'comment' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setSelectedTool('comment')}
               title="Add comment"
+              className="h-8 md:h-9"
             >
-              <MessageSquare className="h-4 w-4 mr-2" />
-              <span className="text-sm">Add Comment</span>
+              <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
+              <span className="text-xs md:text-sm hidden sm:inline">Add Comment</span>
             </Button>
             {selectedTool === 'comment' && (
               <Button
@@ -601,6 +602,7 @@ export default function FastPlanCanvas({
                 size="sm"
                 onClick={() => setSelectedTool('none')}
                 title="Pan view"
+                className="h-8 md:h-9 hidden md:flex"
               >
                 <span className="text-sm">Pan</span>
               </Button>
@@ -608,19 +610,19 @@ export default function FastPlanCanvas({
           </div>
 
           {/* Zoom Controls */}
-          <div className="flex items-center space-x-2">
-            <Button variant="ghost" size="sm" onClick={handleZoomOut}>
-              <ZoomOut className="h-4 w-4" />
+          <div className="flex items-center space-x-1 md:space-x-2">
+            <Button variant="ghost" size="sm" onClick={handleZoomOut} className="h-8 md:h-9">
+              <ZoomOut className="h-3 w-3 md:h-4 md:w-4" />
             </Button>
-            <span className="text-sm text-gray-600 min-w-[60px] text-center">
+            <span className="text-xs md:text-sm text-gray-600 min-w-[50px] md:min-w-[60px] text-center">
               {Math.round(viewport.zoom * 100)}%
             </span>
-            <Button variant="ghost" size="sm" onClick={handleZoomIn}>
-              <ZoomIn className="h-4 w-4" />
+            <Button variant="ghost" size="sm" onClick={handleZoomIn} className="h-8 md:h-9">
+              <ZoomIn className="h-3 w-3 md:h-4 md:w-4" />
             </Button>
-            <div className="group relative">
-              <Button variant="ghost" size="sm" className="px-2">
-                <Info className="h-4 w-4 text-gray-400" />
+            <div className="group relative hidden md:block">
+              <Button variant="ghost" size="sm" className="px-2 h-8 md:h-9">
+                <Info className="h-3 w-3 md:h-4 md:w-4 text-gray-400" />
               </Button>
               <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-50">
                 <div className="bg-gray-900 text-white text-xs rounded-lg p-2 w-48 shadow-lg">
@@ -635,19 +637,20 @@ export default function FastPlanCanvas({
 
           {/* Pagination Controls */}
           {numPages > 1 && (
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1 md:space-x-2">
               <Button 
                 variant="ghost" 
                 size="sm" 
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage <= 1}
+                className="h-8 md:h-9"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
               </Button>
-              <span className="text-sm text-gray-600 min-w-[80px] text-center">
-                Page {currentPage} of {numPages}
+              <span className="text-xs md:text-sm text-gray-600 min-w-[60px] md:min-w-[80px] text-center">
+                <span className="hidden sm:inline">Page </span>{currentPage}<span className="hidden sm:inline"> of {numPages}</span>
                 {loadingPages.has(currentPage) && (
-                  <span className="text-blue-500 ml-1">(Loading...)</span>
+                  <span className="text-blue-500 ml-1 hidden sm:inline">(Loading...)</span>
                 )}
               </span>
               <Button 
@@ -655,24 +658,26 @@ export default function FastPlanCanvas({
                 size="sm" 
                 onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
                 disabled={currentPage >= numPages}
+                className="h-8 md:h-9"
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-3 w-3 md:h-4 md:w-4" />
               </Button>
             </div>
           )}
         </div>
 
-        {/* Right Sidebar Toggle */}
-        <div className="flex items-center space-x-2">
+        {/* Right Sidebar Toggle - Hidden on mobile since sidebar is a drawer */}
+        <div className="flex items-center space-x-2 hidden md:flex">
           <Button
             variant="ghost"
             size="sm"
             onClick={onRightSidebarToggle}
+            className="h-8 md:h-9"
           >
             {rightSidebarOpen ? (
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3 w-3 md:h-4 md:w-4" />
             ) : (
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
             )}
           </Button>
         </div>

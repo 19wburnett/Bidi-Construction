@@ -65,7 +65,7 @@ interface TakeoffAccordionProps {
 
 // Category configuration for styling
 const CATEGORY_CONFIG = {
-  structural: { color: 'bg-blue-100 text-blue-800', label: 'Structural', icon: Building2 },
+  structural: { color: 'bg-orange-100 text-orange-800', label: 'Structural', icon: Building2 },
   exterior: { color: 'bg-green-100 text-green-800', label: 'Exterior', icon: Home },
   interior: { color: 'bg-purple-100 text-purple-800', label: 'Interior', icon: Layers },
   mep: { color: 'bg-yellow-100 text-yellow-800', label: 'MEP', icon: Zap },
@@ -297,17 +297,17 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
   return (
     <div className="space-y-4">
       {/* Overall Total Summary */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+      <div className="bg-gradient-to-r from-orange-50 to-orange-50/50 dark:from-orange-950/30 dark:to-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            <h3 className="font-bold text-lg text-blue-900 dark:text-blue-100">Total Estimate</h3>
+            <DollarSign className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            <h3 className="font-bold text-lg text-orange-900 dark:text-orange-100">Total Estimate</h3>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">
+            <div className="text-2xl font-bold text-orange-900 dark:text-orange-100">
               {formatCurrency(overallTotal)}
             </div>
-            <div className="text-xs text-blue-600 dark:text-blue-400">
+            <div className="text-xs text-orange-600 dark:text-orange-400">
               {items.length} {items.length === 1 ? 'item' : 'items'}
             </div>
           </div>
@@ -421,38 +421,47 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                         <AccordionContent className="px-2 pb-2">
                           {/* Level 3: Line Items */}
                           <div className="space-y-2 ml-4">
-                            {subcatItems.map((item, index) => (
+                            {subcatItems.map((item, index) => {
+                              // Clean notes to remove consensus metadata
+                              const cleanedNotes = item.notes && !item.notes.includes('Consensus from unknown') && !item.notes.startsWith('High-confidence consensus from unknown') 
+                                ? item.notes 
+                                : item.notes?.split('|').slice(1).join('|').trim() || null
+                              
+                              return (
                               <Card
                                 key={`${item.id || `${category}-${subcategory}-${index}`}`}
-                                className={`hover:shadow-md transition-all ${
-                                  item.bounding_box ? 'cursor-pointer hover:border-blue-500' : ''
+                                className={`hover:shadow-lg transition-all ${
+                                  item.bounding_box ? 'cursor-pointer hover:border-orange-500' : ''
                                 }`}
                                 onClick={() => item.bounding_box && onItemHighlight?.(item.bounding_box)}
                               >
-								<CardContent className="p-4">
-                                  <div className="space-y-2">
+								<CardContent className="p-5">
+                                  <div className="space-y-3">
                                     {/* Item Header */}
-                                    <div className="flex items-start justify-between gap-2">
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-start gap-2 mb-2">
                                           {editingId === item.id && editable ? (
                                             <Input
                                               value={draftItem?.name || ''}
                                               onChange={(e) => setDraftItem(d => ({ ...(d || {}), name: e.target.value }))}
-                                              className="h-8"
+                                              className="h-8 flex-1"
                                             />
                                           ) : (
-                                            <h5 className="font-medium text-sm leading-tight">
+                                            <h5 className="font-semibold text-base leading-tight text-gray-900">
                                               {item.name}
                                             </h5>
                                           )}
                                           {item.bounding_box && (
                                             <Badge 
-                                              variant="outline" 
-                                              className="text-xs cursor-pointer hover:bg-blue-50 transition-colors"
-                                              onClick={() => onPageNavigate?.(item.bounding_box!.page)}
+                                              variant="secondary" 
+                                              className="text-xs cursor-pointer hover:bg-orange-50 transition-colors shrink-0 border-orange-200"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                onPageNavigate?.(item.bounding_box!.page)
+                                              }}
                                             >
-                                              <MapPin className="h-3 w-3 mr-1" />
+                                              <MapPin className="h-3 w-3 mr-1 text-orange-600" />
                                               Page {item.bounding_box.page}
                                             </Badge>
                                           )}
@@ -461,125 +470,127 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                                           <Textarea
                                             value={draftItem?.description || ''}
                                             onChange={(e) => setDraftItem(d => ({ ...(d || {}), description: e.target.value }))}
-                                            className="h-16 text-xs"
+                                            className="h-20 text-sm"
                                             placeholder="Description"
                                           />
                                         ) : (
                                           item.description && item.name !== item.description && (
-                                            <p className="text-xs text-gray-600 mt-1">
+                                            <p className="text-sm text-gray-600 leading-relaxed">
                                               {item.description}
                                             </p>
                                           )
                                         )}
                                       </div>
-                                      <div className="flex items-center gap-2">
-                                        {editingId === item.id && editable ? (
-                                          <>
-                                            <Input
-                                              value={String(draftItem?.quantity ?? '')}
-                                              onChange={(e) => {
-                                                const qty = Number(e.target.value) || 0
-                                                const unitCost = draftItem?.unit_cost || 0
-                                                setDraftItem(d => ({ 
-                                                  ...(d || {}), 
-                                                  quantity: qty,
-                                                  total_cost: qty * unitCost
-                                                }))
-                                              }}
-                                              className="h-8 w-16"
-                                              placeholder="Qty"
-                                            />
-                                            <Input
-                                              value={draftItem?.unit || ''}
-                                              onChange={(e) => setDraftItem(d => ({ ...(d || {}), unit: e.target.value }))}
-                                              className="h-8 w-20"
-                                              placeholder="Unit"
-                                            />
-                                            <Input
-                                              type="number"
-                                              step="0.01"
-                                              value={String(draftItem?.unit_cost ?? '')}
-                                              onChange={(e) => {
-                                                const unitCost = Number(e.target.value) || 0
-                                                const qty = draftItem?.quantity || 0
-                                                setDraftItem(d => ({ 
-                                                  ...(d || {}), 
-                                                  unit_cost: unitCost,
-                                                  total_cost: qty * unitCost
-                                                }))
-                                              }}
-                                              className="h-8 w-24"
-                                              placeholder="$/unit"
-                                            />
-                                          </>
-												) : (
-													<div className="grid grid-cols-3 gap-3 text-right min-w-[220px]">
-														<div>
-															<div className="text-sm font-semibold text-gray-900">
-																{item.quantity} {item.unit}
-															</div>
-															<div className="text-[10px] uppercase tracking-wide text-gray-500">Quantity</div>
-														</div>
-														<div>
-															<div className="text-sm font-semibold text-gray-900">
-																{item.unit_cost !== undefined ? `${formatCurrency(item.unit_cost)}/${item.unit}` : '—'}
-															</div>
-															<div className="text-[10px] uppercase tracking-wide text-gray-500">Unit Price</div>
-														</div>
-														<div>
-															<div className="text-sm font-semibold text-green-700">
-																{calculateItemCost(item) > 0 ? formatCurrency(calculateItemCost(item)) : '—'}
-															</div>
-															<div className="text-[10px] uppercase tracking-wide text-gray-500">Total</div>
-														</div>
-													</div>
-												)}
-                                      </div>
                                     </div>
 
-                                    {/* Cost Code */}
-                                    {item.cost_code && (
-                                      <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className="text-xs font-mono">
-                                          {item.cost_code}
-                                        </Badge>
-                                        {item.cost_code_description && (
-                                          <span className="text-xs text-gray-500">
-                                            {item.cost_code_description}
-                                          </span>
+                                    {/* Cost Code & Location Row */}
+                                    {(item.cost_code || item.location) && (
+                                      <div className="flex items-center gap-3 flex-wrap">
+                                        {item.cost_code && (
+                                          <div className="flex items-center gap-1.5">
+                                            <Badge variant="outline" className="text-xs font-mono bg-gray-50">
+                                              {item.cost_code}
+                                            </Badge>
+                                            {item.cost_code_description && (
+                                              <span className="text-xs text-gray-500">
+                                                {item.cost_code_description}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                        {item.location && (
+                                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                            <span className="text-gray-500">Section:</span>
+                                            <span className="font-medium">{item.location}</span>
+                                          </div>
                                         )}
                                       </div>
                                     )}
 
-                                    {/* Metadata */}
-                                    <div className="flex flex-wrap gap-3 text-xs text-gray-600">
-                                      {item.dimensions && (
-                                        <div className="flex items-center gap-1">
-                                          <Ruler className="h-3 w-3" />
-                                          <span>{item.dimensions}</span>
+                                    {/* Dimensions */}
+                                    {item.dimensions && (
+                                      <div className="text-xs text-gray-700 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                                        <div className="flex items-center gap-2">
+                                          <Ruler className="h-3.5 w-3.5 text-orange-600" />
+                                          <span className="font-medium">{item.dimensions}</span>
                                         </div>
-                                      )}
-                                      {item.location && (
-                                        <div className="flex items-center gap-1">
-                                          <MapPin className="h-3 w-3" />
-                                          <span>{item.location}</span>
-                                        </div>
-                                      )}
-                                      {item.ai_provider && (
-                                        <div className="flex items-center gap-1">
-                                          <Badge variant="outline" className="text-xs">
-                                            {item.ai_provider}
-                                          </Badge>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Notes */}
-                                    {item.notes && (
-                                      <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 italic">
-                                        💡 {item.notes}
                                       </div>
                                     )}
+
+                                    {/* Notes */}
+                                    {cleanedNotes && (
+                                      <div className="text-xs text-gray-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                                        <div className="flex items-start gap-2">
+                                          <span className="text-base">💡</span>
+                                          <span className="leading-relaxed">{cleanedNotes}</span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Quantity & Cost Display */}
+                                    <div className="border-t pt-3">
+                                      {editingId === item.id && editable ? (
+                                        <div className="flex gap-2">
+                                          <Input
+                                            value={String(draftItem?.quantity ?? '')}
+                                            onChange={(e) => {
+                                              const qty = Number(e.target.value) || 0
+                                              const unitCost = draftItem?.unit_cost || 0
+                                              setDraftItem(d => ({ 
+                                                ...(d || {}), 
+                                                quantity: qty,
+                                                total_cost: qty * unitCost
+                                              }))
+                                            }}
+                                            className="h-9 w-20"
+                                            placeholder="Qty"
+                                          />
+                                          <Input
+                                            value={draftItem?.unit || ''}
+                                            onChange={(e) => setDraftItem(d => ({ ...(d || {}), unit: e.target.value }))}
+                                            className="h-9 w-24"
+                                            placeholder="Unit"
+                                          />
+                                          <Input
+                                            type="number"
+                                            step="0.01"
+                                            value={String(draftItem?.unit_cost ?? '')}
+                                            onChange={(e) => {
+                                              const unitCost = Number(e.target.value) || 0
+                                              const qty = draftItem?.quantity || 0
+                                              setDraftItem(d => ({ 
+                                                ...(d || {}), 
+                                                unit_cost: unitCost,
+                                                total_cost: qty * unitCost
+                                              }))
+                                            }}
+                                            className="h-9 flex-1"
+                                            placeholder="$/unit"
+                                          />
+                                        </div>
+												) : (
+													<div className="grid grid-cols-3 gap-4">
+														<div className="text-center">
+															<div className="text-lg font-bold text-gray-900">
+																{item.quantity}
+															</div>
+															<div className="text-xs text-gray-600 mt-0.5">{item.unit}</div>
+														</div>
+														<div className="text-center border-x">
+															<div className="text-base font-semibold text-gray-900">
+																{item.unit_cost !== undefined ? formatCurrency(item.unit_cost) : '—'}
+															</div>
+															<div className="text-xs text-gray-600 mt-0.5">per {item.unit}</div>
+														</div>
+														<div className="text-center">
+															<div className="text-xl font-bold text-green-700">
+																{calculateItemCost(item) > 0 ? formatCurrency(calculateItemCost(item)) : '—'}
+															</div>
+															<div className="text-xs text-gray-600 mt-0.5">Total</div>
+														</div>
+													</div>
+												)}
+                                    </div>
 
                                     {editable && (
                                       <div className="flex items-center gap-2 pt-2">
@@ -610,7 +621,7 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
 
                                     {/* Sub-items */}
                                     {editable && item.id && (childrenByParentId[item.id]?.length ?? 0) > 0 && (
-                                      <div className="mt-3 ml-4 border-l-2 border-blue-200 pl-3 space-y-2">
+                                      <div className="mt-3 ml-4 border-l-2 border-orange-200 pl-3 space-y-2">
                                         <div className="text-xs font-semibold text-gray-600 mb-1">Sub-items:</div>
                                         {childrenByParentId[item.id]!.map((child) => {
                                           const childCost = calculateItemCost(child)
@@ -651,7 +662,8 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                                   </div>
                                 </CardContent>
                               </Card>
-                            ))}
+                              )
+                            })}
                           </div>
                         </AccordionContent>
                       </AccordionItem>

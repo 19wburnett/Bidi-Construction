@@ -367,8 +367,8 @@ export default function AdminAnalyzePlanPage() {
       const deltaX = e.clientX - startX
       const newWidth = startWidth - deltaX
       
-      // Clamp width between 300px and 800px
-      const clampedWidth = Math.max(300, Math.min(800, newWidth))
+      // Clamp width between 600px and 800px
+      const clampedWidth = Math.max(600, Math.min(800, newWidth))
       setSidebarWidth(clampedWidth)
     }
 

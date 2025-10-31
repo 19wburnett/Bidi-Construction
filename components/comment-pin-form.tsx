@@ -63,16 +63,16 @@ export default function CommentPinForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-6">
-        <DialogHeader className="pb-4">
-          <DialogTitle className="flex items-center space-x-2">
-            <MessageSquare className="h-5 w-5" />
+      <DialogContent className="max-w-md w-[95vw] md:w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="pb-3 md:pb-4">
+          <DialogTitle className="flex items-center space-x-2 text-base md:text-lg">
+            <MessageSquare className="h-4 w-4 md:h-5 md:w-5" />
             <span>Add Comment</span>
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 pt-2">
-          <div className="text-sm text-gray-600">
+        <div className="space-y-3 md:space-y-4 pt-2">
+          <div className="text-xs md:text-sm text-gray-600">
             Position: Page {pageNumber} at ({Math.round(x)}, {Math.round(y)})
           </div>
 
@@ -105,32 +105,34 @@ export default function CommentPinForm({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
             <div>
-              <Label htmlFor="category">Category (optional)</Label>
+              <Label htmlFor="category" className="text-xs md:text-sm">Category (optional)</Label>
               <Input
                 id="category"
                 placeholder="e.g., Electrical, Plumbing"
                 value={formData.category}
                 onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                className="h-9 md:h-10"
               />
             </div>
             <div>
-              <Label htmlFor="location">Location (optional)</Label>
+              <Label htmlFor="location" className="text-xs md:text-sm">Location (optional)</Label>
               <Input
                 id="location"
                 placeholder="e.g., Floor 2, Room A"
                 value={formData.location}
                 onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                className="h-9 md:h-10"
               />
             </div>
           </div>
 
-          <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <div className="flex flex-col-reverse md:flex-row justify-end gap-2 md:space-x-2 pt-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="h-10 md:h-auto w-full md:w-auto">
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={!formData.content.trim()}>
+            <Button onClick={handleSave} disabled={!formData.content.trim()} className="h-10 md:h-auto w-full md:w-auto">
               Save Comment
             </Button>
           </div>
