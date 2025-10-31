@@ -366,6 +366,7 @@ Return ONLY a valid JSON object with this structure:
       "description": "Detailed description",
       "quantity": 150.5,
       "unit": "LF|SF|CF|CY|EA|SQ",
+      "unit_cost": 2.50,
       "location": "Specific location",
       "category": "structural|exterior|interior|mep|finishes|other",
       "subcategory": "Specific subcategory",
@@ -424,11 +425,18 @@ TAKEOFF ANALYSIS FOCUS:
 - Use standard construction estimating practices
 - Cross-reference dimensions to ensure accuracy
 - Assign appropriate Procore cost codes to each item
+- Provide realistic unit_cost pricing for each item
 
 3-LEVEL CATEGORIZATION:
 LEVEL 1: CATEGORY (structural, exterior, interior, mep, finishes, other)
 LEVEL 2: SUBCATEGORY (specific work type)
 LEVEL 3: LINE ITEMS (individual materials with Procore cost codes)
+
+PRICING REQUIREMENTS:
+- For each item, you MUST provide a realistic "unit_cost" based on material type, grade, and typical market rates (as of 2024)
+- Include both material and labor costs where applicable
+- Use industry-standard pricing ranges appropriate for the material and unit type
+- Price per LF, SF, CF, CY, EA, or SQ depending on the unit
 
 BE THOROUGH: Extract every measurable element visible in the plan
 BE SPECIFIC: "2x6 Top Plate" not just "lumber"
@@ -437,7 +445,8 @@ USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubi
 ASSIGN SUBCATEGORIES: Every item must have a subcategory
 ASSIGN COST CODES: Use the Procore cost codes provided
 INCLUDE LOCATIONS: Specify where each item is located
-PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates`
+PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
+INCLUDE PRICING: Every item must have a realistic unit_cost`
 
     case 'quality':
       return basePrompt + `

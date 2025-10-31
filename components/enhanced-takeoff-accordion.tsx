@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   Accordion,
   AccordionContent,
@@ -23,7 +23,13 @@ import {
   Info,
   TrendingUp,
   Users,
-  Target
+  Target,
+  Building2,
+  Home,
+  Layers,
+  Zap,
+  Paintbrush,
+  Package
 } from 'lucide-react'
 
 export interface BoundingBox {
@@ -105,12 +111,12 @@ interface EnhancedTakeoffAccordionProps {
 
 // Category configuration for styling
 const CATEGORY_CONFIG = {
-  structural: { color: 'bg-blue-100 text-blue-800', label: 'Structural', icon: '🏗️' },
-  exterior: { color: 'bg-green-100 text-green-800', label: 'Exterior', icon: '🏠' },
-  interior: { color: 'bg-purple-100 text-purple-800', label: 'Interior', icon: '🛋️' },
-  mep: { color: 'bg-yellow-100 text-yellow-800', label: 'MEP', icon: '⚡' },
-  finishes: { color: 'bg-pink-100 text-pink-800', label: 'Finishes', icon: '🎨' },
-  other: { color: 'bg-gray-100 text-gray-800', label: 'Other', icon: '📦' }
+  structural: { color: 'bg-blue-100 text-blue-800', label: 'Structural', icon: Building2 },
+  exterior: { color: 'bg-green-100 text-green-800', label: 'Exterior', icon: Home },
+  interior: { color: 'bg-purple-100 text-purple-800', label: 'Interior', icon: Layers },
+  mep: { color: 'bg-yellow-100 text-yellow-800', label: 'MEP', icon: Zap },
+  finishes: { color: 'bg-pink-100 text-pink-800', label: 'Finishes', icon: Paintbrush },
+  other: { color: 'bg-gray-100 text-gray-800', label: 'Other', icon: Package }
 }
 
 // Impact color configuration
@@ -419,7 +425,7 @@ export default function EnhancedTakeoffAccordion({
               <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-50">
                 <div className="flex items-center justify-between w-full pr-4">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{config.icon}</span>
+                    {React.createElement(config.icon, { className: 'h-5 w-5' })}
                     <div className="text-left">
                       <h3 className="font-bold text-lg capitalize">{config.label}</h3>
                       <p className="text-xs text-gray-500">

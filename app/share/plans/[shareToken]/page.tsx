@@ -427,7 +427,7 @@ export default function GuestPlanViewer() {
 
       {/* Canvas Area */}
       <div className="flex-1 flex">
-        <div className={`flex-1 ${rightSidebarOpen ? 'mr-80' : ''} transition-all`}>
+		<div className={`flex-1 ${rightSidebarOpen ? 'mr-96' : ''} transition-all`}>
           {canView ? (
             pdfUrl ? (
               <FastPlanCanvas
@@ -461,8 +461,8 @@ export default function GuestPlanViewer() {
         </div>
         
         {/* Right Sidebar with Analysis */}
-        {rightSidebarOpen && (
-          <div className="fixed right-0 top-16 bottom-0 w-80 bg-white border-l border-gray-200 overflow-y-auto z-10">
+		{rightSidebarOpen && (
+		  <div className="fixed right-0 top-16 bottom-0 w-96 bg-white border-l border-gray-200 overflow-y-auto z-10">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Analysis</h3>

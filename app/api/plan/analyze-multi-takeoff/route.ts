@@ -106,6 +106,7 @@ Return a JSON object with this EXACT structure:
       "description": "Detailed description with specifications",
       "quantity": 150.5,
       "unit": "LF" or "SF" or "CF" or "CY" or "EA" or "SQ",
+      "unit_cost": 2.50,
       "location": "Specific location (e.g., 'North Wall', 'Kitchen', 'Floor Plan Sheet 1')",
       "category": "structural|exterior|interior|mep|finishes|other",
       "subcategory": "One of the subcategories listed above (e.g., 'Foundation', 'Framing', 'Windows', 'Electrical')",
@@ -133,6 +134,26 @@ Return a JSON object with this EXACT structure:
     "notes": "Overall observations about the plan"
   }
 }
+
+PRICING REQUIREMENTS:
+- For each item, you MUST provide a realistic "unit_cost" based on:
+  * Material type and grade
+  * Typical market rates (as of 2024)
+  * Unit of measurement (price per LF, SF, CF, CY, EA, or SQ)
+  * Geographic location adjustments (use standard US national average if location not specified)
+  * Include both material and labor costs where applicable
+- Use realistic industry-standard pricing:
+  * Framing lumber (2x4, 2x6): $1.50-$3.00 per LF
+  * Concrete: $100-$150 per CY
+  * Drywall: $0.50-$1.50 per SF
+  * Electrical work: $50-$150 per fixture/outlet
+  * Plumbing fixtures: $200-$800 per fixture
+  * Windows: $300-$1500 per window depending on size/type
+  * Doors: $200-$2000 per door depending on type
+  * Flooring: $2-$15 per SF depending on material
+  * Paint: $1-$3 per SF
+  * Roofing: $300-$600 per SQ (100 SF)
+- Research appropriate pricing for each material type and provide accurate unit costs
 
 COST CODE ASSIGNMENT RULES:
 - Foundation work → 3,300 series

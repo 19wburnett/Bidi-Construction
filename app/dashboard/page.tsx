@@ -91,11 +91,14 @@ export default function DashboardPage() {
 
       if (plansError) throw plansError
 
-      // Load bid package counts per job
+      // Load bid package counts per job  
+      // First get job IDs for this user
+      const userJobIds = jobsData?.map(job => job.id) || []
+      
       const { data: packagesData, error: packagesError } = await supabase
         .from('bid_packages')
         .select('id, job_id, status')
-        .eq('user_id', user?.id)
+        .in('job_id', userJobIds)
 
       if (packagesError) throw packagesError
 
@@ -140,8 +143,7 @@ export default function DashboardPage() {
           location,
           status,
           created_at,
-          plans(count),
-          bid_packages(count)
+          plans(count)
         `)
         .eq('user_id', user?.id)
         .order('created_at', { ascending: false })
@@ -177,7 +179,7 @@ export default function DashboardPage() {
             status: job.status,
             created_at: job.created_at,
             plan_count: job.plans?.[0]?.count || 0,
-            bid_package_count: job.bid_packages?.[0]?.count || 0,
+            bid_package_count: packageIds.length,
             bid_count: bidCount
           }
         })

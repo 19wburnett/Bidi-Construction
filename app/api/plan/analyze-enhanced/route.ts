@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced-consensus-engine'
+import PDFParser from 'pdf2json'
 
 // Enhanced Multi-Model Analysis API
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection
@@ -103,9 +104,48 @@ export async function POST(request: NextRequest) {
 
     console.log(`Starting enhanced analysis for plan ${planId} with ${images.length} images (job type: ${finalJobType})`)
 
-    // Build specialized prompts based on task type and job type
+    // Attempt to fetch plan file and extract text for hybrid analysis
+    let extractedText = ''
+    try {
+      const { data: planRow, error: planLoadError } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('id', planId)
+        .eq('user_id', userId)
+        .single()
+
+      if (!planLoadError && planRow && planRow.file_path) {
+        let fileUrl: string = planRow.file_path
+
+        // If not an absolute URL, try to create a signed URL from storage (job-plans bucket)
+        if (!fileUrl.startsWith('http')) {
+          try {
+            const { data: urlData } = await supabase.storage
+              .from('job-plans')
+              .createSignedUrl(fileUrl, 300)
+            if (urlData?.signedUrl) {
+              fileUrl = urlData.signedUrl
+            }
+          } catch {}
+        }
+
+        // Fetch the PDF and extract text
+        try {
+          const pdfRes = await fetch(fileUrl)
+          const ab = await pdfRes.arrayBuffer()
+          const buffer = Buffer.from(ab)
+          extractedText = await extractTextFromPDF(buffer)
+        } catch (e) {
+          console.warn('Hybrid text extraction failed; proceeding with images only')
+        }
+      }
+    } catch (e) {
+      console.warn('Plan fetch for text extraction failed; proceeding with images only')
+    }
+
+    // Build specialized prompts based on task type and job type, injecting extracted text when available
     const systemPrompt = buildSystemPrompt(taskType, finalJobType)
-    const userPrompt = buildUserPrompt(images.length, drawings)
+    const userPrompt = buildUserPrompt(images.length, drawings, extractedText)
 
     // Configure analysis options
     const analysisOptions: EnhancedAnalysisOptions = {
@@ -340,6 +380,7 @@ Return ONLY a valid JSON object with this structure:
       "description": "Detailed description",
       "quantity": 150.5,
       "unit": "LF|SF|CF|CY|EA|SQ",
+      "unit_cost": 2.50,
       "location": "Specific location",
       "category": "structural|exterior|interior|mep|finishes|other",
       "subcategory": "Specific subcategory",
@@ -445,11 +486,18 @@ TAKEOFF ANALYSIS FOCUS:
 - Use standard construction estimating practices
 - Cross-reference dimensions to ensure accuracy
 - Assign appropriate Procore cost codes to each item
+- Provide realistic unit_cost pricing for each item
 
 3-LEVEL CATEGORIZATION:
 LEVEL 1: CATEGORY (structural, exterior, interior, mep, finishes, other)
 LEVEL 2: SUBCATEGORY (specific work type)
 LEVEL 3: LINE ITEMS (individual materials with Procore cost codes)
+
+PRICING REQUIREMENTS:
+- For each item, you MUST provide a realistic "unit_cost" based on material type, grade, and typical market rates (as of 2024)
+- Include both material and labor costs where applicable
+- Use industry-standard pricing ranges appropriate for the material and unit type
+- Price per LF, SF, CF, CY, EA, or SQ depending on the unit
 
 BE THOROUGH: Extract every measurable element visible in the plan
 BE SPECIFIC: "2x6 Top Plate" not just "lumber"
@@ -458,7 +506,8 @@ USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubi
 ASSIGN SUBCATEGORIES: Every item must have a subcategory
 ASSIGN COST CODES: Use the Procore cost codes provided
 INCLUDE LOCATIONS: Specify where each item is located
-PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates`
+PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
+INCLUDE PRICING: Every item must have a realistic unit_cost`
 
     case 'quality':
       return basePrompt + jobTypePrompt + `
@@ -511,12 +560,17 @@ PROVIDE RECOMMENDATIONS: Give professional advice and suggestions`
   }
 }
 
-// Build user prompt with image count and context
-function buildUserPrompt(imageCount: number, drawings?: any[]): string {
+// Build user prompt with image count and context; optionally include extracted PDF text
+function buildUserPrompt(imageCount: number, drawings?: any[], extractedText?: string): string {
   let prompt = `Analyze this construction plan with ${imageCount} page${imageCount > 1 ? 's' : ''} for comprehensive construction analysis.
 
 IMAGES PROVIDED: ${imageCount} page${imageCount > 1 ? 's' : ''} of construction plans
 ANALYSIS REQUIRED: Complete construction analysis with materials, quantities, and quality assessment
+
+${extractedText && extractedText.length > 0 ? `=== EXTRACTED TEXT FROM PDF (truncated) ===
+${extractedText.slice(0, 8000)}${extractedText.length > 8000 ? '\n\n...(additional text truncated)' : ''}
+
+=== VISUAL ANALYSIS INSTRUCTIONS ===` : ''}
 
 INSTRUCTIONS:
 1. Examine EVERY dimension, measurement, and annotation visible in the plan
@@ -546,4 +600,50 @@ CRITICAL: You MUST respond with ONLY the JSON object. Do not include any explana
   }
 
   return prompt
+}
+
+// Extracts text from a PDF Buffer using pdf2json, returning a single concatenated string.
+async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser()
+
+    pdfParser.on('pdfParser_dataError', (errData: any) => {
+      console.error('Error parsing PDF:', errData.parserError)
+      reject(new Error('Failed to parse PDF'))
+    })
+
+    pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+      try {
+        let text = ''
+        if (pdfData.Pages) {
+          pdfData.Pages.forEach((page: any, pageIndex: number) => {
+            text += `\n=== PAGE ${pageIndex + 1} ===\n`
+            if (page.Texts) {
+              const sortedTexts = page.Texts.sort((a: any, b: any) => {
+                const yDiff = a.y - b.y
+                if (Math.abs(yDiff) > 0.5) return yDiff
+                return a.x - b.x
+              })
+              sortedTexts.forEach((textItem: any) => {
+                if (textItem.R) {
+                  textItem.R.forEach((r: any) => {
+                    if (r.T) {
+                      text += decodeURIComponent(r.T) + ' '
+                    }
+                  })
+                }
+              })
+              text += '\n'
+            }
+          })
+        }
+        resolve(text.trim())
+      } catch (error) {
+        console.error('Error extracting text:', error)
+        resolve('')
+      }
+    })
+
+    pdfParser.parseBuffer(buffer)
+  })
 }
