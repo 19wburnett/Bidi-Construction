@@ -104,11 +104,20 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         .eq('status', 'active')
 
       // Load unread notifications count
-      const { count: notificationsCount } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('is_read', false)
+      // Note: This assumes notifications table exists with 'read' column
+      // If table doesn't exist, this will fail gracefully
+      let notificationsCount = 0
+      try {
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('read', false)
+        notificationsCount = count || 0
+      } catch (notifError) {
+        // Notifications table may not exist, silently fail
+        console.warn('Could not load notifications count:', notifError)
+      }
 
       setStats({
         activeJobs: jobsCount || 0,

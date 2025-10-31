@@ -69,6 +69,7 @@ export default function FastPlanCanvas({
   const [currentPage, setCurrentPage] = useState(1)
   const [loadingPages, setLoadingPages] = useState<Set<number>>(new Set())
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
+  const hasAutoFitted = useRef(false) // Track if we've already auto-fitted
   
   // Use refs to avoid infinite loops
   const pdfDocumentRef = useRef<any>(null)
@@ -101,10 +102,10 @@ export default function FastPlanCanvas({
         viewport: viewport
       }
       
-      // Add timeout to prevent hanging
+      // Add timeout to prevent hanging (increased to 30s for large plans)
       const renderPromise = page.render(renderContext).promise
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Render timeout')), 10000)
+        setTimeout(() => reject(new Error('Render timeout')), 30000)
       )
       
       await Promise.race([renderPromise, timeoutPromise])
@@ -148,7 +149,7 @@ export default function FastPlanCanvas({
         
         const pdfDocument = await pdfjs.getDocument({
           url: pdfUrl,
-          maxImageSize: 1024 * 1024, // 1MB limit per image
+          maxImageSize: 10 * 1024 * 1024, // 10MB limit per image for large plans
           disableFontFace: true, // Disable font loading
           disableAutoFetch: true, // Disable auto-fetching
           disableStream: true // Disable streaming
@@ -158,6 +159,7 @@ export default function FastPlanCanvas({
         setNumPages(pdfDocument.numPages)
         setPdfLoaded(true)
         setPdfError(null)
+        hasAutoFitted.current = false // Reset auto-fit flag when loading new PDF
         
         // Load first page immediately
         loadPage(1)
@@ -186,6 +188,7 @@ export default function FastPlanCanvas({
       setLoadedPages(new Set())
       loadingPagesRef.current.clear()
       loadedPagesRef.current.clear()
+      hasAutoFitted.current = false // Reset on cleanup
     }
   }, [pdfUrl, loadPage])
 
@@ -382,6 +385,34 @@ export default function FastPlanCanvas({
     resizeCanvas()
     window.addEventListener('resize', resizeCanvas)
     return () => window.removeEventListener('resize', resizeCanvas)
+  }, [pdfPages.length, currentPage])
+
+  // Auto-fit zoom on first page load (separate effect)
+  useEffect(() => {
+    const container = containerRef.current
+    if (!hasAutoFitted.current && pdfPages.length > 0 && pdfPages[currentPage - 1] && container) {
+      const pdfPage = pdfPages[currentPage - 1]
+      const containerRect = container.getBoundingClientRect()
+      const containerWidth = containerRect.width
+      const containerHeight = containerRect.height
+      
+      // Calculate zoom to fit page with 5% padding
+      const scaleX = (containerWidth * 0.95) / pdfPage.width
+      const scaleY = (containerHeight * 0.95) / pdfPage.height
+      const fitZoom = Math.min(scaleX, scaleY)
+      
+      // Limit zoom to reasonable range
+      const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
+      
+      setViewport({
+        zoom: finalZoom,
+        panX: 0,
+        panY: 0
+      })
+      
+      hasAutoFitted.current = true
+      console.log('Auto-fitted zoom:', { finalZoom, containerWidth, containerHeight, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
+    }
   }, [pdfPages.length, currentPage])
 
   // Render drawings when dependencies change

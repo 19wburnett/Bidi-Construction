@@ -268,7 +268,22 @@ export default function EnhancedPlanViewer() {
       if (takeoffAnalysis) {
         console.log('Loading existing takeoff analysis:', takeoffAnalysis)
         setTakeoffAnalysisRowId(takeoffAnalysis.id)
-        const itemsWithIds = ensureItemIds(takeoffAnalysis.items || [])
+        
+        // Parse items if it's a string, otherwise use as-is
+        let itemsArray = []
+        try {
+          if (typeof takeoffAnalysis.items === 'string') {
+            const parsed = JSON.parse(takeoffAnalysis.items)
+            itemsArray = parsed.takeoffs || []
+          } else if (Array.isArray(takeoffAnalysis.items)) {
+            itemsArray = takeoffAnalysis.items
+          }
+        } catch (parseError) {
+          console.error('Error parsing takeoff items:', parseError)
+          itemsArray = []
+        }
+        
+        const itemsWithIds = ensureItemIds(itemsArray)
         setTakeoffResults({
           success: true,
           planId,

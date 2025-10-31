@@ -79,12 +79,15 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
   const [editingId, setEditingId] = useState<string | null>(null)
   const [newCategoryName, setNewCategoryName] = useState<string>('')
 
+  // Ensure items is always an array
+  const safeItems = Array.isArray(items) ? items : []
+
   // Organize items into 3-level hierarchy
   const { hierarchy, categoryDisplayName } = useMemo(() => {
     const organized: Record<string, Record<string, TakeoffItem[]>> = {}
     const displayName: Record<string, string> = {}
 
-    items.forEach(item => {
+    safeItems.forEach(item => {
       const rawCategory = (item.category || 'Other').trim()
       const categoryKey = rawCategory.toLowerCase()
       const subcategory = item.subcategory || 'Uncategorized'
@@ -105,7 +108,7 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
     })
 
     return { hierarchy: organized, categoryDisplayName: displayName }
-  }, [items])
+  }, [safeItems])
 
   const childrenByParentId = useMemo(() => {
     const map: Record<string, TakeoffItem[]> = {}
