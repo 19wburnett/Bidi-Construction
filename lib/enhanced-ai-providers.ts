@@ -568,7 +568,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     const items: any[] = []
     // Try to find item objects even if JSON is incomplete
     // Look for patterns like: { "name": "...", "quantity": ..., "unit": "...", ... }
-    const itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*\}/g)
+    let itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*\}/g)
     
     if (!itemMatches) {
       // Try alternative pattern - look for any object that might be an item
