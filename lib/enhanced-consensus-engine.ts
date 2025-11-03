@@ -152,14 +152,39 @@ export class EnhancedConsensusEngine {
             const jsonMatch = result.content.match(/\{[\s\S]*\}/)
             if (jsonMatch) {
               let jsonText = jsonMatch[0]
-              // Fix trailing commas before closing braces/brackets
+              
+              // CRITICAL FIX: Fix missing commas before closing brackets/braces in arrays
+              // Common error: "value"] should be "value",] (missing comma before closing bracket)
+              
+              // Fix: "] where "], should be (missing comma before closing bracket in array)
+              jsonText = jsonText.replace(/"([^"]+)"(\s*)\]/g, '"$1",$2]')
+              
+              // Fix: "} where "}, should be (missing comma before closing brace in array)
+              jsonText = jsonText.replace(/"([^"]+)"(\s*)\}/g, '"$1",$2}')
+              
+              // Fix cases where a property value is followed by ] instead of ,]
+              jsonText = jsonText.replace(/:\s*"([^"]+)"(\s*)\]/g, ': "$1",$2]')
+              
+              // Fix cases where closing brace is missing comma in array
+              jsonText = jsonText.replace(/\}(\s*)\]/g, '},$1]')
+              
+              // Fix trailing commas before closing braces/brackets (do this AFTER fixing missing commas)
               jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+              
               // Try to close incomplete JSON
               const openBraces = (jsonText.match(/\{/g) || []).length
               const closeBraces = (jsonText.match(/\}/g) || []).length
+              const openBrackets = (jsonText.match(/\[/g) || []).length
+              const closeBrackets = (jsonText.match(/\]/g) || []).length
+              
               if (openBraces > closeBraces) {
                 jsonText += '}'.repeat(openBraces - closeBraces)
               }
+              
+              if (openBrackets > closeBrackets) {
+                jsonText += ']'.repeat(openBrackets - closeBrackets)
+              }
+              
               parsed = JSON.parse(jsonText)
             } else {
               throw new Error('No JSON found in response')
