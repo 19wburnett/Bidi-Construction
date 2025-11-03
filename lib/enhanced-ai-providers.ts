@@ -565,7 +565,14 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
 
   // Extract partial items from incomplete JSON - try to get as much data as possible
   private extractPartialItems(itemsText: string): any[] {
+    if (!itemsText || itemsText.trim().length === 0) {
+      console.warn('extractPartialItems: itemsText is empty')
+      return []
+    }
+    
     const items: any[] = []
+    
+    console.log(`[extractPartialItems] Starting extraction from text of length ${itemsText.length}`)
     
     // Strategy 1: Try to find complete item objects (may span multiple lines)
     // Use a more flexible pattern that handles nested objects and multi-line content
@@ -573,9 +580,12 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     const itemObjectPattern = /\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g
     let itemMatches = itemsText.match(itemObjectPattern)
     
+    console.log(`[extractPartialItems] Strategy 1 found ${itemMatches ? itemMatches.length : 0} item objects`)
+    
     // Strategy 2: If that fails, try simpler pattern
     if (!itemMatches || itemMatches.length === 0) {
       itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g)
+      console.log(`[extractPartialItems] Strategy 2 found ${itemMatches ? itemMatches.length : 0} item objects`)
     }
     
     // Strategy 3: Try alternative pattern
