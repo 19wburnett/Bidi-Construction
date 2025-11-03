@@ -1184,15 +1184,19 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           } catch (parseError) {
             // Try to repair incomplete JSON
             console.warn('JSON parse failed, attempting to repair:', parseError)
+            console.warn('JSON preview (first 500 chars):', jsonText.substring(0, 500))
             
             // CRITICAL FIX: Fix missing commas before closing brackets/braces in arrays
             // Common error from Claude: "name": "value"] should be "name": "value",] 
             // This is a malformed array item - closing bracket where comma should be
             
-            // Fix property:value"] pattern (COMMON Claude error)
+            // SIMPLE FIX FIRST: Replace "key": "value"] with "key": "value", (most common error)
+            // This handles both escaped and non-escaped quotes
+            jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+            
+            // Fix property:value"] pattern (COMMON Claude error) - handle escaped quotes
             // Pattern: "key": "value"] should become "key": "value",
-            // Only fix if followed by ] and not already followed by comma
-            jsonText = jsonText.replace(/(:\s*"([^"]+)")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$3]')
+            jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
             
             // More aggressive: Fix any quoted value followed by ] (not at end of array)
             // Pattern: "value"] where it should be "value",] if inside array
