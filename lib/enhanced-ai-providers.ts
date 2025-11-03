@@ -690,6 +690,59 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           item.subcategory = subcategories[idx]
         }
       })
+      
+      // Strategy 4b: Try to infer category/subcategory from item name if still missing
+      items.forEach(item => {
+        if (item.category === 'other' || !item.category) {
+          const nameLower = item.name.toLowerCase()
+          
+          // Infer category from item name
+          if (nameLower.includes('foundation') || nameLower.includes('footing') || nameLower.includes('slab') || 
+              nameLower.includes('concrete') || nameLower.includes('framing') || nameLower.includes('rebar') ||
+              nameLower.includes('beam') || nameLower.includes('column') || nameLower.includes('truss')) {
+            item.category = 'structural'
+          } else if (nameLower.includes('roof') || nameLower.includes('siding') || nameLower.includes('window') ||
+                     nameLower.includes('door') || nameLower.includes('cladding') || nameLower.includes('waterproof')) {
+            item.category = 'exterior'
+          } else if (nameLower.includes('wall') || nameLower.includes('ceiling') || nameLower.includes('insulation') ||
+                     nameLower.includes('drywall') || nameLower.includes('gwb')) {
+            item.category = 'interior'
+          } else if (nameLower.includes('plumb') || nameLower.includes('hvac') || nameLower.includes('electrical') ||
+                     nameLower.includes('fixture') || nameLower.includes('outlet') || nameLower.includes('light')) {
+            item.category = 'mep'
+          } else if (nameLower.includes('floor') || nameLower.includes('paint') || nameLower.includes('trim') ||
+                     nameLower.includes('carpet') || nameLower.includes('tile') || nameLower.includes('cabinet')) {
+            item.category = 'finishes'
+          } else {
+            item.category = 'other'
+          }
+          
+          // Infer subcategory
+          if (!item.subcategory || item.subcategory === 'Uncategorized') {
+            if (nameLower.includes('foundation') || nameLower.includes('footing')) {
+              item.subcategory = 'Foundation'
+            } else if (nameLower.includes('framing') || nameLower.includes('stud')) {
+              item.subcategory = 'Framing'
+            } else if (nameLower.includes('roof')) {
+              item.subcategory = 'Roofing'
+            } else if (nameLower.includes('window') || nameLower.includes('door')) {
+              item.subcategory = 'Openings'
+            } else if (nameLower.includes('plumb') || nameLower.includes('fixture')) {
+              item.subcategory = 'Plumbing'
+            } else if (nameLower.includes('hvac')) {
+              item.subcategory = 'HVAC'
+            } else if (nameLower.includes('electrical') || nameLower.includes('light')) {
+              item.subcategory = 'Electrical'
+            } else if (nameLower.includes('floor')) {
+              item.subcategory = 'Flooring'
+            } else if (nameLower.includes('paint')) {
+              item.subcategory = 'Paint'
+            } else {
+              item.subcategory = 'Uncategorized'
+            }
+          }
+        }
+      })
     }
     
     // Strategy 5: Last resort - extract just names if nothing else worked
