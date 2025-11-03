@@ -785,7 +785,74 @@ export default function EnhancedPlanViewer() {
 
       if (!analysisResponse.ok) {
         if (analysisResponse.status === 413) {
-          throw new Error('Request too large - try with fewer pages or lower quality images')
+          // Check if server suggests using batch endpoint
+          let errorData
+          try {
+            errorData = await analysisResponse.json()
+          } catch (parseError) {
+            // Fallback if JSON parse fails
+            throw new Error('Request too large - try with fewer pages or lower quality images')
+          }
+          
+          // If server suggests batch, automatically retry with batch endpoint
+          if (errorData.suggestBatch) {
+            console.log(`Auto-switching to batch endpoint for ${errorData.totalPages} pages`)
+            setAnalysisProgress({ step: 'Switching to batch processing...', percent: 75 })
+            
+            // Retry with batch endpoint
+            const batchResponse = await fetch('/api/plan/analyze-enhanced-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                planId: planId,
+                images: images,
+                drawings: drawings,
+                taskType: 'takeoff'
+              })
+            })
+            
+            if (!batchResponse.ok) {
+              throw new Error(errorData.message || 'Batch processing also failed')
+            }
+            
+            // Continue with batch response
+            const batchAnalysisData = await batchResponse.json()
+            const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1)
+            setAnalysisProgress({ step: 'Complete!', percent: 100 })
+            
+            setTakeoffResults(batchAnalysisData)
+            
+            // Handle quality results from batch
+            if (batchAnalysisData.results?.issues || batchAnalysisData.results?.quality_analysis) {
+              const apiIssues = batchAnalysisData?.results?.issues || []
+              const issuesWithIds = ensureIssueIds(apiIssues)
+              setQualityResults({ ...batchAnalysisData, issues: issuesWithIds })
+              
+              try {
+                const { data } = await supabase
+                  .from('plan_quality_analysis')
+                  .select('id')
+                  .eq('plan_id', planId)
+                  .eq('user_id', user?.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .single()
+                if (data?.id) setQualityAnalysisRowId(data.id)
+              } catch (e) {
+                console.warn('Could not fetch quality analysis row id')
+              }
+            }
+            
+            setTimeout(() => {
+              setIsRunningTakeoff(false)
+              setAnalysisProgress({ step: '', percent: 0 })
+            }, 2000)
+            
+            return // Success with batch endpoint
+          }
+          
+          // Otherwise throw the original error
+          throw new Error(errorData.message || 'Request too large')
         }
         
         let errorData
@@ -888,6 +955,67 @@ export default function EnhancedPlanViewer() {
       })
 
       if (!analysisResponse.ok) {
+        if (analysisResponse.status === 413) {
+          // Check if server suggests using batch endpoint
+          let errorData
+          try {
+            errorData = await analysisResponse.json()
+          } catch (parseError) {
+            throw new Error('Request too large - try with fewer pages or lower quality images')
+          }
+          
+          // If server suggests batch, automatically retry with batch endpoint
+          if (errorData.suggestBatch) {
+            console.log(`Auto-switching to batch endpoint for ${errorData.totalPages} pages`)
+            setAnalysisProgress({ step: 'Switching to batch processing...', percent: 75 })
+            
+            const batchResponse = await fetch('/api/plan/analyze-enhanced-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                planId: planId,
+                images: images,
+                drawings: drawings,
+                taskType: 'quality'
+              })
+            })
+            
+            if (!batchResponse.ok) {
+              throw new Error(errorData.message || 'Batch processing also failed')
+            }
+            
+            const batchAnalysisData = await batchResponse.json()
+            setAnalysisProgress({ step: 'Complete!', percent: 100 })
+            
+            const apiIssues = batchAnalysisData?.results?.issues || batchAnalysisData?.issues || []
+            const issuesWithIds = ensureIssueIds(apiIssues)
+            setQualityResults({ ...batchAnalysisData, issues: issuesWithIds })
+            
+            try {
+              const { data } = await supabase
+                .from('plan_quality_analysis')
+                .select('id')
+                .eq('plan_id', planId)
+                .eq('user_id', user?.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single()
+              if (data?.id) setQualityAnalysisRowId(data.id)
+            } catch (e) {
+              console.warn('Could not fetch quality analysis row id')
+            }
+            
+            setTimeout(() => {
+              setIsRunningQuality(false)
+              setAnalysisProgress({ step: '', percent: 0 })
+            }, 2000)
+            
+            return
+          }
+          
+          throw new Error(errorData.message || 'Request too large')
+        }
+        
         let errorData
         try {
           errorData = await analysisResponse.json()

@@ -319,7 +319,7 @@ export class EnhancedAIProvider {
           // Check if we already have minimum required models and remaining models likely to fail
           if (successfulResults.length >= MIN_MODELS && (enabledModels.length - i - 1) === 0) {
             console.log(`✅ Have ${successfulResults.length} successful model(s) - minimum requirement met. Can proceed.`)
-          } else {
+        } else {
             console.log(`⏭️  Continuing to next model (${successfulResults.length}/${MIN_MODELS} minimum, ${successfulResults.length}/${TARGET_MODELS} target)...`)
           }
         } else {
@@ -1181,12 +1181,12 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       console.error('Available results:', results.map(r => ({ model: r.model, provider: r.provider, success: !!r.content })))
       throw new Error(`All models failed. Cannot perform analysis.`)
     }
-    
+      
     // If we have at least 1 model, use it (single model analysis is acceptable)
-    if (results.length === 1) {
+      if (results.length === 1) {
       console.log(`Using single model analysis (${results[0].model}) - consensus requires 2+ models but single model is acceptable`)
-      const singleResult = results[0]
-      try {
+        const singleResult = results[0]
+        try {
           // Handle empty responses - throw error instead of creating fake data
           if (!singleResult.content || singleResult.content.trim().length === 0) {
             console.error(`❌ Model ${singleResult.model} returned empty response - this should not happen`)
@@ -1459,7 +1459,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             specializedInsights: [],
             recommendations: ['Analysis completed but response could not be fully parsed. Please try again.']
           }
-      }
+        }
       // All error handling done, but we should have returned above
       // This means the single model path didn't return - should not happen
       throw new Error('Single model analysis failed to return results')
