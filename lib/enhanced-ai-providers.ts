@@ -97,14 +97,8 @@ export class EnhancedAIProvider {
                bid_analysis: 0.95,
                code_compliance: 0.90,
                cost_estimation: 0.92
-             },
-      'gemini-1.5-flash': {
-        takeoff: 0.82,        // Good for measurements and calculations
-        quality: 0.85,
-        bid_analysis: 0.80,
-        code_compliance: 0.75,
-        cost_estimation: 0.88
-      }
+             }
+             // Gemini removed - model not available or causing errors
     }
   }
 
@@ -137,13 +131,14 @@ export class EnhancedAIProvider {
       // Check environment flags
       if (model.includes('gpt') && process.env.ENABLE_OPENAI === 'false') return false
       if (model.includes('claude') && process.env.ENABLE_ANTHROPIC === 'false') return false
-      if (model.includes('gemini') && process.env.ENABLE_GOOGLE === 'false') return false
+      if (model.includes('gemini')) return false // Gemini disabled - model not available
       if (model.includes('grok') && process.env.ENABLE_XAI === 'false') return false
       
       // Check API key availability
       if (model.includes('gpt') && !process.env.OPENAI_API_KEY) return false
       if (model.includes('claude') && !process.env.ANTHROPIC_API_KEY) return false
-      if (model.includes('gemini') && !process.env.GOOGLE_GEMINI_API_KEY) return false
+      // Gemini disabled - always filter out
+      if (model.includes('gemini')) return false
       if (model.includes('grok') && !process.env.XAI_API_KEY) return false
       
       return true
@@ -219,8 +214,9 @@ export class EnhancedAIProvider {
           return await this.analyzeWithClaude(images, options, model)
         case 'grok-4':
           return await this.analyzeWithXAI(images, options, model)
-        case 'gemini-1.5-flash':
-          return await this.analyzeWithGemini(images, options, model)
+        // case 'gemini-1.5-flash':
+        //   return await this.analyzeWithGemini(images, options, model)
+        // Gemini removed - model not available
         default:
           throw new Error(`Unknown model: ${model}`)
       }
