@@ -74,24 +74,45 @@ async function probeProvider(provider: string): Promise<boolean> {
     
     if (provider === 'anthropic') {
       if (!anthropic) return false
-      await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 5,
-        messages: [testPrompt],
-        timeout: 3000 // 3s timeout for probe
-      })
-      return true
+      // For probe, just try without timeout - it's fast anyway
+      try {
+        await Promise.race([
+          anthropic.messages.create({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 5,
+            messages: [testPrompt]
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('timeout')), 3000)
+          )
+        ])
+        return true
+      } catch (error: any) {
+        if (error?.message === 'timeout') return false
+        // Other errors are fine for probe - we'll try again on real call
+        return false
+      }
     }
     
     if (provider === 'openai') {
       if (!openai) return false
-      await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [testPrompt],
-        max_tokens: 5,
-        timeout: 3000
-      })
-      return true
+      // For probe, use Promise.race for timeout
+      try {
+        await Promise.race([
+          openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [testPrompt],
+            max_tokens: 5
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('timeout')), 3000)
+          )
+        ])
+        return true
+      } catch (error: any) {
+        if (error?.message === 'timeout') return false
+        return false
+      }
     }
     
     if (provider === 'xai') {
@@ -165,6 +186,7 @@ async function callAnthropic(
     }
   ]
 
+  // Anthropic SDK doesn't support signal in body, use timeout in options
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 60000)
 
@@ -175,7 +197,9 @@ async function callAnthropic(
         max_tokens: options.maxTokens || 4096,
         temperature: options.temperature ?? 0.2,
         system: systemPrompt,
-        messages,
+        messages
+      },
+      {
         signal: controller.signal as any
       }
     )
@@ -241,10 +265,12 @@ async function callOpenAI(
         model,
         messages,
         max_tokens: options.maxTokens || 4096,
-        temperature: options.temperature ?? 0.2,
-        timeout: options.timeoutMs || 60000
+        temperature: options.temperature ?? 0.2
       },
-      { signal: controller.signal }
+      { 
+        signal: controller.signal,
+        timeout: options.timeoutMs || 60000
+      }
     )
 
     clearTimeout(timeout)
