@@ -5,8 +5,6 @@ import { createClient } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import { PostHogProvider } from '@/components/posthog-provider'
 import { ThemeProvider } from 'next-themes'
-import UnderConstructionModal from '@/components/under-construction-modal'
-import { usePathname } from 'next/navigation'
 
 interface AuthContextType {
   user: User | null
@@ -29,52 +27,14 @@ export const useAuth = () => {
 export function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showUnderConstruction, setShowUnderConstruction] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
   const supabase = useRef(createClient()).current
   const initialized = useRef(false)
-  const pathname = usePathname()
-
-  // Check if modal should show based on user status and current page
-  const shouldShowModal = (user: User | null, adminStatus: boolean, currentPath: string) => {
-    if (!user) return false
-    
-    // Always show for admins
-    if (adminStatus) return true
-    
-    // Don't show on careers page for non-admin users
-    if (currentPath === '/careers') return false
-    
-    // Show for all other pages
-    return true
-  }
 
   useEffect(() => {
     if (initialized.current) return // Prevent multiple initializations
     
     let mounted = true
     initialized.current = true
-
-    // Check admin status
-    const checkAdminStatus = async (userId: string): Promise<boolean> => {
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('is_admin')
-          .eq('id', userId)
-          .single()
-        
-        if (error) {
-          console.error('Error checking admin status:', error)
-          return false
-        } else {
-          return data?.is_admin || false
-        }
-      } catch (err) {
-        console.error('Error checking admin status:', err)
-        return false
-      }
-    }
 
     // Initial auth check
     const checkAuth = async () => {
@@ -84,15 +44,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
         if (mounted) {
           if (error) {
             setUser(null)
-            setShowUnderConstruction(false)
-            setIsAdmin(false)
           } else {
             setUser(user)
-            if (user) {
-              const adminStatus = await checkAdminStatus(user.id)
-              setIsAdmin(adminStatus)
-              setShowUnderConstruction(shouldShowModal(user, adminStatus, pathname))
-            }
           }
           setLoading(false)
         }
@@ -112,14 +65,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
           // Only update on actual auth state changes, not on token refresh
           if (event === 'SIGNED_IN' && session?.user) {
             setUser(session.user)
-            checkAdminStatus(session.user.id).then((adminStatus) => {
-              setIsAdmin(adminStatus)
-              setShowUnderConstruction(shouldShowModal(session.user, adminStatus, pathname))
-            })
           } else if (event === 'SIGNED_OUT') {
             setUser(null)
-            setShowUnderConstruction(false)
-            setIsAdmin(false)
           } else if (event === 'TOKEN_REFRESHED' && session?.user) {
             // Silently refresh token without triggering re-render if user is same
             if (user?.id !== session.user.id) {
@@ -138,31 +85,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [supabase, pathname, isAdmin]) // Include supabase, pathname, and isAdmin in dependencies
-
-  // Update modal visibility when pathname changes
-  useEffect(() => {
-    if (user) {
-      setShowUnderConstruction(shouldShowModal(user, isAdmin, pathname))
-    }
-  }, [pathname, user, isAdmin])
+  }, [supabase])
 
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({ user, loading }), [user, loading])
-
-  const handleCloseModal = () => {
-    setShowUnderConstruction(false)
-  }
 
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <AuthContext.Provider value={contextValue}>
         <PostHogProviderWrapper>
           {children}
-          <UnderConstructionModal 
-            isOpen={showUnderConstruction}
-            onClose={handleCloseModal}
-          />
         </PostHogProviderWrapper>
       </AuthContext.Provider>
     </ThemeProvider>
