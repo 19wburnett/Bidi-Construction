@@ -152,12 +152,12 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.80
       },
-      'grok-4': {
+             'grok-4': {
         takeoff: 0.95,
-        quality: 0.92,
-        bid_analysis: 0.95,
-        code_compliance: 0.90,
-        cost_estimation: 0.92
+               quality: 0.92,
+               bid_analysis: 0.95,
+               code_compliance: 0.90,
+               cost_estimation: 0.92
       }
       // Gemini removed - model not available or causing errors
     }
@@ -695,22 +695,50 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // Strategy 1: Try to find complete item objects (may span multiple lines)
     // Use a more flexible pattern that handles nested objects and multi-line content
     // Note: Using [\s\S] instead of . with 's' flag for ES compatibility
-    const itemObjectPattern = /\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g
-    let itemMatches = itemsText.match(itemObjectPattern)
+    // Improved: Match objects that contain "name" field, even if incomplete
+    let itemMatches = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g)
     
     console.log(`[extractPartialItems] Strategy 1 found ${itemMatches ? itemMatches.length : 0} item objects`)
     
-    // Strategy 2: If that fails, try simpler pattern
+    // Strategy 2: If that fails, try simpler pattern (non-greedy, handles incomplete objects)
     if (!itemMatches || itemMatches.length === 0) {
       itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g)
       console.log(`[extractPartialItems] Strategy 2 found ${itemMatches ? itemMatches.length : 0} item objects`)
     }
     
-    // Strategy 3: Try alternative pattern
+    // Strategy 2b: More aggressive - find objects that start with { and have "name" field, even if incomplete
+    if (!itemMatches || itemMatches.length === 0) {
+      // Find all { that might be item starts, then extract until next { or } or end
+      const objectStarts = []
+      let depth = 0
+      let start = -1
+      for (let i = 0; i < itemsText.length; i++) {
+        if (itemsText[i] === '{') {
+          if (depth === 0) start = i
+          depth++
+        } else if (itemsText[i] === '}') {
+          depth--
+          if (depth === 0 && start >= 0) {
+            objectStarts.push(itemsText.substring(start, i + 1))
+            start = -1
+          }
+        }
+      }
+      // If we have unclosed objects, include them too
+      if (start >= 0 && depth > 0) {
+        objectStarts.push(itemsText.substring(start))
+      }
+      // Filter to objects that contain "name" field
+      itemMatches = objectStarts.filter(obj => /"name"\s*:\s*"/.test(obj))
+      console.log(`[extractPartialItems] Strategy 2b found ${itemMatches ? itemMatches.length : 0} item objects`)
+    }
+    
+    // Strategy 3: Try alternative pattern (any object with name OR description)
     if (!itemMatches || itemMatches.length === 0) {
       const altMatches = itemsText.match(/\{[^{}]*"(?:name|description)"\s*:\s*"[^"]*"[^{}]*\}/g)
-      if (altMatches) {
+      if (altMatches && altMatches.length > 0) {
         itemMatches = altMatches
+        console.log(`[extractPartialItems] Strategy 3 found ${itemMatches.length} item objects`)
       }
     }
     
@@ -1111,7 +1139,28 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             // Try to repair incomplete JSON
             console.warn('JSON parse failed, attempting to repair:', parseError)
             
-            // Remove trailing commas
+            // CRITICAL FIX: Fix missing commas before closing brackets/braces in arrays
+            // Common error: "value"] should be "value",] (missing comma before closing bracket)
+            // This happens when JSON is truncated or malformed
+            
+            // Fix: "] where "], should be (missing comma before closing bracket in array)
+            // Match pattern: quoted string followed immediately by ] - this is wrong, should have comma
+            // But be careful: only fix if it's NOT already correct (like the last item in array)
+            // We'll fix all instances and let the trailing comma removal handle the last one
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\]/g, '"$1",$2]')
+            
+            // Fix: "} where "}, should be (missing comma before closing brace in array)
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\}/g, '"$1",$2}')
+            
+            // Fix cases where a property value is followed by ] instead of ,]
+            // Pattern: : "value"] should be : "value",]
+            jsonText = jsonText.replace(/:\s*"([^"]+)"(\s*)\]/g, ': "$1",$2]')
+            
+            // Fix cases where closing brace is missing comma in array
+            // Pattern: }\s*] should be },\s*] (when closing object in array)
+            jsonText = jsonText.replace(/\}(\s*)\]/g, '},$1]')
+            
+            // Remove trailing commas (do this AFTER fixing missing commas)
             jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
             
             // Try to close incomplete objects/arrays
