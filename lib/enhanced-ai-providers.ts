@@ -303,7 +303,15 @@ export class EnhancedAIProvider {
     
     try {
       switch (model) {
+        // All OpenAI GPT models
         case 'gpt-5':
+        case 'gpt-5-mini':
+        case 'gpt-5-nano':
+        case 'gpt-4.1':
+        case 'gpt-4.1-mini':
+        case 'gpt-4.1-nano':
+        case 'o3':
+        case 'o4-mini':
         case 'gpt-4o':
         case 'gpt-4-vision':
         case 'gpt-4-turbo':
