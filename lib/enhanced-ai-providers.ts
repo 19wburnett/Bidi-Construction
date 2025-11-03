@@ -967,9 +967,41 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             } catch (secondError) {
               // Last resort: try to extract partial data
               console.warn('JSON repair failed, attempting partial extraction')
+              console.warn('JSON text length:', jsonText.length)
+              console.warn('JSON text preview (first 500 chars):', jsonText.substring(0, 500))
+              console.warn('JSON text preview (last 500 chars):', jsonText.substring(Math.max(0, jsonText.length - 500)))
               
               // Extract items array if it exists (even if incomplete)
-              const itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              // Try multiple patterns to find items array
+              let itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              
+              // If no match, try without the closing bracket requirement
+              if (!itemsMatch) {
+                itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*)/)
+              }
+              
+              // If still no match, try to find any array that might contain items
+              if (!itemsMatch) {
+                // Look for patterns like: "items": [ ... or items: [ ...
+                itemsMatch = jsonText.match(/["']?items["']?\s*:\s*\[([\s\S]*?)(?:\]|$)/i)
+              }
+              
+              // Debug: log what we found
+              if (itemsMatch) {
+                console.log('Found items array, length:', itemsMatch[1].length)
+                console.log('Items array preview (first 200 chars):', itemsMatch[1].substring(0, 200))
+              } else {
+                console.warn('Could not find items array in JSON')
+                // Try to find ANY array with objects containing "name" field
+                const anyArrayMatch = jsonText.match(/"items"\s*:\s*\[/i)
+                if (anyArrayMatch) {
+                  console.log('Found "items": [ marker but extraction failed')
+                  // Try to extract everything after "items": [
+                  const afterItems = jsonText.substring(jsonText.indexOf('"items": [') + 9)
+                  itemsMatch = ['', afterItems] // Fake match to trigger extraction
+                }
+              }
+              
               const issuesMatch = jsonText.match(/"issues"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
               
               // Try to extract quality_analysis object even if incomplete
