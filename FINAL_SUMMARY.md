@@ -87,7 +87,7 @@
 1. Same as above but with warnings
 2. May take longer but works fine
 
-### For Large PDFs (50-100 pages)
+### For Large PDFs (30-100 pages)
 1. Frontend converts all pages to base64 images
 2. Tries `/api/plan/analyze-enhanced` first
 3. Gets 413 error with `suggestBatch: true`
@@ -105,6 +105,8 @@
 6. Returns 202 "Queued" response
 7. User gets email notification when complete
 8. Manual processing by admin
+
+**Note:** 30-page limit chosen to stay under Vercel's 4.5MB request body limit (~120KB/page at 0.3 JPEG quality)
 
 ## Model Execution Flow
 
