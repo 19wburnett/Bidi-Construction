@@ -787,6 +787,18 @@ export default function EnhancedPlanViewer() {
         })
       })
 
+      // Handle queued response (202 Accepted)
+      if (analysisResponse.status === 202) {
+        const queueData = await analysisResponse.json()
+        setAnalysisProgress({ step: 'Request queued...', percent: 100 })
+        
+        // Show success message with queue info
+        alert(`✅ ${queueData.message || 'Your AI takeoff request has been queued.'}\n\nEstimated completion time: ${queueData.estimatedTime || '2-3 hours'}\n\nYou will be notified when it is complete.`)
+        
+        setIsRunningTakeoff(false)
+        return
+      }
+
       if (!analysisResponse.ok) {
         if (analysisResponse.status === 413) {
           throw new Error('Request too large - try with fewer pages or lower quality images')

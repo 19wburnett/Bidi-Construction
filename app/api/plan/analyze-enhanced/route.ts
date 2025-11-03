@@ -6,6 +6,116 @@ import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced
 import PDFParser from 'pdf2json'
 import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
 import { generateTemplateInstructions } from '@/lib/takeoff-template'
+import { Resend } from 'resend'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+/**
+ * Send email notification to admin users about a new AI takeoff request in the queue
+ */
+async function sendAdminQueueNotification(
+  supabase: any,
+  queueId: string,
+  planId: string,
+  userEmail: string,
+  planTitle: string,
+  taskType: string
+) {
+  // Get all admin email addresses
+  const { data: admins, error: adminError } = await supabase
+    .from('users')
+    .select('email')
+    .eq('is_admin', true)
+
+  if (adminError || !admins || admins.length === 0) {
+    console.warn('No admin users found for queue notification')
+    return
+  }
+
+  const adminEmails = admins.map((admin: any) => admin.email).filter(Boolean)
+  
+  if (adminEmails.length === 0) {
+    console.warn('No admin emails found')
+    return
+  }
+
+  const taskTypeDisplay = taskType === 'takeoff' ? 'AI Takeoff' : taskType === 'quality' ? 'Quality Analysis' : 'Bid Analysis'
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'Bidi <noreply@savewithbidi.com>',
+      to: adminEmails,
+      subject: `🔔 New AI ${taskTypeDisplay} Request Queued`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background-color: #3b82f6; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
+          </div>
+          
+          <div style="padding: 30px; background-color: #f8fafc;">
+            <h2 style="color: #1e293b; margin-bottom: 20px;">🔔 New AI ${taskTypeDisplay} Request</h2>
+            
+            <div style="background-color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #3b82f6;">
+              <h3 style="color: #3b82f6; margin-top: 0;">Request Details</h3>
+              <p><strong>Queue ID:</strong> ${queueId}</p>
+              <p><strong>Plan ID:</strong> ${planId}</p>
+              <p><strong>Plan Title:</strong> ${planTitle}</p>
+              <p><strong>Task Type:</strong> ${taskTypeDisplay}</p>
+              <p><strong>Requested by:</strong> ${userEmail}</p>
+              <p><strong>Queued at:</strong> ${new Date().toLocaleString()}</p>
+            </div>
+
+            <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h4 style="color: #f59e0b; margin-top: 0;">⚠️ Action Required</h4>
+              <p style="margin: 10px 0; line-height: 1.6;">
+                A non-admin user has requested an AI ${taskTypeDisplay.toLowerCase()}. 
+                This request has been queued and requires manual processing.
+              </p>
+            </div>
+
+            <div style="background-color: #dcfce7; border: 1px solid #16a34a; padding: 20px; border-radius: 8px;">
+              <h4 style="color: #16a34a; margin-top: 0;">📋 Next Steps</h4>
+              <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                <li>Review the queued request in the admin dashboard</li>
+                <li>Process the AI ${taskTypeDisplay.toLowerCase()} manually</li>
+                <li>The user will be automatically notified when complete</li>
+                <li>Estimated processing time: 2-3 hours</li>
+              </ul>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://www.bidicontracting.com'}/admin/analyze-plans" 
+                 style="display: inline-block; background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                View Queue in Admin Dashboard
+              </a>
+            </div>
+          </div>
+          
+          <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
+            <p style="margin: 0; font-size: 14px;">
+              © 2024 Bidi. All rights reserved.
+            </p>
+            <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
+              This is an automated notification from the Bidi platform.
+            </p>
+          </div>
+        </div>
+      `,
+    })
+
+    if (error) {
+      console.error('Failed to send admin queue notification:', error)
+      throw error
+    }
+
+    console.log(`Admin queue notification sent to ${adminEmails.length} admin(s)`)
+    return data
+  } catch (error) {
+    console.error('Error sending admin queue notification:', error)
+    throw error
+  }
+}
 
 // Enhanced Multi-Model Analysis API
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection
@@ -38,15 +148,47 @@ export async function POST(request: NextRequest) {
     
     userId = user.id
 
-    // Determine job type - fetch from plan -> job relationship if not provided
+    // Check if user is admin - if not, queue the request instead of processing immediately
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('is_admin, email')
+      .eq('id', userId)
+      .single()
+
+    if (userError || !userData) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    const isAdmin = userData.is_admin === true
+
+    // Determine job type first (needed for both admin and non-admin paths)
     let finalJobType = jobType
     if (!finalJobType) {
-      const { data: plan, error: planError } = await supabase
+      const { data: planForJobType, error: planError } = await supabase
         .from('plans')
         .select(`
           job_id,
           jobs!inner(project_type)
         `)
+        .eq('id', planId)
+        .eq('user_id', userId)
+        .single()
+
+      if (!planError && planForJobType) {
+        const projectType = (planForJobType as any).jobs?.project_type
+        finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
+      }
+    }
+
+    // If not admin, queue the request and send email to admins
+    if (!isAdmin) {
+      // Get plan and job info for queue entry
+      const { data: plan, error: planError } = await supabase
+        .from('plans')
+        .select('id, job_id, title, file_name')
         .eq('id', planId)
         .eq('user_id', userId)
         .single()
@@ -58,10 +200,60 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Map project_type to job type: Commercial -> commercial, all others -> residential
-      const projectType = (plan as any).jobs?.project_type
-      finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
+      // Insert into queue
+      const { data: queueEntry, error: queueError } = await supabase
+        .from('ai_takeoff_queue')
+        .insert({
+          plan_id: planId,
+          user_id: userId,
+          job_id: plan.job_id || null,
+          task_type: taskType,
+          job_type: finalJobType || null,
+          images_count: images?.length || 0,
+          request_data: {
+            images_count: images?.length || 0,
+            task_type: taskType,
+            job_type: finalJobType
+          },
+          status: 'pending',
+          priority: 0
+        })
+        .select()
+        .single()
+
+      if (queueError) {
+        console.error('Error queuing takeoff request:', queueError)
+        return NextResponse.json(
+          { error: 'Failed to queue request' },
+          { status: 500 }
+        )
+      }
+
+      // Send email notification to admins
+      try {
+        await sendAdminQueueNotification(supabase, queueEntry.id, planId, userData.email, plan.title || plan.file_name, taskType)
+      } catch (emailError) {
+        console.error('Error sending admin notification email:', emailError)
+        // Don't fail the request if email fails
+      }
+
+      // Update admin_notified_at
+      await supabase
+        .from('ai_takeoff_queue')
+        .update({ admin_notified_at: new Date().toISOString() })
+        .eq('id', queueEntry.id)
+
+      // Return queued response
+      return NextResponse.json({
+        success: true,
+        queued: true,
+        queueId: queueEntry.id,
+        message: 'Your AI takeoff request has been queued. You will be notified when it is complete.',
+        estimatedTime: '2-3 hours'
+      }, { status: 202 }) // 202 Accepted
     }
+
+    // Admin path continues - finalJobType is already determined above
 
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json(
