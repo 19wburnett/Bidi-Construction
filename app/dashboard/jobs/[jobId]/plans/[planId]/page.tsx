@@ -790,12 +790,18 @@ export default function EnhancedPlanViewer() {
       // Handle queued response (202 Accepted)
       if (analysisResponse.status === 202) {
         const queueData = await analysisResponse.json()
-        setAnalysisProgress({ step: 'Request queued...', percent: 100 })
         
-        // Show success message with queue info
-        alert(`✅ ${queueData.message || 'Your AI takeoff request has been queued.'}\n\nEstimated completion time: ${queueData.estimatedTime || '2-3 hours'}\n\nYou will be notified when it is complete.`)
+        // Update progress to show queued message
+        setAnalysisProgress({ 
+          step: `AI Takeoff underway. Estimated time: ${queueData.estimatedTime || '2-3 hours'}. You will be notified when it is complete.`, 
+          percent: 100 
+        })
         
-        setIsRunningTakeoff(false)
+        // Keep the UI showing the message for a bit, then allow them to close it
+        setTimeout(() => {
+          setIsRunningTakeoff(false)
+        }, 5000) // Show for 5 seconds then allow closing
+        
         return
       }
 
@@ -1239,11 +1245,13 @@ export default function EnhancedPlanViewer() {
                               </>
                             )}
                           </Button>
-                          {isRunningTakeoff && (
+                          {(isRunningTakeoff || (analysisProgress.percent === 100 && analysisProgress.step.includes('underway'))) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-600">{analysisProgress.step}</span>
-                                <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
+                                {analysisProgress.percent < 100 && (
+                                  <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
+                                )}
                               </div>
                               <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                                 <div 
@@ -1251,9 +1259,17 @@ export default function EnhancedPlanViewer() {
                                   style={{ width: `${analysisProgress.percent}%` }}
                                 />
                               </div>
-                              <p className="text-xs text-gray-500">
-                                Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
-                              </p>
+                              {analysisProgress.step.includes('underway') ? (
+                                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                                  <p className="text-xs text-blue-800 font-medium">
+                                    ✅ Your request has been queued for processing. You will receive an email notification when the AI takeoff is complete.
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-500">
+                                  Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
+                                </p>
+                              )}
                             </div>
                           )}
                           {takeoffResults ? (
