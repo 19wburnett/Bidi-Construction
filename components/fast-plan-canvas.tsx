@@ -891,6 +891,7 @@ export default function FastPlanCanvas({
     // Increased threshold to minimum 20px regardless of zoom for easier clicking
     const threshold = Math.max(28, 20 / viewport.zoom) // Click tolerance scaled by zoom and bubble size
     
+    if (geom.x === undefined || geom.y === undefined) return false
     const dist = Math.sqrt(Math.pow(worldX - geom.x, 2) + Math.pow(worldY - geom.y, 2))
     return dist <= threshold
   }, [viewport, currentPage])

@@ -101,8 +101,8 @@ export default function PlanCanvasEfficient({
       ctx.lineWidth = drawing.style.strokeWidth / viewport.zoom
 
       const pageOffset = pageOffsets[drawing.pageNumber - 1] || 0
-      const x = drawing.geometry.x
-      const y = drawing.geometry.y + pageOffset
+      const x = drawing.geometry.x ?? 0
+      const y = (drawing.geometry.y ?? 0) + pageOffset
 
       // Draw comment pin
       const pinRadius = 8 / viewport.zoom
@@ -198,6 +198,7 @@ export default function PlanCanvasEfficient({
   const isPointInComment = useCallback((x: number, y: number, drawing: Drawing, pageOffset: number) => {
     if (drawing.type !== 'comment') return false
     const geom = drawing.geometry
+    if (geom.x === undefined || geom.y === undefined) return false
     const drawY = geom.y + pageOffset
     const commentRadius = 15 / viewport.zoom
     return Math.sqrt(Math.pow(x - geom.x, 2) + Math.pow(y - drawY + commentRadius, 2)) <= commentRadius
