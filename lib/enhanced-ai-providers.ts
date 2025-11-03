@@ -181,33 +181,43 @@ export class EnhancedAIProvider {
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
       .sort((a, b) => {
-        // Prioritize GPT-5 first (highest limits: 500k TPM, 500 RPM)
-        if (a.model === 'gpt-5') return -1
-        if (b.model === 'gpt-5') return 1
-        // Then GPT-5-mini
-        if (a.model === 'gpt-5-mini') return -1
-        if (b.model === 'gpt-5-mini') return 1
-        // Then GPT-5-nano
-        if (a.model === 'gpt-5-nano') return -1
-        if (b.model === 'gpt-5-nano') return 1
-        // Then O-series (reasoning models)
-        if (a.model.startsWith('o') && !b.model.startsWith('o')) return -1
-        if (b.model.startsWith('o') && !a.model.startsWith('o')) return 1
-        // Then GPT-4.1 family
-        if (a.model.startsWith('gpt-4.1') && !b.model.startsWith('gpt-4.1')) return -1
-        if (b.model.startsWith('gpt-4.1') && !a.model.startsWith('gpt-4.1')) return 1
-        // Then gpt-4o (ChatGPT)
+        // USER-PRIORITIZED ORDER (reliable models first):
+        // 1. gpt-4o (proven working)
         if (a.model === 'gpt-4o') return -1
         if (b.model === 'gpt-4o') return 1
+        // 2. Claude Sonnet (better quality than haiku, proven working)
+        if (a.model === 'claude-sonnet-4-20250514') return -1
+        if (b.model === 'claude-sonnet-4-20250514') return 1
+        // 3. o4-mini (if above fail)
+        if (a.model === 'o4-mini') return -1
+        if (b.model === 'o4-mini') return 1
+        // 4. gpt-4.1-nano (last resort)
+        if (a.model === 'gpt-4.1-nano') return -1
+        if (b.model === 'gpt-4.1-nano') return 1
+        
+        // Secondary fallbacks (if primary models not available):
+        // Claude Haiku (fast fallback)
+        if (a.model === 'claude-3-haiku-20240307') return -1
+        if (b.model === 'claude-3-haiku-20240307') return 1
+        // Other GPT-4.1 variants
+        if (a.model.startsWith('gpt-4.1') && !b.model.startsWith('gpt-4.1')) return -1
+        if (b.model.startsWith('gpt-4.1') && !a.model.startsWith('gpt-4.1')) return 1
+        // Other O-series models
+        if (a.model.startsWith('o') && !b.model.startsWith('o')) return -1
+        if (b.model.startsWith('o') && !a.model.startsWith('o')) return 1
+        // GPT-5 series (disabled for now - using all tokens for reasoning)
+        if (a.model === 'gpt-5') return -1
+        if (b.model === 'gpt-5') return 1
+        if (a.model === 'gpt-5-mini') return -1
+        if (b.model === 'gpt-5-mini') return 1
+        if (a.model === 'gpt-5-nano') return -1
+        if (b.model === 'gpt-5-nano') return 1
         // Then other GPT models
         if (a.model.includes('gpt') && !b.model.includes('gpt')) return -1
         if (b.model.includes('gpt') && !a.model.includes('gpt')) return 1
         // Then prioritize Grok (alternative provider, good fallback)
         if (a.model.includes('grok') && !b.model.includes('grok')) return -1
         if (b.model.includes('grok') && !a.model.includes('grok')) return 1
-        // Then Claude (fast, reliable fallback)
-        if (a.model.includes('claude') && !b.model.includes('claude')) return -1
-        if (b.model.includes('claude') && !a.model.includes('claude')) return 1
         // Finally sort by score
         return b.score - a.score
       })
