@@ -5,6 +5,7 @@ import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced
 // import { modelOrchestrator } from '@/lib/model-orchestrator' // TODO: Re-enable when orchestrator is ready
 import PDFParser from 'pdf2json'
 import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
+import { generateTemplateInstructions } from '@/lib/takeoff-template'
 
 // Enhanced Multi-Model Analysis API
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection
@@ -242,14 +243,20 @@ export async function POST(request: NextRequest) {
     // Extract quality_analysis from consensusResult if it exists, or construct from issues
     // The consensus engine now extracts and merges quality_analysis from all models
     // This will be reused in the response, so construct once here
+    // Add confidence warning if overall confidence is low
+    const overallConfidence = consensusResult.confidence || 0.8
+    const confidenceWarning = overallConfidence < 0.6 
+      ? `⚠️ LOW CONFIDENCE ANALYSIS (${(overallConfidence * 100).toFixed(0)}%) - Some items may need manual verification.`
+      : ''
+    
     const qualityAnalysisData = consensusResult.quality_analysis || {
       completeness: {
-        overall_score: consensusResult.confidence || 0.8,
+        overall_score: overallConfidence,
         missing_sheets: [],
         missing_dimensions: [],
         missing_details: [],
         incomplete_sections: [],
-        notes: 'Quality analysis included with takeoff'
+        notes: confidenceWarning || 'Quality analysis included with takeoff'
       },
       consistency: {
         scale_mismatches: [],
@@ -578,7 +585,7 @@ RESIDENTIAL PROJECT FOCUS:
   // Add task-specific instructions
   switch (taskType) {
     case 'takeoff':
-      return basePrompt + jobTypePrompt + `
+      return basePrompt + jobTypePrompt + generateTemplateInstructions() + `
 
 TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
 - Extract ALL material quantities and measurements

@@ -231,27 +231,38 @@ export class EnhancedConsensusEngine {
   }
 
   // Build consensus items with advanced scoring
+  // GOAL: Keep ALL unique items from ALL models - only merge exact duplicates
   private buildConsensusItems(
     allItems: TakeoffItem[],
     parsedResults: Array<{ model: string; items: TakeoffItem[]; confidence: number }>
   ): TakeoffItem[] {
-    // Group similar items
+    // Group similar items for merging exact duplicates only
     const itemGroups = this.groupSimilarItems(allItems)
     
     console.log(`Processing ${allItems.length} total items in ${itemGroups.length} groups`)
     
-    // Build consensus for each group
+    // Build consensus for each group - merge duplicates, keep all unique items
     const consensusItems: TakeoffItem[] = []
     
     itemGroups.forEach((group, index) => {
+      // If multiple models found the same item, merge them
+      // If only one model found it, keep it (we want ALL findings)
       const consensusItem = this.buildItemConsensus(group, parsedResults)
       if (consensusItem) {
+        // Add confidence warning in notes if confidence is low
+        if (consensusItem.confidence && consensusItem.confidence < 0.6) {
+          const warning = `⚠️ LOW CONFIDENCE (${(consensusItem.confidence * 100).toFixed(0)}%) - Verify this item manually.`
+          consensusItem.notes = consensusItem.notes 
+            ? `${warning} ${consensusItem.notes}` 
+            : warning
+        }
+        
         consensusItems.push(consensusItem)
         console.log(`Group ${index + 1}: "${consensusItem.name}" - ${((consensusItem.confidence || 0) * 100).toFixed(1)}% confidence`)
       }
     })
     
-    console.log(`Returning ${consensusItems.length} items (filtered from ${allItems.length} total)`)
+    console.log(`Returning ${consensusItems.length} items from ${allItems.length} total (keeping all unique findings from all models)`)
     return consensusItems
   }
 
@@ -446,21 +457,28 @@ export class EnhancedConsensusEngine {
   }
 
   // Build consensus for a group of similar items
+  // GOAL: Keep ALL items, even from single models. Only merge when multiple models found the same item.
   private buildItemConsensus(
     group: TakeoffItem[],
     parsedResults: Array<{ model: string; confidence: number }>
   ): TakeoffItem | null {
     if (group.length === 0) return null
     
-    // Calculate consensus score
+    // Calculate consensus score (how many models found this item)
     const consensusScore = group.length / parsedResults.length
     
-    // INCLUSIVE MODE: Include items even if only 1 model found them (but with lower confidence)
-    // This ensures comprehensive coverage even when models disagree
-    // Only filter out items with very low confidence (< 0.2)
+    // MAXIMALLY INCLUSIVE MODE: Keep items even if only 1 model found them
+    // The goal is COMPREHENSIVE coverage - each model finds different things
+    // Only filter out items with extremely low confidence (< 0.15)
     const minItemConfidence = Math.min(...group.map(i => i.confidence || 0.5))
-    if (minItemConfidence < 0.2 && consensusScore < 0.3) {
-      return null // Filter only very low confidence items with low consensus
+    const avgItemConfidence = group.reduce((sum, i) => sum + (i.confidence || 0.5), 0) / group.length
+    
+    // Only filter out if BOTH conditions are true:
+    // 1. Very low individual confidence AND
+    // 2. Very low consensus (only 1 model found it, and it had low confidence)
+    if (minItemConfidence < 0.15 && consensusScore < 0.25) {
+      console.log(`Filtering out item "${group[0].name}" - confidence ${(minItemConfidence * 100).toFixed(1)}% < 15% threshold`)
+      return null
     }
     
     const base = group[0]
@@ -484,12 +502,21 @@ export class EnhancedConsensusEngine {
       0.95 // Cap at 95% to leave room for manual verification
     )
     
-    // INCLUSIVE MODE: Accept items with lower confidence for comprehensive coverage
-    // Only filter out items with very low confidence (< 0.3) to ensure we get comprehensive results
-    const inclusiveThreshold = 0.3 // Lower threshold for more items
-    if (finalConfidence < inclusiveThreshold) {
-      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < inclusive threshold ${(inclusiveThreshold * 100).toFixed(1)}%`)
+    // MAXIMALLY INCLUSIVE: Keep all items, even with low confidence
+    // We want COMPREHENSIVE coverage - let users verify low-confidence items
+    // Only filter out if confidence is extremely low (< 0.2) AND only 1 model found it
+    const minimalThreshold = 0.2
+    if (finalConfidence < minimalThreshold && consensusScore < 0.25) {
+      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < minimal threshold ${(minimalThreshold * 100).toFixed(1)}% and only ${group.length} model(s) found it`)
       return null
+    }
+    
+    // Add note about model consensus if low
+    if (consensusScore < 0.4) {
+      const foundBy = `${group.length} model${group.length > 1 ? 's' : ''}`
+      base.notes = base.notes 
+        ? `${base.notes} (Found by ${foundBy} - verify for accuracy)`
+        : `Found by ${foundBy} - verify for accuracy`
     }
     
     return {
