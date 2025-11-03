@@ -569,7 +569,8 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     
     // Strategy 1: Try to find complete item objects (may span multiple lines)
     // Use a more flexible pattern that handles nested objects and multi-line content
-    const itemObjectPattern = /\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/gs
+    // Note: Using [\s\S] instead of . with 's' flag for ES compatibility
+    const itemObjectPattern = /\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g
     let itemMatches = itemsText.match(itemObjectPattern)
     
     // Strategy 2: If that fails, try simpler pattern
