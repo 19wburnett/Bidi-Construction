@@ -39,11 +39,14 @@
 
 **Fix:**
 - Added 50-page limit check in API (returns 413 with `suggestBatch: true`)
+- Added 100-page limit check in batch endpoint (queues immediately)
 - Frontend automatically detects 413 and retries with batch endpoint
-- Batch endpoint already existed - processes in groups of 5 pages
+- Batch endpoint processes in groups of 5 pages
+- Very large PDFs (>100 pages) queued for manual processing
 
 **Files:** 
 - `app/api/plan/analyze-enhanced/route.ts`
+- `app/api/plan/analyze-enhanced-batch/route.ts`
 - `app/dashboard/jobs/[jobId]/plans/[planId]/page.tsx`
 
 ### 3. ✅ All Pages Analyzed
@@ -84,7 +87,7 @@
 1. Same as above but with warnings
 2. May take longer but works fine
 
-### For Large PDFs (>50 pages)
+### For Large PDFs (50-100 pages)
 1. Frontend converts all pages to base64 images
 2. Tries `/api/plan/analyze-enhanced` first
 3. Gets 413 error with `suggestBatch: true`
@@ -92,6 +95,16 @@
 5. Batch endpoint processes in groups of 5 pages
 6. All batch results merged together
 7. Same final output as single-batch processing
+
+### For Very Large PDFs (>100 pages)
+1. Frontend converts all pages to base64 images
+2. Tries `/api/plan/analyze-enhanced` first
+3. Gets 413 error with `suggestBatch: true`
+4. **Automatically retries** with `/api/plan/analyze-enhanced-batch`
+5. Batch endpoint detects >100 pages and **immediately queues**
+6. Returns 202 "Queued" response
+7. User gets email notification when complete
+8. Manual processing by admin
 
 ## Model Execution Flow
 
