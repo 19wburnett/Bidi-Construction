@@ -60,10 +60,17 @@ export async function ingestPlan(
   const warnings: string[] = []
 
   try {
+    console.log(`\n${'='.repeat(80)}`)
+    console.log(`📦 INGESTION STARTED - Plan ${planId}`)
+    console.log(`${'='.repeat(80)}`)
+    console.log(`   File: ${plan.file_name || 'unknown'}`)
+    console.log(`   Path: ${plan.file_path || 'unknown'}`)
+    
     // Update status: downloading
     status.stage = 'downloading'
     status.current_step = 'Fetching PDF from storage'
     await updateProcessingStatus(supabase, planId, status)
+    console.log(`   ✅ Stage: Downloading PDF`)
 
     // Step 1: Get signed URL and download PDF
     const pdfBuffer = await downloadPDF(supabase, plan.file_path, errors)
@@ -78,6 +85,7 @@ export async function ingestPlan(
 
     // Step 2: Extract text and images in parallel
     status.stage = 'extracting'
+    console.log(`   ✅ Stage: Extracting text and images from PDF`)
     
     // Default to text-only for simplicity (images are optional enhancement)
     const enableImages = options?.enable_image_extraction === true && !!process.env.PDF_CO_API_KEY
@@ -108,6 +116,7 @@ export async function ingestPlan(
     status.progress = 40
     status.stats!.pages_processed = pageTexts.length
     await updateProcessingStatus(supabase, planId, status)
+    console.log(`   ✅ Extracted: ${pageTexts.length} pages, ${pageImages.size} images`)
 
     // Step 3: Build sheet index
     status.stage = 'indexing'
@@ -119,6 +128,7 @@ export async function ingestPlan(
     // Persist sheet index to database
     await persistSheetIndex(supabase, planId, sheetIndex, errors)
     status.stats!.sheets_indexed = sheetIndex.length
+    console.log(`   ✅ Stage: Sheet indexing complete (${sheetIndex.length} sheets)`)
 
     status.progress = 60
     await updateProcessingStatus(supabase, planId, status)
@@ -157,6 +167,8 @@ export async function ingestPlan(
     // Persist chunks to database
     await persistChunks(supabase, planId, chunks, errors)
     status.stats!.chunks_created = chunks.length
+    console.log(`   ✅ Stage: Chunking complete (${chunks.length} chunks created)`)
+    console.log(`   ✅ Average chunk size: ${Math.round(chunks.reduce((sum, c) => sum + c.content.text_token_count, 0) / chunks.length)} tokens`)
 
     status.progress = 90
     await updateProcessingStatus(supabase, planId, status)
@@ -170,6 +182,18 @@ export async function ingestPlan(
     status.current_step = 'Ingestion complete'
     status.completed_at = new Date().toISOString()
     await updateProcessingStatus(supabase, planId, status)
+    
+    const processingTimeMs = Date.now() - startTime
+    console.log(`\n${'='.repeat(80)}`)
+    console.log(`✅ INGESTION COMPLETE - Plan ${planId}`)
+    console.log(`${'='.repeat(80)}`)
+    console.log(`   📊 Stats:`)
+    console.log(`      - Pages: ${pageTexts.length}`)
+    console.log(`      - Sheets: ${sheetIndex.length}`)
+    console.log(`      - Chunks: ${chunks.length}`)
+    console.log(`      - Time: ${(processingTimeMs / 1000).toFixed(1)}s`)
+    console.log(`   ✅ Plan is now ready for orchestrator analysis!`)
+    console.log(`${'='.repeat(80)}\n`)
 
     // Update plan status
     await supabase
@@ -479,7 +503,7 @@ function extractProjectNames(pageTexts: PageText[]): string[] {
     }
   }
 
-  return [...new Set(projects)]
+  return Array.from(new Set(projects))
 }
 
 /**
@@ -501,7 +525,7 @@ function extractAddresses(pageTexts: PageText[]): string[] {
     }
   }
 
-  return [...new Set(addresses)]
+  return Array.from(new Set(addresses))
 }
 
 /**
