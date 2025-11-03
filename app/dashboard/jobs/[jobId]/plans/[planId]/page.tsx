@@ -72,7 +72,7 @@ export default function EnhancedPlanViewer() {
   const [qualityResults, setQualityResults] = useState<any>(null)
   const [qualityAnalysisRowId, setQualityAnalysisRowId] = useState<string | null>(null)
   const [shareLink, setShareLink] = useState<string | null>(null)
-  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number }>({ step: '', percent: 0 })
+  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number; timeEstimate?: string }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
   
   // Handle page navigation from takeoff items
@@ -692,6 +692,9 @@ export default function EnhancedPlanViewer() {
     const images: string[] = []
     // Convert ALL pages for comprehensive analysis
     const totalPages = pdf.numPages
+    
+    // Store totalPages in ref for use in error handling
+    ;(convertPdfToImages as any).lastTotalPages = totalPages
     // Process all pages - no limits for comprehensive analysis
     const pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
     
@@ -745,13 +748,29 @@ export default function EnhancedPlanViewer() {
 
     setIsRunningTakeoff(true)
     setAnalysisProgress({ step: 'Starting analysis...', percent: 0 })
+    
+    // Calculate realistic time estimate based on page count
+    const calculateTimeEstimate = (totalPages: number): string => {
+      // Base time: 30 seconds per page for conversion, 60 seconds per page for AI analysis
+      // Fastest observed: 60-90s for small docs, scales with pages
+      const baseSeconds = 60 // Minimum time
+      const perPageSeconds = 5 // Rough average per page
+      const totalSeconds = baseSeconds + (totalPages * perPageSeconds)
+      
+      if (totalSeconds < 60) return `${totalSeconds}-${totalSeconds + 30} seconds`
+      const minutes = Math.floor(totalSeconds / 60)
+      const seconds = totalSeconds % 60
+      return `${minutes}-${minutes + 1} minutes`
+    }
 
     try {
       // Step 1: Convert PDF to images (0-70%)
       const images = await convertPdfToImages(retryCount)
+      const totalPages = images.length
 
       // Step 2: Send to AI (70-90%)
-      setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75 })
+      const timeEstimate = calculateTimeEstimate(totalPages)
+      setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75, timeEstimate })
       const startTime = Date.now()
       
       const analysisResponse = await fetch('/api/plan/analyze-enhanced', {
@@ -905,21 +924,53 @@ export default function EnhancedPlanViewer() {
       
     } catch (error) {
       console.error('Error running AI takeoff:', error)
-      setAnalysisProgress({ step: '', percent: 0 })
       
-      // If it's a 413 error, automatically retry with fewer pages
-      if (error instanceof Error && error.message.includes('Request too large') && retryCount < 2) {
-        console.log(`Retrying with fewer pages (attempt ${retryCount + 1})`)
-        setIsRunningTakeoff(false)
-        setTimeout(() => {
-          handleRunAITakeoff(retryCount + 1)
-        }, 1000)
-        return
-      } else if (error instanceof Error && error.message.includes('Request too large')) {
-        alert(`Request still too large even with 1 page. The document may be too complex.`)
-      } else {
-        alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      // Last resort: Queue the request instead of showing error
+      try {
+        console.log('Queueing request as fallback due to error')
+        setAnalysisProgress({ step: 'Queueing request for manual processing...', percent: 75 })
+        
+        // Insert into queue
+        const { data: queueEntry, error: queueError } = await supabase
+          .from('ai_takeoff_queue')
+          .insert({
+            plan_id: planId,
+            user_id: user?.id,
+            job_id: plan.job_id || job?.id || null,
+            task_type: 'takeoff',
+            job_type: job?.project_type === 'Commercial' ? 'commercial' : job?.project_type ? 'residential' : null,
+            images_count: (convertPdfToImages as any).lastTotalPages || 0,
+            request_data: {
+              task_type: 'takeoff',
+              error_fallback: true,
+              original_error: error instanceof Error ? error.message : 'Unknown error'
+            },
+            status: 'pending',
+            priority: 0
+          })
+          .select()
+          .single()
+        
+        if (!queueError && queueEntry) {
+          // Successfully queued
+          setAnalysisProgress({ 
+            step: 'AI Takeoff queued. Estimated time: 2-3 hours. You will be notified when it is complete.', 
+            percent: 100 
+          })
+          
+          setTimeout(() => {
+            setIsRunningTakeoff(false)
+            setAnalysisProgress({ step: '', percent: 0 })
+          }, 5000)
+          return
+        }
+      } catch (queueRetryError) {
+        console.error('Failed to queue request:', queueRetryError)
       }
+      
+      // If queueing also failed, show error
+      setAnalysisProgress({ step: '', percent: 0 })
+      alert(`Failed to run AI takeoff: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setIsRunningTakeoff(false)
     } finally {
       // Analysis completed, but keep running state until success message is shown
@@ -1373,7 +1424,7 @@ export default function EnhancedPlanViewer() {
                                 </div>
                               ) : (
                                 <p className="text-xs text-gray-500">
-                                  Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
+                                  Estimated time: {analysisProgress.timeEstimate || 'Calculating...'}
                                 </p>
                               )}
                             </div>
@@ -1441,7 +1492,7 @@ export default function EnhancedPlanViewer() {
                                 />
                               </div>
                               <p className="text-xs text-gray-500">
-                                Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
+                                Estimated time: {analysisProgress.timeEstimate || 'Calculating...'}
                               </p>
                             </div>
                           )}
