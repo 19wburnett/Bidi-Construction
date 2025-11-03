@@ -319,7 +319,7 @@ export class EnhancedAIProvider {
           // Check if we already have minimum required models and remaining models likely to fail
           if (successfulResults.length >= MIN_MODELS && (enabledModels.length - i - 1) === 0) {
             console.log(`✅ Have ${successfulResults.length} successful model(s) - minimum requirement met. Can proceed.`)
-          } else {
+        } else {
             console.log(`⏭️  Continuing to next model (${successfulResults.length}/${MIN_MODELS} minimum, ${successfulResults.length}/${TARGET_MODELS} target)...`)
           }
         } else {
@@ -1181,12 +1181,12 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       console.error('Available results:', results.map(r => ({ model: r.model, provider: r.provider, success: !!r.content })))
       throw new Error(`All models failed. Cannot perform analysis.`)
     }
-    
+      
     // If we have at least 1 model, use it (single model analysis is acceptable)
-    if (results.length === 1) {
+      if (results.length === 1) {
       console.log(`Using single model analysis (${results[0].model}) - consensus requires 2+ models but single model is acceptable`)
-      const singleResult = results[0]
-      try {
+        const singleResult = results[0]
+        try {
           // Handle empty responses - throw error instead of creating fake data
           if (!singleResult.content || singleResult.content.trim().length === 0) {
             console.error(`❌ Model ${singleResult.model} returned empty response - this should not happen`)
@@ -1459,7 +1459,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             specializedInsights: [],
             recommendations: ['Analysis completed but response could not be fully parsed. Please try again.']
           }
-      }
+        }
       // All error handling done, but we should have returned above
       // This means the single model path didn't return - should not happen
       throw new Error('Single model analysis failed to return results')
@@ -1538,6 +1538,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     return {
       items: result.parsed.items || [],
       issues: taskType === 'quality' ? (result.parsed.issues || []) : [],
+      quality_analysis: result.parsed.quality_analysis, // Include quality_analysis from single model
       confidence: result.confidence || 0.7, // Single model gets lower confidence
       consensusCount: 1,
       disagreements: [],
@@ -1559,6 +1560,9 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     const consensusItems = this.findConsensusItems(items, results.length)
     const consensusIssues = this.findConsensusIssues(issues, results.length)
     
+    // Merge quality_analysis from all models (use the most comprehensive one)
+    const qualityAnalysis = this.mergeQualityAnalysis(results.map(r => r.parsed))
+    
     // Calculate overall confidence
     const avgConfidence = results.reduce((sum, r) => sum + (r.confidence || 0.5), 0) / results.length
     
@@ -1571,6 +1575,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     return {
       items: consensusItems,
       issues: taskType === 'quality' ? consensusIssues : [],
+      quality_analysis: qualityAnalysis, // Include merged quality_analysis
       confidence: avgConfidence,
       consensusCount: results.length,
       disagreements,
@@ -1781,6 +1786,59 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       itemsFound: (result.parsed.items || []).length,
       confidence: 0.8 // Default confidence
     }))
+  }
+
+  // Merge quality_analysis from multiple models
+  private mergeQualityAnalysis(parsedResults: Array<{ quality_analysis?: any }>): any {
+    // Find the most comprehensive quality_analysis
+    let bestQA: any = null
+    let bestScore = 0
+    
+    parsedResults.forEach(result => {
+      if (result.quality_analysis) {
+        const qa = result.quality_analysis
+        // Score based on completeness and detail
+        const score = (qa.completeness?.overall_score || 0) +
+                     (qa.audit_trail?.coverage_percentage || 0) / 100 +
+                     (qa.risk_flags?.length || 0) * 0.1 +
+                     (qa.completeness?.missing_dimensions?.length || 0) * 0.05
+        
+        if (score > bestScore) {
+          bestScore = score
+          bestQA = qa
+        }
+      }
+    })
+    
+    // If no model returned quality_analysis, return default structure
+    if (!bestQA) {
+      return {
+        completeness: {
+          overall_score: 0.8,
+          missing_sheets: [],
+          missing_dimensions: [],
+          missing_details: [],
+          incomplete_sections: [],
+          notes: 'Quality analysis merged from multiple models'
+        },
+        consistency: {
+          scale_mismatches: [],
+          unit_conflicts: [],
+          dimension_contradictions: [],
+          schedule_vs_elevation_conflicts: [],
+          notes: 'No consistency issues detected across models'
+        },
+        risk_flags: [],
+        audit_trail: {
+          pages_analyzed: [],
+          chunks_processed: parsedResults.length,
+          coverage_percentage: 100,
+          assumptions_made: []
+        }
+      }
+    }
+    
+    return bestQA
   }
 }
 

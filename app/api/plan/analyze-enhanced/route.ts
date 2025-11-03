@@ -274,7 +274,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Warn if many images but don't block - allow full plan analysis
+    // For large plans, redirect to batch processing to prevent 413 Request Entity Too Large
+    // Conservative limit: 30 pages at 0.3 JPEG quality = ~120KB/page = 3.6MB total (under 4.5MB Vercel limit)
+    if (images.length > 30) {
+      console.log(`Large plan detected: ${images.length} pages. Redirecting to batch processing.`)
+      return NextResponse.json(
+        { 
+          error: 'Request too large',
+          message: `This plan has ${images.length} pages and is too large for single-batch processing. Please use the batch endpoint or process in smaller chunks.`,
+          suggestBatch: true,
+          totalPages: images.length,
+          maxRecommendedPages: 30
+        },
+        { status: 413 }
+      )
+    }
+
+    // Warn if many images but still allow
     if (images.length > 20) {
       console.warn(`Large plan detected: ${images.length} pages. This may take longer and consume more tokens.`)
     }

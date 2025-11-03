@@ -1,6 +1,120 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { Resend } from 'resend'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+/**
+ * Send email notification to admin users about a new AI takeoff request in the queue
+ */
+async function sendAdminQueueNotification(
+  supabase: any,
+  queueId: string,
+  planId: string,
+  userEmail: string,
+  planTitle: string,
+  taskType: string
+) {
+  // Get all admin email addresses - check both role = 'admin' OR is_admin = true
+  const { data: admins, error: adminError } = await supabase
+    .from('users')
+    .select('email')
+    .or('role.eq.admin,is_admin.eq.true')
+
+  let adminEmails: string[] = []
+  
+  if (adminError) {
+    console.error('Error querying admin users:', adminError)
+  } else if (admins && admins.length > 0) {
+    adminEmails = admins.map((admin: any) => admin.email).filter(Boolean)
+  }
+  
+  // Always include fallback email for safety
+  const fallbackEmail = 'savewithbidi@gmail.com'
+  if (!adminEmails.includes(fallbackEmail)) {
+    adminEmails.push(fallbackEmail)
+  }
+  
+  if (adminEmails.length === 0) {
+    adminEmails = [fallbackEmail]
+  }
+  
+  console.log(`Sending queue notification to ${adminEmails.length} email(s)`)
+
+  const taskTypeDisplay = taskType === 'takeoff' ? 'AI Takeoff' : taskType === 'quality' ? 'Quality Analysis' : 'Bid Analysis'
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'Bidi <noreply@savewithbidi.com>',
+      to: adminEmails,
+      subject: `🔔 New AI ${taskTypeDisplay} Request Queued`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background-color: #3b82f6; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
+          </div>
+          
+          <div style="padding: 30px; background-color: #f8fafc;">
+            <h2 style="color: #1e293b; margin-bottom: 20px;">🔔 New AI ${taskTypeDisplay} Request</h2>
+            
+            <div style="background-color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #3b82f6;">
+              <h3 style="color: #3b82f6; margin-top: 0;">Request Details</h3>
+              <p><strong>Queue ID:</strong> ${queueId}</p>
+              <p><strong>Plan ID:</strong> ${planId}</p>
+              <p><strong>Plan Title:</strong> ${planTitle}</p>
+              <p><strong>Task Type:</strong> ${taskTypeDisplay}</p>
+              <p><strong>Requested by:</strong> ${userEmail}</p>
+              <p><strong>Queued at:</strong> ${new Date().toLocaleString()}</p>
+            </div>
+
+            <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h4 style="color: #f59e0b; margin-top: 0;">⚠️ Action Required</h4>
+              <p style="margin: 10px 0; line-height: 1.6;">
+                A very large plan (100+ pages) has been queued for manual processing due to request size limits.
+              </p>
+            </div>
+
+            <div style="background-color: #dcfce7; border: 1px solid #16a34a; padding: 20px; border-radius: 8px;">
+              <h4 style="color: #16a34a; margin-top: 0;">📋 Next Steps</h4>
+              <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                <li>Review the queued request in the admin dashboard</li>
+                <li>Process the AI ${taskTypeDisplay.toLowerCase()} manually</li>
+                <li>The user will be automatically notified when complete</li>
+                <li>Estimated processing time: 2-3 hours</li>
+              </ul>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://www.bidicontracting.com'}/admin/analyze-plans" 
+                 style="display: inline-block; background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+                View Queue in Admin Dashboard
+              </a>
+            </div>
+          </div>
+          
+          <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
+            <p style="margin: 0; font-size: 14px;">
+              © 2024 Bidi. All rights reserved.
+            </p>
+            <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
+              This is an automated notification from the Bidi platform.
+            </p>
+          </div>
+        </div>
+      `,
+    })
+
+    if (error) {
+      console.error('Failed to send admin queue notification:', error)
+    } else {
+      console.log(`Admin queue notification sent to ${adminEmails.length} admin(s)`)
+    }
+  } catch (error) {
+    console.error('Error sending admin queue notification:', error)
+  }
+}
 
 // Enhanced Multi-Model Analysis API with Batch Processing
 // This endpoint processes large plans in batches of 5 pages each
@@ -63,6 +177,105 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`Starting batch enhanced analysis for plan ${planId} with ${images.length} images`)
+
+    // For VERY large plans, the request itself is too large for Vercel even with batching
+    // Queue it instead of trying to process (request body would exceed 4.5MB limit)
+    if (images.length > 100) {
+      console.log(`Very large plan detected: ${images.length} pages. Request body too large for Vercel. Queueing instead.`)
+      
+      // Get user and plan info for queueing
+      const { data: plan, error: planError } = await supabase
+        .from('plans')
+        .select('id, job_id, title, file_name')
+        .eq('id', planId)
+        .eq('user_id', userId)
+        .single()
+
+      if (planError || !plan) {
+        return NextResponse.json(
+          { error: 'Plan not found' },
+          { status: 404 }
+        )
+      }
+
+      // Determine job type
+      let finalJobType = null
+      if (plan.job_id) {
+        const { data: jobData } = await supabase
+          .from('jobs')
+          .select('project_type')
+          .eq('id', plan.job_id)
+          .single()
+        
+        if (jobData) {
+          finalJobType = jobData.project_type === 'Commercial' ? 'commercial' : 'residential'
+        }
+      }
+
+      // Insert into queue
+      const { data: queueEntry, error: queueError } = await supabase
+        .from('ai_takeoff_queue')
+        .insert({
+          plan_id: planId,
+          user_id: userId,
+          job_id: plan.job_id || null,
+          task_type: taskType,
+          job_type: finalJobType,
+          images_count: images.length,
+          request_data: {
+            images_count: images.length,
+            task_type: taskType,
+            job_type: finalJobType,
+            too_large_for_batch: true
+          },
+          status: 'pending',
+          priority: 0
+        })
+        .select()
+        .single()
+
+      if (queueError) {
+        console.error('Error queuing request:', queueError)
+        return NextResponse.json(
+          { error: 'Failed to queue request' },
+          { status: 500 }
+        )
+      }
+
+      // Send email notification to admins
+      try {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('email')
+          .eq('id', userId)
+          .single()
+
+        await sendAdminQueueNotification(
+          supabase,
+          queueEntry.id,
+          planId,
+          userData?.email || 'unknown@example.com',
+          plan.title || plan.file_name,
+          taskType
+        )
+      } catch (emailError) {
+        console.error('Error sending admin notification:', emailError)
+      }
+
+      // Update admin_notified_at
+      await supabase
+        .from('ai_takeoff_queue')
+        .update({ admin_notified_at: new Date().toISOString() })
+        .eq('id', queueEntry.id)
+
+      return NextResponse.json({
+        success: true,
+        queued: true,
+        queueId: queueEntry.id,
+        message: 'Your AI takeoff request has been queued. You will be notified when it is complete.',
+        estimatedTime: '2-3 hours'
+      }, { status: 202 })
+    }
 
     // Process images in batches of 5
     const batchSize = 5
