@@ -7,7 +7,6 @@ import PDFParser from 'pdf2json'
 import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
 import { generateTemplateInstructions } from '@/lib/takeoff-template'
 import { Resend } from 'resend'
-import { createClient } from '@supabase/supabase-js'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -22,56 +21,33 @@ async function sendAdminQueueNotification(
   planTitle: string,
   taskType: string
 ) {
-  // Use service role client to bypass RLS and query all admin users
-  // (regular client is authenticated as non-admin user, so RLS blocks the query)
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    }
-  )
-
-  // Get all admin email addresses using service role (bypasses RLS)
-  const { data: admins, error: adminError } = await supabaseAdmin
+  // Get all admin email addresses - check both role = 'admin' OR is_admin = true
+  const { data: admins, error: adminError } = await supabase
     .from('users')
     .select('email')
-    .eq('is_admin', true)
+    .or('role.eq.admin,is_admin.eq.true')
 
+  let adminEmails: string[] = []
+  
   if (adminError) {
     console.error('Error querying admin users:', adminError)
-    console.error('Admin query details:', {
-      errorCode: adminError.code,
-      errorMessage: adminError.message,
-      errorDetails: adminError.details,
-      errorHint: adminError.hint
-    })
-    return
+    // Continue to fallback email
+  } else if (admins && admins.length > 0) {
+    adminEmails = admins.map((admin: any) => admin.email).filter(Boolean)
   }
-
-  if (!admins || admins.length === 0) {
-    console.warn('No admin users found for queue notification (query succeeded but returned 0 results)')
-    // Log additional debug info
-    const { data: allUsers, error: allUsersError } = await supabaseAdmin
-      .from('users')
-      .select('email, is_admin')
-      .limit(10)
-    console.log('Sample users query (first 10):', { allUsers, allUsersError })
-    return
+  
+  // Always include fallback email for safety
+  const fallbackEmail = 'savewithbidi@gmail.com'
+  if (!adminEmails.includes(fallbackEmail)) {
+    adminEmails.push(fallbackEmail)
   }
-
-  const adminEmails = admins.map((admin: any) => admin.email).filter(Boolean)
   
   if (adminEmails.length === 0) {
-    console.warn('No admin emails found (admins found but emails are null/empty)')
-    console.log('Admins data:', admins)
-    return
+    console.warn('No admin emails found, using fallback only')
+    adminEmails = [fallbackEmail]
   }
-
-  console.log(`Found ${adminEmails.length} admin email(s) for notification:`, adminEmails)
+  
+  console.log(`Sending queue notification to ${adminEmails.length} email(s):`, adminEmails)
 
   const taskTypeDisplay = taskType === 'takeoff' ? 'AI Takeoff' : taskType === 'quality' ? 'Quality Analysis' : 'Bid Analysis'
 
