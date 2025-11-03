@@ -381,55 +381,38 @@ export const TAKEOFF_TEMPLATE: TakeoffTemplateCategory[] = [
 
 /**
  * Generate template instructions for AI prompts
+ * Keep concise to avoid token limits and JSON truncation
  */
 export function generateTemplateInstructions(): string {
   return `
-COMPREHENSIVE TAKEOFF TEMPLATE - YOU MUST CHECK EVERY CATEGORY:
 
-This template ensures COMPLETE coverage. For each category below:
-1. Check if items in this category exist in the plan
-2. If YES: Extract ALL items with quantities, units, locations, dimensions
-3. If NO: Note why excluded (e.g., "Not applicable - no basement in this plan")
-4. If UNCLEAR: Include with low confidence and note uncertainty
+TAKEOFF TEMPLATE CHECKLIST - Check ALL categories below:
 
-MANDATORY CATEGORIES (must check all):
+MANDATORY (must verify all exist or document why excluded):
 ${TAKEOFF_TEMPLATE.filter(c => c.mandatory).map(cat => 
-  `- ${cat.category.toUpperCase()}: ${cat.notes}
-  Subcategories: ${cat.subcategories.map(sc => sc.name).join(', ')}`
-).join('\n')}
+  `${cat.category.toUpperCase()}: ${cat.subcategories.map(sc => sc.name).join(', ')}`
+).join(' | ')}
 
-OPTIONAL CATEGORIES (can exclude if all models agree not applicable):
+OPTIONAL (can exclude if all models agree):
 ${TAKEOFF_TEMPLATE.filter(c => !c.mandatory).map(cat => 
-  `- ${cat.category.toUpperCase()}: ${cat.notes}
-  Subcategories: ${cat.subcategories.map(sc => sc.name).join(', ')}`
+  `${cat.category.toUpperCase()}: ${cat.subcategories.map(sc => sc.name).join(', ')}`
+).join(' | ')}
+
+KEY CATEGORIES & SUB-CATEGORIES:
+${TAKEOFF_TEMPLATE.map(cat => 
+  `${cat.category.toUpperCase()} -> ${cat.subcategories.map(sc => 
+    `${sc.name} (${sc.units.join('/')})`
+  ).join(', ')}`
 ).join('\n')}
 
-DETAILED SUB-CATEGORIES TO CHECK:
+TEMPLATE RULES:
+1. Check EVERY category above - if missing, note why in quality_analysis.completeness
+2. Extract items from ALL applicable subcategories
+3. Use proper units: ${Array.from(new Set(TAKEOFF_TEMPLATE.flatMap(c => c.subcategories.flatMap(sc => sc.units)))).join(', ')}
+4. Be specific: "2x6 Exterior Wall Framing" not just "framing"
+5. Include quantities calculated from visible dimensions
+6. Minimum items: 5 pages=20-50, 10 pages=40-100, 19 pages=80-200
 
-${TAKEOFF_TEMPLATE.map(cat => 
-  `**${cat.category.toUpperCase()}**\n` +
-  cat.subcategories.map(sc => 
-    `  • ${sc.name}:
-      - Items to look for: ${sc.items.slice(0, 5).join(', ')}${sc.items.length > 5 ? ` (+ ${sc.items.length - 5} more)` : ''}
-      - Units: ${sc.units.join(', ')}
-      - Notes: ${sc.notes}`
-  ).join('\n')
-).join('\n\n')}
-
-CRITICAL INSTRUCTIONS:
-- Extract items from EVERY applicable subcategory
-- Use the template as a checklist - don't skip categories
-- If confidence is low (<0.6), still include the item but note low confidence
-- Be specific: "2x6 Top Plate" not just "lumber"
-- Include dimensions, locations, and bounding boxes for each item
-- Calculate quantities accurately based on visible dimensions
-- If a category doesn't apply, you must document why (e.g., "No basement - slab on grade only")
-
-EXPECTED ITEM COUNT BY PLAN SIZE:
-- 5 pages: 20-50 items minimum
-- 10 pages: 40-100 items minimum
-- 19 pages: 80-200 items minimum
-
-If you return fewer items, you're missing categories!
+If you return fewer items than expected, you're missing categories!
 `
 }
