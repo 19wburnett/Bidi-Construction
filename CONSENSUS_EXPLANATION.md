@@ -68,6 +68,17 @@ Average of all model confidences
 (0.8 + 0.8 + 0.8 + 0.8) / 4 = 0.8667 = 86.67%
 ```
 
+### Step 6: Merge Quality Analysis
+**NEW FIX:** Quality analysis is now merged from all models:
+
+The system selects the **most comprehensive** quality_analysis by scoring:
+- Completeness overall score
+- Audit trail coverage percentage
+- Number of risk flags found
+- Number of missing dimensions detected
+
+**Result:** Uses the best quality analysis from any of the models
+
 ## Results Breakdown:
 
 **Your 29 items:**
@@ -76,7 +87,8 @@ Average of all model confidences
 - `confidence: 0.8666...` = 86.67% overall confidence
 
 **Quality analysis:**
-- 0 issues found across all models
+- Now properly merged from all models
+- Uses the most comprehensive analysis found
 - 100% page coverage (all 19 pages analyzed)
 - No consistency issues detected
 
@@ -87,6 +99,6 @@ The system **combines** all models:
 - ✅ **Merges duplicates** when multiple models find the same item
 - ✅ **Averages quantities** when models disagree on amounts
 - ✅ **Boosts confidence** when models agree
+- ✅ **Selects best quality analysis** from all models
 
 **Not just using "one best" model - all successful models contribute!**
-
