@@ -385,6 +385,19 @@ export class EnhancedAIProvider {
         maxTokens = Math.min(maxTokens, 4096) // GPT-4-turbo max is 4096
       }
       
+      // Reasoning models (gpt-5 series, o3, o4-mini) use reasoning tokens that count against max_completion_tokens
+      // They need MUCH higher limits because reasoning tokens consume the budget before output
+      // These models can handle up to 128k completion tokens, but we'll use 32k for safety
+      const reasoningModels = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
+      const isReasoningModel = reasoningModels.includes(model)
+      
+      if (isReasoningModel) {
+        // Reasoning models need high token limits - reasoning consumes tokens before output
+        maxTokens = Math.max(maxTokens, 16384) // Minimum 16k for reasoning models
+        // Cap at 32k to avoid excessive costs, but allow reasoning models to actually produce output
+        maxTokens = Math.min(maxTokens, 32768)
+      }
+      
       // Some OpenAI models don't support custom temperature - only default (1) is allowed
       // Models that require default temperature: gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini
       const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
@@ -414,22 +427,34 @@ export class EnhancedAIProvider {
       
       const response = await openai.chat.completions.create(requestConfig)
       
-      console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
+      const content = response.choices[0].message.content || ''
+      const finishReason = response.choices[0].finish_reason
+      const reasoningTokens = (response.usage as any)?.completion_tokens_details?.reasoning_tokens || 0
+      const completionTokens = response.usage?.completion_tokens || 0
+      
+      console.log(`OpenAI ${model} response received: ${content.length} chars, finish_reason: ${finishReason}`)
+      console.log(`Token usage: ${completionTokens} completion tokens (${reasoningTokens} reasoning + ${completionTokens - reasoningTokens} output)`)
       
       // Check if response is empty and log details
-      if (!response.choices[0].message.content || response.choices[0].message.content.length === 0) {
-        console.warn(`OpenAI ${model} returned empty response. Finish reason: ${response.choices[0].finish_reason}`)
+      if (!content || content.length === 0) {
+        console.warn(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}`)
+        console.warn(`Token breakdown: ${reasoningTokens} reasoning tokens used, ${completionTokens - reasoningTokens} output tokens`)
+        if (isReasoningModel && reasoningTokens >= maxTokens * 0.9) {
+          console.error(`⚠️ CRITICAL: Reasoning model exhausted token budget. Increase max_completion_tokens or reduce prompt size.`)
+        }
         console.warn(`Response object:`, JSON.stringify(response, null, 2))
+        // Throw error for empty responses - don't treat as success
+        throw new Error(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}. All ${completionTokens} tokens were used for reasoning, leaving 0 for output.`)
       }
       
       return {
         provider: 'openai',
         model: model,
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-        content: response.choices[0].message.content || '',
-        finishReason: response.choices[0].finish_reason,
+        content: content,
+        finishReason: finishReason,
         tokensUsed: response.usage?.total_tokens,
-        confidence: this.calculateConfidence(response.choices[0].message.content || ''),
+        confidence: this.calculateConfidence(content),
         taskType: options.taskType
       }
     } catch (error) {
@@ -1120,19 +1145,10 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         console.log('Falling back to single model analysis (no consensus)')
         const singleResult = results[0]
         try {
-          // Handle empty responses gracefully
+          // Handle empty responses - throw error instead of creating fake data
           if (!singleResult.content || singleResult.content.trim().length === 0) {
-            console.warn(`Model ${singleResult.model} returned empty response, creating fallback structure`)
-            return {
-              items: [],
-              issues: [],
-              confidence: 0.3,
-              consensusCount: 1,
-              disagreements: [],
-              modelAgreements: [singleResult.model],
-              specializedInsights: [],
-              recommendations: ['Analysis completed with minimal data due to empty model response']
-            }
+            console.error(`❌ Model ${singleResult.model} returned empty response - this should not happen`)
+            throw new Error(`Model ${singleResult.model} returned empty response. Check token limits and prompt size.`)
           }
           
           // Use robust JSON extraction like multi-model parsing
@@ -1335,7 +1351,8 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           }
           
           // Ensure quality_analysis always exists, even if empty
-          const qualityAnalysis = parsed.quality_analysis || {
+          // Check if parsed.quality_analysis exists from partial extraction, otherwise create fallback
+          const finalQualityAnalysis = (parsed && parsed.quality_analysis) ? parsed.quality_analysis : {
             completeness: {
               overall_score: singleResult.confidence || 0.6,
               missing_sheets: [],
@@ -1365,7 +1382,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           return {
             items: parsed.items || [],
             issues: parsed.issues || [],
-            quality_analysis: qualityAnalysis,
+            quality_analysis: finalQualityAnalysis,
             confidence: singleResult.confidence || 0.6, // Lower confidence for single model
             consensusCount: 1,
             disagreements: [],
