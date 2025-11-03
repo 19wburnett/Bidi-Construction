@@ -2,14 +2,14 @@
 
 ## Issues Fixed
 
-### 1. ✅ Queue Fallback on Errors
-**Problem:** When analysis failed, users got error messages instead of being helped
+### 1. ✅ Smart Queueing for Large PDFs
+**Problem:** Very large PDFs (>100 pages) caused browser crashes or silent failures when trying to convert to base64
 
 **Fix:**
-- Added automatic fallback to queue when any error occurs
-- Instead of alert("Failed"), system queues request for manual processing
-- User sees "Queued" message with 2-3 hour estimate
-- Much better UX than showing errors
+- Check `plan.num_pages` BEFORE attempting PDF conversion
+- Queue immediately for PDFs >100 pages (no conversion attempt)
+- Still allow conversion for smaller PDFs with error handling
+- Prevents browser crashes and improves UX
 
 **Files:** `app/dashboard/jobs/[jobId]/plans/[planId]/page.tsx`
 
@@ -97,14 +97,12 @@
 7. Same final output as single-batch processing
 
 ### For Very Large PDFs (>100 pages)
-1. Frontend converts all pages to base64 images
-2. Tries `/api/plan/analyze-enhanced` first
-3. Gets 413 error with `suggestBatch: true`
-4. **Automatically retries** with `/api/plan/analyze-enhanced-batch`
-5. Batch endpoint detects >100 pages and **immediately queues**
-6. Returns 202 "Queued" response
-7. User gets email notification when complete
-8. Manual processing by admin
+1. **Frontend checks `plan.num_pages` BEFORE conversion**
+2. **If >100 pages, queues immediately** without attempting conversion
+3. Returns "Queued" message to user
+4. No browser crash, no wasted time
+5. User gets email notification when complete
+6. Manual processing by admin
 
 **Note:** 30-page limit chosen to stay under Vercel's 4.5MB request body limit (~120KB/page at 0.3 JPEG quality)
 
