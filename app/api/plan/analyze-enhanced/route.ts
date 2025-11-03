@@ -720,6 +720,21 @@ ${extractedText.slice(0, 8000)}${extractedText.length > 8000 ? '\n\n...(addition
 === VISUAL ANALYSIS INSTRUCTIONS ===` : ''}
 
 MANDATORY INSTRUCTIONS - YOU MUST PROVIDE BOTH:
+
+TEMPLATE-BASED ANALYSIS:
+You have been provided with a COMPREHENSIVE TAKEOFF TEMPLATE in the system prompt. You MUST:
+1. Go through EVERY category in the template (structural, exterior, interior, mep, finishes, other)
+2. For each subcategory, check if items exist in the plan
+3. Extract ALL items you find - don't skip any category
+4. If a category doesn't apply, document why in quality_analysis.completeness
+5. If you're uncertain about an item, include it with low confidence (<0.6) but still include it
+
+MULTI-MODEL STRATEGY:
+- Your job is to find items OTHER models might miss
+- Extract comprehensively - better to over-extract than under-extract
+- Each model should find DIFFERENT items - we'll aggregate all findings
+- Cross-validate against template to ensure nothing is missed
+
 TAKEOFF REQUIREMENTS:
 1. Examine EVERY dimension, measurement, and annotation visible in the plan
 2. Calculate quantities based on visible dimensions and scale
