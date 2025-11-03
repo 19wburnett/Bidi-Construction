@@ -164,10 +164,10 @@ export class EnhancedAIProvider {
   }
 
   // Route tasks to best-performing models
-  // Prioritizes GPT-4o first for ChatGPT, then falls back to others
-  private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
-    // Get max models from environment or default
-    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '5')
+  // Prioritizes GPT models first, then falls back to Claude/Grok
+  private getBestModelsForTask(taskType: TaskType, count: number = 10): string[] {
+    // Get max models from environment or default to 10 (enough for all OpenAI + Claude + Grok)
+    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '10')
     const actualCount = Math.min(count, maxModels)
     
     const modelScores = Object.entries(this.modelPerformance)
@@ -194,6 +194,12 @@ export class EnhancedAIProvider {
         // Then other GPT models
         if (a.model.includes('gpt') && !b.model.includes('gpt')) return -1
         if (b.model.includes('gpt') && !a.model.includes('gpt')) return 1
+        // Then prioritize Grok (alternative provider, good fallback)
+        if (a.model.includes('grok') && !b.model.includes('grok')) return -1
+        if (b.model.includes('grok') && !a.model.includes('grok')) return 1
+        // Then Claude (fast, reliable fallback)
+        if (a.model.includes('claude') && !b.model.includes('claude')) return -1
+        if (b.model.includes('claude') && !a.model.includes('claude')) return 1
         // Finally sort by score
         return b.score - a.score
       })
@@ -209,8 +215,8 @@ export class EnhancedAIProvider {
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (limit to 5 for maximum consensus)
-    const selectedModels = this.getBestModelsForTask(options.taskType, 5)
+    // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
+    const selectedModels = this.getBestModelsForTask(options.taskType, 10)
     
     // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
