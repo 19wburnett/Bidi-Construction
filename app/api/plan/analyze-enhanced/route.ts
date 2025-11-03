@@ -323,10 +323,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save quality analysis (always, if issues exist or if taskType is quality, or if we have quality_analysis data)
-    if (taskType === 'quality' || 
+    // Save quality analysis (ALWAYS - both takeoff and quality analysis should be saved)
+    // Even if there are no issues, we save the completeness/consistency/audit data
+    const shouldSaveQuality = taskType === 'quality' || 
+        taskType === 'takeoff' || // ALWAYS save quality analysis when doing takeoff
         (consensusResult.issues && consensusResult.issues.length > 0) || 
-        qualityAnalysisData) {
+        qualityAnalysisData
+    
+    if (shouldSaveQuality) {
       
       // Organize issues by severity
       const issues = consensusResult.issues || []
