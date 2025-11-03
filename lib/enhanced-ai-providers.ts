@@ -216,7 +216,17 @@ export class EnhancedAIProvider {
     const startTime = Date.now()
     
     // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
-    const selectedModels = this.getBestModelsForTask(options.taskType, 10)
+    let selectedModels = this.getBestModelsForTask(options.taskType, 10)
+    
+    // CRITICAL: Always ensure Claude and Grok are included for fallback, even if env var limits models
+    // Add them if they're not already in the list
+    const requiredFallbacks = ['grok-4', 'claude-3-haiku-20240307']
+    requiredFallbacks.forEach(fallback => {
+      if (!selectedModels.includes(fallback)) {
+        // Add to the end (will be tried after OpenAI models)
+        selectedModels.push(fallback)
+      }
+    })
     
     // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
