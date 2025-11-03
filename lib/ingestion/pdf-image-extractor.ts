@@ -25,9 +25,11 @@ export async function extractImagesPerPage(
 
   try {
     // Step 1: Upload PDF to PDF.co
-    // Create FormData-compatible body for Node.js
+    // Create FormData for Node.js
     const formData = new FormData()
-    const blob = new Blob([buffer], { type: 'application/pdf' })
+    // Convert Buffer to Uint8Array for Blob compatibility
+    const uint8Array = new Uint8Array(buffer)
+    const blob = new Blob([uint8Array], { type: 'application/pdf' })
     formData.append('file', blob, fileName)
 
     const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {
@@ -35,7 +37,7 @@ export async function extractImagesPerPage(
       headers: {
         'x-api-key': PDF_CO_API_KEY,
       },
-      body: uploadFormData,
+      body: formData,
     })
 
     if (!uploadResponse.ok) {
@@ -135,7 +137,8 @@ export async function extractImageUrlsOnly(
   try {
     // Upload PDF
     const formData = new FormData()
-    const blob = new Blob([buffer], { type: 'application/pdf' })
+    const uint8Array = new Uint8Array(buffer)
+    const blob = new Blob([uint8Array], { type: 'application/pdf' })
     formData.append('file', blob, fileName)
 
     const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {

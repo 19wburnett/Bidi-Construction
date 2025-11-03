@@ -4,6 +4,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced-consensus-engine'
 // import { modelOrchestrator } from '@/lib/model-orchestrator' // TODO: Re-enable when orchestrator is ready
 import PDFParser from 'pdf2json'
+import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
 
 // Enhanced Multi-Model Analysis API
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection
@@ -105,85 +106,8 @@ export async function POST(request: NextRequest) {
 
     console.log(`Starting enhanced analysis for plan ${planId} with ${images.length} images (job type: ${finalJobType})`)
 
-    // AUTO-DETECT: Check if chunks exist and auto-enable orchestrator
-    let shouldUseOrchestrator = useOrchestrator // Respect explicit flag if provided
-    
-    if (!shouldUseOrchestrator) {
-      console.log('\n🔍 Checking for chunks to auto-enable orchestrator...')
-      const { data: chunks, error: chunksCheckError } = await supabase
-        .from('plan_chunks')
-        .select('chunk_id')
-        .eq('plan_id', planId)
-        .limit(1)
-      
-      if (!chunksCheckError && chunks && chunks.length > 0) {
-        console.log(`✅ Found chunks - AUTO-ENABLING ORCHESTRATOR`)
-        shouldUseOrchestrator = true
-      } else {
-        // Check if ingestion is in progress
-        const { data: planStatus } = await supabase
-          .from('plans')
-          .select('processing_status, status')
-          .eq('id', planId)
-          .single()
-        
-        const isIngesting = planStatus?.processing_status?.stage === 'chunking' || 
-                           planStatus?.processing_status?.stage === 'extracting' ||
-                           planStatus?.processing_status?.stage === 'indexing' ||
-                           planStatus?.status === 'processing'
-        
-        if (isIngesting) {
-          console.log('⏳ Ingestion in progress - will use standard analysis for now (chunks coming soon)')
-          console.log(`   Current stage: ${planStatus?.processing_status?.stage || 'unknown'}`)
-        } else {
-          console.log('ℹ️  No chunks found and ingestion not in progress - will use standard enhanced analysis')
-          console.log('💡 Tip: Chunks are auto-created on upload. If plan was uploaded before chunks were implemented, run ingestion manually.')
-        }
-      }
-    }
-
-    // If orchestrator mode is enabled (manually or auto-detected), try to use chunks
-    if (shouldUseOrchestrator) {
-      console.log('\n🎯 ORCHESTRATOR MODE ENABLED (auto-detected or explicit)')
-      console.log('='.repeat(80))
-      try {
-        const orchestratorResult = await runOrchestratorAnalysis(
-          supabase,
-          planId,
-          userId,
-          finalJobType,
-          taskType as TaskType
-        )
-        
-        if (orchestratorResult) {
-          console.log('\n✅ Orchestrator analysis completed successfully')
-          
-          // Include orchestrator summary in response for visibility
-          orchestratorResult.orchestrator_summary = {
-            models_tested: orchestratorResult.metadata?.totalModels || 0,
-            successful_models: orchestratorResult.consensus?.modelAgreements?.length || 0,
-            total_items: orchestratorResult.results?.items?.length || 0,
-            disagreements: orchestratorResult.conflicts?.unresolved?.length || 0,
-            confidence: orchestratorResult.consensus?.confidence || 0,
-            engine_recommendation: orchestratorResult.engine_recommendation?.recommended_model || 'hybrid'
-          }
-          
-          return NextResponse.json(orchestratorResult)
-        } else {
-          console.log('\n⚠️  Orchestrator returned null (chunks might be incomplete?), falling back to standard analysis')
-        }
-      } catch (orchestratorError) {
-        console.error('\n❌ ORCHESTRATOR ANALYSIS FAILED:')
-        console.error('='.repeat(80))
-        console.error('Error:', orchestratorError instanceof Error ? orchestratorError.message : 'Unknown error')
-        if (orchestratorError instanceof Error && orchestratorError.stack) {
-          console.error('Stack:', orchestratorError.stack)
-        }
-        console.error('='.repeat(80))
-        console.warn('\n⚠️  Falling back to standard enhanced analysis...\n')
-        // Fall through to standard analysis
-      }
-    }
+    // Orchestrator temporarily disabled - using standard enhanced analysis
+    // TODO: Re-enable orchestrator when model-orchestrator is fully ready
 
     // Attempt to fetch plan file and extract text for hybrid analysis
     let extractedText = ''
@@ -878,6 +802,7 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
 
 /**
  * Run orchestrator-based analysis using chunks if available
+ * TEMPORARILY DISABLED - returns null to fall back to standard analysis
  */
 async function runOrchestratorAnalysis(
   supabase: any,
@@ -886,7 +811,11 @@ async function runOrchestratorAnalysis(
   jobType: string,
   taskType: TaskType
 ): Promise<any | null> {
-  try {
+  // Orchestrator temporarily disabled - will re-enable when model-orchestrator is ready
+  return null
+  
+  /* ORCHESTRATOR CODE (DISABLED - TO BE RE-ENABLED LATER)
+  
     // Load plan metadata
     const { data: plan, error: planError } = await supabase
       .from('plans')
@@ -1123,4 +1052,5 @@ async function runOrchestratorAnalysis(
     console.error('Orchestrator analysis error:', error)
     throw error
   }
+  */
 }

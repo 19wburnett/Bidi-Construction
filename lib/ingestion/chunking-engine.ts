@@ -234,8 +234,9 @@ function generateDedupeHash(text: string, pages: number[]): string {
  */
 function extractQuantitySignatures(text: string): string[] {
   const signatures: string[] = []
-  const qtyMatches = text.matchAll(/(?:QTY|QUANTITY|COUNT)[\s:]+(\d+)/gi)
-  for (const match of qtyMatches) {
+  const regex = /(?:QTY|QUANTITY|COUNT)[\s:]+(\d+)/gi
+  let match
+  while ((match = regex.exec(text)) !== null) {
     signatures.push(`qty_${match[1]}`)
   }
   return signatures
@@ -267,7 +268,7 @@ function summarizeScales(sheets: SheetIndex[]): string {
   const scales = sheets
     .map(s => s.scale)
     .filter((s): s is string => s !== null)
-  const uniqueScales = [...new Set(scales)]
+  const uniqueScales = Array.from(new Set(scales))
   return uniqueScales.length > 0 
     ? uniqueScales.join(', ') 
     : 'Scale not detected'

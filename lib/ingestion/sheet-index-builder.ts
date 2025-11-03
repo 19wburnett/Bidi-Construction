@@ -207,6 +207,6 @@ function extractKeywords(text: string): string[] {
     }
   })
 
-  return [...new Set(keywords)] // Remove duplicates
+  return Array.from(new Set(keywords)) // Remove duplicates
 }
 

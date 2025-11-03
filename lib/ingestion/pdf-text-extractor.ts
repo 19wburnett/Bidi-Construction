@@ -23,7 +23,7 @@ export interface PageTextData {
  */
 export async function extractTextPerPage(buffer: Buffer): Promise<PageText[]> {
   return new Promise((resolve, reject) => {
-    const pdfParser = new PDFParser(null, 1)
+    const pdfParser = new PDFParser(null, true)
 
     pdfParser.on('pdfParser_dataError', (errData: any) => {
       reject(new Error(`PDF parse error: ${errData.parserError}`))

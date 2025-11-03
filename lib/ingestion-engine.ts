@@ -214,7 +214,7 @@ export async function ingestPlan(
         totalPages: pageTexts.length,
         totalChunks: chunks.length,
         sheetIndexCount: sheetIndex.length,
-        processingTimeMs: totalProcessingTimeMs,
+        processingTimeMs,
         averageChunkSizeTokens,
         imagesExtracted: pageImages.size,
         textExtracted: pageTexts.length > 0

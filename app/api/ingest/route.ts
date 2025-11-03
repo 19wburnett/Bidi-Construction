@@ -72,6 +72,26 @@ export async function POST(request: NextRequest) {
       // Allow re-processing but warn user
       console.log(`Plan ${planId} already has chunks - will overwrite`)
     }
+    
+    // Also check if ingestion is already in progress
+    const { data: planStatus } = await supabase
+      .from('plans')
+      .select('processing_status, status')
+      .eq('id', planId)
+      .single()
+    
+    const isIngesting = planStatus?.processing_status?.stage === 'chunking' || 
+                       planStatus?.processing_status?.stage === 'extracting' ||
+                       planStatus?.processing_status?.stage === 'indexing' ||
+                       planStatus?.status === 'processing'
+    
+    if (isIngesting) {
+      return NextResponse.json({
+        success: false,
+        error: 'Ingestion already in progress',
+        message: `Plan is currently being processed (stage: ${planStatus?.processing_status?.stage || 'unknown'})`
+      }, { status: 409 })
+    }
 
     // Update status to processing
     await supabase
