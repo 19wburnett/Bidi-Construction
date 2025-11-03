@@ -699,6 +699,28 @@ export default function EnhancedPlanViewer() {
       
       setTakeoffResults(analysisData)
       
+      // Also populate quality results if present (API now returns both takeoff and quality)
+      if (analysisData.results?.issues || analysisData.results?.quality_analysis) {
+        const apiIssues = analysisData?.results?.issues || []
+        const issuesWithIds = ensureIssueIds(apiIssues)
+        setQualityResults({ ...analysisData, issues: issuesWithIds })
+        
+        // Fetch quality analysis row id if it was saved
+        try {
+          const { data } = await supabase
+            .from('plan_quality_analysis')
+            .select('id')
+            .eq('plan_id', planId)
+            .eq('user_id', user?.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+          if (data?.id) setQualityAnalysisRowId(data.id)
+        } catch (e) {
+          console.warn('Could not fetch quality analysis row id')
+        }
+      }
+      
       // Complete analysis
       setTimeout(() => {
         setAnalysisProgress({ step: '', percent: 0 })
