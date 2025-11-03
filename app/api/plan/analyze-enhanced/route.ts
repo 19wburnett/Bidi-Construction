@@ -274,9 +274,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // For very large plans, redirect to batch processing
-    // This prevents 413 Request Entity Too Large errors on Vercel
-    if (images.length > 50) {
+    // For large plans, redirect to batch processing to prevent 413 Request Entity Too Large
+    // Conservative limit: 30 pages at 0.3 JPEG quality = ~120KB/page = 3.6MB total (under 4.5MB Vercel limit)
+    if (images.length > 30) {
       console.log(`Large plan detected: ${images.length} pages. Redirecting to batch processing.`)
       return NextResponse.json(
         { 
@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
           message: `This plan has ${images.length} pages and is too large for single-batch processing. Please use the batch endpoint or process in smaller chunks.`,
           suggestBatch: true,
           totalPages: images.length,
-          maxRecommendedPages: 50
+          maxRecommendedPages: 30
         },
         { status: 413 }
       )
