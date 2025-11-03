@@ -240,6 +240,7 @@ export async function POST(request: NextRequest) {
     // Always save BOTH takeoff and quality analysis regardless of taskType
     
     // Extract quality_analysis from consensusResult if it exists, or construct from issues
+    // The consensus engine now extracts and merges quality_analysis from all models
     // This will be reused in the response, so construct once here
     const qualityAnalysisData = consensusResult.quality_analysis || {
       completeness: {
@@ -599,7 +600,8 @@ PRICING REQUIREMENTS:
 - Use industry-standard pricing ranges appropriate for the material and unit type
 - Price per LF, SF, CF, CY, EA, or SQ depending on the unit
 
-BE THOROUGH: Extract every measurable element visible in the plan
+BE THOROUGH: Extract every measurable element visible in the plan - you MUST extract MULTIPLE items per page
+EXPECTED COVERAGE: For a 19-page plan, expect 5-15 items per page minimum
 BE SPECIFIC: "2x6 Top Plate" not just "lumber"
 SHOW YOUR MATH: Include dimensions used for calculations
 USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
@@ -608,6 +610,16 @@ ASSIGN COST CODES: Use the Procore cost codes provided
 INCLUDE LOCATIONS: Specify where each item is located
 PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
 INCLUDE PRICING: Every item must have a realistic unit_cost
+
+EXTRACT COMPREHENSIVELY:
+- Count ALL doors, windows, fixtures, outlets, switches visible
+- Measure ALL walls, floors, roofs, foundations
+- Quantify ALL materials: lumber, concrete, drywall, insulation, roofing, siding
+- Include ALL mechanical: HVAC equipment, plumbing fixtures, electrical components
+- List ALL finishes: paint, flooring, cabinets, countertops, appliances
+- Calculate areas, volumes, lengths for EVERY measurable element
+
+DO NOT SKIP: Even if an item appears simple or small, include it. Better to over-extract than under-extract.
 
 QUALITY ANALYSIS FOCUS (REQUIRED SECTION):
 You MUST also provide a complete quality_analysis object with:
@@ -709,6 +721,17 @@ TAKEOFF REQUIREMENTS:
 5. Cross-reference dimensions to ensure accuracy
 6. Assign appropriate Procore cost codes to each item
 7. Include realistic unit_cost pricing for every item
+
+CRITICAL: You must extract MULTIPLE items per page. A single page typically contains:
+- Multiple wall sections (exterior, interior, different materials)
+- Multiple door/window openings
+- Multiple electrical outlets/switches/fixtures
+- Flooring areas by room/section
+- Multiple material layers (foundation, framing, insulation, finishes)
+- Multiple plumbing fixtures
+- Multiple HVAC components
+
+For 5 pages of a 19-page plan, you should extract AT LEAST 20-50 total items, not just 2-3.
 
 QUALITY ANALYSIS REQUIREMENTS:
 8. Assess completeness - what's missing or incomplete?

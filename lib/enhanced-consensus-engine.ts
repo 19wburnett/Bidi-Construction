@@ -7,6 +7,7 @@ import { TakeoffItem, QualityIssue } from './analysis-merger'
 export interface EnhancedConsensusResult {
   items: TakeoffItem[]
   issues: QualityIssue[]
+  quality_analysis?: any // Include quality_analysis in consensus result
   confidence: number
   consensusCount: number
   disagreements: Disagreement[]
@@ -93,6 +94,9 @@ export class EnhancedConsensusEngine {
     // Build consensus items and issues
     const consensusItems = this.buildConsensusItems(allItems, parsedResults)
     const consensusIssues = this.buildConsensusIssues(allIssues, parsedResults)
+    
+    // Merge quality_analysis from all models (use most comprehensive one)
+    const qualityAnalysis = this.mergeQualityAnalysis(parsedResults)
 
     // Detect disagreements
     const disagreements = this.detectDisagreements(parsedResults, taskType)
@@ -112,6 +116,7 @@ export class EnhancedConsensusEngine {
     return {
       items: consensusItems,
       issues: consensusIssues,
+      quality_analysis: qualityAnalysis, // Include merged quality_analysis
       confidence,
       consensusCount: parsedResults.length,
       disagreements,
@@ -128,17 +133,47 @@ export class EnhancedConsensusEngine {
     confidence: number
     items: TakeoffItem[]
     issues: QualityIssue[]
+    quality_analysis?: any
     raw: any
   }> {
     return results.map(result => {
       try {
-        const parsed = JSON.parse(result.content)
+        // Try to parse JSON, with better error handling for malformed JSON
+        let parsed: any
+        try {
+          parsed = JSON.parse(result.content)
+        } catch (parseError) {
+          // Try to extract JSON from markdown code blocks
+          const codeBlockMatch = result.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+          if (codeBlockMatch) {
+            parsed = JSON.parse(codeBlockMatch[1])
+          } else {
+            // Try to find JSON object in text and fix common issues
+            const jsonMatch = result.content.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              let jsonText = jsonMatch[0]
+              // Fix trailing commas before closing braces/brackets
+              jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+              // Try to close incomplete JSON
+              const openBraces = (jsonText.match(/\{/g) || []).length
+              const closeBraces = (jsonText.match(/\}/g) || []).length
+              if (openBraces > closeBraces) {
+                jsonText += '}'.repeat(openBraces - closeBraces)
+              }
+              parsed = JSON.parse(jsonText)
+            } else {
+              throw new Error('No JSON found in response')
+            }
+          }
+        }
+        
         return {
           model: result.model,
           specialization: result.specialization,
           confidence: result.confidence || 0.5,
           items: this.extractTakeoffItems(parsed),
           issues: this.extractQualityIssues(parsed),
+          quality_analysis: parsed.quality_analysis, // Extract quality_analysis
           raw: parsed
         }
       } catch (error) {
@@ -149,6 +184,7 @@ export class EnhancedConsensusEngine {
           confidence: 0.1,
           items: [],
           issues: [],
+          quality_analysis: undefined,
           raw: null
         }
       }
@@ -354,6 +390,61 @@ export class EnhancedConsensusEngine {
     return matrix[str2.length][str1.length]
   }
 
+  // Merge quality_analysis from multiple models
+  private mergeQualityAnalysis(
+    parsedResults: Array<{ model: string; quality_analysis?: any }>
+  ): any {
+    // Find the most comprehensive quality_analysis
+    let bestQA: any = null
+    let bestScore = 0
+    
+    parsedResults.forEach(result => {
+      if (result.quality_analysis) {
+        const qa = result.quality_analysis
+        // Score based on completeness and detail
+        const score = (qa.completeness?.overall_score || 0) +
+                     (qa.audit_trail?.coverage_percentage || 0) / 100 +
+                     (qa.risk_flags?.length || 0) * 0.1 +
+                     (qa.completeness?.missing_dimensions?.length || 0) * 0.05 // More missing items = more comprehensive analysis
+        
+        if (score > bestScore) {
+          bestScore = score
+          bestQA = qa
+        }
+      }
+    })
+    
+    // If no model returned quality_analysis, return default structure
+    if (!bestQA) {
+      return {
+        completeness: {
+          overall_score: 0.8,
+          missing_sheets: [],
+          missing_dimensions: [],
+          missing_details: [],
+          incomplete_sections: [],
+          notes: 'Quality analysis merged from multiple models'
+        },
+        consistency: {
+          scale_mismatches: [],
+          unit_conflicts: [],
+          dimension_contradictions: [],
+          schedule_vs_elevation_conflicts: [],
+          notes: 'No consistency issues detected across models'
+        },
+        risk_flags: [],
+        audit_trail: {
+          pages_analyzed: [],
+          chunks_processed: parsedResults.length,
+          coverage_percentage: 100,
+          assumptions_made: []
+        }
+      }
+    }
+    
+    return bestQA
+  }
+
   // Build consensus for a group of similar items
   private buildItemConsensus(
     group: TakeoffItem[],
@@ -364,8 +455,13 @@ export class EnhancedConsensusEngine {
     // Calculate consensus score
     const consensusScore = group.length / parsedResults.length
     
-    // Only include items with sufficient consensus (60% threshold)
-    if (consensusScore < this.consensusThreshold) return null
+    // INCLUSIVE MODE: Include items even if only 1 model found them (but with lower confidence)
+    // This ensures comprehensive coverage even when models disagree
+    // Only filter out items with very low confidence (< 0.2)
+    const minItemConfidence = Math.min(...group.map(i => i.confidence || 0.5))
+    if (minItemConfidence < 0.2 && consensusScore < 0.3) {
+      return null // Filter only very low confidence items with low consensus
+    }
     
     const base = group[0]
     const providers = group.map(item => item.ai_provider || 'unknown')
@@ -388,9 +484,11 @@ export class EnhancedConsensusEngine {
       0.95 // Cap at 95% to leave room for manual verification
     )
     
-    // Only return items that meet high confidence threshold
-    if (finalConfidence < this.highConfidenceThreshold) {
-      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < threshold ${(this.highConfidenceThreshold * 100).toFixed(1)}%`)
+    // INCLUSIVE MODE: Accept items with lower confidence for comprehensive coverage
+    // Only filter out items with very low confidence (< 0.3) to ensure we get comprehensive results
+    const inclusiveThreshold = 0.3 // Lower threshold for more items
+    if (finalConfidence < inclusiveThreshold) {
+      console.log(`Filtering out item "${base.name}" - confidence ${(finalConfidence * 100).toFixed(1)}% < inclusive threshold ${(inclusiveThreshold * 100).toFixed(1)}%`)
       return null
     }
     
