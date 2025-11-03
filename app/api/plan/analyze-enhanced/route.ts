@@ -659,25 +659,64 @@ CRITICAL: Even if the plan is unclear or incomplete, you MUST still populate all
     case 'quality':
       return basePrompt + jobTypePrompt + `
 
-QUALITY ANALYSIS FOCUS:
-- Identify potential problems and code violations
-- Check for safety concerns and compliance issues
-- Assess construction quality and workmanship
-- Identify missing information or unclear details
-- Provide recommendations for improvements
+QUALITY ANALYSIS FOCUS (BE AGGRESSIVE - FIND ISSUES):
+You MUST find and report issues. Even if the plan looks good, there are ALWAYS things to check:
+- Missing dimensions or unclear measurements
+- Code compliance concerns (egress, accessibility, structural requirements)
+- Inconsistencies between sheets or details
+- Potential construction challenges
+- Safety or quality concerns
+- Missing or incomplete details
+
+MANDATORY CHECKS - You MUST verify:
+1. ALL dimensions are provided and consistent across sheets
+2. Door/window schedules match elevations
+3. Code compliance (egress, guardrails, stairs, accessibility)
+4. Structural details are complete and clear
+5. MEP systems are properly detailed
+6. No contradictions between plans
+7. All referenced details exist
+8. Scale is consistent across sheets
+9. Material specifications are clear
+10. Finish schedules are complete
+
+IF YOU FIND 0 ISSUES, that means you didn't look hard enough. Every plan has:
+- At least some missing dimensions
+- Some unclear details
+- Potential code compliance questions
+- Areas that need clarification
 
 SEVERITY LEVELS:
-- CRITICAL: Safety hazards, code violations, structural issues
-- WARNING: Quality concerns, potential problems, unclear details
-- INFO: Recommendations, best practices, general observations
+- CRITICAL: Safety hazards, code violations, structural issues that could cause injury or failure
+- WARNING: Quality concerns, potential problems, unclear details that could cause delays/cost overruns
+- INFO: Recommendations, best practices, minor observations that improve quality
 
-BE THOROUGH: Examine every detail for potential issues
-BE SPECIFIC: Provide detailed descriptions of problems
-INCLUDE IMPACT: Explain the impact of each issue
+BE AGGRESSIVE: Look for problems. Question everything. If something is unclear, it's an issue.
+BE THOROUGH: Examine every detail for potential issues - dimension checks, code compliance, consistency
+BE SPECIFIC: Provide detailed descriptions of problems with exact locations
+INCLUDE IMPACT: Explain the impact of each issue (cost, timeline, safety, quality)
 PROVIDE SOLUTIONS: Give specific recommendations for each issue
-ASSIGN SEVERITY: Use appropriate severity levels
-INCLUDE LOCATIONS: Specify where each issue is located
-PROVIDE BOUNDING BOXES: Every issue must have a bounding_box with coordinates`
+ASSIGN SEVERITY: Use appropriate severity levels - when in doubt, mark as WARNING
+INCLUDE LOCATIONS: Specify exactly where each issue is located (sheet number, detail reference)
+PROVIDE BOUNDING BOXES: Every issue must have a bounding_box with coordinates
+
+EXPECTED ISSUE COUNT:
+- For a 5-page plan: 5-15 issues minimum
+- For a 19-page plan: 15-40 issues minimum
+- If you find fewer, you're not looking hard enough
+
+Common issues to look for:
+- Missing dimensions on plans
+- Door/window schedules don't match elevations
+- Stair dimensions don't meet code
+- Guardrail heights missing or unclear
+- Egress routes unclear or non-compliant
+- Scale inconsistencies
+- Structural details incomplete
+- MEP systems lack detail
+- Material specifications vague
+- Finish schedules incomplete
+- Details referenced but not shown`
 
     case 'bid_analysis':
       return basePrompt + jobTypePrompt + `

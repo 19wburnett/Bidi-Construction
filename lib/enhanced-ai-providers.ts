@@ -563,46 +563,172 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     }
   }
 
-  // Extract partial items from incomplete JSON
+  // Extract partial items from incomplete JSON - try to get as much data as possible
   private extractPartialItems(itemsText: string): any[] {
     const items: any[] = []
     // Try to find item objects even if JSON is incomplete
-    const itemMatches = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"([^"]*)"[\s\S]*?\}/g)
+    // Look for patterns like: { "name": "...", "quantity": ..., "unit": "...", ... }
+    const itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*\}/g)
+    
+    if (!itemMatches) {
+      // Try alternative pattern - look for any object that might be an item
+      const altMatches = itemsText.match(/\{[^{}]*"(?:name|description)"\s*:\s*"[^"]*"[^{}]*\}/g)
+      if (altMatches) {
+        itemMatches = altMatches
+      }
+    }
+    
     if (itemMatches) {
       itemMatches.forEach(itemStr => {
         try {
+          // Try to parse complete item
           const item = JSON.parse(itemStr)
-          items.push(item)
+          if (item.name) {
+            items.push(item)
+            return
+          }
         } catch {
-          // Extract name at minimum
+          // Extract fields individually using regex
           const nameMatch = itemStr.match(/"name"\s*:\s*"([^"]*)"/)
+          const descMatch = itemStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const qtyMatch = itemStr.match(/"quantity"\s*:\s*([0-9.]+)/)
+          const unitMatch = itemStr.match(/"unit"\s*:\s*"([^"]*)"/)
+          const catMatch = itemStr.match(/"category"\s*:\s*"([^"]*)"/)
+          const subcatMatch = itemStr.match(/"subcategory"\s*:\s*"([^"]*)"/)
+          const locMatch = itemStr.match(/"location"\s*:\s*"([^"]*)"/)
+          const costMatch = itemStr.match(/"unit_cost"\s*:\s*([0-9.]+)/)
+          const confMatch = itemStr.match(/"confidence"\s*:\s*([0-9.]+)/)
+          
           if (nameMatch) {
-            items.push({ name: nameMatch[1], description: 'Partially extracted', quantity: 0, unit: 'EA', confidence: 0.3 })
+            items.push({
+              name: nameMatch[1],
+              description: descMatch ? descMatch[1] : 'Partially extracted from incomplete JSON',
+              quantity: qtyMatch ? parseFloat(qtyMatch[1]) : 0,
+              unit: unitMatch ? unitMatch[1] : 'EA',
+              category: catMatch ? catMatch[1] : 'other',
+              subcategory: subcatMatch ? subcatMatch[1] : 'Uncategorized',
+              location: locMatch ? locMatch[1] : '',
+              unit_cost: costMatch ? parseFloat(costMatch[1]) : 0,
+              confidence: confMatch ? parseFloat(confMatch[1]) : 0.3,
+              notes: '⚠️ PARTIALLY EXTRACTED - JSON was incomplete. Verify quantities and details manually.'
+            })
           }
         }
       })
     }
+    
+    // If no structured items found, try to extract from raw text patterns
+    if (items.length === 0) {
+      // Look for patterns like "2x6 Exterior Wall Framing" or similar
+      const namePattern = /"name"\s*:\s*"([^"]{3,50})"/g
+      let match
+      while ((match = namePattern.exec(itemsText)) !== null) {
+        items.push({
+          name: match[1],
+          description: 'Extracted from incomplete JSON response',
+          quantity: 0,
+          unit: 'EA',
+          category: 'other',
+          subcategory: 'Uncategorized',
+          confidence: 0.2,
+          notes: '⚠️ PARTIALLY EXTRACTED - Only name was recoverable. All other fields need manual entry.'
+        })
+      }
+    }
+    
     return items
   }
 
   // Extract partial issues from incomplete JSON
   private extractPartialIssues(issuesText: string): any[] {
     const issues: any[] = []
-    const issueMatches = issuesText.match(/\{[\s\S]*?"description"\s*:\s*"([^"]*)"[\s\S]*?\}/g)
+    const issueMatches = issuesText.match(/\{[^{}]*"(?:description|severity)"\s*:\s*"[^"]*"[^{}]*\}/g)
     if (issueMatches) {
       issueMatches.forEach(issueStr => {
         try {
           const issue = JSON.parse(issueStr)
           issues.push(issue)
         } catch {
+          // Extract fields individually
           const descMatch = issueStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const sevMatch = issueStr.match(/"severity"\s*:\s*"([^"]*)"/)
+          const catMatch = issueStr.match(/"category"\s*:\s*"([^"]*)"/)
+          const locMatch = issueStr.match(/"location"\s*:\s*"([^"]*)"/)
+          const recMatch = issueStr.match(/"recommendation"\s*:\s*"([^"]*)"/)
+          
           if (descMatch) {
-            issues.push({ description: descMatch[1], severity: 'info', confidence: 0.3 })
+            issues.push({
+              description: descMatch[1],
+              severity: sevMatch ? sevMatch[1] : 'info',
+              category: catMatch ? catMatch[1] : 'general',
+              location: locMatch ? locMatch[1] : '',
+              recommendation: recMatch ? recMatch[1] : '',
+              confidence: 0.3
+            })
           }
         }
       })
     }
     return issues
+  }
+
+  // Extract partial object from incomplete JSON
+  private extractPartialObject(objText: string): any {
+    const obj: any = {}
+    // Extract common fields
+    const scoreMatch = objText.match(/"overall_score"\s*:\s*([0-9.]+)/)
+    const notesMatch = objText.match(/"notes"\s*:\s*"([^"]*)"/)
+    const missingSheetsMatch = objText.match(/"missing_sheets"\s*:\s*\[([\s\S]*?)\]/)
+    const missingDimsMatch = objText.match(/"missing_dimensions"\s*:\s*\[([\s\S]*?)\]/)
+    
+    if (scoreMatch) obj.overall_score = parseFloat(scoreMatch[1])
+    if (notesMatch) obj.notes = notesMatch[1]
+    if (missingSheetsMatch) {
+      try {
+        obj.missing_sheets = JSON.parse(`[${missingSheetsMatch[1]}]`)
+      } catch {
+        obj.missing_sheets = []
+      }
+    } else {
+      obj.missing_sheets = []
+    }
+    if (missingDimsMatch) {
+      try {
+        obj.missing_dimensions = JSON.parse(`[${missingDimsMatch[1]}]`)
+      } catch {
+        obj.missing_dimensions = []
+      }
+    } else {
+      obj.missing_dimensions = []
+    }
+    
+    return obj
+  }
+
+  // Extract partial array from incomplete JSON
+  private extractPartialArray(arrayText: string): any[] {
+    const items: any[] = []
+    // Look for objects in the array
+    const objMatches = arrayText.match(/\{[^{}]*\}/g)
+    if (objMatches) {
+      objMatches.forEach(objStr => {
+        try {
+          items.push(JSON.parse(objStr))
+        } catch {
+          // Try to extract at least description/level
+          const descMatch = objStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const levelMatch = objStr.match(/"level"\s*:\s*"([^"]*)"/)
+          if (descMatch) {
+            items.push({
+              description: descMatch[1],
+              level: levelMatch ? levelMatch[1] : 'low',
+              confidence: 0.3
+            })
+          }
+        }
+      })
+    }
+    return items
   }
 
   // Cross-validation and consensus analysis
@@ -682,7 +808,21 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             }
             
             // Try to fix incomplete string values by closing quotes
-            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*?)"([^,}\]]*)$/, ':$1"$2"')
+            // Find strings that aren't properly closed and close them
+            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*)$/, (match, spaces, text) => {
+              // If string isn't closed, close it
+              if (!match.includes('"', text.length + spaces.length + 2)) {
+                return `:${spaces}"${text}"`
+              }
+              return match
+            })
+            
+            // Fix incomplete arrays by closing them
+            // Look for arrays that might be incomplete
+            const incompleteArrayMatch = jsonText.match(/(\[[^\]]*),(\s*)$/)
+            if (incompleteArrayMatch) {
+              jsonText = jsonText.replace(/,(\s*)$/, ']')
+            }
             
             // Try parsing again
             try {
@@ -696,20 +836,88 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
               const itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
               const issuesMatch = jsonText.match(/"issues"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
               
+              // Try to extract quality_analysis object even if incomplete
+              const qaMatch = jsonText.match(/"quality_analysis"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+              let qualityAnalysis: any = {}
+              if (qaMatch) {
+                try {
+                  // Try to extract completeness, consistency, risk_flags, audit_trail
+                  const completenessMatch = qaMatch[1].match(/"completeness"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  const consistencyMatch = qaMatch[1].match(/"consistency"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  const riskFlagsMatch = qaMatch[1].match(/"risk_flags"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+                  const auditMatch = qaMatch[1].match(/"audit_trail"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  
+                  qualityAnalysis = {
+                    completeness: completenessMatch ? this.extractPartialObject(completenessMatch[1]) : {
+                      overall_score: 0.5,
+                      missing_sheets: [],
+                      missing_dimensions: [],
+                      missing_details: [],
+                      incomplete_sections: [],
+                      notes: 'Quality analysis partially extracted - some data may be missing'
+                    },
+                    consistency: consistencyMatch ? this.extractPartialObject(consistencyMatch[1]) : {
+                      scale_mismatches: [],
+                      unit_conflicts: [],
+                      dimension_contradictions: [],
+                      schedule_vs_elevation_conflicts: [],
+                      notes: 'Consistency check partially extracted'
+                    },
+                    risk_flags: riskFlagsMatch ? this.extractPartialArray(riskFlagsMatch[1]) : [],
+                    audit_trail: auditMatch ? this.extractPartialObject(auditMatch[1]) : {
+                      pages_analyzed: [],
+                      chunks_processed: 1,
+                      coverage_percentage: 50,
+                      assumptions_made: []
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Failed to extract quality_analysis, using default')
+                }
+              }
+              
               parsed = {
                 items: itemsMatch ? this.extractPartialItems(itemsMatch[1]) : [],
                 issues: issuesMatch ? this.extractPartialIssues(issuesMatch[1]) : [],
-                quality_analysis: {}
+                quality_analysis: qualityAnalysis
               }
               
               console.warn('Using partially extracted data due to JSON parse failure')
             }
           }
           
+          // Ensure quality_analysis always exists, even if empty
+          const qualityAnalysis = parsed.quality_analysis || {
+            completeness: {
+              overall_score: singleResult.confidence || 0.6,
+              missing_sheets: [],
+              missing_dimensions: [],
+              missing_details: [],
+              incomplete_sections: [],
+              notes: 'Quality analysis generated from single model (no consensus). Verify completeness manually.'
+            },
+            consistency: {
+              scale_mismatches: [],
+              unit_conflicts: [],
+              dimension_contradictions: [],
+              schedule_vs_elevation_conflicts: [],
+              notes: 'Single model analysis - consistency checks limited'
+            },
+            risk_flags: [],
+            audit_trail: {
+              pages_analyzed: [],
+              chunks_processed: 1,
+              coverage_percentage: 50,
+              assumptions_made: parsed.items && parsed.items.length > 0 
+                ? [`Extracted ${parsed.items.length} items from partial JSON - some data may be incomplete`]
+                : []
+            }
+          }
+          
           return {
             items: parsed.items || [],
             issues: parsed.issues || [],
-            quality_analysis: parsed.quality_analysis,
+            quality_analysis: qualityAnalysis,
             confidence: singleResult.confidence || 0.6, // Lower confidence for single model
             consensusCount: 1,
             disagreements: [],
@@ -1056,3 +1264,4 @@ export async function analyzeWithSpecializedModels(
 ): Promise<EnhancedAIResponse[]> {
   return enhancedAIProvider.analyzeWithSpecializedModels(images, options)
 }
+
