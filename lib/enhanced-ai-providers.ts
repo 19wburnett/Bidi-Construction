@@ -1147,13 +1147,17 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // Get results from all specialized models
     const results = await this.analyzeWithSpecializedModels(images, options)
     
-    if (results.length < 2) {
-      console.error(`Only ${results.length} models succeeded. Need at least 2 for consensus analysis.`)
+    // TEMPORARY: Allow single model results until we can get multiple models working consistently
+    // Previously required 2+ models for consensus, but this was blocking valid single-model results
+    if (results.length === 0) {
+      console.error(`No models succeeded. Cannot proceed with analysis.`)
       console.error('Available results:', results.map(r => ({ model: r.model, provider: r.provider, success: !!r.content })))
-      
-      // If we have at least 1 model, use it without consensus
-      if (results.length === 1) {
-        console.log('Falling back to single model analysis (no consensus)')
+      throw new Error(`All models failed. Cannot perform analysis.`)
+    }
+    
+    // If we have at least 1 model, use it (single model analysis is acceptable)
+    if (results.length === 1) {
+      console.log(`Using single model analysis (${results[0].model}) - consensus requires 2+ models but single model is acceptable`)
         const singleResult = results[0]
         try {
           // Handle empty responses - throw error instead of creating fake data
