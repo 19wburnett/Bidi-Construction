@@ -562,6 +562,48 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     }
   }
 
+  // Extract partial items from incomplete JSON
+  private extractPartialItems(itemsText: string): any[] {
+    const items: any[] = []
+    // Try to find item objects even if JSON is incomplete
+    const itemMatches = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"([^"]*)"[\s\S]*?\}/g)
+    if (itemMatches) {
+      itemMatches.forEach(itemStr => {
+        try {
+          const item = JSON.parse(itemStr)
+          items.push(item)
+        } catch {
+          // Extract name at minimum
+          const nameMatch = itemStr.match(/"name"\s*:\s*"([^"]*)"/)
+          if (nameMatch) {
+            items.push({ name: nameMatch[1], description: 'Partially extracted', quantity: 0, unit: 'EA', confidence: 0.3 })
+          }
+        }
+      })
+    }
+    return items
+  }
+
+  // Extract partial issues from incomplete JSON
+  private extractPartialIssues(issuesText: string): any[] {
+    const issues: any[] = []
+    const issueMatches = issuesText.match(/\{[\s\S]*?"description"\s*:\s*"([^"]*)"[\s\S]*?\}/g)
+    if (issueMatches) {
+      issueMatches.forEach(issueStr => {
+        try {
+          const issue = JSON.parse(issueStr)
+          issues.push(issue)
+        } catch {
+          const descMatch = issueStr.match(/"description"\s*:\s*"([^"]*)"/)
+          if (descMatch) {
+            issues.push({ description: descMatch[1], severity: 'info', confidence: 0.3 })
+          }
+        }
+      })
+    }
+    return issues
+  }
+
   // Cross-validation and consensus analysis
   async analyzeWithConsensus(
     images: string[],
@@ -596,11 +638,78 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             }
           }
           
-          const parsed = JSON.parse(singleResult.content)
+          // Use robust JSON extraction like multi-model parsing
+          let jsonText = singleResult.content
+          
+          // Remove markdown code blocks if present
+          const codeBlockMatch = singleResult.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+          if (codeBlockMatch) {
+            jsonText = codeBlockMatch[1]
+          } else {
+            // Try to find JSON object in the text
+            const jsonMatch = singleResult.content.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              jsonText = jsonMatch[0]
+            }
+          }
+          
+          // Try to repair incomplete JSON (common when response is truncated)
+          let parsed: any
+          try {
+            parsed = JSON.parse(jsonText)
+          } catch (parseError) {
+            // Try to repair incomplete JSON
+            console.warn('JSON parse failed, attempting to repair:', parseError)
+            
+            // Remove trailing commas
+            jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+            
+            // Try to close incomplete objects/arrays
+            const openBraces = (jsonText.match(/\{/g) || []).length
+            const closeBraces = (jsonText.match(/\}/g) || []).length
+            const openBrackets = (jsonText.match(/\[/g) || []).length
+            const closeBrackets = (jsonText.match(/\]/g) || []).length
+            
+            // Close incomplete objects
+            if (openBraces > closeBraces) {
+              jsonText += '}'.repeat(openBraces - closeBraces)
+            }
+            
+            // Close incomplete arrays
+            if (openBrackets > closeBrackets) {
+              jsonText += ']'.repeat(openBrackets - closeBrackets)
+            }
+            
+            // Try to fix incomplete string values by closing quotes
+            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*?)"([^,}\]]*)$/, ':$1"$2"')
+            
+            // Try parsing again
+            try {
+              parsed = JSON.parse(jsonText)
+              console.log('Successfully repaired JSON')
+            } catch (secondError) {
+              // Last resort: try to extract partial data
+              console.warn('JSON repair failed, attempting partial extraction')
+              
+              // Extract items array if it exists (even if incomplete)
+              const itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              const issuesMatch = jsonText.match(/"issues"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              
+              parsed = {
+                items: itemsMatch ? this.extractPartialItems(itemsMatch[1]) : [],
+                issues: issuesMatch ? this.extractPartialIssues(issuesMatch[1]) : [],
+                quality_analysis: {}
+              }
+              
+              console.warn('Using partially extracted data due to JSON parse failure')
+            }
+          }
+          
           return {
             items: parsed.items || [],
             issues: parsed.issues || [],
-            confidence: singleResult.confidence || 0.7,
+            quality_analysis: parsed.quality_analysis,
+            confidence: singleResult.confidence || 0.6, // Lower confidence for single model
             consensusCount: 1,
             disagreements: [],
             modelAgreements: [singleResult.model],
@@ -609,8 +718,19 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           }
         } catch (error) {
           console.error('Failed to parse single model response:', error)
-          console.error('Raw response:', singleResult.content?.substring(0, 200))
-          throw new Error('Single model analysis failed to parse response')
+          console.error('Raw response (first 500 chars):', singleResult.content?.substring(0, 500))
+          
+          // Don't throw - return empty structure with warning
+          return {
+            items: [],
+            issues: [],
+            confidence: 0.3,
+            consensusCount: 1,
+            disagreements: [],
+            modelAgreements: [singleResult.model],
+            specializedInsights: [],
+            recommendations: ['Analysis completed but response could not be fully parsed. Please try again.']
+          }
         }
       }
       
