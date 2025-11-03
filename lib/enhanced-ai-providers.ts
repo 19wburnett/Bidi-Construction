@@ -277,9 +277,10 @@ export class EnhancedAIProvider {
       console.log(`\n[${i + 1}/${enabledModels.length}] Attempting analysis with: ${model}`)
       
       try {
-        // Add timeout to prevent Vercel 300s limit
+        // Add timeout to prevent Vercel 300s limit (increased to 120s for large prompts)
+        const timeoutMs = 120000 // 120 seconds - large prompts with images can take longer
         const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
+          setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
         
         const modelStartTime = Date.now()
@@ -1185,25 +1186,33 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             console.warn('JSON parse failed, attempting to repair:', parseError)
             
             // CRITICAL FIX: Fix missing commas before closing brackets/braces in arrays
-            // Common error: "value"] should be "value",] (missing comma before closing bracket)
-            // This happens when JSON is truncated or malformed
+            // Common error from Claude: "name": "value"] should be "name": "value",] 
+            // This is a malformed array item - closing bracket where comma should be
             
-            // Fix: "] where "], should be (missing comma before closing bracket in array)
-            // Match pattern: quoted string followed immediately by ] - this is wrong, should have comma
-            // But be careful: only fix if it's NOT already correct (like the last item in array)
-            // We'll fix all instances and let the trailing comma removal handle the last one
-            jsonText = jsonText.replace(/"([^"]+)"(\s*)\]/g, '"$1",$2]')
+            // Fix property:value"] pattern (COMMON Claude error)
+            // Pattern: "key": "value"] should become "key": "value",
+            // Only fix if followed by ] and not already followed by comma
+            jsonText = jsonText.replace(/(:\s*"([^"]+)")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$3]')
+            
+            // More aggressive: Fix any quoted value followed by ] (not at end of array)
+            // Pattern: "value"] where it should be "value",] if inside array
+            // Check if we're inside an array (have [ before and not ] after)
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\](?!\s*[,\}\]\s]|$)/g, (match, value, spaces, offset, string) => {
+              // Look backwards to see if we're in an array
+              const beforeMatch = string.substring(Math.max(0, offset - 100), offset)
+              // If we have an opening [ recently, likely in array
+              if (beforeMatch.includes('[')) {
+                return `"${value}",${spaces}]`
+              }
+              return match
+            })
             
             // Fix: "} where "}, should be (missing comma before closing brace in array)
-            jsonText = jsonText.replace(/"([^"]+)"(\s*)\}/g, '"$1",$2}')
-            
-            // Fix cases where a property value is followed by ] instead of ,]
-            // Pattern: : "value"] should be : "value",]
-            jsonText = jsonText.replace(/:\s*"([^"]+)"(\s*)\]/g, ': "$1",$2]')
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\}(?!\s*[,}\]\s]|$)/g, '"$1",$2}')
             
             // Fix cases where closing brace is missing comma in array
             // Pattern: }\s*] should be },\s*] (when closing object in array)
-            jsonText = jsonText.replace(/\}(\s*)\]/g, '},$1]')
+            jsonText = jsonText.replace(/\}(\s*)\](?!\s*[,}\]\s]|$)/g, '},$1]')
             
             // Remove trailing commas (do this AFTER fixing missing commas)
             jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
