@@ -159,9 +159,10 @@ export async function POST(request: NextRequest) {
     userId = user.id
 
     // Check if user is admin - if not, queue the request instead of processing immediately
+    // Check both role = 'admin' OR is_admin = true
     const { data: userData, error: userError } = await supabase
       .from('users')
-      .select('is_admin, email')
+      .select('is_admin, role, email')
       .eq('id', userId)
       .single()
 
@@ -172,7 +173,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const isAdmin = userData.is_admin === true
+    // User is admin if role = 'admin' OR is_admin = true
+    const isAdmin = userData.role === 'admin' || userData.is_admin === true
 
     // Determine job type first (needed for both admin and non-admin paths)
     let finalJobType = jobType
