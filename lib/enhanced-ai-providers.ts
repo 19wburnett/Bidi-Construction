@@ -1490,16 +1490,36 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       }
     }).filter((result): result is NonNullable<typeof result> => result !== null)
     
-    if (parsedResults.length < 2) {
-      throw new Error('Need at least 2 valid responses for consensus')
+    // TEMPORARY: Allow single model results - removed 2-model requirement
+    if (parsedResults.length === 0) {
+      throw new Error('No valid responses to process')
     }
     
-    // Build consensus
-    const consensus = this.buildConsensus(parsedResults, options.taskType)
+    // Build consensus (will work with 1 model, just returns that model's results)
+    const consensus = parsedResults.length === 1 
+      ? this.buildSingleModelResult(parsedResults[0], options.taskType)
+      : this.buildConsensus(parsedResults, options.taskType)
     
     console.log(`Consensus analysis complete: ${consensus.consensusCount}/${parsedResults.length} models agreed`)
     
     return consensus
+  }
+
+  // Build result from single model (when only 1 model succeeds)
+  private buildSingleModelResult(
+    result: { parsed: any; model: string; confidence?: number },
+    taskType: TaskType
+  ): ConsensusResult {
+    return {
+      items: result.parsed.items || [],
+      issues: taskType === 'quality' ? (result.parsed.issues || []) : [],
+      confidence: result.confidence || 0.7, // Single model gets lower confidence
+      consensusCount: 1,
+      disagreements: [],
+      modelAgreements: [result.model],
+      specializedInsights: result.parsed.specializedInsights || [],
+      recommendations: result.parsed.recommendations || []
+    }
   }
 
   // Build consensus from multiple model results
