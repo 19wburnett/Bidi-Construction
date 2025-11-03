@@ -747,23 +747,91 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     
     // Strategy 5: Last resort - extract just names if nothing else worked
     if (items.length === 0) {
-      const namePattern = /"name"\s*:\s*"([^"]{3,100})"/g
+      console.log('Strategy 5: Trying to extract just names')
+      const namePattern = /"name"\s*:\s*"([^"]{3,200})"/g
       let match
+      let nameCount = 0
       while ((match = namePattern.exec(itemsText)) !== null) {
+        nameCount++
+        const inferredCategory = this.inferCategoryFromName(match[1])
+        const inferredSubcategory = this.inferSubcategoryFromName(match[1])
+        
         items.push({
           name: match[1],
           description: 'Extracted from incomplete JSON response',
           quantity: 0,
           unit: 'EA',
-          category: 'other',
-          subcategory: 'Uncategorized',
+          category: inferredCategory.category,
+          subcategory: inferredSubcategory,
           confidence: 0.2,
           notes: '⚠️ PARTIALLY EXTRACTED - Only name was recoverable. All other fields need manual entry.'
         })
       }
+      console.log(`Strategy 5 extracted ${nameCount} item names`)
     }
     
+    console.log(`Final extraction result: ${items.length} items`)
     return items
+  }
+
+  // Helper to infer category from item name
+  private inferCategoryFromName(name: string): { category: string } {
+    const nameLower = name.toLowerCase()
+    
+    if (nameLower.includes('foundation') || nameLower.includes('footing') || nameLower.includes('slab') || 
+        nameLower.includes('concrete') && (nameLower.includes('wall') || nameLower.includes('foundation')) ||
+        nameLower.includes('framing') || nameLower.includes('rebar') ||
+        nameLower.includes('beam') || nameLower.includes('column') || nameLower.includes('truss')) {
+      return { category: 'structural' }
+    } else if (nameLower.includes('roof') || nameLower.includes('siding') || nameLower.includes('window') ||
+               nameLower.includes('door') || nameLower.includes('cladding') || nameLower.includes('waterproof')) {
+      return { category: 'exterior' }
+    } else if (nameLower.includes('wall') && !nameLower.includes('exterior') || 
+               nameLower.includes('ceiling') || nameLower.includes('insulation') ||
+               nameLower.includes('drywall') || nameLower.includes('gwb')) {
+      return { category: 'interior' }
+    } else if (nameLower.includes('plumb') || nameLower.includes('hvac') || nameLower.includes('electrical') ||
+               nameLower.includes('fixture') || nameLower.includes('outlet') || nameLower.includes('light')) {
+      return { category: 'mep' }
+    } else if (nameLower.includes('floor') || nameLower.includes('paint') || nameLower.includes('trim') ||
+               nameLower.includes('carpet') || nameLower.includes('tile') || nameLower.includes('cabinet')) {
+      return { category: 'finishes' }
+    } else {
+      return { category: 'other' }
+    }
+  }
+
+  // Helper to infer subcategory from item name
+  private inferSubcategoryFromName(name: string): string {
+    const nameLower = name.toLowerCase()
+    
+    if (nameLower.includes('foundation') || nameLower.includes('footing')) {
+      return 'Foundation'
+    } else if (nameLower.includes('framing') || nameLower.includes('stud')) {
+      return 'Framing'
+    } else if (nameLower.includes('roof')) {
+      return 'Roofing'
+    } else if (nameLower.includes('window') || nameLower.includes('door')) {
+      return 'Openings'
+    } else if (nameLower.includes('plumb') || nameLower.includes('fixture')) {
+      return 'Plumbing'
+    } else if (nameLower.includes('hvac')) {
+      return 'HVAC'
+    } else if (nameLower.includes('electrical') || nameLower.includes('light')) {
+      return 'Electrical'
+    } else if (nameLower.includes('floor')) {
+      return 'Flooring'
+    } else if (nameLower.includes('paint')) {
+      return 'Paint'
+    } else if (nameLower.includes('wall')) {
+      return 'Walls'
+    } else if (nameLower.includes('ceiling')) {
+      return 'Ceilings'
+    } else if (nameLower.includes('insulation')) {
+      return 'Insulation'
+    } else {
+      return 'Uncategorized'
+    }
   }
 
   // Extract partial issues from incomplete JSON
@@ -1044,9 +1112,25 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
                 }
               }
               
+              const extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+              const extractedIssues = issuesMatch ? this.extractPartialIssues(issuesMatch[1]) : []
+              
+              console.warn(`Using partially extracted data: ${extractedItems.length} items, ${extractedIssues.length} issues`)
+              
+              // If we extracted 0 items, try one more time with the FULL jsonText as fallback
+              if (extractedItems.length === 0 && jsonText.length > 100) {
+                console.warn('No items extracted with normal method, trying full-text extraction')
+                // Try extracting from the entire jsonText as a last resort
+                const fallbackItems = this.extractPartialItems(jsonText)
+                if (fallbackItems.length > 0) {
+                  console.log(`Fallback extraction found ${fallbackItems.length} items`)
+                  extractedItems.push(...fallbackItems)
+                }
+              }
+              
               parsed = {
-                items: itemsMatch ? this.extractPartialItems(itemsMatch[1]) : [],
-                issues: issuesMatch ? this.extractPartialIssues(issuesMatch[1]) : [],
+                items: extractedItems,
+                issues: extractedIssues,
                 quality_analysis: qualityAnalysis
               }
               
