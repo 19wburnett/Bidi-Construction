@@ -690,34 +690,10 @@ export default function EnhancedPlanViewer() {
     const pdf = await loadingTask.promise
     
     const images: string[] = []
-    // Smart page selection for comprehensive analysis while staying under payload limits
+    // Convert ALL pages for comprehensive analysis
     const totalPages = pdf.numPages
-    let pagesToProcess: number[] = []
-    
-    // Adjust page count based on retry attempts
-    const maxPages = retryCount === 0 ? 5 : (retryCount === 1 ? 3 : 1)
-    
-    if (totalPages <= maxPages) {
-      // Small document - process all pages
-      pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
-    } else {
-      // Large document - select key pages strategically
-      // Always include: first page, last page, and every 3rd page in between
-      pagesToProcess = [1] // First page
-      
-      // Add every 3rd page (2, 5, 8, 11, etc.) up to page 20
-      for (let i = 2; i <= Math.min(totalPages, 20); i += 3) {
-        pagesToProcess.push(i)
-      }
-      
-      // Add the last page if not already included
-      if (totalPages > 1 && !pagesToProcess.includes(totalPages)) {
-        pagesToProcess.push(totalPages)
-      }
-      
-      // Limit based on retry count
-      pagesToProcess = pagesToProcess.slice(0, maxPages)
-    }
+    // Process all pages - no limits for comprehensive analysis
+    const pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
     
     const pagesToConvert = pagesToProcess.length
     

@@ -274,17 +274,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check request size limits - limit to 5 images max to avoid 413 errors
-    if (images.length > 5) {
-      return NextResponse.json(
-        { 
-          error: 'Too many images for enhanced analysis',
-          details: `Enhanced analysis is limited to 5 pages maximum. You provided ${images.length} pages. Please select the most important pages or use the standard AI analysis for larger plans.`,
-          maxImages: 5,
-          providedImages: images.length
-        },
-        { status: 413 }
-      )
+    // Warn if many images but don't block - allow full plan analysis
+    if (images.length > 20) {
+      console.warn(`Large plan detected: ${images.length} pages. This may take longer and consume more tokens.`)
     }
 
     // Check environment variables for enhanced AI providers

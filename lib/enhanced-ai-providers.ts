@@ -268,9 +268,12 @@ export class EnhancedAIProvider {
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
     console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run models SEQUENTIALLY with fallback - try first model, only move to next if it fails
+    // Run models SEQUENTIALLY - try to get at least 2 for cross-validation, but accept 1 if needed
+    // Goal: Cross-validate with multiple models for better accuracy, but don't fail if only 1 works
     const successfulResults: EnhancedAIResponse[] = []
     const failedResults: any[] = []
+    const TARGET_MODELS = 2 // Try to get at least 2 models for cross-validation
+    const MIN_MODELS = 1 // Minimum required (will accept single model if others fail)
     
     for (let i = 0; i < enabledModels.length; i++) {
       const model = enabledModels[i]
@@ -295,20 +298,37 @@ export class EnhancedAIProvider {
         console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
         successfulResults.push(result)
         
-        // SUCCESS! Stop here - we only need one successful model
-        console.log(`🎯 First successful model (${model}) - stopping here, not trying remaining models`)
-        break
+        // If we have enough models for cross-validation, we can stop early (but not required)
+        if (successfulResults.length >= TARGET_MODELS) {
+          console.log(`🎯 Got ${successfulResults.length} successful models - sufficient for cross-validation. Continuing to try more models...`)
+          // Continue trying more models for better consensus, but we can stop if we want
+          // For now, continue to try all models if we have time
+        }
+        
+        // Continue to next model to try for cross-validation
+        // Only stop early if we have enough models AND remaining models are likely to fail
+        // Otherwise, keep trying for better consensus
         
       } catch (error: any) {
         const errorMsg = error?.message || String(error)
         console.error(`❌ ${model} failed:`, errorMsg)
         failedResults.push({ model, error: errorMsg })
         
-        // Continue to next model only if this one failed
+        // Continue to next model - we need at least MIN_MODELS working
         if (i < enabledModels.length - 1) {
-          console.log(`⏭️  Falling back to next model...`)
+          // Check if we already have minimum required models and remaining models likely to fail
+          if (successfulResults.length >= MIN_MODELS && (enabledModels.length - i - 1) === 0) {
+            console.log(`✅ Have ${successfulResults.length} successful model(s) - minimum requirement met. Can proceed.`)
+          } else {
+            console.log(`⏭️  Continuing to next model (${successfulResults.length}/${MIN_MODELS} minimum, ${successfulResults.length}/${TARGET_MODELS} target)...`)
+          }
         } else {
-          console.error(`⚠️  All ${enabledModels.length} models failed!`)
+          // Last model failed
+          if (successfulResults.length >= MIN_MODELS) {
+            console.log(`✅ Completed trying all models: ${successfulResults.length} succeeded (meets minimum of ${MIN_MODELS})`)
+          } else {
+            console.error(`⚠️  All ${enabledModels.length} models failed! Have ${successfulResults.length} successful (need ${MIN_MODELS} minimum)`)
+          }
         }
       }
     }
@@ -320,9 +340,16 @@ export class EnhancedAIProvider {
       console.log(`❌ Failed models:`, failedResults.map(r => `${r.model}: ${r.error}`))
     }
     
-    // If no models succeeded, throw an error with helpful message
-    if (successfulResults.length === 0) {
-      throw new Error(`All ${enabledModels.length} models failed. Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
+    // If we don't have minimum required models, throw an error
+    if (successfulResults.length < MIN_MODELS) {
+      throw new Error(`Only ${successfulResults.length} model(s) succeeded (need ${MIN_MODELS} minimum). Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
+    }
+    
+    // Log if we have enough for good cross-validation
+    if (successfulResults.length >= TARGET_MODELS) {
+      console.log(`✅ Cross-validation ready: ${successfulResults.length} models for consensus analysis`)
+    } else {
+      console.log(`⚠️  Single model analysis: ${successfulResults.length} model(s) (target: ${TARGET_MODELS} for better consensus)`)
     }
     
     return successfulResults
