@@ -695,6 +695,13 @@ export default function EnhancedPlanViewer() {
     
     // Store totalPages in ref for use in error handling
     ;(convertPdfToImages as any).lastTotalPages = totalPages
+    
+    // For very large PDFs, reject early instead of trying to convert
+    // This prevents browser crashes and timeout issues
+    if (totalPages > 200) {
+      throw new Error(`PDF too large: ${totalPages} pages. Maximum supported: 200 pages. Please split the document or contact support.`)
+    }
+    
     // Process all pages - no limits for comprehensive analysis
     const pagesToProcess = Array.from({ length: totalPages }, (_, i) => i + 1)
     
@@ -748,6 +755,55 @@ export default function EnhancedPlanViewer() {
 
     setIsRunningTakeoff(true)
     setAnalysisProgress({ step: 'Starting analysis...', percent: 0 })
+    
+    // For very large PDFs, queue immediately without trying to convert
+    // This prevents browser crashes and timeout issues
+    if (plan.num_pages && plan.num_pages > 100) {
+      console.log(`Very large PDF detected: ${plan.num_pages} pages. Queueing immediately without conversion.`)
+      setAnalysisProgress({ step: 'Queueing large PDF for processing...', percent: 75 })
+      
+      try {
+        const { data: queueEntry, error: queueError } = await supabase
+          .from('ai_takeoff_queue')
+          .insert({
+            plan_id: planId,
+            user_id: user?.id,
+            job_id: plan.job_id || job?.id || null,
+            task_type: 'takeoff',
+            job_type: job?.project_type === 'Commercial' ? 'commercial' : job?.project_type ? 'residential' : null,
+            images_count: plan.num_pages || 0,
+            request_data: {
+              images_count: plan.num_pages || 0,
+              task_type: 'takeoff',
+              job_type: job?.project_type === 'Commercial' ? 'commercial' : job?.project_type ? 'residential' : null,
+              too_large_for_browser: true,
+              num_pages: plan.num_pages
+            },
+            status: 'pending',
+            priority: 0
+          })
+          .select()
+          .single()
+        
+        if (!queueError && queueEntry) {
+          setAnalysisProgress({ 
+            step: 'AI Takeoff queued. Estimated time: 2-3 hours. You will be notified when it is complete.', 
+            percent: 100 
+          })
+          
+          setTimeout(() => {
+            setIsRunningTakeoff(false)
+            setAnalysisProgress({ step: '', percent: 0 })
+          }, 5000)
+          return
+        }
+      } catch (error) {
+        console.error('Failed to queue large PDF:', error)
+        setIsRunningTakeoff(false)
+        alert(`This PDF is too large (${plan.num_pages} pages). Please contact support or split the document.`)
+        return
+      }
+    }
     
     // Calculate realistic time estimate based on page count
     const calculateTimeEstimate = (totalPages: number): string => {
