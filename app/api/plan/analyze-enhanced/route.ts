@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { enhancedAIProvider, EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { enhancedConsensusEngine, EnhancedConsensusResult } from '@/lib/enhanced-consensus-engine'
-import { modelOrchestrator } from '@/lib/model-orchestrator'
+// import { modelOrchestrator } from '@/lib/model-orchestrator' // TODO: Re-enable when orchestrator is ready
 import PDFParser from 'pdf2json'
-import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
 
 // Enhanced Multi-Model Analysis API
 // This endpoint uses 5+ specialized models with consensus scoring and disagreement detection

@@ -182,18 +182,6 @@ export async function ingestPlan(
     status.current_step = 'Ingestion complete'
     status.completed_at = new Date().toISOString()
     await updateProcessingStatus(supabase, planId, status)
-    
-    const processingTimeMs = Date.now() - startTime
-    console.log(`\n${'='.repeat(80)}`)
-    console.log(`✅ INGESTION COMPLETE - Plan ${planId}`)
-    console.log(`${'='.repeat(80)}`)
-    console.log(`   📊 Stats:`)
-    console.log(`      - Pages: ${pageTexts.length}`)
-    console.log(`      - Sheets: ${sheetIndex.length}`)
-    console.log(`      - Chunks: ${chunks.length}`)
-    console.log(`      - Time: ${(processingTimeMs / 1000).toFixed(1)}s`)
-    console.log(`   ✅ Plan is now ready for orchestrator analysis!`)
-    console.log(`${'='.repeat(80)}\n`)
 
     // Update plan status
     await supabase
@@ -205,6 +193,16 @@ export async function ingestPlan(
       .eq('id', planId)
 
     const processingTimeMs = Date.now() - startTime
+    console.log(`\n${'='.repeat(80)}`)
+    console.log(`✅ INGESTION COMPLETE - Plan ${planId}`)
+    console.log(`${'='.repeat(80)}`)
+    console.log(`   📊 Stats:`)
+    console.log(`      - Pages: ${pageTexts.length}`)
+    console.log(`      - Sheets: ${sheetIndex.length}`)
+    console.log(`      - Chunks: ${chunks.length}`)
+    console.log(`      - Time: ${(processingTimeMs / 1000).toFixed(1)}s`)
+    console.log(`   ✅ Plan is now ready for orchestrator analysis!`)
+    console.log(`${'='.repeat(80)}\n`)
     const averageChunkSizeTokens = chunks.length > 0
       ? Math.round(chunks.reduce((sum, c) => sum + c.content.text_token_count, 0) / chunks.length)
       : 0
@@ -216,7 +214,7 @@ export async function ingestPlan(
         totalPages: pageTexts.length,
         totalChunks: chunks.length,
         sheetIndexCount: sheetIndex.length,
-        processingTimeMs,
+        processingTimeMs: totalProcessingTimeMs,
         averageChunkSizeTokens,
         imagesExtracted: pageImages.size,
         textExtracted: pageTexts.length > 0
