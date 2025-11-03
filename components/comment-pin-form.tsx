@@ -6,8 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { MessageSquare, X } from 'lucide-react'
+import { MessageSquare, X, CheckCircle, AlertCircle, Lightbulb } from 'lucide-react'
 
 interface CommentPinFormProps {
   open: boolean
@@ -77,21 +76,49 @@ export default function CommentPinForm({
           </div>
 
           <div>
-            <Label htmlFor="noteType">Note Type</Label>
-            <Select
-              value={formData.noteType}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, noteType: value as any }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="requirement">Requirement</SelectItem>
-                <SelectItem value="concern">Concern</SelectItem>
-                <SelectItem value="suggestion">Suggestion</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="block mb-2">Note Type</Label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <Button
+                type="button"
+                variant={formData.noteType === 'requirement' ? 'default' : 'outline'}
+                onClick={() => setFormData(prev => ({ ...prev, noteType: 'requirement' }))}
+                className="h-auto py-3 flex flex-col items-center gap-1.5"
+                size="sm"
+              >
+                <CheckCircle className="h-5 w-5" />
+                <span className="text-xs">Requirement</span>
+              </Button>
+              <Button
+                type="button"
+                variant={formData.noteType === 'concern' ? 'default' : 'outline'}
+                onClick={() => setFormData(prev => ({ ...prev, noteType: 'concern' }))}
+                className="h-auto py-3 flex flex-col items-center gap-1.5"
+                size="sm"
+              >
+                <AlertCircle className="h-5 w-5" />
+                <span className="text-xs">Concern</span>
+              </Button>
+              <Button
+                type="button"
+                variant={formData.noteType === 'suggestion' ? 'default' : 'outline'}
+                onClick={() => setFormData(prev => ({ ...prev, noteType: 'suggestion' }))}
+                className="h-auto py-3 flex flex-col items-center gap-1.5"
+                size="sm"
+              >
+                <Lightbulb className="h-5 w-5" />
+                <span className="text-xs">Suggestion</span>
+              </Button>
+              <Button
+                type="button"
+                variant={formData.noteType === 'other' ? 'default' : 'outline'}
+                onClick={() => setFormData(prev => ({ ...prev, noteType: 'other' }))}
+                className="h-auto py-3 flex flex-col items-center gap-1.5"
+                size="sm"
+              >
+                <MessageSquare className="h-5 w-5" />
+                <span className="text-xs">Other</span>
+              </Button>
+            </div>
           </div>
 
           <div>

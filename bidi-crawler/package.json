@@ -1,0 +1,26 @@
+{
+  "name": "bidi-crawler",
+  "version": "1.0.0",
+  "description": "Automated Utah subcontractor crawler using Firecrawl and Supabase",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node src/test.js"
+  },
+  "keywords": [
+    "crawler",
+    "subcontractor",
+    "firecrawl",
+    "supabase"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.1",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.4.5",
+    "axios": "^1.7.2"
+  }
+}

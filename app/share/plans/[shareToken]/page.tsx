@@ -27,6 +27,7 @@ import CommentPinForm from '@/components/comment-pin-form'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { Drawing } from '@/lib/canvas-utils'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
+import { CommentPersistence } from '@/lib/comment-persistence'
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
@@ -118,6 +119,17 @@ export default function GuestPlanViewer() {
         }
       } else {
         console.error('No file_path found in plan data')
+      }
+
+      // Load existing comments for this plan so they show in the sidebar
+      try {
+        const commentPersistence = new CommentPersistence(planData.id)
+        const existingComments = await commentPersistence.loadComments()
+        if (Array.isArray(existingComments)) {
+          setDrawings(existingComments)
+        }
+      } catch (loadCommentsError) {
+        console.warn('Unable to load existing comments for shared view:', loadCommentsError)
       }
 
       // Update access count

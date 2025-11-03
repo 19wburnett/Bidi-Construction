@@ -67,6 +67,10 @@ export default function CommentPopup({
         transform: 'translate(10px, 10px)', // Offset from click position
         pointerEvents: 'auto'
       }}
+      onClick={(e) => {
+        // Stop event propagation so clicks inside popup don't trigger canvas actions
+        e.stopPropagation()
+      }}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">

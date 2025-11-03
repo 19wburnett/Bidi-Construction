@@ -418,10 +418,8 @@ export default function EnhancedPlanViewer() {
 
   // Handle comment click (to view existing comment)
   const handleCommentClick = useCallback((comment: Drawing) => {
-    if (comment.notes) {
-      alert(comment.notes)
-    }
-    // You could also show a modal with full comment details here
+    // Comment popup is now handled directly in FastPlanCanvas component
+    // No additional action needed here
   }, [])
 
   // Handle comment save

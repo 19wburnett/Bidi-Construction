@@ -62,6 +62,7 @@ export default function FastPlanCanvas({
   const [selectedComment, setSelectedComment] = useState<Drawing | null>(null)
   const [showCommentPopup, setShowCommentPopup] = useState(false)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
+  const [hoveredComment, setHoveredComment] = useState<Drawing | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
   const [numPages, setNumPages] = useState(1) // Default to 1 page for drawing area
@@ -257,19 +258,8 @@ export default function FastPlanCanvas({
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Debug: Draw a test marker at top-left to verify canvas is rendering
-    ctx.fillStyle = 'red'
-    ctx.fillRect(0, 0, 20, 20)
-
     // Draw only comment drawings for current page
     const commentsForPage = drawings.filter(drawing => drawing.type === 'comment' && drawing.pageNumber === currentPage)
-    
-    // Debug log
-    console.log('Rendering comments:', { 
-      total: commentsForPage.length, 
-      page: currentPage,
-      canvasSize: `${canvas.width}x${canvas.height}` 
-    })
     
     commentsForPage.forEach(drawing => {
         // Check if geometry has valid x and y values
@@ -282,11 +272,9 @@ export default function FastPlanCanvas({
         const worldX = drawing.geometry.x
         const worldY = drawing.geometry.y
         
-        console.log('Drawing comment at:', { worldX, worldY, pageNumber: drawing.pageNumber, canvas: { width: canvas.width, height: canvas.height } })
-        
         // Draw comment bubble at world position
         // Note: size is in world coordinates, actual pixel size will be scaled by canvas transform
-        const bubbleRadius = 12
+        const bubbleRadius = 24  // Increased size for better visibility
         
         // Draw selection highlight if this comment is selected
         if (selectedComment?.id === drawing.id) {
@@ -362,30 +350,33 @@ export default function FastPlanCanvas({
     const canvas = drawingCanvasRef.current
     const container = containerRef.current
     if (!canvas || !container) {
-      console.log('Canvas setup failed:', { canvas: !!canvas, container: !!container })
       return
     }
 
     const resizeCanvas = () => {
-      // Size canvas to match PDF dimensions if available, otherwise use container
+      // Size canvas to match PDF dimensions if available
       if (pdfPages.length > 0 && pdfPages[currentPage - 1]) {
         const pdfPage = pdfPages[currentPage - 1]
         canvas.width = pdfPage.width
         canvas.height = pdfPage.height
         canvas.style.width = `${pdfPage.width}px`
         canvas.style.height = `${pdfPage.height}px`
-        console.log('Canvas sized for PDF:', { width: canvas.width, height: canvas.height, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
+        
+        // Force re-render of drawings after canvas resize
+        setTimeout(() => renderDrawings(), 0)
       } else {
-        console.log('No PDF pages available yet, waiting...', { pdfPagesLength: pdfPages.length, currentPage })
-        // Don't resize canvas yet - wait for PDF pages to load
-        return
+        // Set minimum dimensions to prevent zero-size canvas
+        canvas.width = 800
+        canvas.height = 600
+        canvas.style.width = '800px'
+        canvas.style.height = '600px'
       }
     }
 
     resizeCanvas()
     window.addEventListener('resize', resizeCanvas)
     return () => window.removeEventListener('resize', resizeCanvas)
-  }, [pdfPages.length, currentPage])
+  }, [pdfPages.length, currentPage, renderDrawings])
 
   // Auto-fit zoom on first page load (separate effect)
   useEffect(() => {
@@ -411,7 +402,6 @@ export default function FastPlanCanvas({
       })
       
       hasAutoFitted.current = true
-      console.log('Auto-fitted zoom:', { finalZoom, containerWidth, containerHeight, pageWidth: pdfPage.width, pageHeight: pdfPage.height })
     }
   }, [pdfPages.length, currentPage])
 
@@ -484,7 +474,8 @@ export default function FastPlanCanvas({
     if (drawing.pageNumber !== currentPage || drawing.type !== 'comment') return false
     
     const geom = drawing.geometry
-    const threshold = 15 / viewport.zoom // Click tolerance for comment bubbles (scaled by zoom)
+    // Increased threshold to minimum 20px regardless of zoom for easier clicking
+    const threshold = Math.max(28, 20 / viewport.zoom) // Click tolerance scaled by zoom and bubble size
     
     const dist = Math.sqrt(Math.pow(worldX - geom.x, 2) + Math.pow(worldY - geom.y, 2))
     return dist <= threshold
@@ -501,24 +492,22 @@ export default function FastPlanCanvas({
     const world = screenToWorld(screenX, screenY)
     const pageNumber = currentPage
 
-    if (selectedTool === 'comment') {
-      // Check if clicking on an existing comment
-      const clickedComment = drawings.find(d => 
-        d.type === 'comment' && d.pageNumber === pageNumber && isPointInComment(world.x, world.y, d)
-      )
-      
-      if (clickedComment) {
-        // Clicking on existing comment - show details
-        setSelectedComment(clickedComment)
-        setPopupPosition({ x: screenX, y: screenY })
-        setShowCommentPopup(true)
-        if (onCommentClick) {
-          onCommentClick(clickedComment)
-        }
-      } else {
-        // Place new comment pin
-        onCommentPinClick(world.x, world.y, pageNumber)
+    // Check if clicking on an existing comment (works in both modes)
+    const clickedComment = drawings.find(d => 
+      d.type === 'comment' && d.pageNumber === pageNumber && isPointInComment(world.x, world.y, d)
+    )
+    
+    if (clickedComment) {
+      // Clicking on existing comment - show details
+      setSelectedComment(clickedComment)
+      setPopupPosition({ x: screenX, y: screenY })
+      setShowCommentPopup(true)
+      if (onCommentClick) {
+        onCommentClick(clickedComment)
       }
+    } else if (selectedTool === 'comment') {
+      // Place new comment pin
+      onCommentPinClick(world.x, world.y, pageNumber)
     } else if (selectedTool === 'none') {
       // Start panning
       setIsPanning(true)
@@ -542,13 +531,34 @@ export default function FastPlanCanvas({
         panY: prev.panY + (screenY - lastPanPoint.y)
       }))
       setLastPanPoint({ x: screenX, y: screenY })
+    } else {
+      // Check for hovered comment (works in both modes)
+      const container = containerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+      const world = screenToWorld(screenX, screenY)
+
+      const hovered = drawings.find(d => 
+        d.type === 'comment' && d.pageNumber === currentPage && isPointInComment(world.x, world.y, d)
+      )
+      setHoveredComment(hovered || null)
     }
-  }, [isPanning, lastPanPoint])
+  }, [isPanning, lastPanPoint, selectedTool, screenToWorld, currentPage, drawings, isPointInComment])
 
   const handleMouseUp = useCallback(() => {
     if (isPanning) {
       setIsPanning(false)
     }
+  }, [isPanning])
+
+  const handleMouseLeave = useCallback(() => {
+    if (isPanning) {
+      setIsPanning(false)
+    }
+    setHoveredComment(null)
   }, [isPanning])
 
   // Zoom controls
@@ -691,9 +701,10 @@ export default function FastPlanCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         style={{ 
-          cursor: selectedTool === 'none' ? (isPanning ? 'grabbing' : 'grab') : 
+          cursor: hoveredComment ? 'pointer' :
+                 selectedTool === 'none' ? (isPanning ? 'grabbing' : 'grab') : 
                  selectedTool === 'comment' ? 'crosshair' : 'default'
         }}
       >
@@ -780,7 +791,7 @@ export default function FastPlanCanvas({
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
         >
           <canvas
             ref={drawingCanvasRef}
