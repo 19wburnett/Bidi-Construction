@@ -226,12 +226,12 @@ export class EnhancedAIProvider {
     // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
     let selectedModels = this.getBestModelsForTask(options.taskType, 10)
     
-    // CRITICAL: Always ensure Claude and Grok are included for fallback, even if env var limits models
-    // Add them if they're not already in the list
-    const requiredFallbacks = ['grok-2-1212', 'claude-3-haiku-20240307']
+    // CRITICAL: Always ensure Claude Sonnet is included for fallback (better than haiku)
+    // Add it if it's not already in the list
+    const requiredFallbacks = ['claude-sonnet-4-20250514']
     requiredFallbacks.forEach(fallback => {
       if (!selectedModels.includes(fallback)) {
-        // Add to the end (will be tried after OpenAI models)
+        // Add to the end (will be tried after primary models)
         selectedModels.push(fallback)
       }
     })
