@@ -49,6 +49,7 @@ export interface EnhancedAIResponse {
 export interface ConsensusResult {
   items: any[]
   issues: any[]
+  quality_analysis?: any // Quality analysis from models
   confidence: number
   consensusCount: number
   disagreements: any[]
