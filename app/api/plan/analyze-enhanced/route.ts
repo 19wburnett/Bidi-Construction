@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   let userId: string | undefined
 
   try {
-    const { planId: requestPlanId, images, drawings, taskType = 'takeoff', jobType, useOrchestrator = false } = await request.json()
+    const { planId: requestPlanId, images, drawings, taskType = 'takeoff', jobType } = await request.json()
     planId = requestPlanId
 
     if (!planId) {
@@ -960,13 +960,14 @@ async function runOrchestratorAnalysis(
     // Build system prompt
     const systemPrompt = buildSystemPrompt(taskType, jobType)
 
-    // Run orchestrator
-    console.log(`🚀 Running orchestrator with ${normalizedInput.chunks.length} chunks`)
-    const result = await modelOrchestrator.orchestrate(
-      normalizedInput,
-      systemPrompt,
-      taskType
-    )
+    // Run orchestrator (disabled - uncomment when model-orchestrator is ready)
+    // console.log(`🚀 Running orchestrator with ${normalizedInput.chunks.length} chunks`)
+    // const result = await modelOrchestrator.orchestrate(
+    //   normalizedInput,
+    //   systemPrompt,
+    //   taskType
+    // )
+    throw new Error('Orchestrator is temporarily disabled - use standard analysis instead')
 
     // Convert to response format compatible with existing API
     const processingTime = result.final_json.metadata.processing_time_ms
