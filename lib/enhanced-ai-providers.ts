@@ -1158,8 +1158,8 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // If we have at least 1 model, use it (single model analysis is acceptable)
     if (results.length === 1) {
       console.log(`Using single model analysis (${results[0].model}) - consensus requires 2+ models but single model is acceptable`)
-        const singleResult = results[0]
-        try {
+      const singleResult = results[0]
+      try {
           // Handle empty responses - throw error instead of creating fake data
           if (!singleResult.content || singleResult.content.trim().length === 0) {
             console.error(`❌ Model ${singleResult.model} returned empty response - this should not happen`)
@@ -1432,15 +1432,13 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             specializedInsights: [],
             recommendations: ['Analysis completed but response could not be fully parsed. Please try again.']
           }
-        }
       }
-      
-      // If no models succeeded, try to use the standard AI analysis as fallback
-      console.log('No enhanced models succeeded, falling back to standard AI analysis')
-      throw new Error('Enhanced analysis failed - falling back to standard analysis')
+      // All error handling done, but we should have returned above
+      // This means the single model path didn't return - should not happen
+      throw new Error('Single model analysis failed to return results')
     }
     
-    // Parse all responses with improved JSON extraction
+    // Parse all responses with improved JSON extraction (for 2+ models)
     const parsedResults = results.map(result => {
       try {
         // Try to extract JSON from the response (handle markdown code blocks)
