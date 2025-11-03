@@ -238,42 +238,60 @@ export interface Database {
       bids: {
         Row: {
           id: string
-          job_request_id: string
-          subcontractor_email: string
-          subcontractor_name: string | null
-          phone: string | null
+          job_id: string | null
+          job_request_id: string | null
+          subcontractor_id: string | null
+          subcontractor_email: string | null
           bid_amount: number | null
           timeline: string | null
           notes: string | null
           ai_summary: string | null
           raw_email: string
           created_at: string
+          status: string | null
+          accepted_at: string | null
+          declined_at: string | null
+          decline_reason: string | null
+          bid_package_id: string | null
+          seen: boolean | null
         }
         Insert: {
           id?: string
-          job_request_id: string
-          subcontractor_email: string
-          subcontractor_name?: string | null
-          phone?: string | null
+          job_id?: string | null
+          job_request_id?: string | null
+          subcontractor_id?: string | null
+          subcontractor_email?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null
           ai_summary?: string | null
           raw_email: string
           created_at?: string
+          status?: string | null
+          accepted_at?: string | null
+          declined_at?: string | null
+          decline_reason?: string | null
+          bid_package_id?: string | null
+          seen?: boolean | null
         }
         Update: {
           id?: string
-          job_request_id?: string
-          subcontractor_email?: string
-          subcontractor_name?: string | null
-          phone?: string | null
+          job_id?: string | null
+          job_request_id?: string | null
+          subcontractor_id?: string | null
+          subcontractor_email?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null
           ai_summary?: string | null
           raw_email?: string
           created_at?: string
+          status?: string | null
+          accepted_at?: string | null
+          declined_at?: string | null
+          decline_reason?: string | null
+          bid_package_id?: string | null
+          seen?: boolean | null
         }
       }
       subcontractors: {

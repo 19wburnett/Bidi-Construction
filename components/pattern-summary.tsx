@@ -25,7 +25,12 @@ interface BidNote {
 
 interface Bid {
   id: string
-  subcontractor_name: string | null
+  subcontractor_name?: string | null
+  subcontractor_email?: string | null
+  subcontractors?: {
+    name: string
+    email: string
+  } | null
   bid_notes?: BidNote[]
 }
 
@@ -48,7 +53,7 @@ export default function PatternSummary({ bids }: PatternSummaryProps) {
   const allNotes = bids.flatMap(bid => 
     (bid.bid_notes || []).map(note => ({
       ...note,
-      contractor: bid.subcontractor_name || 'Unknown'
+      contractor: bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'
     }))
   )
 

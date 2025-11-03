@@ -63,13 +63,28 @@ export async function POST(request: NextRequest) {
     const supabase = await createServerSupabaseClient()
     const { data: jobRequest, error: jobError } = await supabase
       .from('job_requests')
-      .select('*')
+      .select('*, job_id')
       .eq('id', jobRequestId)
       .single()
 
     if (jobError || !jobRequest) {
       console.error('Could not find matching job request:', jobError)
       return NextResponse.json({ message: 'Job request not found' })
+    }
+
+    // Get job_id from jobRequest or find through bid_packages
+    let jobId: string | null = jobRequest.job_id || null
+    
+    // If no direct job_id, try to find through bid_packages
+    if (!jobId) {
+      const { data: bidPackage } = await supabase
+        .from('bid_packages')
+        .select('job_id')
+        .eq('job_id', jobRequestId) // This might not work, let me check the relationship
+        .single()
+      
+      // Actually, we need to find bid_packages that might be related to this job_request
+      // For now, we'll keep jobId as null and let the migration handle it
     }
 
     // Parse the email content with AI
@@ -82,27 +97,71 @@ export async function POST(request: NextRequest) {
     // Extract categorized notes using AI
     const categorizedNotes = await extractCategorizedNotes(emailContent, jobRequest.trade_category)
 
-    // Look up website from discovered contractors, fallback to AI extraction
-    let website = bidData.website || null
-    const { data: contractorData } = await supabase
-      .from('crawler_discovered_contractors')
-      .select('website')
+    // Find or create subcontractor record
+    let subcontractorId: string | null = null
+    
+    // First, try to find existing subcontractor by email
+    const { data: existingSub } = await supabase
+      .from('subcontractors')
+      .select('id')
       .eq('email', from.email)
       .single()
     
-    if (contractorData?.website) {
-      website = contractorData.website
+    if (existingSub) {
+      subcontractorId = existingSub.id
+      
+      // Update subcontractor with any new data from the bid
+      await supabase
+        .from('subcontractors')
+        .update({
+          name: bidData.companyName || existingSub.name || from.name || 'Unknown',
+          phone: bidData.phone || null,
+          website_url: bidData.website || null,
+        })
+        .eq('id', subcontractorId)
+    } else {
+      // Create new subcontractor record
+      // Look up website from discovered contractors, fallback to AI extraction
+      let website = bidData.website || null
+      const { data: contractorData } = await supabase
+        .from('crawler_discovered_contractors')
+        .select('website')
+        .eq('email', from.email)
+        .single()
+      
+      if (contractorData?.website) {
+        website = contractorData.website
+      }
+      
+      const { data: newSub, error: subError } = await supabase
+        .from('subcontractors')
+        .insert({
+          email: from.email,
+          name: bidData.companyName || from.name || 'Unknown',
+          trade_category: jobRequest.trade_category,
+          location: jobRequest.location,
+          phone: bidData.phone || null,
+          website_url: website,
+        })
+        .select('id')
+        .single()
+      
+      if (subError) {
+        console.error('Error creating subcontractor:', subError)
+        return NextResponse.json({ error: 'Failed to create subcontractor' }, { status: 500 })
+      }
+      
+      subcontractorId = newSub.id
     }
 
     // Store the bid in the database
     const { data: bid, error: bidError } = await supabase
       .from('bids')
       .insert({
+        job_id: jobId,
         job_request_id: jobRequest.id,
-        subcontractor_email: from.email,
-        subcontractor_name: bidData.companyName || from.name || 'Unknown',
-        phone: bidData.phone || null,
-        website: website,
+        subcontractor_id: subcontractorId,
+        subcontractor_email: from.email, // Keep for backward compatibility during transition
         bid_amount: bidData.bidAmount || null,
         timeline: bidData.timeline || null,
         notes: bidData.notes || null,

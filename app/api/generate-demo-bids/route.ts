@@ -285,13 +285,62 @@ async function generateBidsAsync(jobRequestId: string, selectedBids: any[], budg
     const variance = (Math.random() - 0.5) * 0.2
     adjustedAmount = Math.floor(adjustedAmount * (1 + variance))
 
+    // Get job request to get trade_category, location, and job_id
+    const { data: jobRequest } = await supabase
+      .from('job_requests')
+      .select('trade_category, location, job_id')
+      .eq('id', jobRequestId)
+      .single()
+
+    // Find or create subcontractor record
+    let subcontractorId: string | null = null
+    
+    const { data: existingSub } = await supabase
+      .from('subcontractors')
+      .select('id')
+      .eq('email', bidData.email)
+      .single()
+    
+    if (existingSub) {
+      subcontractorId = existingSub.id
+      
+      // Update subcontractor with any new data
+      await supabase
+        .from('subcontractors')
+        .update({
+          name: bidData.companyName,
+          phone: bidData.phone || null,
+        })
+        .eq('id', subcontractorId)
+    } else {
+      // Create new subcontractor record
+      const { data: newSub, error: subError } = await supabase
+        .from('subcontractors')
+        .insert({
+          email: bidData.email,
+          name: bidData.companyName,
+          trade_category: jobRequest?.trade_category || 'General',
+          location: jobRequest?.location || 'Unknown',
+          phone: bidData.phone || null,
+        })
+        .select('id')
+        .single()
+      
+      if (subError) {
+        console.error('Error creating subcontractor for demo bid:', subError)
+        continue
+      }
+      
+      subcontractorId = newSub.id
+    }
+
     const { data: bid, error: bidError } = await supabase
       .from('bids')
       .insert({
+        job_id: jobRequest?.job_id || null,
         job_request_id: jobRequestId,
-        subcontractor_email: bidData.email,
-        subcontractor_name: bidData.companyName,
-        phone: bidData.phone,
+        subcontractor_id: subcontractorId,
+        subcontractor_email: bidData.email, // Keep for backward compatibility during transition
         bid_amount: adjustedAmount,
         timeline: bidData.timeline,
         notes: bidData.notes,

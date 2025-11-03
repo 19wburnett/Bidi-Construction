@@ -27,7 +27,12 @@ interface BidNote {
 
 interface Bid {
   id: string
-  subcontractor_name: string | null
+  subcontractor_name?: string | null
+  subcontractor_email?: string | null
+  subcontractors?: {
+    name: string
+    email: string
+  } | null
   bid_amount: number | null
   timeline: string | null
   bid_notes?: BidNote[]
@@ -57,7 +62,7 @@ export default function JobSummaryPanel({ jobRequest, bids }: JobSummaryPanelPro
   const allNotes = bids.flatMap(bid => 
     (bid.bid_notes || []).map(note => ({
       ...note,
-      contractor: bid.subcontractor_name || 'Unknown'
+      contractor: bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'
     }))
   )
 
@@ -172,7 +177,7 @@ function generateSummaryItems(notes: (BidNote & { contractor: string })[], bids:
         title: 'Potential Cost Savings Identified',
         description: `Bid range: $${minBid.toLocaleString()} - $${maxBid.toLocaleString()}. Potential savings of $${savings.toLocaleString()} by choosing the lowest bid.`,
         count: bidAmounts.length,
-        contractors: bids.filter(b => b.bid_amount === minBid).map(b => b.subcontractor_name || 'Unknown'),
+        contractors: bids.filter(b => b.bid_amount === minBid).map(b => b.subcontractors?.name || b.subcontractor_name || b.subcontractor_email || 'Unknown'),
         priority: savings > avgBid * 0.2 ? 'high' : 'medium',
         category: 'Pricing'
       })

@@ -41,6 +41,8 @@ import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settin
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 import { CheckCircle2 } from 'lucide-react'
+import ScaleSettingsModal, { ScaleSetting } from '@/components/scale-settings-modal'
+
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
 
@@ -85,6 +87,13 @@ export default function EnhancedPlanViewer() {
   // PDF quality settings
   const [qualityMode, setQualityMode] = useState<QualityMode>('balanced')
   const [scale, setScale] = useState(1.5)
+  // Measurement scale settings per page (pixelsPerUnit derived from ratio input)
+  const [measurementScaleSettings, setMeasurementScaleSettings] = useState<Record<number, ScaleSetting>>({})
+  const [scaleSettingsModalOpen, setScaleSettingsModalOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pdfNumPages, setPdfNumPages] = useState<number | null>(null)
+  const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
+  const [isCalibrating, setIsCalibrating] = useState(false)
   
   // Modal states
   const [showShareModal, setShowShareModal] = useState(false)
@@ -274,12 +283,71 @@ export default function EnhancedPlanViewer() {
         }
       }
 
+      // Load scale settings
+      try {
+        const response = await fetch(`/api/plan/scale-settings?planId=${planId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.settings && Object.keys(data.settings).length > 0) {
+            console.log('Loaded scale settings:', data.settings)
+            // Ensure page numbers are numbers, not strings
+            // JavaScript object keys are always strings, but we need numeric keys for lookup
+            const normalizedSettings: Record<number, ScaleSetting> = {}
+            Object.entries(data.settings).forEach(([key, value]: [string, any]) => {
+              const pageNum = Number(key)
+              if (!isNaN(pageNum)) {
+                normalizedSettings[pageNum] = value
+                // Also store as string key for compatibility
+                normalizedSettings[String(pageNum) as any] = value
+              }
+            })
+            console.log('Loaded scale settings - original:', data.settings)
+            console.log('Normalized scale settings:', normalizedSettings)
+            console.log('Setting keys (numbers):', Object.keys(normalizedSettings).filter(k => !isNaN(Number(k))))
+            console.log('Setting keys (all):', Object.keys(normalizedSettings))
+            setMeasurementScaleSettings(normalizedSettings)
+          } else {
+            console.log('No scale settings found for plan')
+          }
+        } else {
+          const errorData = await response.json().catch(() => ({}))
+          console.error('Error loading scale settings:', response.status, errorData)
+        }
+      } catch (error) {
+        console.error('Error loading scale settings:', error)
+      }
+
     } catch (error) {
       console.error('Error loading data:', error)
     } finally {
       setLoading(false)
     }
   }
+
+  // Save scale settings to database
+  const saveScaleSettings = useCallback(async (pageNumber: number, setting: ScaleSetting) => {
+    if (!planId) return
+    
+    try {
+      const response = await fetch('/api/plan/scale-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId,
+          pageNumber,
+          scaleRatio: setting.ratio,
+          pixelsPerUnit: setting.pixelsPerUnit,
+          unit: setting.unit
+        })
+      })
+      
+      if (!response.ok) {
+        console.error('Failed to save scale settings')
+      }
+    } catch (error) {
+      console.error('Error saving scale settings:', error)
+    }
+  }, [planId])
 
   // Load existing takeoff and quality analysis
   const loadExistingAnalysis = async () => {
@@ -1120,6 +1188,22 @@ export default function EnhancedPlanViewer() {
                 goToPage={goToPage}
                 scale={scale}
                 onClearCache={handleClearCache}
+                measurementScaleSettings={measurementScaleSettings}
+                onPageChange={setCurrentPage}
+                onNumPagesChange={setPdfNumPages}
+                onOpenScaleSettings={() => {
+                  // Don't clear calibration points when opening - preserve them if they exist
+                  setScaleSettingsModalOpen(true)
+                  // Only clear isCalibrating if we're not in calibration mode
+                  // This allows the modal to reopen with points after calibration
+                  if (!isCalibrating) {
+                    setIsCalibrating(false)
+                  }
+                }}
+                onCalibrationPointsChange={setCalibrationPoints}
+                calibrationPoints={calibrationPoints}
+                isCalibrating={isCalibrating}
+                onSetCalibrating={setIsCalibrating}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -1160,15 +1244,19 @@ export default function EnhancedPlanViewer() {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className={`bg-white border-l border-gray-200 flex flex-col h-full overflow-y-auto ${
+                  className={`bg-white border-l border-gray-200 flex flex-col overflow-y-auto ${
                     isMobile || isTablet 
-                      ? 'fixed right-0 top-0 bottom-0 w-full max-w-sm z-50 shadow-xl' 
+                      ? 'fixed right-0 top-0 bottom-0 w-full max-w-sm z-50 shadow-xl h-screen' 
                       : 'relative'
                   }`}
                   style={{ 
                     width: isMobile || isTablet 
                       ? '90vw' 
-                      : `${sidebarWidth}px` 
+                      : `${sidebarWidth}px`,
+                    ...(isMobile || isTablet 
+                      ? { height: '100vh' }
+                      : { height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)' }
+                    )
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -1186,9 +1274,9 @@ export default function EnhancedPlanViewer() {
                   </div>
                 </div>
                 
-                <div className="flex-1 overflow-hidden">
-                  <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="h-full">
-                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1">
+                <div className="flex-1 overflow-hidden flex flex-col">
+                  <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
+                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1 flex-shrink-0">
                       <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden sm:inline">Takeoff</span>
@@ -1203,8 +1291,8 @@ export default function EnhancedPlanViewer() {
                       </TabsTrigger>
                     </TabsList>
                     
-                    <div className="p-2 md:p-4 h-full overflow-y-auto">
-                      <TabsContent value="takeoff" className="h-full">
+                    <div className="flex-1 overflow-y-auto p-2 md:p-4 pb-6">
+                      <TabsContent value="takeoff" className="mt-0">
                         <div className="space-y-3 md:space-y-4">
                           <Button 
                             className="w-full h-10 md:h-auto" 
@@ -1281,7 +1369,7 @@ export default function EnhancedPlanViewer() {
                         </div>
                       </TabsContent>
                       
-                      <TabsContent value="quality" className="h-full">
+                      <TabsContent value="quality" className="mt-0">
                         <div className="space-y-4">
                           <Button 
                             className="w-full"
@@ -1467,6 +1555,106 @@ export default function EnhancedPlanViewer() {
         jobId={jobId}
         isOpen={showBidsModal}
         onClose={() => setShowBidsModal(false)}
+      />
+      
+      {/* Scale Settings Modal */}
+      <ScaleSettingsModal
+        open={scaleSettingsModalOpen}
+        onOpenChange={(open) => {
+          setScaleSettingsModalOpen(open)
+          if (!open) {
+            setIsCalibrating(false)
+            setCalibrationPoints([])
+          }
+        }}
+        current={(() => {
+          // Use same helper logic as fast-plan-canvas to handle key mismatches
+          if (!measurementScaleSettings) return undefined
+          const setting = measurementScaleSettings[currentPage] || 
+                         measurementScaleSettings[String(currentPage) as any] ||
+                         measurementScaleSettings[Number(currentPage)]
+          return setting
+        })()}
+        numPages={pdfNumPages || plan?.num_pages || undefined}
+        onApplyCurrentToAll={async () => {
+          try {
+            // Use same helper logic to handle key mismatches
+            const currentSetting = measurementScaleSettings?.[currentPage] || 
+                                  measurementScaleSettings?.[String(currentPage) as any] ||
+                                  measurementScaleSettings?.[Number(currentPage)]
+            
+            const totalPages = pdfNumPages || plan?.num_pages
+            if (!currentSetting || !totalPages) {
+              console.error('Cannot apply to all pages:', { currentSetting, totalPages, currentPage })
+              alert('Unable to apply scale: No scale setting found for current page or page count unavailable.')
+              return
+            }
+            
+            console.log('Applying scale to all pages:', { currentSetting, totalPages })
+            
+            // Apply current page's scale to all pages
+            const updatedSettings: Record<number, ScaleSetting> = {}
+            for (let page = 1; page <= totalPages; page++) {
+              updatedSettings[page] = currentSetting
+            }
+            setMeasurementScaleSettings(prev => ({
+              ...prev,
+              ...updatedSettings
+            }))
+            
+            // Save all pages to database
+            const savePromises = Array.from({ length: totalPages }, (_, i) => i + 1).map(page =>
+              saveScaleSettings(page, currentSetting)
+            )
+            await Promise.all(savePromises)
+            
+            console.log(`Successfully applied scale to all ${totalPages} pages`)
+            // Close modal after successful save
+            setScaleSettingsModalOpen(false)
+          } catch (error) {
+            console.error('Error applying scale to all pages:', error)
+            alert('Failed to apply scale to all pages. Please try again.')
+          }
+        }}
+        onApply={async (setting: ScaleSetting, applyToAllPages = false) => {
+          if (applyToAllPages && plan?.num_pages) {
+            // Apply to all pages
+            const updatedSettings: Record<number, ScaleSetting> = {}
+            for (let page = 1; page <= plan.num_pages; page++) {
+              updatedSettings[page] = setting
+            }
+            setMeasurementScaleSettings(prev => ({
+              ...prev,
+              ...updatedSettings
+            }))
+            // Save all pages to database
+            await Promise.all(
+              Array.from({ length: plan.num_pages }, (_, i) => i + 1).map(page =>
+                saveScaleSettings(page, setting)
+              )
+            )
+          } else {
+            // Apply to current page only
+            setMeasurementScaleSettings(prev => ({
+              ...prev,
+              [currentPage]: setting
+            }))
+            // Save to database
+            await saveScaleSettings(currentPage, setting)
+          }
+          setIsCalibrating(false)
+          setCalibrationPoints([])
+        }}
+        onStartCalibration={() => {
+          setScaleSettingsModalOpen(false)
+          setIsCalibrating(true)
+          setCalibrationPoints([])
+        }}
+        calibrationPoints={calibrationPoints}
+        onCalibrationComplete={() => {
+          setIsCalibrating(false)
+          setCalibrationPoints([])
+        }}
       />
     </div>
   )

@@ -31,12 +31,8 @@ interface BidComparisonModalProps {
 
 interface Bid {
   id: string
-  subcontractor_name: string | null
+  subcontractor_id: string | null
   subcontractor_email: string
-  phone: string | null
-  website: string | null
-  google_rating: number | null
-  google_review_count: number | null
   bid_amount: number | null
   timeline: string | null
   notes: string | null
@@ -44,6 +40,15 @@ interface Bid {
   raw_email: string
   created_at: string
   status: string
+  subcontractors: {
+    id: string
+    name: string
+    email: string
+    phone: string | null
+    website_url: string | null
+    google_review_score: number | null
+    google_reviews_link: string | null
+  } | null
 }
 
 interface BidLineItem {
@@ -93,12 +98,22 @@ export default function BidComparisonModal({
     setError('')
     
     try {
-      // Load bids for this job (bids are associated with job_requests, not jobs)
-      // We need to query bids that might be associated with job_requests that belong to this job
+      // Load bids for this job with subcontractor information joined
       const { data: bidsData, error: bidsError } = await supabase
         .from('bids')
-        .select('*')
-        .eq('job_request_id', jobId)
+        .select(`
+          *,
+          subcontractors (
+            id,
+            name,
+            email,
+            phone,
+            website_url,
+            google_review_score,
+            google_reviews_link
+          )
+        `)
+        .or(`job_id.eq.${jobId},job_request_id.eq.${jobId}`)
         .order('created_at', { ascending: false })
 
       if (bidsError) throw bidsError
@@ -298,9 +313,9 @@ export default function BidComparisonModal({
                             <div className="flex items-start justify-between">
                               <div>
                                 <h4 className="font-semibold text-gray-900">
-                                  {bid.subcontractor_name || bid.subcontractor_email}
+                                  {bid.subcontractors?.name || bid.subcontractor_email || 'Unknown'}
                                 </h4>
-                                <p className="text-sm text-gray-600">{bid.subcontractor_email}</p>
+                                <p className="text-sm text-gray-600">{bid.subcontractors?.email || bid.subcontractor_email}</p>
                               </div>
                               {bid.status && (
                                 <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'}>
@@ -315,11 +330,11 @@ export default function BidComparisonModal({
                               </div>
                             )}
                             
-                            {bid.google_rating && (
+                            {bid.subcontractors?.google_review_score && (
                               <div className="flex items-center text-sm text-gray-600">
-                                ⭐ {bid.google_rating}
-                                {bid.google_review_count && (
-                                  <span className="ml-1">({bid.google_review_count} reviews)</span>
+                                ⭐ {bid.subcontractors.google_review_score}
+                                {bid.subcontractors.google_reviews_link && (
+                                  <span className="ml-1">(see reviews)</span>
                                 )}
                               </div>
                             )}
@@ -348,20 +363,20 @@ export default function BidComparisonModal({
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <p className="text-sm text-gray-600">Subcontractor</p>
-                                <p className="font-medium">{selectedBid.subcontractor_name || selectedBid.subcontractor_email}</p>
+                                <p className="font-medium">{selectedBid.subcontractors?.name || selectedBid.subcontractor_email || 'Unknown'}</p>
                               </div>
-                              {selectedBid.phone && (
+                              {selectedBid.subcontractors?.phone && (
                                 <div>
                                   <p className="text-sm text-gray-600">Phone</p>
-                                  <p className="font-medium">{selectedBid.phone}</p>
+                                  <p className="font-medium">{selectedBid.subcontractors.phone}</p>
                                 </div>
                               )}
                             </div>
-                            {selectedBid.website && (
+                            {selectedBid.subcontractors?.website_url && (
                               <div>
                                 <p className="text-sm text-gray-600">Website</p>
-                                <a href={selectedBid.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                                  {selectedBid.website}
+                                <a href={selectedBid.subcontractors.website_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                  {selectedBid.subcontractors.website_url}
                                 </a>
                               </div>
                             )}

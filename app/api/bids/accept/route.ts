@@ -35,10 +35,10 @@ export async function POST(request: NextRequest) {
     console.log('Sample bids in database:', allBids)
     console.log('Looking for bidId:', bidId)
 
-    // Fetch the bid to verify ownership and get job_request_id
+    // Fetch the bid to verify ownership and get job_id
     const { data: bid, error: bidError } = await supabase
       .from('bids')
-      .select('id, job_request_id, status, subcontractor_email, subcontractor_name')
+      .select('id, job_id, job_request_id, status, subcontractor_email, subcontractors (name, email)')
       .eq('id', bidId)
       .single()
     
@@ -59,27 +59,61 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch the job request to verify ownership
-    const { data: jobRequest, error: jobError } = await supabase
-      .from('job_requests')
-      .select('gc_id')
-      .eq('id', bid.job_request_id)
-      .single()
-
-    if (jobError || !jobRequest) {
-      console.error('Error fetching job request:', jobError)
+    // Verify ownership through job_id or job_request_id
+    const jobId = bid.job_id || bid.job_request_id
+    if (!jobId) {
       return NextResponse.json(
-        { error: 'Job request not found' },
-        { status: 404 }
+        { error: 'Bid is not associated with a job' },
+        { status: 400 }
       )
     }
 
-    // Verify the user owns this job request
-    if (jobRequest.gc_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized - You do not own this job request' },
-        { status: 403 }
-      )
+    // Try to verify through jobs table first (new way)
+    if (bid.job_id) {
+      const { data: job, error: jobError } = await supabase
+        .from('jobs')
+        .select('user_id')
+        .eq('id', bid.job_id)
+        .single()
+
+      if (jobError || !job) {
+        console.error('Error fetching job:', jobError)
+        return NextResponse.json(
+          { error: 'Job not found' },
+          { status: 404 }
+        )
+      }
+
+      // Verify the user owns this job
+      if (job.user_id !== user.id) {
+        return NextResponse.json(
+          { error: 'Unauthorized - You do not own this job' },
+          { status: 403 }
+        )
+      }
+    } else {
+      // Fallback to job_requests (old way)
+      const { data: jobRequest, error: jobError } = await supabase
+        .from('job_requests')
+        .select('gc_id')
+        .eq('id', bid.job_request_id)
+        .single()
+
+      if (jobError || !jobRequest) {
+        console.error('Error fetching job request:', jobError)
+        return NextResponse.json(
+          { error: 'Job request not found' },
+          { status: 404 }
+        )
+      }
+
+      // Verify the user owns this job request
+      if (jobRequest.gc_id !== user.id) {
+        return NextResponse.json(
+          { error: 'Unauthorized - You do not own this job request' },
+          { status: 403 }
+        )
+      }
     }
 
     // Check if bid is already accepted or declined (only if status column exists)
@@ -111,6 +145,7 @@ export async function POST(request: NextRequest) {
     if (documents && documents.length > 0) {
       const documentRecords = documents.map((doc: any) => ({
         bid_id: bidId,
+        job_id: bid.job_id,
         job_request_id: bid.job_request_id,
         document_type: doc.type,
         file_name: doc.fileName,

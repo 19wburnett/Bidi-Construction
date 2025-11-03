@@ -1,12 +1,18 @@
 import { createClient } from '@/lib/supabase'
 
-// Drawing interface - now only used for comments
+// Drawing interface - supports comments and measurements
 export interface Drawing {
   id: string
-  type: 'comment'
+  type: 'comment' | 'measurement_line' | 'measurement_area'
   geometry: {
-    x: number
-    y: number
+    x?: number
+    y?: number
+    width?: number
+    height?: number
+    radius?: number
+    // For measurement_line: array of [x, y, x, y, ...] points
+    // For measurement_area: array of [x, y, x, y, ...] polygon points
+    points?: number[]
   }
   style: {
     color: string
@@ -14,6 +20,15 @@ export interface Drawing {
     opacity?: number
   }
   pageNumber: number
+  // Measurement fields
+  measurements?: {
+    // For measurement_line: array of segment lengths in real-world units
+    segmentLengths?: number[]
+    totalLength?: number
+    // For measurement_area: area in sqft
+    area?: number
+    unit?: 'ft' | 'in' | 'm' | 'cm' | 'mm'
+  }
   // Comment fields
   label?: string
   notes?: string

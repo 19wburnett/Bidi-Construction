@@ -48,8 +48,12 @@ interface BidNote {
 
 interface Bid {
   id: string
-  subcontractor_name: string | null
-  subcontractor_email: string
+  subcontractor_name?: string | null
+  subcontractor_email?: string | null
+  subcontractors?: {
+    name: string
+    email: string
+  } | null
   bid_notes?: BidNote[]
 }
 
@@ -159,7 +163,7 @@ export default function PlanAnnotatorModal({
     (bid.bid_notes || []).map(note => ({
       ...note,
       bidId: bid.id,
-      bidderName: bid.subcontractor_name || bid.subcontractor_email
+      bidderName: bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'
     }))
     ),
     ...customNotes.map(note => ({
@@ -238,7 +242,7 @@ export default function PlanAnnotatorModal({
       const notes = bid.bid_notes || []
       notes.forEach(note => {
         if (note.page_number && note.page_number >= 1 && note.page_number <= numPages) {
-          const bidderName = bid.subcontractor_name || bid.subcontractor_email || 'Unknown'
+          const bidderName = bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'
           
           // Place at a default position (center-left of the page)
           notesToAutoPlace.push({
@@ -327,7 +331,7 @@ export default function PlanAnnotatorModal({
     const y = ((e.clientY - rect.top) / rect.height) * 100
 
     const bid = bids.find(b => b.id === bidId)
-    const bidderName = bid?.subcontractor_name || bid?.subcontractor_email || 'Unknown'
+    const bidderName = bid?.subcontractors?.name || bid?.subcontractor_name || bid?.subcontractor_email || 'Unknown'
 
     const placedNote: PlacedNote = {
       ...note,
@@ -1114,7 +1118,7 @@ export default function PlanAnnotatorModal({
                     <div key={bid.id} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <h4 className="font-medium text-xs sm:text-sm truncate max-w-[200px]">
-                          {bid.subcontractor_name || bid.subcontractor_email}
+                          {bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'}
                         </h4>
                         <Badge variant="outline" className="text-xs flex-shrink-0">
                           {unplacedNotes.length}/{notes.length} remaining

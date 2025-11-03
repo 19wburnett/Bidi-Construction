@@ -12,7 +12,12 @@ interface EmailDraftButtonProps {
     budget_range: string
   }
   bids: Array<{
-    subcontractor_name: string | null
+    subcontractor_name?: string | null
+    subcontractor_email?: string | null
+    subcontractors?: {
+      name: string
+      email: string
+    } | null
     bid_amount: number | null
     timeline: string | null
     bid_notes?: Array<{
@@ -72,7 +77,7 @@ BID SUMMARY:
 ${bids.map((bid, index) => {
   const amount = bid.bid_amount ? `$${bid.bid_amount.toLocaleString()}` : 'Amount TBD'
   const timeline = bid.timeline || 'Timeline TBD'
-  return `${index + 1}. ${bid.subcontractor_name || 'Unknown Contractor'}: ${amount} - ${timeline}`
+  return `${index + 1}. ${bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown Contractor'}: ${amount} - ${timeline}`
 }).join('\n')}
 
 KEY REQUIREMENTS IDENTIFIED:

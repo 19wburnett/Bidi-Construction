@@ -25,7 +25,7 @@ export default function SeenStatusIndicator({ jobId, refreshTrigger }: SeenStatu
       const { data: bids, error } = await supabase
         .from('bids')
         .select('id, seen')
-        .eq('job_request_id', jobId)
+        .or(`job_id.eq.${jobId},job_request_id.eq.${jobId}`)
 
       console.log('Seen status query result:', bids)
       console.log('Seen status query error:', error)
@@ -103,7 +103,7 @@ export default function SeenStatusIndicator({ jobId, refreshTrigger }: SeenStatu
           const { data: data2, error: error2 } = await supabase
             .from('bids')
             .update({ seen: true })
-            .eq('job_request_id', jobId)
+            .or(`job_id.eq.${jobId},job_request_id.eq.${jobId}`)
             .select('id, seen, job_request_id')
           
           console.log('Job ID update result:', data2)
@@ -121,7 +121,7 @@ export default function SeenStatusIndicator({ jobId, refreshTrigger }: SeenStatu
           console.log('Debugging all bids in database...')
           const { data: allBids, error } = await supabase
             .from('bids')
-            .select('id, job_request_id, seen, subcontractor_name')
+            .select('id, job_request_id, seen, subcontractor_email, subcontractors (name, email)')
             .limit(10)
           console.log('All bids in database:', allBids)
           console.log('All bids error:', error)

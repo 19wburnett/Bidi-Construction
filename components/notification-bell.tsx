@@ -53,10 +53,15 @@ export default function NotificationBell() {
           bids!inner(
             id,
             job_request_id,
-            subcontractor_name,
             bid_amount,
             seen,
             created_at,
+            subcontractor_email,
+            subcontractors (
+              id,
+              name,
+              email
+            ),
             job_requests!inner(
               trade_category
             )
@@ -88,7 +93,7 @@ export default function NotificationBell() {
           notification_id: notif.id,
           job_id: notif.bids.job_request_id,
           job_title: notif.bids.job_requests.trade_category,
-          subcontractor_name: notif.bids.subcontractor_name || 'Unknown Subcontractor',
+          subcontractor_name: notif.bids.subcontractors?.name || notif.bids.subcontractor_email || 'Unknown Subcontractor',
           bid_amount: notif.bids.bid_amount,
           created_at: notif.bids.created_at,
           read: notif.read,
@@ -118,10 +123,15 @@ export default function NotificationBell() {
         .select(`
           id,
           job_request_id,
-          subcontractor_name,
           bid_amount,
           seen,
           created_at,
+          subcontractor_email,
+          subcontractors (
+            id,
+            name,
+            email
+          ),
           job_requests!inner(
             id,
             trade_category,
@@ -143,7 +153,7 @@ export default function NotificationBell() {
         id: bid.id,
         job_id: bid.job_request_id,
         job_title: bid.job_requests.trade_category,
-        subcontractor_name: bid.subcontractor_name || 'Unknown Subcontractor',
+          subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         read: false, // Mark all as unread for fallback
