@@ -103,6 +103,7 @@ export class EnhancedAIProvider {
   }
 
   // Route tasks to best-performing models
+  // Prioritizes GPT-4o first for ChatGPT, then falls back to others
   private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
     // Get max models from environment or default
     const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '5')
@@ -110,7 +111,16 @@ export class EnhancedAIProvider {
     
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => {
+        // Always prioritize gpt-4o first (ChatGPT)
+        if (a.model === 'gpt-4o') return -1
+        if (b.model === 'gpt-4o') return 1
+        // Then prioritize other GPT models
+        if (a.model.includes('gpt') && !b.model.includes('gpt')) return -1
+        if (b.model.includes('gpt') && !a.model.includes('gpt')) return 1
+        // Then sort by score
+        return b.score - a.score
+      })
       .slice(0, actualCount)
     
     return modelScores.map(m => m.model)
@@ -144,52 +154,64 @@ export class EnhancedAIProvider {
       return true
     })
     
-    console.log(`Using specialized models for ${options.taskType}:`, enabledModels)
+    console.log(`Using specialized models for ${options.taskType} (sequential with fallback):`, enabledModels)
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
     console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run analysis with selected models in parallel with timeout
-    const analysisPromises = enabledModels.map(async (model, index) => {
-      console.log(`Starting analysis with model ${index + 1}/${enabledModels.length}: ${model}`)
+    // Run models SEQUENTIALLY with fallback - try first model, only move to next if it fails
+    const successfulResults: EnhancedAIResponse[] = []
+    const failedResults: any[] = []
+    
+    for (let i = 0; i < enabledModels.length; i++) {
+      const model = enabledModels[i]
+      console.log(`\n[${i + 1}/${enabledModels.length}] Attempting analysis with: ${model}`)
+      
       try {
         // Add timeout to prevent Vercel 300s limit
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
         )
         
+        const modelStartTime = Date.now()
         const result = await Promise.race([
           this.analyzeWithModel(images, options, model),
           timeoutPromise
         ]) as EnhancedAIResponse
         
-        console.log(`Model ${model} succeeded: ${result.content.length} chars`)
-        return result
-      } catch (error) {
-        console.error(`Model ${model} failed:`, error)
-        throw error
+        const modelProcessingTime = Date.now() - modelStartTime
+        result.processingTime = modelProcessingTime
+        
+        console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
+        successfulResults.push(result)
+        
+        // SUCCESS! Stop here - we only need one successful model
+        console.log(`🎯 First successful model (${model}) - stopping here, not trying remaining models`)
+        break
+        
+      } catch (error: any) {
+        const errorMsg = error?.message || String(error)
+        console.error(`❌ ${model} failed:`, errorMsg)
+        failedResults.push({ model, error: errorMsg })
+        
+        // Continue to next model only if this one failed
+        if (i < enabledModels.length - 1) {
+          console.log(`⏭️  Falling back to next model...`)
+        } else {
+          console.error(`⚠️  All ${enabledModels.length} models failed!`)
+        }
       }
-    })
+    }
     
-    const results = await Promise.allSettled(analysisPromises)
+    const totalProcessingTime = Date.now() - startTime
     
-    const successfulResults = results
-      .filter(r => r.status === 'fulfilled')
-      .map(r => (r as PromiseFulfilledResult<EnhancedAIResponse>).value)
-    
-    const failedResults = results
-      .filter(r => r.status === 'rejected')
-      .map(r => (r as PromiseRejectedResult).reason)
-    
-    const processingTime = Date.now() - startTime
-    
-    // Add processing time to all results
-    successfulResults.forEach(result => {
-      result.processingTime = processingTime
-    })
-    
-    console.log(`Enhanced analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${processingTime}ms`)
+    console.log(`\n📊 Sequential analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
     if (failedResults.length > 0) {
-      console.log(`Failed models:`, failedResults.map(r => r.message || r))
+      console.log(`❌ Failed models:`, failedResults.map(r => `${r.model}: ${r.error}`))
+    }
+    
+    // If no models succeeded, throw an error with helpful message
+    if (successfulResults.length === 0) {
+      throw new Error(`All ${enabledModels.length} models failed. Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
     }
     
     return successfulResults
