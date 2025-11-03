@@ -566,29 +566,36 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
   // Extract partial items from incomplete JSON - try to get as much data as possible
   private extractPartialItems(itemsText: string): any[] {
     const items: any[] = []
-    // Try to find item objects even if JSON is incomplete
-    // Look for patterns like: { "name": "...", "quantity": ..., "unit": "...", ... }
-    let itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"([^"]*)"[^{}]*\}/g)
     
-    if (!itemMatches) {
-      // Try alternative pattern - look for any object that might be an item
+    // Strategy 1: Try to find complete item objects (may span multiple lines)
+    // Use a more flexible pattern that handles nested objects and multi-line content
+    const itemObjectPattern = /\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/gs
+    let itemMatches = itemsText.match(itemObjectPattern)
+    
+    // Strategy 2: If that fails, try simpler pattern
+    if (!itemMatches || itemMatches.length === 0) {
+      itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g)
+    }
+    
+    // Strategy 3: Try alternative pattern
+    if (!itemMatches || itemMatches.length === 0) {
       const altMatches = itemsText.match(/\{[^{}]*"(?:name|description)"\s*:\s*"[^"]*"[^{}]*\}/g)
       if (altMatches) {
         itemMatches = altMatches
       }
     }
     
-    if (itemMatches) {
+    if (itemMatches && itemMatches.length > 0) {
       itemMatches.forEach(itemStr => {
         try {
-          // Try to parse complete item
+          // Try to parse complete item first
           const item = JSON.parse(itemStr)
           if (item.name) {
             items.push(item)
             return
           }
         } catch {
-          // Extract fields individually using regex
+          // If parsing fails, extract fields using regex from this item string
           const nameMatch = itemStr.match(/"name"\s*:\s*"([^"]*)"/)
           const descMatch = itemStr.match(/"description"\s*:\s*"([^"]*)"/)
           const qtyMatch = itemStr.match(/"quantity"\s*:\s*([0-9.]+)/)
@@ -617,10 +624,76 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       })
     }
     
-    // If no structured items found, try to extract from raw text patterns
+    // Strategy 4: If we found items by name but they have no quantities, try to find quantities in the raw text
+    // Look for patterns like "quantity": 150.5 or "quantity":150.5 near each item name
+    if (items.length > 0 && items.some(item => item.quantity === 0)) {
+      // Extract all name-value pairs from the entire itemsText
+      const allNames: string[] = []
+      const allQuantities: Map<string, number> = new Map()
+      const allUnits: Map<string, string> = new Map()
+      const allCategories: Map<string, string> = new Map()
+      const allSubcategories: Map<string, string> = new Map()
+      
+      // Find all names
+      const namePattern = /"name"\s*:\s*"([^"]{3,100})"/g
+      let nameMatch
+      while ((nameMatch = namePattern.exec(itemsText)) !== null) {
+        allNames.push(nameMatch[1])
+      }
+      
+      // Find quantities - look for patterns near each name
+      const quantityPattern = /"quantity"\s*:\s*([0-9.]+)/g
+      let qtyMatch
+      const quantities: number[] = []
+      while ((qtyMatch = quantityPattern.exec(itemsText)) !== null) {
+        quantities.push(parseFloat(qtyMatch[1]))
+      }
+      
+      // Find units
+      const unitPattern = /"unit"\s*:\s*"([^"]{1,10})"/g
+      let unitMatch
+      const units: string[] = []
+      while ((unitMatch = unitPattern.exec(itemsText)) !== null) {
+        units.push(unitMatch[1])
+      }
+      
+      // Find categories
+      const catPattern = /"category"\s*:\s*"([^"]{3,30})"/g
+      let catMatch
+      const categories: string[] = []
+      while ((catMatch = catPattern.exec(itemsText)) !== null) {
+        categories.push(catMatch[1])
+      }
+      
+      // Find subcategories
+      const subcatPattern = /"subcategory"\s*:\s*"([^"]{3,50})"/g
+      let subcatMatch
+      const subcategories: string[] = []
+      while ((subcatMatch = subcatPattern.exec(itemsText)) !== null) {
+        subcategories.push(subcatMatch[1])
+      }
+      
+      // Try to match quantities/units/categories to items by position
+      // If we have the same number of each, assume they're in order
+      items.forEach((item, idx) => {
+        if (item.quantity === 0 && quantities.length > idx) {
+          item.quantity = quantities[idx]
+        }
+        if (item.unit === 'EA' && units.length > idx) {
+          item.unit = units[idx]
+        }
+        if (item.category === 'other' && categories.length > idx) {
+          item.category = categories[idx]
+        }
+        if (item.subcategory === 'Uncategorized' && subcategories.length > idx) {
+          item.subcategory = subcategories[idx]
+        }
+      })
+    }
+    
+    // Strategy 5: Last resort - extract just names if nothing else worked
     if (items.length === 0) {
-      // Look for patterns like "2x6 Exterior Wall Framing" or similar
-      const namePattern = /"name"\s*:\s*"([^"]{3,50})"/g
+      const namePattern = /"name"\s*:\s*"([^"]{3,100})"/g
       let match
       while ((match = namePattern.exec(itemsText)) !== null) {
         items.push({
@@ -809,7 +882,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
             
             // Try to fix incomplete string values by closing quotes
             // Find strings that aren't properly closed and close them
-            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*)$/, (match, spaces, text) => {
+            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*)$/gm, (match, spaces, text) => {
               // If string isn't closed, close it
               if (!match.includes('"', text.length + spaces.length + 2)) {
                 return `:${spaces}"${text}"`
@@ -817,12 +890,21 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
               return match
             })
             
-            // Fix incomplete arrays by closing them
-            // Look for arrays that might be incomplete
-            const incompleteArrayMatch = jsonText.match(/(\[[^\]]*),(\s*)$/)
+            // Fix trailing commas before closing braces/brackets (more aggressively)
+            jsonText = jsonText.replace(/,(\s*)([}\]])/g, '$1$2')
+            
+            // Fix incomplete arrays - find unclosed arrays and close them
+            const incompleteArrayMatch = jsonText.match(/(\[[^\]]*),(\s*)$/m)
             if (incompleteArrayMatch) {
-              jsonText = jsonText.replace(/,(\s*)$/, ']')
+              jsonText = jsonText.replace(/,(\s*)$/m, ']')
             }
+            
+            // Try to fix common JSON syntax errors
+            // Fix unclosed quotes in the middle of strings (replace with escaped quote)
+            jsonText = jsonText.replace(/"([^"]*)"([^",}\]:\s])/g, '"$1\\"$2')
+            
+            // Remove any control characters that might break parsing
+            jsonText = jsonText.replace(/[\x00-\x1F\x7F]/g, '')
             
             // Try parsing again
             try {
