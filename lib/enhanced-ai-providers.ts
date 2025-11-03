@@ -18,7 +18,8 @@ export const MODEL_SPECIALIZATIONS = {
   'gpt-4o': 'general_construction', // Best overall construction analysis
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
   'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
-  'grok-4': 'alternative_analysis' // Alternative perspective model (XAI) - newest and most powerful
+  'claude-sonnet-4-20250514': 'general_construction', // Latest Sonnet model (better quality than haiku)
+  'grok-2-1212': 'alternative_analysis' // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
 } as const
 
 export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
@@ -152,7 +153,14 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.80
       },
-             'grok-4': {
+      'claude-sonnet-4-20250514': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.94,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+             'grok-2-1212': {
         takeoff: 0.95,
                quality: 0.92,
                bid_analysis: 0.95,
@@ -220,7 +228,7 @@ export class EnhancedAIProvider {
     
     // CRITICAL: Always ensure Claude and Grok are included for fallback, even if env var limits models
     // Add them if they're not already in the list
-    const requiredFallbacks = ['grok-4', 'claude-3-haiku-20240307']
+    const requiredFallbacks = ['grok-2-1212', 'claude-3-haiku-20240307']
     requiredFallbacks.forEach(fallback => {
       if (!selectedModels.includes(fallback)) {
         // Add to the end (will be tried after OpenAI models)
@@ -333,8 +341,9 @@ export class EnhancedAIProvider {
         case 'gpt-4-turbo':
           return await this.analyzeWithOpenAI(images, options, model)
         case 'claude-3-haiku-20240307':
+        case 'claude-sonnet-4-20250514':
           return await this.analyzeWithClaude(images, options, model)
-        case 'grok-4':
+        case 'grok-2-1212':
           return await this.analyzeWithXAI(images, options, model)
         // case 'gemini-1.5-flash':
         //   return await this.analyzeWithGemini(images, options, model)
