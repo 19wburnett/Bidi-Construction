@@ -385,7 +385,11 @@ export class EnhancedAIProvider {
         maxTokens = Math.min(maxTokens, 4096) // GPT-4-turbo max is 4096
       }
       
-      // GPT-5 doesn't support custom temperature, use default for it
+      // Some OpenAI models don't support custom temperature - only default (1) is allowed
+      // Models that require default temperature: gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini
+      const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
+      const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(model)
+      
       const requestConfig: any = {
         model: model,
         messages: [
@@ -402,10 +406,11 @@ export class EnhancedAIProvider {
         response_format: { type: 'json_object' }
       }
       
-      // Only add temperature for models that support it (not GPT-5)
-      if (model !== 'gpt-5') {
+      // Only add temperature for models that support custom values
+      if (supportsCustomTemperature) {
         requestConfig.temperature = options.temperature || 0.2
       }
+      // Models without custom temperature support will use default (1.0)
       
       const response = await openai.chat.completions.create(requestConfig)
       
@@ -593,18 +598,20 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: Math.min(options.maxTokens || 8192, 4096), // XAI models typically have lower limits
-        temperature: options.temperature || 0.2,
-        response_format: { type: 'json_object' }
+        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Try max_tokens instead of max_completion_tokens
+        temperature: options.temperature || 0.2
+        // Note: Grok may not support response_format, remove it for now
       })
     })
 
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`XAI API error (${response.status}):`, errorText)
       if (response.status === 403) {
         console.warn('XAI API access forbidden - skipping Grok model')
         throw new Error('XAI API access forbidden')
       }
-      throw new Error(`XAI API error: ${response.statusText}`)
+      throw new Error(`XAI API error: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
     }
 
     const data = await response.json()

@@ -347,10 +347,12 @@ export default function EnhancedPlanViewer() {
             status: 'open'
           })) || []
           
+          // Set issues at top level to match API response format for frontend display
           setQualityResults({
             success: true,
             planId,
             taskType: 'takeoff',
+            issues: issuesFromQA, // Top level for frontend compatibility
             results: {
               issues: issuesFromQA,
               quality_analysis: qualityAnalysisFromTakeoff
@@ -438,11 +440,13 @@ export default function EnhancedPlanViewer() {
           }
         }
         
+        // Set issues at top level to match API response format for frontend display
         setQualityResults({
           success: true,
           planId,
           taskType: 'quality',
           processingTime: qualityAnalysis.processing_time_ms || 0,
+          issues: issuesWithIds, // Top level for frontend compatibility
           results: {
             issues: issuesWithIds,
             quality_analysis: qualityAnalysisObj
