@@ -68,8 +68,68 @@ export class EnhancedAIProvider {
 
   private initializeModelPerformance() {
     // Initialize performance scores based on model specializations
+    // Prioritized by your OpenAI dashboard availability and limits
     this.modelPerformance = {
-      // Note: GPT-5 removed due to timeout issues on Vercel
+      // GPT-5 family - highest limits (500k TPM, 500 RPM)
+      'gpt-5': {
+        takeoff: 0.98,
+        quality: 0.95,
+        bid_analysis: 0.98,
+        code_compliance: 0.92,
+        cost_estimation: 0.95
+      },
+      'gpt-5-mini': {
+        takeoff: 0.96,
+        quality: 0.93,
+        bid_analysis: 0.96,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+      'gpt-5-nano': {
+        takeoff: 0.94,
+        quality: 0.91,
+        bid_analysis: 0.94,
+        code_compliance: 0.88,
+        cost_estimation: 0.91
+      },
+      // GPT-4.1 family - high limits (200k TPM for mini/nano, 30k for base)
+      'gpt-4.1': {
+        takeoff: 0.96,
+        quality: 0.93,
+        bid_analysis: 0.96,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+      'gpt-4.1-mini': {
+        takeoff: 0.94,
+        quality: 0.91,
+        bid_analysis: 0.94,
+        code_compliance: 0.88,
+        cost_estimation: 0.91
+      },
+      'gpt-4.1-nano': {
+        takeoff: 0.92,
+        quality: 0.89,
+        bid_analysis: 0.92,
+        code_compliance: 0.86,
+        cost_estimation: 0.89
+      },
+      // O-series models - reasoning models
+      'o3': {
+        takeoff: 0.97,
+        quality: 0.94,
+        bid_analysis: 0.97,
+        code_compliance: 0.93,
+        cost_estimation: 0.94
+      },
+      'o4-mini': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.91,
+        cost_estimation: 0.92
+      },
+      // GPT-4o - standard model (30k TPM, 500 RPM)
       'gpt-4o': {
         takeoff: 0.95,
         quality: 0.90,
@@ -84,6 +144,7 @@ export class EnhancedAIProvider {
         code_compliance: 0.80,
         cost_estimation: 0.82
       },
+      // Non-OpenAI models
       'claude-3-haiku-20240307': {
         takeoff: 0.85,
         quality: 0.80,
@@ -91,14 +152,14 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.80
       },
-             'grok-4': {
-               takeoff: 0.95,        // Grok-4 is the newest and most powerful!
-               quality: 0.92,
-               bid_analysis: 0.95,
-               code_compliance: 0.90,
-               cost_estimation: 0.92
-             }
-             // Gemini removed - model not available or causing errors
+      'grok-4': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
+      }
+      // Gemini removed - model not available or causing errors
     }
   }
 
@@ -112,13 +173,28 @@ export class EnhancedAIProvider {
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
       .sort((a, b) => {
-        // Always prioritize gpt-4o first (ChatGPT)
+        // Prioritize GPT-5 first (highest limits: 500k TPM, 500 RPM)
+        if (a.model === 'gpt-5') return -1
+        if (b.model === 'gpt-5') return 1
+        // Then GPT-5-mini
+        if (a.model === 'gpt-5-mini') return -1
+        if (b.model === 'gpt-5-mini') return 1
+        // Then GPT-5-nano
+        if (a.model === 'gpt-5-nano') return -1
+        if (b.model === 'gpt-5-nano') return 1
+        // Then O-series (reasoning models)
+        if (a.model.startsWith('o') && !b.model.startsWith('o')) return -1
+        if (b.model.startsWith('o') && !a.model.startsWith('o')) return 1
+        // Then GPT-4.1 family
+        if (a.model.startsWith('gpt-4.1') && !b.model.startsWith('gpt-4.1')) return -1
+        if (b.model.startsWith('gpt-4.1') && !a.model.startsWith('gpt-4.1')) return 1
+        // Then gpt-4o (ChatGPT)
         if (a.model === 'gpt-4o') return -1
         if (b.model === 'gpt-4o') return 1
-        // Then prioritize other GPT models
+        // Then other GPT models
         if (a.model.includes('gpt') && !b.model.includes('gpt')) return -1
         if (b.model.includes('gpt') && !a.model.includes('gpt')) return 1
-        // Then sort by score
+        // Finally sort by score
         return b.score - a.score
       })
       .slice(0, actualCount)
