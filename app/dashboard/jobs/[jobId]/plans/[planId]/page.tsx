@@ -281,11 +281,12 @@ export default function EnhancedPlanViewer() {
     }
   }
 
-  // Load existing takeoff analysis
+  // Load existing takeoff and quality analysis
   const loadExistingAnalysis = async () => {
     if (!planId || !user) return
 
     try {
+      // Load takeoff analysis
       const { data: takeoffAnalysis } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
@@ -314,6 +315,10 @@ export default function EnhancedPlanViewer() {
         }
         
         const itemsWithIds = ensureItemIds(itemsArray)
+        
+        // Extract quality_analysis from takeoff summary if it exists
+        const qualityAnalysisFromTakeoff = takeoffAnalysis.summary?.quality_analysis
+        
         setTakeoffResults({
           success: true,
           planId,
@@ -325,9 +330,34 @@ export default function EnhancedPlanViewer() {
           },
           results: {
             items: itemsWithIds,
-            summary: takeoffAnalysis.summary || {}
+            summary: takeoffAnalysis.summary || {},
+            quality_analysis: qualityAnalysisFromTakeoff // Include quality_analysis from takeoff
           }
         })
+        
+        // If quality_analysis is in takeoff results, populate quality tab
+        if (qualityAnalysisFromTakeoff) {
+          const issuesFromQA = qualityAnalysisFromTakeoff.risk_flags?.map((rf: any) => ({
+            id: crypto.randomUUID(),
+            severity: rf.level === 'high' ? 'critical' : rf.level === 'medium' ? 'warning' : 'info',
+            category: rf.category || 'general',
+            description: rf.description || '',
+            location: rf.location || '',
+            recommendation: rf.recommendation || '',
+            status: 'open'
+          })) || []
+          
+          setQualityResults({
+            success: true,
+            planId,
+            taskType: 'takeoff',
+            results: {
+              issues: issuesFromQA,
+              quality_analysis: qualityAnalysisFromTakeoff
+            }
+          })
+        }
+        
         // Prepare items for BidPackageModal
         const items = itemsWithIds.map((it: any, idx: number) => ({
           id: it.id,
@@ -339,8 +369,91 @@ export default function EnhancedPlanViewer() {
         }))
         setModalTakeoffItems(items)
       }
+
+      // Load quality analysis from plan_quality_analysis table (separate from takeoff)
+      const { data: qualityAnalysis, error: qualityError } = await supabase
+        .from('plan_quality_analysis')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (qualityAnalysis && !qualityError) {
+        console.log('Loading existing quality analysis:', qualityAnalysis)
+        setQualityAnalysisRowId(qualityAnalysis.id)
+        
+        // Parse issues if needed
+        let issuesArray = []
+        try {
+          if (typeof qualityAnalysis.issues === 'string') {
+            issuesArray = JSON.parse(qualityAnalysis.issues)
+          } else if (Array.isArray(qualityAnalysis.issues)) {
+            issuesArray = qualityAnalysis.issues
+          } else if (qualityAnalysis.findings_by_severity) {
+            // Combine issues from severity buckets
+            issuesArray = [
+              ...(qualityAnalysis.findings_by_severity.critical || []),
+              ...(qualityAnalysis.findings_by_severity.warning || []),
+              ...(qualityAnalysis.findings_by_severity.info || [])
+            ]
+          }
+        } catch (parseError) {
+          console.error('Error parsing quality issues:', parseError)
+          issuesArray = []
+        }
+        
+        const issuesWithIds = ensureIssueIds(issuesArray)
+        
+        // Build quality_analysis object from DB data
+        const qualityAnalysisObj = {
+          completeness: {
+            overall_score: qualityAnalysis.overall_score || 0.8,
+            missing_sheets: [],
+            missing_dimensions: qualityAnalysis.missing_details || [],
+            missing_details: qualityAnalysis.missing_details || [],
+            incomplete_sections: [],
+            notes: 'Quality analysis loaded from database'
+          },
+          consistency: {
+            scale_mismatches: [],
+            unit_conflicts: [],
+            dimension_contradictions: [],
+            schedule_vs_elevation_conflicts: [],
+            notes: 'Consistency check from database'
+          },
+          risk_flags: issuesArray.map((issue: any) => ({
+            level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
+            category: issue.category || 'general',
+            description: issue.description || issue.detail || issue.message || '',
+            location: issue.location || '',
+            recommendation: issue.recommendation || ''
+          })),
+          audit_trail: {
+            pages_analyzed: [],
+            chunks_processed: 1,
+            coverage_percentage: 100,
+            assumptions_made: []
+          }
+        }
+        
+        setQualityResults({
+          success: true,
+          planId,
+          taskType: 'quality',
+          processingTime: qualityAnalysis.processing_time_ms || 0,
+          results: {
+            issues: issuesWithIds,
+            quality_analysis: qualityAnalysisObj
+          }
+        })
+      } else if (qualityError && qualityError.code !== 'PGRST116') {
+        // PGRST116 is "not found" error, which is fine
+        console.error('Error loading quality analysis:', qualityError)
+      }
     } catch (error) {
-      console.log('No existing takeoff analysis found')
+      console.error('Error loading existing analysis:', error)
     }
   }
 
