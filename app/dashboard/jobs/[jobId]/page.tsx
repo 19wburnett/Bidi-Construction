@@ -91,6 +91,7 @@ export default function JobDetailPage() {
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Auto-trigger ingestion after upload (same pattern as plans/new page)
     const files = Array.from(e.target.files || [])
     if (!files.length || !job) return
 
@@ -113,21 +114,44 @@ export default function JobDetailPage() {
           .getPublicUrl(filePath)
 
         // Create plan record
-        const { error: insertError } = await supabase
+        // Store both public URL and storage path for ingestion
+        const { data: newPlan, error: insertError } = await supabase
           .from('plans')
           .insert({
             user_id: user?.id,
             job_id: jobId,
             title: file.name.split('.')[0],
             file_name: file.name,
-            file_path: publicUrl,
+            file_path: filePath, // Store storage path, not public URL (ingestion needs this)
             file_size: file.size,
             file_type: file.type,
             status: 'ready',
             num_pages: 1 // Will be updated after PDF processing
           })
+          .select()
+          .single()
 
         if (insertError) throw insertError
+
+        // Auto-trigger ingestion in the background (don't wait)
+        if (newPlan) {
+          console.log(`Auto-triggering ingestion for plan ${newPlan.id}`)
+          fetch('/api/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId: newPlan.id,
+              jobId: jobId,
+              options: {
+                enable_image_extraction: true,
+                image_dpi: 300
+              }
+            })
+          }).catch(err => {
+            console.error('Background ingestion trigger failed:', err)
+            // Don't block the user - ingestion can be retried later
+          })
+        }
       }
 
       // Reload plans

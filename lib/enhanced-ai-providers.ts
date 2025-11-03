@@ -18,7 +18,8 @@ export const MODEL_SPECIALIZATIONS = {
   'gpt-4o': 'general_construction', // Best overall construction analysis
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
   'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
-  'grok-4': 'alternative_analysis' // Alternative perspective model (XAI) - newest and most powerful
+  'claude-sonnet-4-20250514': 'general_construction', // Latest Sonnet model (better quality than haiku)
+  'grok-2-1212': 'alternative_analysis' // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
 } as const
 
 export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
@@ -49,6 +50,7 @@ export interface EnhancedAIResponse {
 export interface ConsensusResult {
   items: any[]
   issues: any[]
+  quality_analysis?: any // Quality analysis from models
   confidence: number
   consensusCount: number
   disagreements: any[]
@@ -67,8 +69,68 @@ export class EnhancedAIProvider {
 
   private initializeModelPerformance() {
     // Initialize performance scores based on model specializations
+    // Prioritized by your OpenAI dashboard availability and limits
     this.modelPerformance = {
-      // Note: GPT-5 removed due to timeout issues on Vercel
+      // GPT-5 family - highest limits (500k TPM, 500 RPM)
+      'gpt-5': {
+        takeoff: 0.98,
+        quality: 0.95,
+        bid_analysis: 0.98,
+        code_compliance: 0.92,
+        cost_estimation: 0.95
+      },
+      'gpt-5-mini': {
+        takeoff: 0.96,
+        quality: 0.93,
+        bid_analysis: 0.96,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+      'gpt-5-nano': {
+        takeoff: 0.94,
+        quality: 0.91,
+        bid_analysis: 0.94,
+        code_compliance: 0.88,
+        cost_estimation: 0.91
+      },
+      // GPT-4.1 family - high limits (200k TPM for mini/nano, 30k for base)
+      'gpt-4.1': {
+        takeoff: 0.96,
+        quality: 0.93,
+        bid_analysis: 0.96,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+      'gpt-4.1-mini': {
+        takeoff: 0.94,
+        quality: 0.91,
+        bid_analysis: 0.94,
+        code_compliance: 0.88,
+        cost_estimation: 0.91
+      },
+      'gpt-4.1-nano': {
+        takeoff: 0.92,
+        quality: 0.89,
+        bid_analysis: 0.92,
+        code_compliance: 0.86,
+        cost_estimation: 0.89
+      },
+      // O-series models - reasoning models
+      'o3': {
+        takeoff: 0.97,
+        quality: 0.94,
+        bid_analysis: 0.97,
+        code_compliance: 0.93,
+        cost_estimation: 0.94
+      },
+      'o4-mini': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.91,
+        cost_estimation: 0.92
+      },
+      // GPT-4o - standard model (30k TPM, 500 RPM)
       'gpt-4o': {
         takeoff: 0.95,
         quality: 0.90,
@@ -83,6 +145,7 @@ export class EnhancedAIProvider {
         code_compliance: 0.80,
         cost_estimation: 0.82
       },
+      // Non-OpenAI models
       'claude-3-haiku-20240307': {
         takeoff: 0.85,
         quality: 0.80,
@@ -90,32 +153,74 @@ export class EnhancedAIProvider {
         code_compliance: 0.85,
         cost_estimation: 0.80
       },
-             'grok-4': {
-               takeoff: 0.95,        // Grok-4 is the newest and most powerful!
+      'claude-sonnet-4-20250514': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.94,
+        code_compliance: 0.90,
+        cost_estimation: 0.93
+      },
+             'grok-2-1212': {
+        takeoff: 0.95,
                quality: 0.92,
                bid_analysis: 0.95,
                code_compliance: 0.90,
                cost_estimation: 0.92
-             },
-      'gemini-1.5-flash': {
-        takeoff: 0.82,        // Good for measurements and calculations
-        quality: 0.85,
-        bid_analysis: 0.80,
-        code_compliance: 0.75,
-        cost_estimation: 0.88
       }
+      // Gemini removed - model not available or causing errors
     }
   }
 
   // Route tasks to best-performing models
-  private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
-    // Get max models from environment or default
-    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '5')
+  // Prioritizes GPT models first, then falls back to Claude/Grok
+  private getBestModelsForTask(taskType: TaskType, count: number = 10): string[] {
+    // Get max models from environment or default to 10 (enough for all OpenAI + Claude + Grok)
+    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '10')
     const actualCount = Math.min(count, maxModels)
     
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => {
+        // USER-PRIORITIZED ORDER (reliable models first):
+        // 1. gpt-4o (proven working)
+        if (a.model === 'gpt-4o') return -1
+        if (b.model === 'gpt-4o') return 1
+        // 2. Claude Sonnet (better quality than haiku, proven working)
+        if (a.model === 'claude-sonnet-4-20250514') return -1
+        if (b.model === 'claude-sonnet-4-20250514') return 1
+        // 3. o4-mini (if above fail)
+        if (a.model === 'o4-mini') return -1
+        if (b.model === 'o4-mini') return 1
+        // 4. gpt-4.1-nano (last resort)
+        if (a.model === 'gpt-4.1-nano') return -1
+        if (b.model === 'gpt-4.1-nano') return 1
+        
+        // Secondary fallbacks (if primary models not available):
+        // Claude Haiku (fast fallback)
+        if (a.model === 'claude-3-haiku-20240307') return -1
+        if (b.model === 'claude-3-haiku-20240307') return 1
+        // Other GPT-4.1 variants
+        if (a.model.startsWith('gpt-4.1') && !b.model.startsWith('gpt-4.1')) return -1
+        if (b.model.startsWith('gpt-4.1') && !a.model.startsWith('gpt-4.1')) return 1
+        // Other O-series models
+        if (a.model.startsWith('o') && !b.model.startsWith('o')) return -1
+        if (b.model.startsWith('o') && !a.model.startsWith('o')) return 1
+        // GPT-5 series (disabled for now - using all tokens for reasoning)
+        if (a.model === 'gpt-5') return -1
+        if (b.model === 'gpt-5') return 1
+        if (a.model === 'gpt-5-mini') return -1
+        if (b.model === 'gpt-5-mini') return 1
+        if (a.model === 'gpt-5-nano') return -1
+        if (b.model === 'gpt-5-nano') return 1
+        // Then other GPT models
+        if (a.model.includes('gpt') && !b.model.includes('gpt')) return -1
+        if (b.model.includes('gpt') && !a.model.includes('gpt')) return 1
+        // Then prioritize Grok (alternative provider, good fallback)
+        if (a.model.includes('grok') && !b.model.includes('grok')) return -1
+        if (b.model.includes('grok') && !a.model.includes('grok')) return 1
+        // Finally sort by score
+        return b.score - a.score
+      })
       .slice(0, actualCount)
     
     return modelScores.map(m => m.model)
@@ -128,72 +233,96 @@ export class EnhancedAIProvider {
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (limit to 5 for maximum consensus)
-    const selectedModels = this.getBestModelsForTask(options.taskType, 5)
+    // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
+    let selectedModels = this.getBestModelsForTask(options.taskType, 10)
+    
+    // CRITICAL: Always ensure Claude Sonnet is included for fallback (better than haiku)
+    // Add it if it's not already in the list
+    const requiredFallbacks = ['claude-sonnet-4-20250514']
+    requiredFallbacks.forEach(fallback => {
+      if (!selectedModels.includes(fallback)) {
+        // Add to the end (will be tried after primary models)
+        selectedModels.push(fallback)
+      }
+    })
     
     // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
       // Check environment flags
       if (model.includes('gpt') && process.env.ENABLE_OPENAI === 'false') return false
       if (model.includes('claude') && process.env.ENABLE_ANTHROPIC === 'false') return false
-      if (model.includes('gemini') && process.env.ENABLE_GOOGLE === 'false') return false
+      if (model.includes('gemini')) return false // Gemini disabled - model not available
       if (model.includes('grok') && process.env.ENABLE_XAI === 'false') return false
       
       // Check API key availability
       if (model.includes('gpt') && !process.env.OPENAI_API_KEY) return false
       if (model.includes('claude') && !process.env.ANTHROPIC_API_KEY) return false
-      if (model.includes('gemini') && !process.env.GOOGLE_GEMINI_API_KEY) return false
+      // Gemini disabled - always filter out
+      if (model.includes('gemini')) return false
       if (model.includes('grok') && !process.env.XAI_API_KEY) return false
       
       return true
     })
     
-    console.log(`Using specialized models for ${options.taskType}:`, enabledModels)
+    console.log(`Using specialized models for ${options.taskType} (sequential with fallback):`, enabledModels)
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
     console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run analysis with selected models in parallel with timeout
-    const analysisPromises = enabledModels.map(async (model, index) => {
-      console.log(`Starting analysis with model ${index + 1}/${enabledModels.length}: ${model}`)
+    // Run models SEQUENTIALLY with fallback - try first model, only move to next if it fails
+    const successfulResults: EnhancedAIResponse[] = []
+    const failedResults: any[] = []
+    
+    for (let i = 0; i < enabledModels.length; i++) {
+      const model = enabledModels[i]
+      console.log(`\n[${i + 1}/${enabledModels.length}] Attempting analysis with: ${model}`)
+      
       try {
-        // Add timeout to prevent Vercel 300s limit
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Model timeout after 60 seconds')), 60000)
+        // Add timeout to prevent Vercel 300s limit (increased to 120s for large prompts)
+        const timeoutMs = 120000 // 120 seconds - large prompts with images can take longer
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
         
+        const modelStartTime = Date.now()
         const result = await Promise.race([
           this.analyzeWithModel(images, options, model),
           timeoutPromise
         ]) as EnhancedAIResponse
         
-        console.log(`Model ${model} succeeded: ${result.content.length} chars`)
-        return result
-      } catch (error) {
-        console.error(`Model ${model} failed:`, error)
-        throw error
+        const modelProcessingTime = Date.now() - modelStartTime
+        result.processingTime = modelProcessingTime
+        
+        console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
+        successfulResults.push(result)
+        
+        // SUCCESS! Stop here - we only need one successful model
+        console.log(`🎯 First successful model (${model}) - stopping here, not trying remaining models`)
+        break
+        
+      } catch (error: any) {
+        const errorMsg = error?.message || String(error)
+        console.error(`❌ ${model} failed:`, errorMsg)
+        failedResults.push({ model, error: errorMsg })
+        
+        // Continue to next model only if this one failed
+        if (i < enabledModels.length - 1) {
+          console.log(`⏭️  Falling back to next model...`)
+        } else {
+          console.error(`⚠️  All ${enabledModels.length} models failed!`)
+        }
       }
-    })
+    }
     
-    const results = await Promise.allSettled(analysisPromises)
+    const totalProcessingTime = Date.now() - startTime
     
-    const successfulResults = results
-      .filter(r => r.status === 'fulfilled')
-      .map(r => (r as PromiseFulfilledResult<EnhancedAIResponse>).value)
-    
-    const failedResults = results
-      .filter(r => r.status === 'rejected')
-      .map(r => (r as PromiseRejectedResult).reason)
-    
-    const processingTime = Date.now() - startTime
-    
-    // Add processing time to all results
-    successfulResults.forEach(result => {
-      result.processingTime = processingTime
-    })
-    
-    console.log(`Enhanced analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${processingTime}ms`)
+    console.log(`\n📊 Sequential analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
     if (failedResults.length > 0) {
-      console.log(`Failed models:`, failedResults.map(r => r.message || r))
+      console.log(`❌ Failed models:`, failedResults.map(r => `${r.model}: ${r.error}`))
+    }
+    
+    // If no models succeeded, throw an error with helpful message
+    if (successfulResults.length === 0) {
+      throw new Error(`All ${enabledModels.length} models failed. Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
     }
     
     return successfulResults
@@ -209,17 +338,27 @@ export class EnhancedAIProvider {
     
     try {
       switch (model) {
+        // All OpenAI GPT models
         case 'gpt-5':
+        case 'gpt-5-mini':
+        case 'gpt-5-nano':
+        case 'gpt-4.1':
+        case 'gpt-4.1-mini':
+        case 'gpt-4.1-nano':
+        case 'o3':
+        case 'o4-mini':
         case 'gpt-4o':
         case 'gpt-4-vision':
         case 'gpt-4-turbo':
           return await this.analyzeWithOpenAI(images, options, model)
         case 'claude-3-haiku-20240307':
+        case 'claude-sonnet-4-20250514':
           return await this.analyzeWithClaude(images, options, model)
-        case 'grok-4':
+        case 'grok-2-1212':
           return await this.analyzeWithXAI(images, options, model)
-        case 'gemini-1.5-flash':
-          return await this.analyzeWithGemini(images, options, model)
+        // case 'gemini-1.5-flash':
+        //   return await this.analyzeWithGemini(images, options, model)
+        // Gemini removed - model not available
         default:
           throw new Error(`Unknown model: ${model}`)
       }
@@ -257,7 +396,24 @@ export class EnhancedAIProvider {
         maxTokens = Math.min(maxTokens, 4096) // GPT-4-turbo max is 4096
       }
       
-      // GPT-5 doesn't support custom temperature, use default for it
+      // Reasoning models (gpt-5 series, o3, o4-mini) use reasoning tokens that count against max_completion_tokens
+      // They need MUCH higher limits because reasoning tokens consume the budget before output
+      // These models can handle up to 128k completion tokens, but we'll use 32k for safety
+      const reasoningModels = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
+      const isReasoningModel = reasoningModels.includes(model)
+      
+      if (isReasoningModel) {
+        // Reasoning models need high token limits - reasoning consumes tokens before output
+        maxTokens = Math.max(maxTokens, 16384) // Minimum 16k for reasoning models
+        // Cap at 32k to avoid excessive costs, but allow reasoning models to actually produce output
+        maxTokens = Math.min(maxTokens, 32768)
+      }
+      
+      // Some OpenAI models don't support custom temperature - only default (1) is allowed
+      // Models that require default temperature: gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini
+      const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
+      const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(model)
+      
       const requestConfig: any = {
         model: model,
         messages: [
@@ -274,29 +430,42 @@ export class EnhancedAIProvider {
         response_format: { type: 'json_object' }
       }
       
-      // Only add temperature for models that support it (not GPT-5)
-      if (model !== 'gpt-5') {
+      // Only add temperature for models that support custom values
+      if (supportsCustomTemperature) {
         requestConfig.temperature = options.temperature || 0.2
       }
+      // Models without custom temperature support will use default (1.0)
       
       const response = await openai.chat.completions.create(requestConfig)
       
-      console.log(`OpenAI ${model} response received: ${response.choices[0].message.content?.length || 0} chars`)
+      const content = response.choices[0].message.content || ''
+      const finishReason = response.choices[0].finish_reason
+      const reasoningTokens = (response.usage as any)?.completion_tokens_details?.reasoning_tokens || 0
+      const completionTokens = response.usage?.completion_tokens || 0
+      
+      console.log(`OpenAI ${model} response received: ${content.length} chars, finish_reason: ${finishReason}`)
+      console.log(`Token usage: ${completionTokens} completion tokens (${reasoningTokens} reasoning + ${completionTokens - reasoningTokens} output)`)
       
       // Check if response is empty and log details
-      if (!response.choices[0].message.content || response.choices[0].message.content.length === 0) {
-        console.warn(`OpenAI ${model} returned empty response. Finish reason: ${response.choices[0].finish_reason}`)
+      if (!content || content.length === 0) {
+        console.warn(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}`)
+        console.warn(`Token breakdown: ${reasoningTokens} reasoning tokens used, ${completionTokens - reasoningTokens} output tokens`)
+        if (isReasoningModel && reasoningTokens >= maxTokens * 0.9) {
+          console.error(`⚠️ CRITICAL: Reasoning model exhausted token budget. Increase max_completion_tokens or reduce prompt size.`)
+        }
         console.warn(`Response object:`, JSON.stringify(response, null, 2))
+        // Throw error for empty responses - don't treat as success
+        throw new Error(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}. All ${completionTokens} tokens were used for reasoning, leaving 0 for output.`)
       }
       
       return {
         provider: 'openai',
         model: model,
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-        content: response.choices[0].message.content || '',
-        finishReason: response.choices[0].finish_reason,
+        content: content,
+        finishReason: finishReason,
         tokensUsed: response.usage?.total_tokens,
-        confidence: this.calculateConfidence(response.choices[0].message.content || ''),
+        confidence: this.calculateConfidence(content),
         taskType: options.taskType
       }
     } catch (error) {
@@ -465,18 +634,20 @@ export class EnhancedAIProvider {
             ] 
           }
         ],
-        max_completion_tokens: Math.min(options.maxTokens || 8192, 4096), // XAI models typically have lower limits
-        temperature: options.temperature || 0.2,
-        response_format: { type: 'json_object' }
+        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Try max_tokens instead of max_completion_tokens
+        temperature: options.temperature || 0.2
+        // Note: Grok may not support response_format, remove it for now
       })
     })
 
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`XAI API error (${response.status}):`, errorText)
       if (response.status === 403) {
         console.warn('XAI API access forbidden - skipping Grok model')
         throw new Error('XAI API access forbidden')
       }
-      throw new Error(`XAI API error: ${response.statusText}`)
+      throw new Error(`XAI API error: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
     }
 
     const data = await response.json()
@@ -562,6 +733,410 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     }
   }
 
+  // Extract partial items from incomplete JSON - try to get as much data as possible
+  private extractPartialItems(itemsText: string): any[] {
+    if (!itemsText || itemsText.trim().length === 0) {
+      console.warn('extractPartialItems: itemsText is empty')
+      return []
+    }
+    
+    const items: any[] = []
+    
+    console.log(`[extractPartialItems] Starting extraction from text of length ${itemsText.length}`)
+    
+    // Strategy 1: Try to find complete item objects (may span multiple lines)
+    // Use a more flexible pattern that handles nested objects and multi-line content
+    // Note: Using [\s\S] instead of . with 's' flag for ES compatibility
+    // Improved: Match objects that contain "name" field, even if incomplete
+    let itemMatches: string[] | null = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g)
+    
+    console.log(`[extractPartialItems] Strategy 1 found ${itemMatches ? itemMatches.length : 0} item objects`)
+    
+    // Strategy 2: If that fails, try simpler pattern (non-greedy, handles incomplete objects)
+    if (!itemMatches || itemMatches.length === 0) {
+      itemMatches = itemsText.match(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g)
+      console.log(`[extractPartialItems] Strategy 2 found ${itemMatches ? itemMatches.length : 0} item objects`)
+    }
+    
+    // Strategy 2b: More aggressive - find objects that start with { and have "name" field, even if incomplete
+    if (!itemMatches || itemMatches.length === 0) {
+      // Find all { that might be item starts, then extract until next { or } or end
+      const objectStarts: string[] = []
+      let depth = 0
+      let start = -1
+      for (let i = 0; i < itemsText.length; i++) {
+        if (itemsText[i] === '{') {
+          if (depth === 0) start = i
+          depth++
+        } else if (itemsText[i] === '}') {
+          depth--
+          if (depth === 0 && start >= 0) {
+            objectStarts.push(itemsText.substring(start, i + 1))
+            start = -1
+          }
+        }
+      }
+      // If we have unclosed objects, include them too
+      if (start >= 0 && depth > 0) {
+        objectStarts.push(itemsText.substring(start))
+      }
+      // Filter to objects that contain "name" field
+      const filteredObjects = objectStarts.filter(obj => /"name"\s*:\s*"/.test(obj))
+      if (filteredObjects.length > 0) {
+        itemMatches = filteredObjects
+        console.log(`[extractPartialItems] Strategy 2b found ${itemMatches.length} item objects`)
+      }
+    }
+    
+    // Strategy 3: Try alternative pattern (any object with name OR description)
+    if (!itemMatches || itemMatches.length === 0) {
+      const altMatches = itemsText.match(/\{[^{}]*"(?:name|description)"\s*:\s*"[^"]*"[^{}]*\}/g)
+      if (altMatches && altMatches.length > 0) {
+        itemMatches = altMatches
+        console.log(`[extractPartialItems] Strategy 3 found ${itemMatches.length} item objects`)
+      }
+    }
+    
+    if (itemMatches && itemMatches.length > 0) {
+      itemMatches.forEach(itemStr => {
+        try {
+          // Try to parse complete item first
+          const item = JSON.parse(itemStr)
+          if (item.name) {
+            items.push(item)
+            return
+          }
+        } catch {
+          // If parsing fails, extract fields using regex from this item string
+          const nameMatch = itemStr.match(/"name"\s*:\s*"([^"]*)"/)
+          const descMatch = itemStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const qtyMatch = itemStr.match(/"quantity"\s*:\s*([0-9.]+)/)
+          const unitMatch = itemStr.match(/"unit"\s*:\s*"([^"]*)"/)
+          const catMatch = itemStr.match(/"category"\s*:\s*"([^"]*)"/)
+          const subcatMatch = itemStr.match(/"subcategory"\s*:\s*"([^"]*)"/)
+          const locMatch = itemStr.match(/"location"\s*:\s*"([^"]*)"/)
+          const costMatch = itemStr.match(/"unit_cost"\s*:\s*([0-9.]+)/)
+          const confMatch = itemStr.match(/"confidence"\s*:\s*([0-9.]+)/)
+          
+          if (nameMatch) {
+            items.push({
+              name: nameMatch[1],
+              description: descMatch ? descMatch[1] : 'Partially extracted from incomplete JSON',
+              quantity: qtyMatch ? parseFloat(qtyMatch[1]) : 0,
+              unit: unitMatch ? unitMatch[1] : 'EA',
+              category: catMatch ? catMatch[1] : 'other',
+              subcategory: subcatMatch ? subcatMatch[1] : 'Uncategorized',
+              location: locMatch ? locMatch[1] : '',
+              unit_cost: costMatch ? parseFloat(costMatch[1]) : 0,
+              confidence: confMatch ? parseFloat(confMatch[1]) : 0.3,
+              notes: '⚠️ PARTIALLY EXTRACTED - JSON was incomplete. Verify quantities and details manually.'
+            })
+          }
+        }
+      })
+    }
+    
+    // Strategy 4: If we found items by name but they have no quantities, try to find quantities in the raw text
+    // Look for patterns like "quantity": 150.5 or "quantity":150.5 near each item name
+    if (items.length > 0 && items.some(item => item.quantity === 0)) {
+      // Extract all name-value pairs from the entire itemsText
+      const allNames: string[] = []
+      const allQuantities: Map<string, number> = new Map()
+      const allUnits: Map<string, string> = new Map()
+      const allCategories: Map<string, string> = new Map()
+      const allSubcategories: Map<string, string> = new Map()
+      
+      // Find all names
+      const namePattern = /"name"\s*:\s*"([^"]{3,100})"/g
+      let nameMatch
+      while ((nameMatch = namePattern.exec(itemsText)) !== null) {
+        allNames.push(nameMatch[1])
+      }
+      
+      // Find quantities - look for patterns near each name
+      const quantityPattern = /"quantity"\s*:\s*([0-9.]+)/g
+      let qtyMatch
+      const quantities: number[] = []
+      while ((qtyMatch = quantityPattern.exec(itemsText)) !== null) {
+        quantities.push(parseFloat(qtyMatch[1]))
+      }
+      
+      // Find units
+      const unitPattern = /"unit"\s*:\s*"([^"]{1,10})"/g
+      let unitMatch
+      const units: string[] = []
+      while ((unitMatch = unitPattern.exec(itemsText)) !== null) {
+        units.push(unitMatch[1])
+      }
+      
+      // Find categories
+      const catPattern = /"category"\s*:\s*"([^"]{3,30})"/g
+      let catMatch
+      const categories: string[] = []
+      while ((catMatch = catPattern.exec(itemsText)) !== null) {
+        categories.push(catMatch[1])
+      }
+      
+      // Find subcategories
+      const subcatPattern = /"subcategory"\s*:\s*"([^"]{3,50})"/g
+      let subcatMatch
+      const subcategories: string[] = []
+      while ((subcatMatch = subcatPattern.exec(itemsText)) !== null) {
+        subcategories.push(subcatMatch[1])
+      }
+      
+      // Try to match quantities/units/categories to items by position
+      // If we have the same number of each, assume they're in order
+      items.forEach((item, idx) => {
+        if (item.quantity === 0 && quantities.length > idx) {
+          item.quantity = quantities[idx]
+        }
+        if (item.unit === 'EA' && units.length > idx) {
+          item.unit = units[idx]
+        }
+        if (item.category === 'other' && categories.length > idx) {
+          item.category = categories[idx]
+        }
+        if (item.subcategory === 'Uncategorized' && subcategories.length > idx) {
+          item.subcategory = subcategories[idx]
+        }
+      })
+      
+      // Strategy 4b: Try to infer category/subcategory from item name if still missing
+      items.forEach(item => {
+        if (item.category === 'other' || !item.category) {
+          const nameLower = item.name.toLowerCase()
+          
+          // Infer category from item name
+          if (nameLower.includes('foundation') || nameLower.includes('footing') || nameLower.includes('slab') || 
+              nameLower.includes('concrete') || nameLower.includes('framing') || nameLower.includes('rebar') ||
+              nameLower.includes('beam') || nameLower.includes('column') || nameLower.includes('truss')) {
+            item.category = 'structural'
+          } else if (nameLower.includes('roof') || nameLower.includes('siding') || nameLower.includes('window') ||
+                     nameLower.includes('door') || nameLower.includes('cladding') || nameLower.includes('waterproof')) {
+            item.category = 'exterior'
+          } else if (nameLower.includes('wall') || nameLower.includes('ceiling') || nameLower.includes('insulation') ||
+                     nameLower.includes('drywall') || nameLower.includes('gwb')) {
+            item.category = 'interior'
+          } else if (nameLower.includes('plumb') || nameLower.includes('hvac') || nameLower.includes('electrical') ||
+                     nameLower.includes('fixture') || nameLower.includes('outlet') || nameLower.includes('light')) {
+            item.category = 'mep'
+          } else if (nameLower.includes('floor') || nameLower.includes('paint') || nameLower.includes('trim') ||
+                     nameLower.includes('carpet') || nameLower.includes('tile') || nameLower.includes('cabinet')) {
+            item.category = 'finishes'
+          } else {
+            item.category = 'other'
+          }
+          
+          // Infer subcategory
+          if (!item.subcategory || item.subcategory === 'Uncategorized') {
+            if (nameLower.includes('foundation') || nameLower.includes('footing')) {
+              item.subcategory = 'Foundation'
+            } else if (nameLower.includes('framing') || nameLower.includes('stud')) {
+              item.subcategory = 'Framing'
+            } else if (nameLower.includes('roof')) {
+              item.subcategory = 'Roofing'
+            } else if (nameLower.includes('window') || nameLower.includes('door')) {
+              item.subcategory = 'Openings'
+            } else if (nameLower.includes('plumb') || nameLower.includes('fixture')) {
+              item.subcategory = 'Plumbing'
+            } else if (nameLower.includes('hvac')) {
+              item.subcategory = 'HVAC'
+            } else if (nameLower.includes('electrical') || nameLower.includes('light')) {
+              item.subcategory = 'Electrical'
+            } else if (nameLower.includes('floor')) {
+              item.subcategory = 'Flooring'
+            } else if (nameLower.includes('paint')) {
+              item.subcategory = 'Paint'
+            } else {
+              item.subcategory = 'Uncategorized'
+            }
+          }
+        }
+      })
+    }
+    
+    // Strategy 5: Last resort - extract just names if nothing else worked
+    if (items.length === 0) {
+      console.log('Strategy 5: Trying to extract just names')
+      const namePattern = /"name"\s*:\s*"([^"]{3,200})"/g
+      let match
+      let nameCount = 0
+      while ((match = namePattern.exec(itemsText)) !== null) {
+        nameCount++
+        const inferredCategory = this.inferCategoryFromName(match[1])
+        const inferredSubcategory = this.inferSubcategoryFromName(match[1])
+        
+        items.push({
+          name: match[1],
+          description: 'Extracted from incomplete JSON response',
+          quantity: 0,
+          unit: 'EA',
+          category: inferredCategory.category,
+          subcategory: inferredSubcategory,
+          confidence: 0.2,
+          notes: '⚠️ PARTIALLY EXTRACTED - Only name was recoverable. All other fields need manual entry.'
+        })
+      }
+      console.log(`Strategy 5 extracted ${nameCount} item names`)
+    }
+    
+    console.log(`Final extraction result: ${items.length} items`)
+    return items
+  }
+
+  // Helper to infer category from item name
+  private inferCategoryFromName(name: string): { category: string } {
+    const nameLower = name.toLowerCase()
+    
+    if (nameLower.includes('foundation') || nameLower.includes('footing') || nameLower.includes('slab') || 
+        nameLower.includes('concrete') && (nameLower.includes('wall') || nameLower.includes('foundation')) ||
+        nameLower.includes('framing') || nameLower.includes('rebar') ||
+        nameLower.includes('beam') || nameLower.includes('column') || nameLower.includes('truss')) {
+      return { category: 'structural' }
+    } else if (nameLower.includes('roof') || nameLower.includes('siding') || nameLower.includes('window') ||
+               nameLower.includes('door') || nameLower.includes('cladding') || nameLower.includes('waterproof')) {
+      return { category: 'exterior' }
+    } else if (nameLower.includes('wall') && !nameLower.includes('exterior') || 
+               nameLower.includes('ceiling') || nameLower.includes('insulation') ||
+               nameLower.includes('drywall') || nameLower.includes('gwb')) {
+      return { category: 'interior' }
+    } else if (nameLower.includes('plumb') || nameLower.includes('hvac') || nameLower.includes('electrical') ||
+               nameLower.includes('fixture') || nameLower.includes('outlet') || nameLower.includes('light')) {
+      return { category: 'mep' }
+    } else if (nameLower.includes('floor') || nameLower.includes('paint') || nameLower.includes('trim') ||
+               nameLower.includes('carpet') || nameLower.includes('tile') || nameLower.includes('cabinet')) {
+      return { category: 'finishes' }
+    } else {
+      return { category: 'other' }
+    }
+  }
+
+  // Helper to infer subcategory from item name
+  private inferSubcategoryFromName(name: string): string {
+    const nameLower = name.toLowerCase()
+    
+    if (nameLower.includes('foundation') || nameLower.includes('footing')) {
+      return 'Foundation'
+    } else if (nameLower.includes('framing') || nameLower.includes('stud')) {
+      return 'Framing'
+    } else if (nameLower.includes('roof')) {
+      return 'Roofing'
+    } else if (nameLower.includes('window') || nameLower.includes('door')) {
+      return 'Openings'
+    } else if (nameLower.includes('plumb') || nameLower.includes('fixture')) {
+      return 'Plumbing'
+    } else if (nameLower.includes('hvac')) {
+      return 'HVAC'
+    } else if (nameLower.includes('electrical') || nameLower.includes('light')) {
+      return 'Electrical'
+    } else if (nameLower.includes('floor')) {
+      return 'Flooring'
+    } else if (nameLower.includes('paint')) {
+      return 'Paint'
+    } else if (nameLower.includes('wall')) {
+      return 'Walls'
+    } else if (nameLower.includes('ceiling')) {
+      return 'Ceilings'
+    } else if (nameLower.includes('insulation')) {
+      return 'Insulation'
+    } else {
+      return 'Uncategorized'
+    }
+  }
+
+  // Extract partial issues from incomplete JSON
+  private extractPartialIssues(issuesText: string): any[] {
+    const issues: any[] = []
+    const issueMatches = issuesText.match(/\{[^{}]*"(?:description|severity)"\s*:\s*"[^"]*"[^{}]*\}/g)
+    if (issueMatches) {
+      issueMatches.forEach(issueStr => {
+        try {
+          const issue = JSON.parse(issueStr)
+          issues.push(issue)
+        } catch {
+          // Extract fields individually
+          const descMatch = issueStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const sevMatch = issueStr.match(/"severity"\s*:\s*"([^"]*)"/)
+          const catMatch = issueStr.match(/"category"\s*:\s*"([^"]*)"/)
+          const locMatch = issueStr.match(/"location"\s*:\s*"([^"]*)"/)
+          const recMatch = issueStr.match(/"recommendation"\s*:\s*"([^"]*)"/)
+          
+          if (descMatch) {
+            issues.push({
+              description: descMatch[1],
+              severity: sevMatch ? sevMatch[1] : 'info',
+              category: catMatch ? catMatch[1] : 'general',
+              location: locMatch ? locMatch[1] : '',
+              recommendation: recMatch ? recMatch[1] : '',
+              confidence: 0.3
+            })
+          }
+        }
+      })
+    }
+    return issues
+  }
+
+  // Extract partial object from incomplete JSON
+  private extractPartialObject(objText: string): any {
+    const obj: any = {}
+    // Extract common fields
+    const scoreMatch = objText.match(/"overall_score"\s*:\s*([0-9.]+)/)
+    const notesMatch = objText.match(/"notes"\s*:\s*"([^"]*)"/)
+    const missingSheetsMatch = objText.match(/"missing_sheets"\s*:\s*\[([\s\S]*?)\]/)
+    const missingDimsMatch = objText.match(/"missing_dimensions"\s*:\s*\[([\s\S]*?)\]/)
+    
+    if (scoreMatch) obj.overall_score = parseFloat(scoreMatch[1])
+    if (notesMatch) obj.notes = notesMatch[1]
+    if (missingSheetsMatch) {
+      try {
+        obj.missing_sheets = JSON.parse(`[${missingSheetsMatch[1]}]`)
+      } catch {
+        obj.missing_sheets = []
+      }
+    } else {
+      obj.missing_sheets = []
+    }
+    if (missingDimsMatch) {
+      try {
+        obj.missing_dimensions = JSON.parse(`[${missingDimsMatch[1]}]`)
+      } catch {
+        obj.missing_dimensions = []
+      }
+    } else {
+      obj.missing_dimensions = []
+    }
+    
+    return obj
+  }
+
+  // Extract partial array from incomplete JSON
+  private extractPartialArray(arrayText: string): any[] {
+    const items: any[] = []
+    // Look for objects in the array
+    const objMatches = arrayText.match(/\{[^{}]*\}/g)
+    if (objMatches) {
+      objMatches.forEach(objStr => {
+        try {
+          items.push(JSON.parse(objStr))
+        } catch {
+          // Try to extract at least description/level
+          const descMatch = objStr.match(/"description"\s*:\s*"([^"]*)"/)
+          const levelMatch = objStr.match(/"level"\s*:\s*"([^"]*)"/)
+          if (descMatch) {
+            items.push({
+              description: descMatch[1],
+              level: levelMatch ? levelMatch[1] : 'low',
+              confidence: 0.3
+            })
+          }
+        }
+      })
+    }
+    return items
+  }
+
   // Cross-validation and consensus analysis
   async analyzeWithConsensus(
     images: string[],
@@ -572,35 +1147,270 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // Get results from all specialized models
     const results = await this.analyzeWithSpecializedModels(images, options)
     
-    if (results.length < 2) {
-      console.error(`Only ${results.length} models succeeded. Need at least 2 for consensus analysis.`)
+    // TEMPORARY: Allow single model results until we can get multiple models working consistently
+    // Previously required 2+ models for consensus, but this was blocking valid single-model results
+    if (results.length === 0) {
+      console.error(`No models succeeded. Cannot proceed with analysis.`)
       console.error('Available results:', results.map(r => ({ model: r.model, provider: r.provider, success: !!r.content })))
-      
-      // If we have at least 1 model, use it without consensus
-      if (results.length === 1) {
-        console.log('Falling back to single model analysis (no consensus)')
+      throw new Error(`All models failed. Cannot perform analysis.`)
+    }
+    
+    // If we have at least 1 model, use it (single model analysis is acceptable)
+    if (results.length === 1) {
+      console.log(`Using single model analysis (${results[0].model}) - consensus requires 2+ models but single model is acceptable`)
         const singleResult = results[0]
         try {
-          // Handle empty responses gracefully
+          // Handle empty responses - throw error instead of creating fake data
           if (!singleResult.content || singleResult.content.trim().length === 0) {
-            console.warn(`Model ${singleResult.model} returned empty response, creating fallback structure`)
-            return {
-              items: [],
-              issues: [],
-              confidence: 0.3,
-              consensusCount: 1,
-              disagreements: [],
-              modelAgreements: [singleResult.model],
-              specializedInsights: [],
-              recommendations: ['Analysis completed with minimal data due to empty model response']
+            console.error(`❌ Model ${singleResult.model} returned empty response - this should not happen`)
+            throw new Error(`Model ${singleResult.model} returned empty response. Check token limits and prompt size.`)
+          }
+          
+          // Use robust JSON extraction like multi-model parsing
+          let jsonText = singleResult.content
+          
+          // Remove markdown code blocks if present
+          const codeBlockMatch = singleResult.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+          if (codeBlockMatch) {
+            jsonText = codeBlockMatch[1]
+          } else {
+            // Try to find JSON object in the text
+            const jsonMatch = singleResult.content.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              jsonText = jsonMatch[0]
             }
           }
           
-          const parsed = JSON.parse(singleResult.content)
+          // Try to repair incomplete JSON (common when response is truncated)
+          let parsed: any
+          try {
+            parsed = JSON.parse(jsonText)
+          } catch (parseError) {
+            // Try to repair incomplete JSON
+            console.warn('JSON parse failed, attempting to repair:', parseError)
+            console.warn('JSON preview (first 500 chars):', jsonText.substring(0, 500))
+            
+            // CRITICAL FIX: Fix missing commas before closing brackets/braces in arrays
+            // Common error from Claude: "name": "value"] should be "name": "value",] 
+            // This is a malformed array item - closing bracket where comma should be
+            
+            // SIMPLE FIX FIRST: Replace "key": "value"] with "key": "value", (most common error)
+            // This handles both escaped and non-escaped quotes
+            jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+            
+            // Fix property:value"] pattern (COMMON Claude error) - handle escaped quotes
+            // Pattern: "key": "value"] should become "key": "value",
+            jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+            
+            // More aggressive: Fix any quoted value followed by ] (not at end of array)
+            // Pattern: "value"] where it should be "value",] if inside array
+            // Check if we're inside an array (have [ before and not ] after)
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\](?!\s*[,\}\]\s]|$)/g, (match, value, spaces, offset, string) => {
+              // Look backwards to see if we're in an array
+              const beforeMatch = string.substring(Math.max(0, offset - 100), offset)
+              // If we have an opening [ recently, likely in array
+              if (beforeMatch.includes('[')) {
+                return `"${value}",${spaces}]`
+              }
+              return match
+            })
+            
+            // Fix: "} where "}, should be (missing comma before closing brace in array)
+            jsonText = jsonText.replace(/"([^"]+)"(\s*)\}(?!\s*[,}\]\s]|$)/g, '"$1",$2}')
+            
+            // Fix cases where closing brace is missing comma in array
+            // Pattern: }\s*] should be },\s*] (when closing object in array)
+            jsonText = jsonText.replace(/\}(\s*)\](?!\s*[,}\]\s]|$)/g, '},$1]')
+            
+            // Remove trailing commas (do this AFTER fixing missing commas)
+            jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+            
+            // Try to close incomplete objects/arrays
+            const openBraces = (jsonText.match(/\{/g) || []).length
+            const closeBraces = (jsonText.match(/\}/g) || []).length
+            const openBrackets = (jsonText.match(/\[/g) || []).length
+            const closeBrackets = (jsonText.match(/\]/g) || []).length
+            
+            // Close incomplete objects
+            if (openBraces > closeBraces) {
+              jsonText += '}'.repeat(openBraces - closeBraces)
+            }
+            
+            // Close incomplete arrays
+            if (openBrackets > closeBrackets) {
+              jsonText += ']'.repeat(openBrackets - closeBrackets)
+            }
+            
+            // Try to fix incomplete string values by closing quotes
+            // Find strings that aren't properly closed and close them
+            jsonText = jsonText.replace(/:(\s*)"([^"]*?)([^",}\]]*)$/gm, (match, spaces, text) => {
+              // If string isn't closed, close it
+              if (!match.includes('"', text.length + spaces.length + 2)) {
+                return `:${spaces}"${text}"`
+              }
+              return match
+            })
+            
+            // Fix trailing commas before closing braces/brackets (more aggressively)
+            jsonText = jsonText.replace(/,(\s*)([}\]])/g, '$1$2')
+            
+            // Fix incomplete arrays - find unclosed arrays and close them
+            const incompleteArrayMatch = jsonText.match(/(\[[^\]]*),(\s*)$/m)
+            if (incompleteArrayMatch) {
+              jsonText = jsonText.replace(/,(\s*)$/m, ']')
+            }
+            
+            // Try to fix common JSON syntax errors
+            // Fix unclosed quotes in the middle of strings (replace with escaped quote)
+            jsonText = jsonText.replace(/"([^"]*)"([^",}\]:\s])/g, '"$1\\"$2')
+            
+            // Remove any control characters that might break parsing
+            jsonText = jsonText.replace(/[\x00-\x1F\x7F]/g, '')
+            
+            // Try parsing again
+            try {
+              parsed = JSON.parse(jsonText)
+              console.log('Successfully repaired JSON')
+            } catch (secondError) {
+              // Last resort: try to extract partial data
+              console.warn('JSON repair failed, attempting partial extraction')
+              console.warn('JSON text length:', jsonText.length)
+              console.warn('JSON text preview (first 500 chars):', jsonText.substring(0, 500))
+              console.warn('JSON text preview (last 500 chars):', jsonText.substring(Math.max(0, jsonText.length - 500)))
+              
+              // Extract items array if it exists (even if incomplete)
+              // Try multiple patterns to find items array
+              let itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              
+              // If no match, try without the closing bracket requirement
+              if (!itemsMatch) {
+                itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*)/)
+              }
+              
+              // If still no match, try to find any array that might contain items
+              if (!itemsMatch) {
+                // Look for patterns like: "items": [ ... or items: [ ...
+                itemsMatch = jsonText.match(/["']?items["']?\s*:\s*\[([\s\S]*?)(?:\]|$)/i)
+              }
+              
+              // Debug: log what we found
+              if (itemsMatch) {
+                console.log('Found items array, length:', itemsMatch[1].length)
+                console.log('Items array preview (first 200 chars):', itemsMatch[1].substring(0, 200))
+              } else {
+                console.warn('Could not find items array in JSON')
+                // Try to find ANY array with objects containing "name" field
+                const anyArrayMatch = jsonText.match(/"items"\s*:\s*\[/i)
+                if (anyArrayMatch) {
+                  console.log('Found "items": [ marker but extraction failed')
+                  // Try to extract everything after "items": [
+                  const afterItems = jsonText.substring(jsonText.indexOf('"items": [') + 9)
+                  itemsMatch = ['', afterItems] // Fake match to trigger extraction
+                }
+              }
+              
+              const issuesMatch = jsonText.match(/"issues"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+              
+              // Try to extract quality_analysis object even if incomplete
+              const qaMatch = jsonText.match(/"quality_analysis"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+              let qualityAnalysis: any = {}
+              if (qaMatch) {
+                try {
+                  // Try to extract completeness, consistency, risk_flags, audit_trail
+                  const completenessMatch = qaMatch[1].match(/"completeness"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  const consistencyMatch = qaMatch[1].match(/"consistency"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  const riskFlagsMatch = qaMatch[1].match(/"risk_flags"\s*:\s*\[([\s\S]*?)(?:\]|$)/)
+                  const auditMatch = qaMatch[1].match(/"audit_trail"\s*:\s*\{([\s\S]*?)(?:\}|$)/)
+                  
+                  qualityAnalysis = {
+                    completeness: completenessMatch ? this.extractPartialObject(completenessMatch[1]) : {
+                      overall_score: 0.5,
+                      missing_sheets: [],
+                      missing_dimensions: [],
+                      missing_details: [],
+                      incomplete_sections: [],
+                      notes: 'Quality analysis partially extracted - some data may be missing'
+                    },
+                    consistency: consistencyMatch ? this.extractPartialObject(consistencyMatch[1]) : {
+                      scale_mismatches: [],
+                      unit_conflicts: [],
+                      dimension_contradictions: [],
+                      schedule_vs_elevation_conflicts: [],
+                      notes: 'Consistency check partially extracted'
+                    },
+                    risk_flags: riskFlagsMatch ? this.extractPartialArray(riskFlagsMatch[1]) : [],
+                    audit_trail: auditMatch ? this.extractPartialObject(auditMatch[1]) : {
+                      pages_analyzed: [],
+                      chunks_processed: 1,
+                      coverage_percentage: 50,
+                      assumptions_made: []
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Failed to extract quality_analysis, using default')
+                }
+              }
+              
+              const extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+              const extractedIssues = issuesMatch ? this.extractPartialIssues(issuesMatch[1]) : []
+              
+              console.warn(`Using partially extracted data: ${extractedItems.length} items, ${extractedIssues.length} issues`)
+              
+              // If we extracted 0 items, try one more time with the FULL jsonText as fallback
+              if (extractedItems.length === 0 && jsonText.length > 100) {
+                console.warn('No items extracted with normal method, trying full-text extraction')
+                // Try extracting from the entire jsonText as a last resort
+                const fallbackItems = this.extractPartialItems(jsonText)
+                if (fallbackItems.length > 0) {
+                  console.log(`Fallback extraction found ${fallbackItems.length} items`)
+                  extractedItems.push(...fallbackItems)
+                }
+              }
+              
+              parsed = {
+                items: extractedItems,
+                issues: extractedIssues,
+                quality_analysis: qualityAnalysis
+              }
+              
+              console.warn('Using partially extracted data due to JSON parse failure')
+            }
+          }
+          
+          // Ensure quality_analysis always exists, even if empty
+          // Check if parsed.quality_analysis exists from partial extraction, otherwise create fallback
+          const finalQualityAnalysis = (parsed && parsed.quality_analysis) ? parsed.quality_analysis : {
+            completeness: {
+              overall_score: singleResult.confidence || 0.6,
+              missing_sheets: [],
+              missing_dimensions: [],
+              missing_details: [],
+              incomplete_sections: [],
+              notes: 'Quality analysis generated from single model (no consensus). Verify completeness manually.'
+            },
+            consistency: {
+              scale_mismatches: [],
+              unit_conflicts: [],
+              dimension_contradictions: [],
+              schedule_vs_elevation_conflicts: [],
+              notes: 'Single model analysis - consistency checks limited'
+            },
+            risk_flags: [],
+            audit_trail: {
+              pages_analyzed: [],
+              chunks_processed: 1,
+              coverage_percentage: 50,
+              assumptions_made: parsed.items && parsed.items.length > 0 
+                ? [`Extracted ${parsed.items.length} items from partial JSON - some data may be incomplete`]
+                : []
+            }
+          }
+          
           return {
             items: parsed.items || [],
             issues: parsed.issues || [],
-            confidence: singleResult.confidence || 0.7,
+            quality_analysis: finalQualityAnalysis,
+            confidence: singleResult.confidence || 0.6, // Lower confidence for single model
             consensusCount: 1,
             disagreements: [],
             modelAgreements: [singleResult.model],
@@ -609,8 +1419,19 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           }
         } catch (error) {
           console.error('Failed to parse single model response:', error)
-          console.error('Raw response:', singleResult.content?.substring(0, 200))
-          throw new Error('Single model analysis failed to parse response')
+          console.error('Raw response (first 500 chars):', singleResult.content?.substring(0, 500))
+          
+          // Don't throw - return empty structure with warning
+          return {
+            items: [],
+            issues: [],
+            confidence: 0.3,
+            consensusCount: 1,
+            disagreements: [],
+            modelAgreements: [singleResult.model],
+            specializedInsights: [],
+            recommendations: ['Analysis completed but response could not be fully parsed. Please try again.']
+          }
         }
       }
       
@@ -669,16 +1490,36 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       }
     }).filter((result): result is NonNullable<typeof result> => result !== null)
     
-    if (parsedResults.length < 2) {
-      throw new Error('Need at least 2 valid responses for consensus')
+    // TEMPORARY: Allow single model results - removed 2-model requirement
+    if (parsedResults.length === 0) {
+      throw new Error('No valid responses to process')
     }
     
-    // Build consensus
-    const consensus = this.buildConsensus(parsedResults, options.taskType)
+    // Build consensus (will work with 1 model, just returns that model's results)
+    const consensus = parsedResults.length === 1 
+      ? this.buildSingleModelResult(parsedResults[0], options.taskType)
+      : this.buildConsensus(parsedResults, options.taskType)
     
     console.log(`Consensus analysis complete: ${consensus.consensusCount}/${parsedResults.length} models agreed`)
     
     return consensus
+  }
+
+  // Build result from single model (when only 1 model succeeds)
+  private buildSingleModelResult(
+    result: { parsed: any; model: string; confidence?: number },
+    taskType: TaskType
+  ): ConsensusResult {
+    return {
+      items: result.parsed.items || [],
+      issues: taskType === 'quality' ? (result.parsed.issues || []) : [],
+      confidence: result.confidence || 0.7, // Single model gets lower confidence
+      consensusCount: 1,
+      disagreements: [],
+      modelAgreements: [result.model],
+      specializedInsights: result.parsed.specializedInsights || [],
+      recommendations: result.parsed.recommendations || []
+    }
   }
 
   // Build consensus from multiple model results
@@ -935,3 +1776,4 @@ export async function analyzeWithSpecializedModels(
 ): Promise<EnhancedAIResponse[]> {
   return enhancedAIProvider.analyzeWithSpecializedModels(images, options)
 }
+

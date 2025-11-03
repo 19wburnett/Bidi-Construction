@@ -281,11 +281,12 @@ export default function EnhancedPlanViewer() {
     }
   }
 
-  // Load existing takeoff analysis
+  // Load existing takeoff and quality analysis
   const loadExistingAnalysis = async () => {
     if (!planId || !user) return
 
     try {
+      // Load takeoff analysis
       const { data: takeoffAnalysis } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
@@ -314,6 +315,10 @@ export default function EnhancedPlanViewer() {
         }
         
         const itemsWithIds = ensureItemIds(itemsArray)
+        
+        // Extract quality_analysis from takeoff summary if it exists
+        const qualityAnalysisFromTakeoff = takeoffAnalysis.summary?.quality_analysis
+        
         setTakeoffResults({
           success: true,
           planId,
@@ -325,9 +330,36 @@ export default function EnhancedPlanViewer() {
           },
           results: {
             items: itemsWithIds,
-            summary: takeoffAnalysis.summary || {}
+            summary: takeoffAnalysis.summary || {},
+            quality_analysis: qualityAnalysisFromTakeoff // Include quality_analysis from takeoff
           }
         })
+        
+        // If quality_analysis is in takeoff results, populate quality tab
+        if (qualityAnalysisFromTakeoff) {
+          const issuesFromQA = qualityAnalysisFromTakeoff.risk_flags?.map((rf: any) => ({
+            id: crypto.randomUUID(),
+            severity: rf.level === 'high' ? 'critical' : rf.level === 'medium' ? 'warning' : 'info',
+            category: rf.category || 'general',
+            description: rf.description || '',
+            location: rf.location || '',
+            recommendation: rf.recommendation || '',
+            status: 'open'
+          })) || []
+          
+          // Set issues at top level to match API response format for frontend display
+          setQualityResults({
+            success: true,
+            planId,
+            taskType: 'takeoff',
+            issues: issuesFromQA, // Top level for frontend compatibility
+            results: {
+              issues: issuesFromQA,
+              quality_analysis: qualityAnalysisFromTakeoff
+            }
+          })
+        }
+        
         // Prepare items for BidPackageModal
         const items = itemsWithIds.map((it: any, idx: number) => ({
           id: it.id,
@@ -339,8 +371,93 @@ export default function EnhancedPlanViewer() {
         }))
         setModalTakeoffItems(items)
       }
+
+      // Load quality analysis from plan_quality_analysis table (separate from takeoff)
+      const { data: qualityAnalysis, error: qualityError } = await supabase
+        .from('plan_quality_analysis')
+        .select('*')
+        .eq('plan_id', planId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (qualityAnalysis && !qualityError) {
+        console.log('Loading existing quality analysis:', qualityAnalysis)
+        setQualityAnalysisRowId(qualityAnalysis.id)
+        
+        // Parse issues if needed
+        let issuesArray = []
+        try {
+          if (typeof qualityAnalysis.issues === 'string') {
+            issuesArray = JSON.parse(qualityAnalysis.issues)
+          } else if (Array.isArray(qualityAnalysis.issues)) {
+            issuesArray = qualityAnalysis.issues
+          } else if (qualityAnalysis.findings_by_severity) {
+            // Combine issues from severity buckets
+            issuesArray = [
+              ...(qualityAnalysis.findings_by_severity.critical || []),
+              ...(qualityAnalysis.findings_by_severity.warning || []),
+              ...(qualityAnalysis.findings_by_severity.info || [])
+            ]
+          }
+        } catch (parseError) {
+          console.error('Error parsing quality issues:', parseError)
+          issuesArray = []
+        }
+        
+        const issuesWithIds = ensureIssueIds(issuesArray)
+        
+        // Build quality_analysis object from DB data
+        const qualityAnalysisObj = {
+          completeness: {
+            overall_score: qualityAnalysis.overall_score || 0.8,
+            missing_sheets: [],
+            missing_dimensions: qualityAnalysis.missing_details || [],
+            missing_details: qualityAnalysis.missing_details || [],
+            incomplete_sections: [],
+            notes: 'Quality analysis loaded from database'
+          },
+          consistency: {
+            scale_mismatches: [],
+            unit_conflicts: [],
+            dimension_contradictions: [],
+            schedule_vs_elevation_conflicts: [],
+            notes: 'Consistency check from database'
+          },
+          risk_flags: issuesArray.map((issue: any) => ({
+            level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
+            category: issue.category || 'general',
+            description: issue.description || issue.detail || issue.message || '',
+            location: issue.location || '',
+            recommendation: issue.recommendation || ''
+          })),
+          audit_trail: {
+            pages_analyzed: [],
+            chunks_processed: 1,
+            coverage_percentage: 100,
+            assumptions_made: []
+          }
+        }
+        
+        // Set issues at top level to match API response format for frontend display
+        setQualityResults({
+          success: true,
+          planId,
+          taskType: 'quality',
+          processingTime: qualityAnalysis.processing_time_ms || 0,
+          issues: issuesWithIds, // Top level for frontend compatibility
+          results: {
+            issues: issuesWithIds,
+            quality_analysis: qualityAnalysisObj
+          }
+        })
+      } else if (qualityError && qualityError.code !== 'PGRST116') {
+        // PGRST116 is "not found" error, which is fine
+        console.error('Error loading quality analysis:', qualityError)
+      }
     } catch (error) {
-      console.log('No existing takeoff analysis found')
+      console.error('Error loading existing analysis:', error)
     }
   }
 
@@ -672,6 +789,24 @@ export default function EnhancedPlanViewer() {
         })
       })
 
+      // Handle queued response (202 Accepted)
+      if (analysisResponse.status === 202) {
+        const queueData = await analysisResponse.json()
+        
+        // Update progress to show queued message
+        setAnalysisProgress({ 
+          step: `AI Takeoff underway. Estimated time: ${queueData.estimatedTime || '2-3 hours'}. You will be notified when it is complete.`, 
+          percent: 100 
+        })
+        
+        // Keep the UI showing the message for a bit, then allow them to close it
+        setTimeout(() => {
+          setIsRunningTakeoff(false)
+        }, 5000) // Show for 5 seconds then allow closing
+        
+        return
+      }
+
       if (!analysisResponse.ok) {
         if (analysisResponse.status === 413) {
           throw new Error('Request too large - try with fewer pages or lower quality images')
@@ -696,6 +831,28 @@ export default function EnhancedPlanViewer() {
       setAnalysisProgress({ step: 'Complete!', percent: 100 })
       
       setTakeoffResults(analysisData)
+      
+      // Also populate quality results if present (API now returns both takeoff and quality)
+      if (analysisData.results?.issues || analysisData.results?.quality_analysis) {
+        const apiIssues = analysisData?.results?.issues || []
+        const issuesWithIds = ensureIssueIds(apiIssues)
+        setQualityResults({ ...analysisData, issues: issuesWithIds })
+        
+        // Fetch quality analysis row id if it was saved
+        try {
+          const { data } = await supabase
+            .from('plan_quality_analysis')
+            .select('id')
+            .eq('plan_id', planId)
+            .eq('user_id', user?.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+          if (data?.id) setQualityAnalysisRowId(data.id)
+        } catch (e) {
+          console.warn('Could not fetch quality analysis row id')
+        }
+      }
       
       // Complete analysis
       setTimeout(() => {
@@ -1090,11 +1247,13 @@ export default function EnhancedPlanViewer() {
                               </>
                             )}
                           </Button>
-                          {isRunningTakeoff && (
+                          {(isRunningTakeoff || (analysisProgress.percent === 100 && analysisProgress.step.includes('underway'))) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-600">{analysisProgress.step}</span>
-                                <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
+                                {analysisProgress.percent < 100 && (
+                                  <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
+                                )}
                               </div>
                               <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                                 <div 
@@ -1102,9 +1261,17 @@ export default function EnhancedPlanViewer() {
                                   style={{ width: `${analysisProgress.percent}%` }}
                                 />
                               </div>
-                              <p className="text-xs text-gray-500">
-                                Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
-                              </p>
+                              {analysisProgress.step.includes('underway') ? (
+                                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                                  <p className="text-xs text-blue-800 font-medium">
+                                    ✅ Your request has been queued for processing. You will receive an email notification when the AI takeoff is complete.
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-gray-500">
+                                  Estimated time: {analysisProgress.percent < 70 ? '30-60 seconds' : '10-30 seconds'}
+                                </p>
+                              )}
                             </div>
                           )}
                           {takeoffResults ? (
