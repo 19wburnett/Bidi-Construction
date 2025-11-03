@@ -696,7 +696,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // Use a more flexible pattern that handles nested objects and multi-line content
     // Note: Using [\s\S] instead of . with 's' flag for ES compatibility
     // Improved: Match objects that contain "name" field, even if incomplete
-    let itemMatches = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g)
+    let itemMatches: string[] | null = itemsText.match(/\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?\}/g)
     
     console.log(`[extractPartialItems] Strategy 1 found ${itemMatches ? itemMatches.length : 0} item objects`)
     
@@ -709,7 +709,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     // Strategy 2b: More aggressive - find objects that start with { and have "name" field, even if incomplete
     if (!itemMatches || itemMatches.length === 0) {
       // Find all { that might be item starts, then extract until next { or } or end
-      const objectStarts = []
+      const objectStarts: string[] = []
       let depth = 0
       let start = -1
       for (let i = 0; i < itemsText.length; i++) {
@@ -729,8 +729,11 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         objectStarts.push(itemsText.substring(start))
       }
       // Filter to objects that contain "name" field
-      itemMatches = objectStarts.filter(obj => /"name"\s*:\s*"/.test(obj))
-      console.log(`[extractPartialItems] Strategy 2b found ${itemMatches ? itemMatches.length : 0} item objects`)
+      const filteredObjects = objectStarts.filter(obj => /"name"\s*:\s*"/.test(obj))
+      if (filteredObjects.length > 0) {
+        itemMatches = filteredObjects
+        console.log(`[extractPartialItems] Strategy 2b found ${itemMatches.length} item objects`)
+      }
     }
     
     // Strategy 3: Try alternative pattern (any object with name OR description)
