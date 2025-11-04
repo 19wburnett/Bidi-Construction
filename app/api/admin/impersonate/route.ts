@@ -27,20 +27,33 @@ export async function POST(request: NextRequest) {
 
     // Get target user email
     const { email } = await request.json()
+    console.log('Impersonate request - Admin:', adminUser.email, 'Target email:', email)
+    
     if (!email) {
       return NextResponse.json({ error: 'Email required' }, { status: 400 })
+    }
+
+    // Normalize email (lowercase, trim)
+    const normalizedEmail = email.toLowerCase().trim()
+    
+    // Prevent impersonating yourself
+    if (normalizedEmail === adminUser.email?.toLowerCase().trim()) {
+      return NextResponse.json({ error: 'Cannot impersonate yourself' }, { status: 400 })
     }
 
     // Get target user
     const { data: targetUser, error: targetError } = await supabase
       .from('users')
       .select('id, email')
-      .eq('email', email)
+      .eq('email', normalizedEmail)
       .single()
 
     if (targetError || !targetUser) {
+      console.error('Target user not found:', targetError, 'Email:', normalizedEmail)
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
+    
+    console.log('Found target user:', targetUser.email, 'ID:', targetUser.id)
 
     // Use service role to create session for target user
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -61,6 +74,7 @@ export async function POST(request: NextRequest) {
 
     // Generate magic link for target user
     // Redirect to impersonate callback to handle session setup
+    console.log('Generating magic link for:', targetUser.email)
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: targetUser.email,
@@ -70,11 +84,14 @@ export async function POST(request: NextRequest) {
     })
 
     if (linkError || !linkData?.properties?.action_link) {
+      console.error('Failed to generate magic link:', linkError)
       return NextResponse.json(
         { error: 'Failed to create impersonation link', details: linkError?.message },
         { status: 500 }
       )
     }
+    
+    console.log('Magic link generated successfully, redirecting to:', linkData.properties.action_link.substring(0, 100) + '...')
 
     // Store admin info in cookies
     const cookieStore = await cookies()
