@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       await supabase
         .from('subcontractors')
         .update({
-          name: bidData.companyName || existingSub.name || from.name || 'Unknown',
+          name: bidData.companyName || existingSub.name || (from as any).name || 'Unknown',
           phone: bidData.phone || null,
           website_url: bidData.website || null,
         })
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
         .from('subcontractors')
         .insert({
           email: from.email,
-          name: bidData.companyName || from.name || 'Unknown',
+          name: bidData.companyName || (from as any).name || 'Unknown',
           trade_category: jobRequest.trade_category,
           location: jobRequest.location,
           phone: bidData.phone || null,
