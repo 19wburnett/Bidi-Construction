@@ -214,12 +214,10 @@ export default function MasqueradeCallback() {
         
         console.log('Session fully verified, redirecting to dashboard...')
         
-        // Small delay to ensure cookies are written
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        // Use full page reload with replace to ensure cookies are persisted
-        // and middleware sees them. Use replace instead of href to avoid back button issues
-        window.location.replace('/dashboard')
+        // Use router like the regular auth callback does
+        // This allows Next.js to properly handle the navigation and cookie sync
+        router.push('/dashboard')
+        router.refresh() // Force refresh to ensure middleware sees the new session
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
