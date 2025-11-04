@@ -96,13 +96,18 @@ export default function PlanCanvasEfficient({
       if (!drawing.isVisible) return
       if (drawing.type !== 'comment') return
 
+      const pageOffset = pageOffsets[drawing.pageNumber - 1] || 0
+      const x = drawing.geometry.x
+      const y = drawing.geometry.y
+      
+      // Skip if coordinates are undefined
+      if (x === undefined || y === undefined) return
+
       ctx.strokeStyle = drawing.style.color
       ctx.fillStyle = `${drawing.style.color}20`
       ctx.lineWidth = drawing.style.strokeWidth / viewport.zoom
 
-      const pageOffset = pageOffsets[drawing.pageNumber - 1] || 0
-      const x = drawing.geometry.x
-      const y = drawing.geometry.y + pageOffset
+      const adjustedY = y + pageOffset
 
       // Draw comment pin
       const pinRadius = 8 / viewport.zoom
@@ -115,21 +120,21 @@ export default function PlanCanvasEfficient({
 
       // Circle head
       ctx.beginPath()
-      ctx.arc(x, y - pinStemHeight, pinRadius, 0, Math.PI * 2)
+      ctx.arc(x, adjustedY - pinStemHeight, pinRadius, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
 
       // Stem
       ctx.beginPath()
-      ctx.moveTo(x, y - pinStemHeight + pinRadius)
-      ctx.lineTo(x, y)
+      ctx.moveTo(x, adjustedY - pinStemHeight + pinRadius)
+      ctx.lineTo(x, adjustedY)
       ctx.stroke()
 
       // Base triangle
       ctx.beginPath()
-      ctx.moveTo(x, y)
-      ctx.lineTo(x - pinBaseWidth / 2, y + pinBaseWidth / 2)
-      ctx.lineTo(x + pinBaseWidth / 2, y + pinBaseWidth / 2)
+      ctx.moveTo(x, adjustedY)
+      ctx.lineTo(x - pinBaseWidth / 2, adjustedY + pinBaseWidth / 2)
+      ctx.lineTo(x + pinBaseWidth / 2, adjustedY + pinBaseWidth / 2)
       ctx.closePath()
       ctx.fill()
       ctx.stroke()
@@ -198,6 +203,7 @@ export default function PlanCanvasEfficient({
   const isPointInComment = useCallback((x: number, y: number, drawing: Drawing, pageOffset: number) => {
     if (drawing.type !== 'comment') return false
     const geom = drawing.geometry
+    if (geom.x === undefined || geom.y === undefined) return false
     const drawY = geom.y + pageOffset
     const commentRadius = 15 / viewport.zoom
     return Math.sqrt(Math.pow(x - geom.x, 2) + Math.pow(y - drawY + commentRadius, 2)) <= commentRadius

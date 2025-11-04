@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import DashboardSidebar from './dashboard-sidebar'
 import { Button } from './ui/button'
-import { Menu, X } from 'lucide-react'
+import { Menu } from 'lucide-react'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -36,14 +36,6 @@ export default function DashboardLayout({ children, className }: DashboardLayout
           }`}
         >
           <DashboardSidebar />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="absolute top-4 -right-12 bg-white dark:bg-gray-950 shadow-lg"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <X className="h-4 w-4" />
-          </Button>
         </aside>
 
         {/* Main Content */}
@@ -51,9 +43,10 @@ export default function DashboardLayout({ children, className }: DashboardLayout
           {/* Mobile Menu Button */}
           <div className="lg:hidden sticky top-0 z-30 bg-white dark:bg-black border-b border-gray-200 dark:border-gray-800 px-4 py-3 transition-colors duration-300">
             <Button
-              variant="ghost"
-              size="sm"
+              variant="default"
+              size="default"
               onClick={() => setSidebarOpen(true)}
+              className="shadow-sm"
             >
               <Menu className="h-5 w-5 mr-2" />
               Menu

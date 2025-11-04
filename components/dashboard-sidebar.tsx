@@ -173,6 +173,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         },
         { label: 'Crawler', href: '/admin/crawler' },
         { label: 'Subcontractors', href: '/admin/manage-subcontractors' },
+        { label: 'Manage Bids', href: '/admin/manage-bids' },
         { label: 'Workflow Demo', href: '/admin/workflow-demo' }
       ]
     }

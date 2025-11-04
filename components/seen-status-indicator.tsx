@@ -121,7 +121,7 @@ export default function SeenStatusIndicator({ jobId, refreshTrigger }: SeenStatu
           console.log('Debugging all bids in database...')
           const { data: allBids, error } = await supabase
             .from('bids')
-            .select('id, job_request_id, seen, subcontractor_email, subcontractors (name, email)')
+            .select('id, job_request_id, seen, subcontractors (name, email)')
             .limit(10)
           console.log('All bids in database:', allBids)
           console.log('All bids error:', error)

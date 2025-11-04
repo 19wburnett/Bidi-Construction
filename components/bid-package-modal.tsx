@@ -537,35 +537,110 @@ export default function BidPackageModal({
                       </div>
 
                       <div className="space-y-2 md:space-y-3 max-h-64 overflow-y-auto">
-                        {filteredTakeoffItems.map((item) => (
-                          <motion.div
-                            key={item.id}
-                            variants={staggerItem}
-                            className="flex items-center space-x-3 p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <Checkbox
-                              checked={selectedItems.includes(item.id)}
-                              onCheckedChange={(checked: boolean) => {
-                                if (checked) {
-                                  setSelectedItems(prev => [...prev, item.id])
-                                } else {
-                                  setSelectedItems(prev => prev.filter(id => id !== item.id))
-                                }
-                              }}
-                            />
-                            <div className="flex-1">
-                              <div className="font-medium">{item.description}</div>
-                              <div className="text-sm text-gray-600">
-                                {item.quantity} {item.unit}
-                                {item.unit_cost && ` • $${item.unit_cost}/${item.unit}`}
+                        {filteredTakeoffItems.map((item) => {
+                          const isSelected = selectedItems.includes(item.id)
+                          const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : null
+                          return (
+                            <motion.div
+                              key={item.id}
+                              variants={staggerItem}
+                              className={`flex items-center space-x-3 p-3 border rounded-lg transition-colors ${
+                                isSelected ? 'bg-orange-50 border-orange-300' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={(checked: boolean) => {
+                                  if (checked) {
+                                    setSelectedItems(prev => [...prev, item.id])
+                                  } else {
+                                    setSelectedItems(prev => prev.filter(id => id !== item.id))
+                                  }
+                                }}
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium">{item.description}</div>
+                                <div className="text-sm text-gray-600">
+                                  {item.quantity} {item.unit}
+                                  {item.unit_cost && ` • $${item.unit_cost.toFixed(2)}/${item.unit}`}
+                                </div>
+                                {isSelected && totalCost !== null && (
+                                  <div className="text-sm font-semibold text-green-600 mt-1">
+                                    Total: ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                            <Badge variant="outline" className="text-xs">
-                              {item.category}
-                            </Badge>
-                          </motion.div>
-                        ))}
+                              <Badge variant="outline" className="text-xs">
+                                {item.category}
+                              </Badge>
+                            </motion.div>
+                          )
+                        })}
                       </div>
+
+                      {/* Selected Items Summary */}
+                      {selectedItems.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-4 bg-blue-50 border border-blue-200 rounded-lg"
+                        >
+                          <h4 className="font-semibold text-blue-900 mb-3 flex items-center">
+                            <FileText className="h-4 w-4 mr-2" />
+                            Selected Items Summary ({selectedItems.length})
+                          </h4>
+                          <div className="space-y-2 max-h-48 overflow-y-auto">
+                            {filteredTakeoffItems
+                              .filter(item => selectedItems.includes(item.id))
+                              .map((item) => {
+                                const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : null
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-start justify-between p-2 bg-white rounded border border-blue-100"
+                                  >
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm">{item.description}</div>
+                                      <div className="text-xs text-gray-600 mt-1">
+                                        <span className="font-mono">{item.quantity} {item.unit}</span>
+                                        {item.unit_cost && (
+                                          <>
+                                            {' × '}
+                                            <span className="font-mono">${item.unit_cost.toFixed(2)}</span>
+                                            {'/'}{item.unit}
+                                          </>
+                                        )}
+                                      </div>
+                                      <Badge variant="outline" className="text-xs mt-1">
+                                        {item.category}
+                                      </Badge>
+                                    </div>
+                                    {totalCost !== null && (
+                                      <div className="ml-4 text-right">
+                                        <div className="font-bold text-green-600">
+                                          ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                          </div>
+                          <div className="mt-3 pt-3 border-t border-blue-300 flex items-center justify-between">
+                            <span className="font-semibold text-blue-900">Grand Total:</span>
+                            <span className="text-xl font-bold text-green-600">
+                              $
+                              {filteredTakeoffItems
+                                .filter(item => selectedItems.includes(item.id))
+                                .reduce((sum, item) => {
+                                  const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : 0
+                                  return sum + totalCost
+                                }, 0)
+                                .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </motion.div>
+                      )}
 
                       {/* Add custom line item */}
                       <div className="p-2 md:p-3 border rounded-lg space-y-2 md:space-y-3">

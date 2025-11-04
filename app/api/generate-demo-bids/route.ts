@@ -340,7 +340,6 @@ async function generateBidsAsync(jobRequestId: string, selectedBids: any[], budg
         job_id: jobRequest?.job_id || null,
         job_request_id: jobRequestId,
         subcontractor_id: subcontractorId,
-        subcontractor_email: bidData.email, // Keep for backward compatibility during transition
         bid_amount: adjustedAmount,
         timeline: bidData.timeline,
         notes: bidData.notes,

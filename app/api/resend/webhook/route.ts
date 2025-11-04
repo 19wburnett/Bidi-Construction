@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     // First, try to find existing subcontractor by email
     const { data: existingSub } = await supabase
       .from('subcontractors')
-      .select('id')
+      .select('id, name')
       .eq('email', from.email)
       .single()
     
@@ -154,20 +154,19 @@ export async function POST(request: NextRequest) {
       subcontractorId = newSub.id
     }
 
-    // Store the bid in the database
-    const { data: bid, error: bidError } = await supabase
-      .from('bids')
-      .insert({
-        job_id: jobId,
-        job_request_id: jobRequest.id,
-        subcontractor_id: subcontractorId,
-        subcontractor_email: from.email, // Keep for backward compatibility during transition
-        bid_amount: bidData.bidAmount || null,
-        timeline: bidData.timeline || null,
-        notes: bidData.notes || null,
-        ai_summary: aiSummary,
-        raw_email: emailContent,
-      })
+      // Store the bid in the database
+      const { data: bid, error: bidError } = await supabase
+        .from('bids')
+        .insert({
+          job_id: jobId,
+          job_request_id: jobRequest.id,
+          subcontractor_id: subcontractorId,
+          bid_amount: bidData.bidAmount || null,
+          timeline: bidData.timeline || null,
+          notes: bidData.notes || null,
+          ai_summary: aiSummary,
+          raw_email: emailContent,
+        })
       .select()
       .single()
 

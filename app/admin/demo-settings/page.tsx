@@ -6,18 +6,40 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Building2, Settings, ArrowLeft, Users, Zap, Search, UserPlus, FileText } from 'lucide-react'
+import { 
+  Building2, 
+  Settings, 
+  Users, 
+  Zap, 
+  Search, 
+  UserPlus, 
+  FileText,
+  DollarSign,
+  BarChart3,
+  Activity,
+  ArrowRight,
+  ArrowLeft,
+  PlayCircle
+} from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
+import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
-export default function AdminDemoSettingsPage() {
+export default function AdminDashboardPage() {
   const [demoMode, setDemoMode] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [stats, setStats] = useState({
+    totalBids: 0,
+    totalPlans: 0,
+    totalSubcontractors: 0,
+    pendingAnalyses: 0
+  })
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -133,77 +155,178 @@ export default function AdminDemoSettingsPage() {
     )
   }
 
+  const adminFeatures = [
+    {
+      title: 'Analyze Plans',
+      description: 'Review and complete takeoff and quality analyses for uploaded plans',
+      icon: FileText,
+      href: '/admin/analyze-plans',
+      color: 'blue',
+      badge: stats.pendingAnalyses > 0 ? stats.pendingAnalyses : undefined
+    },
+    {
+      title: 'Manage Bids',
+      description: 'Add and manage line items for bids from subcontractors',
+      icon: DollarSign,
+      href: '/admin/manage-bids',
+      color: 'green'
+    },
+    {
+      title: 'Manage Subcontractors',
+      description: 'View, add, and manage subcontractors in your network',
+      icon: Users,
+      href: '/admin/manage-subcontractors',
+      color: 'purple'
+    },
+    {
+      title: 'Crawler',
+      description: 'Run web crawler jobs to find and contact new subcontractors',
+      icon: Search,
+      href: '/admin/crawler',
+      color: 'orange'
+    },
+    {
+      title: 'Workflow Demo',
+      description: 'Demonstrate the complete bid collection workflow',
+      icon: PlayCircle,
+      href: '/admin/workflow-demo',
+      color: 'indigo'
+    },
+    {
+      title: 'AI Plan Demo',
+      description: 'Showcase AI-powered plan analysis and bid generation',
+      icon: Zap,
+      href: '/admin/ai-plan-demo',
+      color: 'yellow'
+    }
+  ]
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-background border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Bidi Admin</h1>
-          </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            <Link href="/admin/analyze-plans">
-              <Button variant="outline" className="hidden sm:flex">
-                <FileText className="h-4 w-4 mr-2" />
-                Analyze Plans
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <FileText className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/admin/workflow-demo">
-              <Button variant="outline" className="hidden sm:flex">
-                <Users className="h-4 w-4 mr-2" />
-                Workflow Demo
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <Users className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/admin/crawler">
-              <Button variant="outline" className="hidden sm:flex">
-                <Search className="h-4 w-4 mr-2" />
-                Crawler
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <Search className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/admin/manage-subcontractors">
-              <Button variant="outline" className="hidden sm:flex">
-                <UserPlus className="h-4 w-4 mr-2" />
-                Subcontractors
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <UserPlus className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/dashboard">
-              <Button variant="outline" className="hidden sm:flex">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-              <Button variant="outline" size="sm" className="sm:hidden">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <NotificationBell />
-            <ProfileDropdown />
+      <header className="bg-white border-b shadow-sm">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Building2 className="h-8 w-8 text-orange-600" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+                <p className="text-sm text-gray-600">Manage your platform and settings</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <NotificationBell />
+              <ProfileDropdown />
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Demo Settings</h1>
-          <p className="text-muted-foreground">
-            Configure demo mode settings for showcasing the platform to potential clients.
-          </p>
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+            {error}
+          </div>
+        )}
+
+        {/* Stats Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Total Bids</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalBids.toLocaleString()}</p>
+                </div>
+                <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
+                  <DollarSign className="h-6 w-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Total Plans</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalPlans.toLocaleString()}</p>
+                </div>
+                <div className="h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
+                  <FileText className="h-6 w-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Subcontractors</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalSubcontractors.toLocaleString()}</p>
+                </div>
+                <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
+                  <Users className="h-6 w-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Pending Analyses</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.pendingAnalyses.toLocaleString()}</p>
+                </div>
+                <div className="h-12 w-12 rounded-full bg-orange-100 flex items-center justify-center">
+                  <Activity className="h-6 w-6 text-orange-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="grid gap-6">
-          {/* AI Plan Demo */}
+        {/* Admin Features Grid */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Admin Tools</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {adminFeatures.map((feature) => {
+              const Icon = feature.icon
+              return (
+                <Link key={feature.href} href={feature.href}>
+                  <Card className="h-full hover:shadow-lg transition-all cursor-pointer border-2 hover:border-orange-300">
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className={`h-12 w-12 rounded-lg bg-${feature.color}-100 flex items-center justify-center mb-3`}>
+                          <Icon className={`h-6 w-6 text-${feature.color}-600`} />
+                        </div>
+                        {feature.badge && (
+                          <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                            {feature.badge}
+                          </span>
+                        )}
+                      </div>
+                      <CardTitle className="text-lg">{feature.title}</CardTitle>
+                      <CardDescription className="text-sm">{feature.description}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center text-orange-600 font-medium text-sm">
+                        Open tool
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Settings */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Demo Mode */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">

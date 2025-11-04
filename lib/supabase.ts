@@ -241,7 +241,6 @@ export interface Database {
           job_id: string | null
           job_request_id: string | null
           subcontractor_id: string | null
-          subcontractor_email: string | null
           bid_amount: number | null
           timeline: string | null
           notes: string | null
@@ -260,7 +259,6 @@ export interface Database {
           job_id?: string | null
           job_request_id?: string | null
           subcontractor_id?: string | null
-          subcontractor_email?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null
@@ -279,7 +277,6 @@ export interface Database {
           job_id?: string | null
           job_request_id?: string | null
           subcontractor_id?: string | null
-          subcontractor_email?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null

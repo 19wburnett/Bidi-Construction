@@ -374,13 +374,13 @@ export default function JobDetailPage() {
                           <Card className="cursor-pointer">
                             <CardContent className="p-4">
                               <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center space-x-2">
-                                  <FileText className="h-5 w-5 text-orange-600" />
-                                  <span className="font-medium text-sm truncate">
+                                <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                  <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
+                                  <span className="font-medium text-sm truncate min-w-0">
                                     {plan.title || plan.file_name}
                                   </span>
                                 </div>
-                                <Badge variant="outline" className="text-xs">
+                                <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
                                   {plan.status}
                                 </Badge>
                               </div>

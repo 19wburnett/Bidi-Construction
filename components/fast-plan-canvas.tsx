@@ -1,6 +1,7 @@
 'use client'
 
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { 
   MessageSquare,
@@ -23,6 +24,58 @@ import {
 
 import { Drawing } from '@/lib/canvas-utils'
 import CommentPopup from '@/components/comment-popup'
+
+// Dynamically import react-pdf to avoid SSR issues
+const Document = dynamic(
+  () => import('react-pdf').then((mod) => mod.Document),
+  { 
+    ssr: false,
+    loading: () => null
+  }
+) as any
+
+const Page = dynamic(
+  () => import('react-pdf').then((mod) => mod.Page),
+  { ssr: false }
+) as any
+
+// Worker configuration will be handled in useEffect
+
+// Import CSS for react-pdf
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+
+// Inject styles to ensure react-pdf canvas is visible
+if (typeof window !== 'undefined') {
+  // Check if styles already injected
+  if (!document.getElementById('react-pdf-canvas-fix')) {
+    const style = document.createElement('style')
+    style.id = 'react-pdf-canvas-fix'
+    style.textContent = `
+      .react-pdf__Page__canvas {
+        display: block !important;
+        max-width: 100% !important;
+        height: auto !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        image-rendering: auto !important;
+        background-color: white !important;
+      }
+      .react-pdf__Page {
+        display: block !important;
+        position: relative !important;
+        background-color: white !important;
+      }
+      .react-pdf__Page__textContent {
+        display: none !important;
+      }
+      .react-pdf__Page__annotations {
+        display: none !important;
+      }
+    `
+    document.head.appendChild(style)
+  }
+}
 
 // Helper functions for measurements (pure functions, can be outside component)
 const calculatePixelDistance = (x1: number, y1: number, x2: number, y2: number): number => {
@@ -127,79 +180,101 @@ export default function FastPlanCanvas({
   }
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
-  const [numPages, setNumPages] = useState(1) // Default to 1 page for drawing area
-  const [pdfPages, setPdfPages] = useState<HTMLCanvasElement[]>([])
+  const [numPages, setNumPages] = useState(0) // Start at 0, will be set when PDF loads
   const [currentPage, setCurrentPage] = useState(1)
-  const [loadingPages, setLoadingPages] = useState<Set<number>>(new Set())
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
+  const [pageHeights, setPageHeights] = useState<Map<number, number>>(new Map())
+  const [documentReady, setDocumentReady] = useState(false) // Track if PDF is ready for rendering
+  const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set([1])) // Track visible pages for lazy loading
   const hasAutoFitted = useRef(false) // Track if we've already auto-fitted
-  
-  // Use refs to avoid infinite loops
-  const pdfDocumentRef = useRef<any>(null)
-  const loadingPagesRef = useRef<Set<number>>(new Set())
-  const loadedPagesRef = useRef<Set<number>>(new Set())
 
-  // Load page function - defined outside useEffect to avoid dependency issues
-  const loadPage = useCallback(async (pageNum: number) => {
-    const pdfDocument = pdfDocumentRef.current
-    if (!pdfDocument || loadingPagesRef.current.has(pageNum) || loadedPagesRef.current.has(pageNum)) {
-      return
-    }
-    
-    try {
-      loadingPagesRef.current.add(pageNum)
-      setLoadingPages(new Set(loadingPagesRef.current))
-      
-      const page = await pdfDocument.getPage(pageNum)
-      const viewport = page.getViewport({ scale })
-      
-      // Create canvas for this page
-      const canvas = document.createElement('canvas')
-      const context = canvas.getContext('2d')!
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      
-      // Render page to canvas with timeout
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport
+  // Configure PDF.js worker on mount - only needed for getting page count
+  const [workerReady, setWorkerReady] = useState(false)
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !workerReady) {
+      const initWorker = async () => {
+        try {
+          const pdfjs = await import('react-pdf')
+          if (pdfjs.pdfjs) {
+            // Set worker source to absolute path to avoid Turbopack specifier issues
+            pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+              '/pdf.worker.min.js',
+              window.location.origin
+            ).toString()
+            console.log('PDF.js worker configured:', pdfjs.pdfjs.GlobalWorkerOptions.workerSrc)
+            
+            // Give the worker more time to initialize properly
+            // Increased delay to ensure worker is fully ready
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            
+            // Verify worker is actually ready
+            if (pdfjs.pdfjs.GlobalWorkerOptions.workerSrc) {
+              console.log('PDF.js worker ready')
+              setWorkerReady(true)
+            } else {
+              console.warn('PDF.js worker not properly configured, retrying...')
+              setTimeout(() => setWorkerReady(true), 500)
+            }
+          }
+        } catch (error) {
+          console.error('Failed to configure PDF.js worker:', error)
+          // Fallback to CDN
+          try {
+            const pdfjs = await import('react-pdf')
+            if (pdfjs.pdfjs) {
+              pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.pdfjs.version}/pdf.worker.min.js`
+              console.log('PDF.js worker configured with CDN fallback')
+              await new Promise(resolve => setTimeout(resolve, 1000))
+              setWorkerReady(true)
+            }
+          } catch (fallbackError) {
+            console.error('CDN fallback also failed:', fallbackError)
+            // Still set ready after delay to allow rendering attempts
+            setTimeout(() => setWorkerReady(true), 1500)
+          }
+        }
       }
       
-      // Add timeout to prevent hanging (increased to 30s for large plans)
-      const renderPromise = page.render(renderContext).promise
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Render timeout')), 30000)
-      )
-      
-      await Promise.race([renderPromise, timeoutPromise])
-      
-      // Update state
-      setPdfPages(prev => {
-        const newPages = [...prev]
-        newPages[pageNum - 1] = canvas
-        return newPages
-      })
-      
-      loadedPagesRef.current.add(pageNum)
-      setLoadedPages(new Set(loadedPagesRef.current))
-      
-      // Clean up page immediately
-      page.cleanup()
-      
-    } catch (pageError) {
-      console.warn(`Failed to render page ${pageNum}:`, pageError)
-    } finally {
-      loadingPagesRef.current.delete(pageNum)
-      setLoadingPages(new Set(loadingPagesRef.current))
+      initWorker()
     }
-  }, [])
+  }, [workerReady])
 
-  // Handle goToPage prop to navigate to a specific page
+  // Load PDF to get page count only, then destroy PDF object
   useEffect(() => {
-    if (goToPage && goToPage >= 1 && goToPage <= numPages) {
-      setCurrentPage(goToPage)
+    if (!pdfUrl || !workerReady || pdfLoaded) return
+
+    const loadPageCount = async () => {
+      try {
+        const pdfjs = await import('react-pdf')
+        if (!pdfjs.pdfjs) {
+          throw new Error('PDF.js not available')
+        }
+
+        // Load PDF just to get page count
+        const pdf = await pdfjs.pdfjs.getDocument(pdfUrl).promise
+        const loadedPages = pdf.numPages
+        console.log('PDF loaded successfully, pages:', loadedPages)
+        
+        setNumPages(loadedPages)
+        if (onNumPagesChange) {
+          onNumPagesChange(loadedPages)
+        }
+        setPdfLoaded(true)
+        setPdfError(null)
+        setDocumentReady(true)
+
+        // Destroy PDF object immediately to free memory
+        pdf.destroy()
+        console.log('PDF object destroyed after page count extraction')
+      } catch (error) {
+        console.error('PDF loading failed:', error)
+        setPdfError('PDF could not be loaded. You can still use drawing tools on a blank canvas.')
+        setPdfLoaded(true) // Still allow drawing
+      }
     }
-  }, [goToPage, numPages])
+
+    loadPageCount()
+  }, [pdfUrl, workerReady, pdfLoaded, onNumPagesChange])
 
   // Notify parent on current page changes
   useEffect(() => {
@@ -207,107 +282,6 @@ export default function FastPlanCanvas({
       onPageChange(currentPage)
     }
   }, [currentPage, onPageChange])
-
-  // Progressive PDF loading - load pages on demand
-  useEffect(() => {
-    const loadPdfDocument = async () => {
-      try {
-        const pdfjs = await import('pdfjs-dist')
-        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
-        
-        // Set worker source
-        
-        const pdfDocument = await pdfjs.getDocument({
-          url: pdfUrl,
-          maxImageSize: 10 * 1024 * 1024, // 10MB limit per image for large plans
-          disableFontFace: true, // Disable font loading
-          disableAutoFetch: true, // Disable auto-fetching
-          disableStream: true // Disable streaming
-        }).promise
-        
-        pdfDocumentRef.current = pdfDocument
-        setNumPages(pdfDocument.numPages)
-        // Notify parent of actual page count
-        if (onNumPagesChange) {
-          onNumPagesChange(pdfDocument.numPages)
-        }
-        setPdfLoaded(true)
-        setPdfError(null)
-        hasAutoFitted.current = false // Reset auto-fit flag when loading new PDF
-        
-        // Load first page immediately
-        loadPage(1)
-        
-      } catch (error) {
-        console.warn('PDF loading failed, using fallback drawing area:', error)
-        setPdfError('PDF could not be loaded. You can still use drawing tools on a blank canvas.')
-        setPdfLoaded(true) // Still allow drawing
-        setNumPages(1)
-      }
-    }
-    
-    if (pdfUrl) {
-      loadPdfDocument()
-    }
-    
-    // Cleanup function to prevent memory leaks
-    return () => {
-      if (pdfDocumentRef.current) {
-        pdfDocumentRef.current.destroy()
-        pdfDocumentRef.current = null
-      }
-      setPdfPages([])
-      setPdfLoaded(false)
-      setLoadingPages(new Set())
-      setLoadedPages(new Set())
-      loadingPagesRef.current.clear()
-      loadedPagesRef.current.clear()
-      hasAutoFitted.current = false // Reset on cleanup
-    }
-  }, [pdfUrl, loadPage])
-
-  // Separate effect to handle page loading when current page changes
-  useEffect(() => {
-    if (!pdfLoaded || numPages <= 1) return
-    
-    const loadPagesAroundCurrent = () => {
-      const pagesToLoad = []
-      for (let i = Math.max(1, currentPage - 1); i <= Math.min(numPages, currentPage + 1); i++) {
-        if (!loadedPagesRef.current.has(i) && !loadingPagesRef.current.has(i)) {
-          pagesToLoad.push(i)
-        }
-      }
-      
-      // Load pages with delay to prevent overwhelming
-      pagesToLoad.forEach((pageNum, index) => {
-        setTimeout(() => loadPage(pageNum), index * 200)
-      })
-    }
-    
-    loadPagesAroundCurrent()
-  }, [currentPage, pdfLoaded, numPages, loadPage])
-
-  // Handle scale changes - clear and reload pages
-  useEffect(() => {
-    if (!pdfLoaded) return
-    
-    // Clear existing pages and reload with new scale
-    setPdfPages([])
-    loadedPagesRef.current.clear()
-    loadingPagesRef.current.clear()
-    setLoadedPages(new Set())
-    setLoadingPages(new Set())
-    
-    // Reload the current page and nearby pages
-    if (numPages > 0) {
-      const loadPagesAroundCurrent = () => {
-        for (let i = Math.max(1, currentPage - 1); i <= Math.min(numPages, currentPage + 1); i++) {
-          setTimeout(() => loadPage(i), (i - currentPage + 1) * 200)
-        }
-      }
-      loadPagesAroundCurrent()
-    }
-  }, [scale, pdfLoaded, numPages, currentPage, loadPage])
 
   // Get icon for comment type
   const getCommentIcon = (noteType?: string) => {
@@ -426,6 +400,85 @@ export default function FastPlanCanvas({
     }
   }
 
+  // Calculate page positions for continuous scroll view - memoized to prevent infinite loops
+  // Uses actual heights from loaded pages, or estimated heights
+  const pagePositions = useMemo(() => {
+    const PAGE_GAP = 20 // Gap between pages in pixels
+    const positions: { y: number; height: number }[] = []
+    let yPos = 0
+
+    // Estimate height from first loaded page, or use default based on scale
+    // Standard 8.5x11" at 72 DPI = 612x792px, scaled
+    const estimatedHeight = pageHeights.get(1) || (792 * scale)
+
+    for (let i = 0; i < numPages; i++) {
+      const pageNum = i + 1
+      const height = pageHeights.get(pageNum) || estimatedHeight
+      positions[i] = { y: yPos, height }
+      yPos += height + PAGE_GAP
+    }
+
+    return positions
+  }, [pageHeights, numPages, scale])
+  
+  // Wrapper function for backward compatibility with callbacks
+  const calculatePagePositions = useCallback(() => {
+    return pagePositions
+  }, [pagePositions])
+
+  // Track visible pages for lazy loading
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || numPages === 0) return
+
+    const updateVisiblePages = () => {
+      const containerRect = container.getBoundingClientRect()
+      const positions = calculatePagePositions()
+      const visible = new Set<number>()
+
+      positions.forEach((pos, index) => {
+        const pageNum = index + 1
+        const worldY = pos.y
+        const screenY = worldY * viewport.zoom + viewport.panY
+        const pageHeight = pos.height * viewport.zoom
+        
+        // Check if page is in viewport (with some padding)
+        const padding = 200 // Load pages slightly outside viewport
+        if (screenY + pageHeight + padding >= 0 && screenY - padding <= containerRect.height) {
+          visible.add(pageNum)
+        }
+      })
+
+      setVisiblePages(visible)
+    }
+
+    updateVisiblePages()
+    
+    // Update on viewport changes (zoom/pan)
+    const handleViewportChange = () => updateVisiblePages()
+    
+    // Use requestAnimationFrame for smooth updates
+    let rafId: number
+    const scheduleUpdate = () => {
+      rafId = requestAnimationFrame(() => {
+        updateVisiblePages()
+      })
+    }
+    
+    scheduleUpdate()
+    
+    // Also listen to wheel events for immediate updates
+    const handleWheel = () => scheduleUpdate()
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    window.addEventListener('resize', scheduleUpdate)
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      container.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('resize', scheduleUpdate)
+    }
+  }, [numPages, viewport, calculatePagePositions])
+
   // Render drawings on the drawing canvas
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
@@ -434,25 +487,34 @@ export default function FastPlanCanvas({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    // Check if canvas is in a valid state
+    try {
+      // Test if canvas is accessible
+      if (canvas.width === 0 || canvas.height === 0) return
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    } catch (error) {
+      console.warn('Canvas context error, skipping render:', error)
+      return
+    }
 
-    // Get all drawings for current page (comments and measurements)
-    const drawingsForPage = drawings.filter(drawing => drawing.pageNumber === currentPage)
-    const commentsForPage = drawingsForPage.filter(d => d.type === 'comment')
-    const measurementsForPage = drawingsForPage.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area')
+    // Get drawings for current page only (paginated view)
+    const currentPageComments = drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
+    const currentPageMeasurements = drawings.filter(d => (d.type === 'measurement_line' || d.type === 'measurement_area') && d.pageNumber === currentPage)
     
-    // Draw measurement lines
-    measurementsForPage.forEach(drawing => {
+    // Draw measurement lines for current page
+    currentPageMeasurements.forEach(drawing => {
       if (!drawing.geometry?.points || drawing.geometry.points.length < 4) return
       
-      const scaleSetting = measurementScaleSettings?.[currentPage]
+      const scaleSetting = getScaleSetting(drawing.pageNumber)
       const unit = scaleSetting?.unit || 'ft'
+      // Use points directly at base scale (zoom is handled by transform)
       const points = drawing.geometry.points
       
       ctx.strokeStyle = drawing.style?.color || '#3b82f6'
       ctx.fillStyle = drawing.style?.color || '#3b82f6'
-      ctx.lineWidth = (drawing.style?.strokeWidth || 2) / viewport.zoom
+      ctx.lineWidth = drawing.style?.strokeWidth || 2
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       
@@ -478,18 +540,22 @@ export default function FastPlanCanvas({
             
             // Draw label background
             const label = formatMeasurement(length, unit)
-            ctx.font = `${12 / viewport.zoom}px Arial`
+            ctx.font = '12px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4 / viewport.zoom
+            const padding = 4
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8 / viewport.zoom, textWidth + padding * 2, 16 / viewport.zoom)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
             
             // Draw label text
-            ctx.fillStyle = '#1f2937'
-            ctx.fillText(label, midX, midY)
+            try {
+              ctx.fillStyle = '#1f2937'
+              ctx.fillText(label, midX, midY)
+            } catch (error) {
+              console.warn('Error drawing text, skipping:', error)
+            }
           }
           
           // Draw total length if multiple segments
@@ -497,16 +563,20 @@ export default function FastPlanCanvas({
             const lastX = points[points.length - 2]
             const lastY = points[points.length - 1]
             const label = `Total: ${formatMeasurement(drawing.measurements.totalLength, unit)}`
-            ctx.font = `${14 / viewport.zoom}px Arial`
+            ctx.font = '14px Arial'
             ctx.textAlign = 'left'
             const textWidth = ctx.measureText(label).width
-            const padding = 4 / viewport.zoom
+            const padding = 4
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(lastX + 10 / viewport.zoom, lastY - 10 / viewport.zoom, textWidth + padding * 2, 20 / viewport.zoom)
+            ctx.fillRect(lastX + 10, lastY - 10, textWidth + padding * 2, 20)
             
-            ctx.fillStyle = '#1f2937'
-            ctx.fillText(label, lastX + 10 / viewport.zoom + padding, lastY)
+            try {
+              ctx.fillStyle = '#1f2937'
+              ctx.fillText(label, lastX + 10 + padding, lastY)
+            } catch (error) {
+              console.warn('Error drawing text, skipping:', error)
+            }
           }
         }
       } else if (drawing.type === 'measurement_area') {
@@ -536,30 +606,35 @@ export default function FastPlanCanvas({
           let area = drawing.measurements.area
           const areaLabel = formatArea(area, unit)
           
-          ctx.font = `${14 / viewport.zoom}px Arial`
+          ctx.font = '14px Arial'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           const textWidth = ctx.measureText(areaLabel).width
-          const padding = 6 / viewport.zoom
+          const padding = 6
           
           ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10 / viewport.zoom, textWidth + padding * 2, 20 / viewport.zoom)
+          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
           
-          ctx.fillStyle = '#1f2937'
-          ctx.fillText(areaLabel, centroidX, centroidY)
+          try {
+            ctx.fillStyle = '#1f2937'
+            ctx.fillText(areaLabel, centroidX, centroidY)
+          } catch (error) {
+            console.warn('Error drawing text, skipping:', error)
+          }
         }
       }
     })
     
-    // Draw current measurement being drawn
-    if (currentMeasurement && currentMeasurement.geometry?.points) {
+    // Draw current measurement being drawn (only if on current page)
+    if (currentMeasurement && currentMeasurement.geometry?.points && currentMeasurement.pageNumber === currentPage) {
+      // Use points directly at base scale (zoom is handled by transform)
       const points = currentMeasurement.geometry.points
-      const scaleSetting = measurementScaleSettings?.[currentPage]
+      const scaleSetting = getScaleSetting(currentMeasurement.pageNumber)
       const unit = scaleSetting?.unit || 'ft'
       
       ctx.strokeStyle = currentMeasurement.style?.color || '#3b82f6'
       ctx.fillStyle = currentMeasurement.style?.color || '#3b82f6'
-      ctx.lineWidth = (currentMeasurement.style?.strokeWidth || 2) / viewport.zoom
+      ctx.lineWidth = currentMeasurement.style?.strokeWidth || 2
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       
@@ -578,24 +653,28 @@ export default function FastPlanCanvas({
           const x2 = points[points.length - 2]
           const y2 = points[points.length - 1]
           const pixelDist = calculatePixelDistance(x1, y1, x2, y2)
-          const realDist = calculateRealWorldDistance(pixelDist, currentPage)
+          const realDist = calculateRealWorldDistance(pixelDist, currentMeasurement.pageNumber)
           
           if (realDist !== null) {
             const midX = (x1 + x2) / 2
             const midY = (y1 + y2) / 2
             const label = formatMeasurement(realDist, unit)
             
-            ctx.font = `${12 / viewport.zoom}px Arial`
+            ctx.font = '12px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4 / viewport.zoom
+            const padding = 4
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8 / viewport.zoom, textWidth + padding * 2, 16 / viewport.zoom)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
             
-            ctx.fillStyle = '#1f2937'
-            ctx.fillText(label, midX, midY)
+            try {
+              ctx.fillStyle = '#1f2937'
+              ctx.fillText(label, midX, midY)
+            } catch (error) {
+              console.warn('Error drawing text, skipping:', error)
+            }
           }
         }
       } else if (currentMeasurement.type === 'measurement_area' && points.length >= 6) {
@@ -611,7 +690,7 @@ export default function FastPlanCanvas({
         // Show live area if closed
         if (scaleSetting) {
           const pixelArea = calculatePolygonArea(points)
-          const realArea = calculateRealWorldArea(pixelArea, currentPage)
+          const realArea = calculateRealWorldArea(pixelArea, currentMeasurement.pageNumber)
           
           if (realArea !== null) {
             let sumX = 0, sumY = 0
@@ -624,17 +703,21 @@ export default function FastPlanCanvas({
             
             const areaLabel = formatArea(realArea, unit)
             
-            ctx.font = `${14 / viewport.zoom}px Arial`
+            ctx.font = '14px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(areaLabel).width
-            const padding = 6 / viewport.zoom
+            const padding = 6
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10 / viewport.zoom, textWidth + padding * 2, 20 / viewport.zoom)
+            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
             
-            ctx.fillStyle = '#1f2937'
-            ctx.fillText(areaLabel, centroidX, centroidY)
+            try {
+              ctx.fillStyle = '#1f2937'
+              ctx.fillText(areaLabel, centroidX, centroidY)
+            } catch (error) {
+              console.warn('Error drawing text, skipping:', error)
+            }
           }
         }
       }
@@ -645,26 +728,26 @@ export default function FastPlanCanvas({
       calibrationPoints.forEach((point, index) => {
         ctx.fillStyle = '#ef4444'
         ctx.strokeStyle = 'white'
-        ctx.lineWidth = 2 / viewport.zoom
+        ctx.lineWidth = 2
         
         ctx.beginPath()
-        ctx.arc(point.x, point.y, 8 / viewport.zoom, 0, Math.PI * 2)
+        ctx.arc(point.x, point.y, 8, 0, Math.PI * 2)
         ctx.fill()
         ctx.stroke()
         
         // Draw label
-        ctx.font = `${12 / viewport.zoom}px Arial`
+        ctx.font = '12px Arial'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'bottom'
         ctx.fillStyle = '#1f2937'
-        ctx.fillText(`Point ${index + 1}`, point.x, point.y - 12 / viewport.zoom)
+        ctx.fillText(`Point ${index + 1}`, point.x, point.y - 12)
       })
       
       // Draw line between points if we have 2
       if (calibrationPoints.length === 2) {
         ctx.strokeStyle = '#ef4444'
-        ctx.lineWidth = 2 / viewport.zoom
-        ctx.setLineDash([5 / viewport.zoom, 5 / viewport.zoom])
+        ctx.lineWidth = 2
+        ctx.setLineDash([5, 5])
         ctx.beginPath()
         ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y)
         ctx.lineTo(calibrationPoints[1].x, calibrationPoints[1].y)
@@ -673,18 +756,17 @@ export default function FastPlanCanvas({
       }
     }
 
-    // Draw only comment drawings for current page
-    
-    commentsForPage.forEach(drawing => {
-        // Check if geometry has valid x and y values
-        if (!drawing.geometry || typeof drawing.geometry.x === 'undefined' || typeof drawing.geometry.y === 'undefined') {
-          console.warn('Comment missing geometry:', drawing)
-          return
-        }
-        
-        // Use world coordinates directly - the canvas transform handles the viewport
-        const worldX = drawing.geometry.x
-        const worldY = drawing.geometry.y
+    // Draw comment drawings for current page only
+    currentPageComments.forEach(drawing => {
+      // Check if geometry has valid x and y values
+      if (!drawing.geometry || typeof drawing.geometry.x === 'undefined' || typeof drawing.geometry.y === 'undefined') {
+        console.warn('Comment missing geometry:', drawing)
+        return
+      }
+      
+      // Use world coordinates directly - the canvas transform handles the viewport
+      const worldX = drawing.geometry.x
+      const worldY = drawing.geometry.y
         
         // Draw comment bubble at world position
         // Note: size is in world coordinates, actual pixel size will be scaled by canvas transform
@@ -757,9 +839,9 @@ export default function FastPlanCanvas({
           ctx.stroke()
         }
       })
-  }, [drawings, currentPage, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints])
+  }, [drawings, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting])
 
-  // Set canvas dimensions
+  // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
     const canvas = drawingCanvasRef.current
     const container = containerRef.current
@@ -768,56 +850,64 @@ export default function FastPlanCanvas({
     }
 
     const resizeCanvas = () => {
-      // Size canvas to match PDF dimensions if available
-      if (pdfPages.length > 0 && pdfPages[currentPage - 1]) {
-        const pdfPage = pdfPages[currentPage - 1]
-        canvas.width = pdfPage.width
-        canvas.height = pdfPage.height
-        canvas.style.width = `${pdfPage.width}px`
-        canvas.style.height = `${pdfPage.height}px`
-        
-        // Force re-render of drawings after canvas resize
-        setTimeout(() => renderDrawings(), 0)
-      } else {
-        // Set minimum dimensions to prevent zero-size canvas
-        canvas.width = 800
-        canvas.height = 600
-        canvas.style.width = '800px'
-        canvas.style.height = '600px'
-      }
+      // Size canvas to match current PDF page at base scale (zoom is handled by transform)
+      const pageHeight = pageHeights.get(currentPage) || (792 * scale)
+      const pageWidth = 612 * scale
+      
+      canvas.width = pageWidth
+      canvas.height = pageHeight
+      canvas.style.width = `${pageWidth}px`
+      canvas.style.height = `${pageHeight}px`
+      
+      // Canvas is centered by the parent container's flex layout
+      canvas.style.position = 'absolute'
+      canvas.style.left = '0'
+      canvas.style.top = '0'
+      
+      // Force re-render of drawings after canvas resize
+      setTimeout(() => renderDrawings(), 0)
     }
 
     resizeCanvas()
     window.addEventListener('resize', resizeCanvas)
     return () => window.removeEventListener('resize', resizeCanvas)
-  }, [pdfPages.length, currentPage, renderDrawings])
+  }, [currentPage, pageHeights, scale, renderDrawings])
 
-  // Auto-fit zoom on first page load (separate effect)
+  // Auto-fit zoom on first page load (fit to first page width)
   useEffect(() => {
     const container = containerRef.current
-    if (!hasAutoFitted.current && pdfPages.length > 0 && pdfPages[currentPage - 1] && container) {
-      const pdfPage = pdfPages[currentPage - 1]
-      const containerRect = container.getBoundingClientRect()
-      const containerWidth = containerRect.width
-      const containerHeight = containerRect.height
-      
-      // Calculate zoom to fit page with 5% padding
-      const scaleX = (containerWidth * 0.95) / pdfPage.width
-      const scaleY = (containerHeight * 0.95) / pdfPage.height
-      const fitZoom = Math.min(scaleX, scaleY)
-      
-      // Limit zoom to reasonable range
-      const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
-      
-      setViewport({
-        zoom: finalZoom,
-        panX: 0,
-        panY: 0
-      })
-      
-      hasAutoFitted.current = true
+    if (!hasAutoFitted.current && pageHeights.size > 0 && container) {
+      // Small delay to ensure container has dimensions
+      setTimeout(() => {
+        const containerRect = container.getBoundingClientRect()
+        if (containerRect.width === 0 || containerRect.height === 0) {
+          return
+        }
+        
+        const firstPageHeight = pageHeights.get(1)
+        if (!firstPageHeight) return
+        
+        // Estimate width from height (assuming standard page ratio)
+        const estimatedWidth = firstPageHeight * (8.5 / 11) // Standard 8.5x11 ratio
+        const containerWidth = containerRect.width
+        
+        // Calculate zoom to fit page width with 5% padding
+        const fitZoom = (containerWidth * 0.95) / estimatedWidth
+        
+        // Limit zoom to reasonable range
+        const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
+        
+        // Start at top of first page (panY = 0 means first page starts at top)
+        setViewport({
+          zoom: finalZoom,
+          panX: 0,
+          panY: 0
+        })
+        
+        hasAutoFitted.current = true
+      }, 100)
     }
-  }, [pdfPages.length, currentPage])
+  }, [pageHeights.size])
 
   // Render drawings when dependencies change
   useEffect(() => {
@@ -834,21 +924,69 @@ export default function FastPlanCanvas({
     renderDrawings()
   }, [drawings, renderDrawings])
 
-  // Convert screen coordinates to world coordinates
+
+  // Convert screen coordinates to world coordinates (for centered page view)
+  // Note: Zoom is applied via transform, so we need to account for that in coordinate conversion
   const screenToWorld = useCallback((screenX: number, screenY: number) => {
-    return {
-      x: (screenX - viewport.panX) / viewport.zoom,
-      y: (screenY - viewport.panY) / viewport.zoom
-    }
-  }, [viewport])
+    const container = containerRef.current
+    if (!container) return { x: 0, y: 0 }
+    
+    const containerRect = container.getBoundingClientRect()
+    const pageWidth = 612 * scale
+    const pageHeight = pageHeights.get(currentPage) || (792 * scale)
+    
+    // Calculate center offset (page is centered in container)
+    const centerX = containerRect.width / 2
+    const centerY = containerRect.height / 2
+    
+    // Convert screen coordinates to world coordinates
+    // Account for: container center, pan offset (scaled by zoom), transform scale, and page center
+    // Since zoom is applied via transform, we need to divide by zoom to get base coordinates
+    const worldX = ((screenX - centerX - viewport.panX) / viewport.zoom) + (pageWidth / 2)
+    const worldY = ((screenY - centerY - viewport.panY) / viewport.zoom) + (pageHeight / 2)
+    
+    return { x: worldX, y: worldY }
+  }, [viewport, scale, currentPage, pageHeights])
 
   // Get page number from Y coordinate
   const getPageNumber = useCallback((y: number) => {
-    const pageHeight = 800 + 20 // 800px page + 20px gap
-    return Math.floor(y / pageHeight) + 1
-  }, [])
+    const positions = calculatePagePositions()
+    for (let i = positions.length - 1; i >= 0; i--) {
+      if (positions[i] && y >= positions[i].y) {
+        return i + 1
+      }
+    }
+    // If no position found or all pages not loaded yet, return 1
+    return 1
+  }, [calculatePagePositions])
 
-  // Handle wheel events for zoom and pan
+  // Handle goToPage prop to scroll to a specific page
+  useEffect(() => {
+    if (goToPage && goToPage >= 1 && goToPage <= numPages && pageHeights.size > 0) {
+      const positions = calculatePagePositions()
+      const targetPosition = positions[goToPage - 1]
+      if (targetPosition) {
+        // Scroll to the target page by adjusting panY
+        // The position is in world coordinates, so we need to account for zoom
+        const container = containerRef.current
+        if (container) {
+          const containerRect = container.getBoundingClientRect()
+          const containerCenterY = containerRect.height / 2
+          // Calculate panY to center the target page in the viewport
+          const targetY = targetPosition.y + targetPosition.height / 2
+          const newPanY = containerCenterY / viewport.zoom - targetY
+          
+          setViewport(prev => ({
+            ...prev,
+            panY: newPanY
+          }))
+          setCurrentPage(goToPage)
+        }
+      }
+    }
+  }, [goToPage, numPages, pageHeights.size, calculatePagePositions, viewport.zoom])
+
+  // Handle wheel events for zoom and pan (natural scrolling)
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
     
@@ -870,30 +1008,44 @@ export default function FastPlanCanvas({
         panY: mouseY - (mouseY - prev.panY) * (newZoom / prev.zoom)
       }))
     } else {
-      // Pan when Ctrl/Cmd is not pressed
-      // Use deltaX for horizontal scrolling (shift+scroll or trackpad)
-      // Use deltaY for vertical scrolling (normal scroll)
+      // Natural scrolling - pan vertically through all pages
       const panSpeed = 0.5
-      setViewport(prev => ({
-        ...prev,
-        panX: prev.panX - e.deltaX * panSpeed,
-        panY: prev.panY - e.deltaY * panSpeed
-      }))
+      setViewport(prev => {
+        const newPanY = prev.panY - e.deltaY * panSpeed
+        // Update current page based on scroll position
+        const positions = calculatePagePositions()
+        const scrollY = -newPanY / prev.zoom
+        const newPage = getPageNumber(scrollY)
+        if (newPage !== currentPage) {
+          setCurrentPage(newPage)
+        }
+        return {
+          ...prev,
+          panX: prev.panX - e.deltaX * panSpeed,
+          panY: newPanY
+        }
+      })
+      
     }
-  }, [viewport])
+  }, [viewport, calculatePagePositions, getPageNumber, currentPage])
 
-  // Check if a point intersects with a comment (only for current page)
+  // Check if a point intersects with a comment (current page only)
   const isPointInComment = useCallback((worldX: number, worldY: number, drawing: Drawing) => {
-    // Only check comments on current page
-    if (drawing.pageNumber !== currentPage || drawing.type !== 'comment') return false
+    if (drawing.type !== 'comment' || drawing.pageNumber !== currentPage) return false
     
     const geom = drawing.geometry
-    // Increased threshold to minimum 20px regardless of zoom for easier clicking
-    const threshold = Math.max(28, 20 / viewport.zoom) // Click tolerance scaled by zoom and bubble size
+    if (!geom || typeof geom.x === 'undefined' || typeof geom.y === 'undefined') return false
     
-    const dist = Math.sqrt(Math.pow(worldX - geom.x, 2) + Math.pow(worldY - geom.y, 2))
+    // Coordinates are at base scale (zoom is handled by transform)
+    const drawingX = geom.x
+    const drawingY = geom.y
+    
+    // Increased threshold for easier clicking (at base scale)
+    const threshold = 28
+    
+    const dist = Math.sqrt(Math.pow(worldX - drawingX, 2) + Math.pow(worldY - drawingY, 2))
     return dist <= threshold
-  }, [viewport, currentPage])
+  }, [currentPage])
 
   // Handle mouse events
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -904,6 +1056,10 @@ export default function FastPlanCanvas({
     const screenX = e.clientX - rect.left
     const screenY = e.clientY - rect.top
     const world = screenToWorld(screenX, screenY)
+    // screenToWorld already returns base scale coordinates (zoom is handled by transform)
+    const baseWorldX = world.x
+    const baseWorldY = world.y
+    // Use current page (since we're in paginated view)
     const pageNumber = currentPage
 
     // Check scale setting exists
@@ -915,11 +1071,11 @@ export default function FastPlanCanvas({
       return
     }
 
-    // Priority 1: Handle calibration mode (highest priority)
-    if (isCalibrating) {
-      // Handle calibration point clicks
-      if (calibrationPoints.length < 2) {
-        const newPoints = [...calibrationPoints, { x: world.x, y: world.y }]
+      // Priority 1: Handle calibration mode (highest priority)
+      if (isCalibrating) {
+        // Handle calibration point clicks (store at base scale)
+        if (calibrationPoints.length < 2) {
+          const newPoints = [...calibrationPoints, { x: baseWorldX, y: baseWorldY }]
         setCalibrationPoints(newPoints)
         if (newPoints.length === 2) {
           setIsCalibrating(false)
@@ -937,7 +1093,7 @@ export default function FastPlanCanvas({
       return // Exit early - don't process other click handlers
     }
     
-    // Priority 2: Check if clicking on an existing comment
+    // Priority 2: Check if clicking on an existing comment (current page only)
     const clickedComment = drawings.find(d => 
       d.type === 'comment' && d.pageNumber === pageNumber && isPointInComment(world.x, world.y, d)
     )
@@ -952,16 +1108,17 @@ export default function FastPlanCanvas({
       }
     } else if (selectedTool === 'comment' && !isCalibrating) {
       // Place new comment pin (only if not calibrating)
-      onCommentPinClick(world.x, world.y, pageNumber)
+      // Store coordinates at base scale (not zoomed)
+      onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
     } else if (selectedTool === 'measurement_line' || selectedTool === 'measurement_area') {
       // Start or continue measurement drawing
       if (!currentMeasurement || !isDrawingMeasurement) {
-        // Start new measurement
+        // Start new measurement (store at base scale)
         const newMeasurement: Drawing = {
           id: Date.now().toString(),
           type: selectedTool,
           geometry: {
-            points: [world.x, world.y]
+            points: [baseWorldX, baseWorldY]
           },
           style: {
             color: '#3b82f6',
@@ -976,8 +1133,8 @@ export default function FastPlanCanvas({
         setCurrentMeasurement(newMeasurement)
         setIsDrawingMeasurement(true)
       } else {
-        // Add point to existing measurement
-        const updatedPoints = [...(currentMeasurement.geometry.points || []), world.x, world.y]
+        // Add point to existing measurement (store at base scale)
+        const updatedPoints = [...(currentMeasurement.geometry.points || []), baseWorldX, baseWorldY]
         setCurrentMeasurement({
           ...currentMeasurement,
           geometry: {
@@ -991,7 +1148,7 @@ export default function FastPlanCanvas({
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
     }
-  }, [selectedTool, screenToWorld, currentPage, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, measurementScaleSettings, onOpenScaleSettings, isCalibrating, calibrationPoints])
+  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -1019,10 +1176,14 @@ export default function FastPlanCanvas({
       const screenY = e.clientY - rect.top
       const world = screenToWorld(screenX, screenY)
       
-      // Update last point in measurement for preview
+      // screenToWorld already returns base scale coordinates (zoom is handled by transform)
+      const baseWorldX = world.x
+      const baseWorldY = world.y
+      
+      // Update last point in measurement for preview (store at base scale)
       const points = currentMeasurement.geometry.points || []
       if (points.length >= 2) {
-        const updatedPoints = [...points.slice(0, points.length - 2), world.x, world.y]
+        const updatedPoints = [...points.slice(0, points.length - 2), baseWorldX, baseWorldY]
         setCurrentMeasurement({
           ...currentMeasurement,
           geometry: {
@@ -1032,7 +1193,7 @@ export default function FastPlanCanvas({
         })
       }
     } else {
-      // Check for hovered comment (works in both modes)
+      // Check for hovered comment (current page only)
       const container = containerRef.current
       if (!container) return
 
@@ -1168,16 +1329,8 @@ export default function FastPlanCanvas({
     setViewport(prev => ({ ...prev, zoom: Math.max(prev.zoom / 1.2, 0.1) }))
   }
 
-  if (!pdfLoaded) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading PDF...</p>
-        </div>
-      </div>
-    )
-  }
+  // Don't block rendering - show the PDF viewer even if it's still loading
+  // The Document component will handle its own loading state
 
   return (
     <div className="flex flex-col h-full">
@@ -1296,13 +1449,18 @@ export default function FastPlanCanvas({
             </div>
           </div>
 
-          {/* Pagination Controls */}
+          {/* Page Navigation Controls */}
           {numPages > 1 && (
-            <div className="flex items-center space-x-1 md:space-x-2">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+            <div className="flex items-center space-x-1 md:space-x-2 border-r border-gray-200 pr-2 md:pr-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (currentPage > 1) {
+                    setCurrentPage(currentPage - 1)
+                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 })) // Reset pan when changing pages
+                  }
+                }}
                 disabled={currentPage <= 1}
                 className="h-8 md:h-9"
               >
@@ -1310,14 +1468,16 @@ export default function FastPlanCanvas({
               </Button>
               <span className="text-xs md:text-sm text-gray-600 min-w-[60px] md:min-w-[80px] text-center">
                 <span className="hidden sm:inline">Page </span>{currentPage}<span className="hidden sm:inline"> of {numPages}</span>
-                {loadingPages.has(currentPage) && (
-                  <span className="text-blue-500 ml-1 hidden sm:inline">(Loading...)</span>
-                )}
               </span>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (currentPage < numPages) {
+                    setCurrentPage(currentPage + 1)
+                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 })) // Reset pan when changing pages
+                  }
+                }}
                 disabled={currentPage >= numPages}
                 className="h-8 md:h-9"
               >
@@ -1398,52 +1558,131 @@ export default function FastPlanCanvas({
             </button>
           </div>
         )}
-        {/* PDF Pages as Canvas Elements - Show only current page */}
-        {!pdfError && pdfPages.length > 0 && pdfPages[currentPage - 1] && (
+        {/* PDF Page - Paginated view (single page) */}
+        {!pdfError && pdfUrl && documentReady && numPages > 0 && workerReady ? (
           <div
-            className="absolute"
+            className="absolute inset-0 flex items-center justify-center"
             style={{
               transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
-              transformOrigin: '0 0',
+              transformOrigin: 'center center',
+              willChange: 'transform',
             }}
           >
-            <div className="mb-5">
-              <canvas
-                ref={(canvas) => {
-                  if (canvas && pdfPages[currentPage - 1]) {
-                    // Copy the rendered content from our page canvas to the display canvas
-                    const ctx = canvas.getContext('2d')!
-                    canvas.width = pdfPages[currentPage - 1].width
-                    canvas.height = pdfPages[currentPage - 1].height
-                    ctx.drawImage(pdfPages[currentPage - 1], 0, 0)
+            <Document
+              file={pdfUrl}
+              loading={
+                <div className="flex items-center justify-center p-8">
+                  <div className="text-center">
+                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading PDF...</p>
+                  </div>
+                </div>
+              }
+              error={
+                <div className="p-8 text-center text-red-600">
+                  <p className="font-medium mb-2">Failed to load PDF</p>
+                  <p className="text-sm text-gray-600">You can still use drawing tools on a blank canvas</p>
+                </div>
+              }
+            >
+              <div 
+                className="relative shadow-lg" 
+                data-page-num={currentPage} 
+                style={{ 
+                  width: `${612 * scale}px`,
+                  backgroundColor: 'white',
+                }}
+              >
+                <Page
+                  key={`page-${currentPage}-zoom-${viewport.zoom}`}
+                  pageNumber={currentPage}
+                  scale={scale * viewport.zoom * (typeof window !== 'undefined' ? Math.max(2, window.devicePixelRatio || 2) : 2)}
+                  width={612}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                  className="shadow-lg"
+                  style={{ 
+                    display: 'block', 
+                    position: 'relative', 
+                    zIndex: 1,
+                    width: `${612 * scale}px`,
+                    height: 'auto',
+                    backgroundColor: 'white',
+                  }}
+                  loading={
+                    <div className="bg-white flex items-center justify-center text-gray-400 text-sm" style={{ width: `${612 * scale}px`, backgroundColor: 'white' }}>
+                      Loading page {currentPage}...
+                    </div>
                   }
-                }}
-                style={{
-                  display: 'block',
-                  borderRadius: '4px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                  pointerEvents: 'none', // Let drawing canvas handle interactions
-                  zIndex: '1' // Below the drawing canvas
-                }}
-              />
-            </div>
+                  onLoadSuccess={(page: { height: number; width: number }) => {
+                    // Calculate height using display scale (zoom is handled by transform)
+                    const height = page.height * scale
+                    setPageHeights((prev: Map<number, number>) => {
+                      const newHeights = new Map(prev)
+                      newHeights.set(currentPage, height)
+                      return newHeights
+                    })
+                  }}
+                  onRenderSuccess={() => {
+                    // Ensure canvas quality settings are applied for crisp rendering
+                    if (typeof window !== 'undefined') {
+                      setTimeout(() => {
+                        const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
+                        if (pageContainer) {
+                          // Ensure container has white background
+                          pageContainer.style.backgroundColor = 'white'
+                          
+                          const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
+                          if (canvas) {
+                            const ctx = canvas.getContext('2d')
+                            if (ctx) {
+                              // Enable image smoothing for better quality when zoomed
+                              // The high-resolution render combined with smoothing gives best results
+                              ctx.imageSmoothingEnabled = true
+                              ctx.imageSmoothingQuality = 'high'
+                            }
+                            
+                            // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
+                            // but displayed at base size (scale). CSS transform handles visual zoom
+                            // This ensures crisp rendering when zoomed in
+                            const baseDisplayWidth = 612 * scale
+                            canvas.style.width = `${baseDisplayWidth}px`
+                            canvas.style.height = 'auto'
+                            canvas.style.maxWidth = `${baseDisplayWidth}px`
+                            canvas.style.backgroundColor = 'white'
+                            // Use high-quality rendering for better appearance when zoomed
+                            canvas.style.imageRendering = 'auto'
+                            
+                            // Also ensure the canvas element itself has white background via CSS
+                            const canvasStyle = window.getComputedStyle(canvas)
+                            if (canvasStyle.backgroundColor === 'transparent' || canvasStyle.backgroundColor === 'rgba(0, 0, 0, 0)') {
+                              canvas.style.backgroundColor = 'white'
+                            }
+                          }
+                        }
+                      }, 100)
+                    }
+                  }}
+                  onRenderError={(error: Error) => {
+                    console.error(`Error rendering page ${currentPage}:`, error)
+                  }}
+                />
+              </div>
+            </Document>
           </div>
-        )}
-
-        {/* Loading indicator for current page */}
-        {!pdfError && pdfLoaded && loadingPages.has(currentPage) && (
-          <div
-            className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50"
-            style={{ zIndex: '5' }}
-          >
-            <div className="bg-white rounded-lg p-4 shadow-lg">
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                <span className="text-sm text-gray-600">Loading page {currentPage}...</span>
+        ) : (
+          !pdfError && pdfUrl && (
+            <div className="flex items-center justify-center p-8">
+              <div className="text-center">
+                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-600">
+                  {!workerReady ? 'Initializing PDF viewer...' : !pdfLoaded ? 'Loading PDF...' : 'Preparing pages...'}
+                </p>
               </div>
             </div>
-          </div>
+          )
         )}
+
 
         {/* Fallback Drawing Area - Show when PDF fails */}
         {pdfError && (
@@ -1464,18 +1703,16 @@ export default function FastPlanCanvas({
           </div>
         )}
 
-        {/* Drawing Canvas Overlay */}
+        {/* Drawing Canvas Overlay - single page */}
         <div
-          className="absolute"
+          className="absolute inset-0 flex items-center justify-center"
           style={{ 
-            top: 0,
-            left: 0,
             pointerEvents: 'auto',
-            transform: pdfPages.length > 0 && pdfPages[currentPage - 1] ? `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` : 'none',
-            transformOrigin: '0 0',
-            width: pdfPages[currentPage - 1] ? `${pdfPages[currentPage - 1].width}px` : '0px',
-            height: pdfPages[currentPage - 1] ? `${pdfPages[currentPage - 1].height}px` : '0px',
-            display: !pdfError && pdfPages.length > 0 && pdfPages[currentPage - 1] ? 'block' : 'none',
+            transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
+            transformOrigin: 'center center',
+            width: '100%',
+            height: '100%',
+            display: !pdfError ? 'flex' : 'none',
             zIndex: 10 // Ensure it's above PDF canvas elements
           }}
           onMouseDown={handleMouseDown}
@@ -1489,8 +1726,7 @@ export default function FastPlanCanvas({
             style={{ 
               display: 'block',
               position: 'absolute',
-              top: 0,
-              left: 0,
+              backgroundColor: 'transparent',
             }}
           />
         </div>

@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     // Fetch the bid to verify ownership and get job_id
     const { data: bid, error: bidError } = await supabase
       .from('bids')
-      .select('id, job_id, job_request_id, status, subcontractor_email, subcontractors (name, email)')
+      .select('id, job_id, job_request_id, status, subcontractors (name, email)')
       .eq('id', bidId)
       .single()
     

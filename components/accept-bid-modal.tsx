@@ -15,7 +15,6 @@ interface AcceptBidModalProps {
   bid: {
     id: string
     subcontractor_name?: string | null
-    subcontractor_email?: string | null
     subcontractors?: {
       name: string
       email: string
@@ -199,12 +198,14 @@ export default function AcceptBidModal({
               <div className="bg-gray-50 rounded-lg p-4 space-y-3">
                 <div>
                   <Label className="text-sm text-gray-600">Contractor</Label>
-                  <p className="font-medium">{bid.subcontractors?.name || bid.subcontractor_name || bid.subcontractor_email || 'Unknown'}</p>
+                  <p className="font-medium">{bid.subcontractors?.name || bid.subcontractor_name || 'Unknown'}</p>
                 </div>
-                <div>
-                  <Label className="text-sm text-gray-600">Email</Label>
-                  <p className="text-sm">{bid.subcontractors?.email || bid.subcontractor_email || 'N/A'}</p>
-                </div>
+                {bid.subcontractors?.email && (
+                  <div>
+                    <Label className="text-sm text-gray-600">Email</Label>
+                    <p className="text-sm">{bid.subcontractors.email}</p>
+                  </div>
+                )}
                 {bid.bid_amount && (
                   <div>
                     <Label className="text-sm text-gray-600">Bid Amount</Label>
