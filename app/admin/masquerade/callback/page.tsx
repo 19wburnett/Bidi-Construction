@@ -146,8 +146,35 @@ export default function MasqueradeCallback() {
           break
         }
         
-        // Wait longer to ensure all cookies are written and persisted
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        // Wait for auth state change event to ensure session is fully established
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => {
+            console.log('Auth state change timeout, proceeding anyway')
+            resolve()
+          }, 3000)
+          
+          const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('Auth state changed:', event, session?.user?.email)
+            if (event === 'SIGNED_IN' || (event === 'TOKEN_REFRESHED' && session)) {
+              clearTimeout(timeout)
+              subscription.unsubscribe()
+              resolve()
+            }
+          })
+        })
+        
+        // Final verification
+        const { data: { session: finalSession }, error: finalError } = await supabase.auth.getSession()
+        if (!finalSession) {
+          console.error('Session lost after auth state change!')
+          setError('Session was lost. Please try again.')
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=session_lost'
+          }, 2000)
+          return
+        }
+        
+        console.log('Final session verified, redirecting to dashboard...')
         
         // Use full page reload with replace to ensure cookies are persisted
         // and middleware sees them. Use replace instead of href to avoid back button issues
