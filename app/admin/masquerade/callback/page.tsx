@@ -12,94 +12,61 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Wait for the hash to be available in the URL
+        // Wait a bit for Supabase to process the URL tokens
         await new Promise(resolve => setTimeout(resolve, 500))
         
-        // Check if there's a hash with tokens
-        const hash = window.location.hash
-        if (hash && hash.includes('access_token')) {
-          // Parse the hash to extract tokens
-          const hashParams = new URLSearchParams(hash.substring(1))
-          const accessToken = hashParams.get('access_token')
-          const refreshToken = hashParams.get('refresh_token')
-          const type = hashParams.get('type')
-          
-          if (accessToken && type === 'magiclink') {
-            // Set the session using the tokens from the hash
-            const { data, error: sessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken || ''
-            })
-            
-            if (sessionError) {
-              console.error('Session error:', sessionError)
-              setError('Failed to establish session')
-              setTimeout(() => {
-                window.location.href = '/auth/login?error=masquerade_failed'
-              }, 2000)
-              return
-            }
-            
-            if (!data.session) {
-              console.error('No session after setting tokens')
-              setError('Failed to create session')
-              setTimeout(() => {
-                window.location.href = '/auth/login?error=masquerade_failed'
-              }, 2000)
-              return
-            }
-            
-            // Wait a bit to ensure session cookies are written
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            
-            // Verify the session is set
-            const { data: { user }, error: userError } = await supabase.auth.getUser()
-            if (userError || !user) {
-              console.error('User verification failed:', userError)
-              setError('Failed to verify user')
-              setTimeout(() => {
-                window.location.href = '/auth/login?error=masquerade_failed'
-              }, 2000)
-              return
-            }
-            
-            // Use full page reload to ensure cookies are persisted and middleware sees them
-            window.location.href = '/dashboard'
-          } else {
-            // Try the standard getSession approach
-            const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-            
-            if (sessionError || !session) {
-              console.error('Session error:', sessionError)
-              setError('Failed to establish session')
-              setTimeout(() => {
-                window.location.href = '/auth/login?error=masquerade_failed'
-              }, 2000)
-              return
-            }
-            
-            // Use full page reload to ensure cookies are persisted
-            window.location.href = '/dashboard'
-          }
-        } else {
-          // No hash tokens found, try getSession anyway
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-          
-          if (sessionError || !session) {
-            console.error('No tokens found and no session:', sessionError)
-            setError('No authentication tokens found')
-            setTimeout(() => {
-              window.location.href = '/auth/login?error=masquerade_failed'
-            }, 2000)
-            return
-          }
-          
-          // Use full page reload to ensure cookies are persisted
-          window.location.href = '/dashboard'
+        // Use getSession which automatically extracts tokens from URL hash/query
+        // This is the same approach as the regular auth callback
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        
+        if (sessionError) {
+          console.error('Session error:', sessionError)
+          setError(`Failed to establish session: ${sessionError.message}`)
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=masquerade_failed'
+          }, 2000)
+          return
         }
+        
+        if (!session) {
+          console.error('No session found after callback')
+          setError('No session found. The magic link may have expired.')
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=masquerade_failed'
+          }, 2000)
+          return
+        }
+        
+        // Verify the user is actually authenticated
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        
+        if (userError) {
+          console.error('User verification error:', userError)
+          setError(`Failed to verify user: ${userError.message}`)
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=masquerade_failed'
+          }, 2000)
+          return
+        }
+        
+        if (!user) {
+          console.error('No user found after session was set')
+          setError('User not found after authentication')
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=masquerade_failed'
+          }, 2000)
+          return
+        }
+        
+        // Wait a bit more to ensure all cookies are written
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Use full page reload to ensure cookies are persisted and middleware sees them
+        // This also clears the hash from the URL
+        window.location.href = '/dashboard'
       } catch (error) {
         console.error('Callback error:', error)
-        setError('An error occurred during masquerade')
+        setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
         setTimeout(() => {
           window.location.href = '/auth/login?error=callback_error'
         }, 2000)
@@ -111,17 +78,23 @@ export default function MasqueradeCallback() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-center">
+      <div className="text-center max-w-md mx-auto p-6">
         {error ? (
           <>
-            <div className="text-red-500 mb-2">⚠️</div>
-            <p className="text-red-600 mb-2">{error}</p>
+            <div className="text-red-500 mb-4">
+              <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 19.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-red-600 mb-2">Masquerade Failed</h2>
+            <p className="text-red-600 mb-4">{error}</p>
             <p className="text-sm text-gray-500">Redirecting to login...</p>
           </>
         ) : (
           <>
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-2"></div>
-            <p className="text-gray-500">Completing masquerade...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+            <p className="text-gray-700 font-medium mb-2">Completing masquerade...</p>
+            <p className="text-sm text-gray-500">Please wait while we authenticate you</p>
           </>
         )}
       </div>
