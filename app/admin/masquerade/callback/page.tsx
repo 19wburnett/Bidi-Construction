@@ -42,45 +42,14 @@ export default function MasqueradeCallback() {
         // Clear hash from URL now that we've extracted the session
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
         
-        // Make a request to an API route to trigger middleware processing
-        // This will cause the middleware to sync localStorage to cookies
-        try {
-          const syncResponse = await fetch('/api/admin/masquerade/sync', {
-            method: 'POST',
-            credentials: 'include'
-          })
-          
-          if (syncResponse.ok) {
-            const syncData = await syncResponse.json()
-            console.log('Session synced to server, user:', syncData.user?.email)
-          } else {
-            console.warn('Session sync failed, but continuing anyway')
-          }
-        } catch (syncError) {
-          console.warn('Session sync error:', syncError)
-          // Continue anyway - the redirect might still work
-        }
+        // Wait a moment for the session to be fully established in localStorage
+        await new Promise(resolve => setTimeout(resolve, 1000))
         
-        // Wait a moment for cookies to be written
-        await new Promise(resolve => setTimeout(resolve, 500))
-        
-        // Verify the user one more time
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        if (userError || !user) {
-          console.error('Failed to verify user:', userError)
-          setError('Failed to verify user after authentication')
-          setTimeout(() => {
-            router.push('/auth/login?error=masquerade_failed')
-            router.refresh()
-          }, 3000)
-          return
-        }
-        
-        console.log('User verified, redirecting to dashboard...')
-        
-        // Use window.location for full page reload to ensure middleware processes it
-        // This ensures the synced cookies are read
-        window.location.href = '/dashboard'
+        // Reload the page to trigger middleware processing
+        // This will cause the middleware to read localStorage and sync to cookies
+        // The middleware will process this callback URL and set the cookies
+        console.log('Reloading page to trigger middleware cookie sync...')
+        window.location.reload()
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
