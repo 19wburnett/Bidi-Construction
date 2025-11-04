@@ -22,6 +22,10 @@ export default function MasqueradeCallback() {
         // If we have tokens in the hash, set them manually first
         if (accessToken && type === 'magiclink') {
           console.log('Found tokens in hash, setting session manually')
+          
+          // Clear the hash from URL first to prevent issues
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+          
           const { data, error: setSessionError } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken || ''
@@ -45,8 +49,7 @@ export default function MasqueradeCallback() {
             return
           }
           
-          // Clear the hash from URL
-          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+          console.log('Session set from hash, session ID:', data.session.access_token.substring(0, 20) + '...')
         } else {
           // Try getSession which should auto-extract tokens
           console.log('No hash tokens, trying getSession')
@@ -69,26 +72,53 @@ export default function MasqueradeCallback() {
             }, 2000)
             return
           }
+          
+          console.log('Session found via getSession, session ID:', session.access_token.substring(0, 20) + '...')
         }
         
-        // Wait a bit for session to be fully established
+        // Wait a bit for session to be fully established and cookies to be written
         await new Promise(resolve => setTimeout(resolve, 1000))
         
         // Verify the user is actually authenticated
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        
-        if (userError) {
-          console.error('User verification error:', userError)
-          setError(`Failed to verify user: ${userError.message}`)
-          setTimeout(() => {
-            window.location.href = '/auth/login?error=masquerade_failed'
-          }, 2000)
-          return
+        let user = null
+        let attempts = 0
+        while (attempts < 3) {
+          const { data: { user: fetchedUser }, error: userError } = await supabase.auth.getUser()
+          
+          if (userError) {
+            console.error('User verification error (attempt ' + (attempts + 1) + '):', userError)
+            if (attempts === 2) {
+              setError(`Failed to verify user: ${userError.message}`)
+              setTimeout(() => {
+                window.location.href = '/auth/login?error=masquerade_failed'
+              }, 2000)
+              return
+            }
+            attempts++
+            await new Promise(resolve => setTimeout(resolve, 500))
+            continue
+          }
+          
+          if (fetchedUser) {
+            user = fetchedUser
+            break
+          }
+          
+          if (attempts === 2) {
+            console.error('No user found after session was set')
+            setError('User not found after authentication')
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=masquerade_failed'
+            }, 2000)
+            return
+          }
+          
+          attempts++
+          await new Promise(resolve => setTimeout(resolve, 500))
         }
         
         if (!user) {
-          console.error('No user found after session was set')
-          setError('User not found after authentication')
+          setError('Failed to get user after authentication')
           setTimeout(() => {
             window.location.href = '/auth/login?error=masquerade_failed'
           }, 2000)
@@ -97,11 +127,31 @@ export default function MasqueradeCallback() {
         
         console.log('Masquerade successful, user:', user.email)
         
-        // Wait a bit more to ensure all cookies are written
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Double-check session is still there multiple times
+        for (let i = 0; i < 3; i++) {
+          const { data: { session: verifySession } } = await supabase.auth.getSession()
+          if (!verifySession) {
+            console.error('Session lost after verification (attempt ' + (i + 1) + ')!')
+            if (i === 2) {
+              setError('Session was lost after authentication. Please try again.')
+              setTimeout(() => {
+                window.location.href = '/auth/login?error=session_lost'
+              }, 2000)
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 500))
+            continue
+          }
+          console.log('Session verified (attempt ' + (i + 1) + '), redirecting...')
+          break
+        }
         
-        // Use full page reload to ensure cookies are persisted and middleware sees them
-        window.location.href = '/dashboard'
+        // Wait longer to ensure all cookies are written and persisted
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Use full page reload with replace to ensure cookies are persisted
+        // and middleware sees them. Use replace instead of href to avoid back button issues
+        window.location.replace('/dashboard')
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
