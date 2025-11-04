@@ -12,6 +12,9 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
+        // Wait a moment for URL to be fully loaded
+        await new Promise(resolve => setTimeout(resolve, 300))
+        
         // Check if there are tokens in the URL hash
         const hash = window.location.hash
         const hashParams = hash ? new URLSearchParams(hash.substring(1)) : null
@@ -19,12 +22,11 @@ export default function MasqueradeCallback() {
         const refreshToken = hashParams?.get('refresh_token')
         const type = hashParams?.get('type')
         
-        // If we have tokens in the hash, set them manually first
+        console.log('Callback page loaded, hash:', hash ? hash.substring(0, 50) + '...' : 'none')
+        
+        // If we have tokens in the hash, set them manually
         if (accessToken && type === 'magiclink') {
           console.log('Found tokens in hash, setting session manually')
-          
-          // Clear the hash from URL first to prevent issues
-          window.history.replaceState(null, '', window.location.pathname + window.location.search)
           
           const { data, error: setSessionError } = await supabase.auth.setSession({
             access_token: accessToken,
@@ -49,10 +51,13 @@ export default function MasqueradeCallback() {
             return
           }
           
-          console.log('Session set from hash, session ID:', data.session.access_token.substring(0, 20) + '...')
+          console.log('Session set from hash successfully')
+          
+          // Clear the hash from URL after setting session
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
         } else {
-          // Try getSession which should auto-extract tokens
-          console.log('No hash tokens, trying getSession')
+          // Try getSession which should auto-extract tokens from hash
+          console.log('No hash tokens found, trying getSession to auto-extract')
           const { data: { session }, error: sessionError } = await supabase.auth.getSession()
           
           if (sessionError) {
@@ -73,7 +78,7 @@ export default function MasqueradeCallback() {
             return
           }
           
-          console.log('Session found via getSession, session ID:', session.access_token.substring(0, 20) + '...')
+          console.log('Session found via getSession')
         }
         
         // Wait a bit for session to be fully established and cookies to be written
@@ -147,15 +152,17 @@ export default function MasqueradeCallback() {
         }
         
         // Wait for auth state change event to ensure session is fully established
+        let authStateChanged = false
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
-            console.log('Auth state change timeout, proceeding anyway')
+            console.log('Auth state change timeout after 2s, proceeding anyway')
             resolve()
-          }, 3000)
+          }, 2000)
           
           const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             console.log('Auth state changed:', event, session?.user?.email)
             if (event === 'SIGNED_IN' || (event === 'TOKEN_REFRESHED' && session)) {
+              authStateChanged = true
               clearTimeout(timeout)
               subscription.unsubscribe()
               resolve()
@@ -163,18 +170,52 @@ export default function MasqueradeCallback() {
           })
         })
         
-        // Final verification
-        const { data: { session: finalSession }, error: finalError } = await supabase.auth.getSession()
-        if (!finalSession) {
-          console.error('Session lost after auth state change!')
-          setError('Session was lost. Please try again.')
-          setTimeout(() => {
-            window.location.href = '/auth/login?error=session_lost'
-          }, 2000)
+        // Verify session multiple times before redirect
+        let verified = false
+        for (let i = 0; i < 5; i++) {
+          const { data: { session: verifySession }, error: verifyError } = await supabase.auth.getSession()
+          
+          if (verifyError) {
+            console.error('Session verification error (attempt ' + (i + 1) + '):', verifyError)
+            if (i === 4) {
+              setError('Session verification failed. Please try again.')
+              setTimeout(() => {
+                window.location.href = '/auth/login?error=session_verification_failed'
+              }, 2000)
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 400))
+            continue
+          }
+          
+          if (verifySession && verifySession.user) {
+            verified = true
+            console.log('Session verified successfully (attempt ' + (i + 1) + '), user:', verifySession.user.email)
+            break
+          }
+          
+          if (i === 4) {
+            console.error('Session not found after 5 attempts')
+            setError('Session was not established. Please try again.')
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=session_not_established'
+            }, 2000)
+            return
+          }
+          
+          console.log('Session not ready yet (attempt ' + (i + 1) + '), waiting...')
+          await new Promise(resolve => setTimeout(resolve, 400))
+        }
+        
+        if (!verified) {
+          setError('Failed to verify session')
           return
         }
         
-        console.log('Final session verified, redirecting to dashboard...')
+        console.log('Session fully verified, redirecting to dashboard...')
+        
+        // Small delay to ensure cookies are written
+        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Use full page reload with replace to ensure cookies are persisted
         // and middleware sees them. Use replace instead of href to avoid back button issues
