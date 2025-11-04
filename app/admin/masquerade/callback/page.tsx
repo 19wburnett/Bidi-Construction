@@ -12,30 +12,67 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Wait a bit for Supabase to process the URL tokens
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Check if there are tokens in the URL hash
+        const hash = window.location.hash
+        const hashParams = hash ? new URLSearchParams(hash.substring(1)) : null
+        const accessToken = hashParams?.get('access_token')
+        const refreshToken = hashParams?.get('refresh_token')
+        const type = hashParams?.get('type')
         
-        // Use getSession which automatically extracts tokens from URL hash/query
-        // This is the same approach as the regular auth callback
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-        
-        if (sessionError) {
-          console.error('Session error:', sessionError)
-          setError(`Failed to establish session: ${sessionError.message}`)
-          setTimeout(() => {
-            window.location.href = '/auth/login?error=masquerade_failed'
-          }, 2000)
-          return
+        // If we have tokens in the hash, set them manually first
+        if (accessToken && type === 'magiclink') {
+          console.log('Found tokens in hash, setting session manually')
+          const { data, error: setSessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken || ''
+          })
+          
+          if (setSessionError) {
+            console.error('Error setting session from hash:', setSessionError)
+            setError(`Failed to set session: ${setSessionError.message}`)
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=masquerade_failed'
+            }, 2000)
+            return
+          }
+          
+          if (!data.session) {
+            console.error('No session after setting from hash')
+            setError('Session was not created from tokens')
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=masquerade_failed'
+            }, 2000)
+            return
+          }
+          
+          // Clear the hash from URL
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        } else {
+          // Try getSession which should auto-extract tokens
+          console.log('No hash tokens, trying getSession')
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+          
+          if (sessionError) {
+            console.error('Session error:', sessionError)
+            setError(`Failed to establish session: ${sessionError.message}`)
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=masquerade_failed'
+            }, 2000)
+            return
+          }
+          
+          if (!session) {
+            console.error('No session found after callback')
+            setError('No session found. The magic link may have expired.')
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=masquerade_failed'
+            }, 2000)
+            return
+          }
         }
         
-        if (!session) {
-          console.error('No session found after callback')
-          setError('No session found. The magic link may have expired.')
-          setTimeout(() => {
-            window.location.href = '/auth/login?error=masquerade_failed'
-          }, 2000)
-          return
-        }
+        // Wait a bit for session to be fully established
+        await new Promise(resolve => setTimeout(resolve, 1000))
         
         // Verify the user is actually authenticated
         const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -58,11 +95,12 @@ export default function MasqueradeCallback() {
           return
         }
         
+        console.log('Masquerade successful, user:', user.email)
+        
         // Wait a bit more to ensure all cookies are written
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Use full page reload to ensure cookies are persisted and middleware sees them
-        // This also clears the hash from the URL
         window.location.href = '/dashboard'
       } catch (error) {
         console.error('Callback error:', error)
