@@ -860,9 +860,9 @@ export default function FastPlanCanvas({
       canvas.style.height = `${pageHeight}px`
       
       // Canvas is centered by the parent container's flex layout
-      canvas.style.position = 'absolute'
-      canvas.style.left = '0'
-      canvas.style.top = '0'
+      // Use relative positioning to match PDF positioning
+      canvas.style.position = 'relative'
+      canvas.style.margin = '0'
       
       // Force re-render of drawings after canvas resize
       setTimeout(() => renderDrawings(), 0)
@@ -926,7 +926,8 @@ export default function FastPlanCanvas({
 
 
   // Convert screen coordinates to world coordinates (for centered page view)
-  // Note: Zoom is applied via transform, so we need to account for that in coordinate conversion
+  // Note: Zoom is applied via CSS transform, so coordinates are stored at base scale
+  // The canvas and PDF both use base scale coordinates, then CSS transform handles zoom
   const screenToWorld = useCallback((screenX: number, screenY: number) => {
     const container = containerRef.current
     if (!container) return { x: 0, y: 0 }
@@ -935,15 +936,16 @@ export default function FastPlanCanvas({
     const pageWidth = 612 * scale
     const pageHeight = pageHeights.get(currentPage) || (792 * scale)
     
-    // Calculate center offset (page is centered in container)
+    // Calculate center offset (page is centered in container via flexbox)
     const centerX = containerRect.width / 2
     const centerY = containerRect.height / 2
     
-    // Convert screen coordinates to world coordinates
-    // Account for: container center, pan offset (scaled by zoom), transform scale, and page center
-    // Since zoom is applied via transform, we need to divide by zoom to get base coordinates
-    const worldX = ((screenX - centerX - viewport.panX) / viewport.zoom) + (pageWidth / 2)
-    const worldY = ((screenY - centerY - viewport.panY) / viewport.zoom) + (pageHeight / 2)
+    // Convert screen coordinates to world coordinates (page top-left is origin at 0,0)
+    // The transform is: translate(panX, panY) scale(zoom) with origin at center
+    // To reverse: (screen - center - pan) / zoom gives coordinates relative to center
+    // Then add pageWidth/2 and pageHeight/2 to get coordinates relative to page top-left
+    const worldX = (screenX - centerX - viewport.panX) / viewport.zoom + (pageWidth / 2)
+    const worldY = (screenY - centerY - viewport.panY) / viewport.zoom + (pageHeight / 2)
     
     return { x: worldX, y: worldY }
   }, [viewport, scale, currentPage, pageHeights])
@@ -1586,7 +1588,7 @@ export default function FastPlanCanvas({
               }
             >
               <div 
-                className="relative shadow-lg" 
+                className="relative shadow-lg bg-white" 
                 data-page-num={currentPage} 
                 style={{ 
                   width: `${612 * scale}px`,
@@ -1594,13 +1596,13 @@ export default function FastPlanCanvas({
                 }}
               >
                 <Page
-                  key={`page-${currentPage}-zoom-${viewport.zoom}`}
+                  key={`page-${currentPage}`}
                   pageNumber={currentPage}
-                  scale={scale * viewport.zoom * (typeof window !== 'undefined' ? Math.max(2, window.devicePixelRatio || 2) : 2)}
+                  scale={scale * (typeof window !== 'undefined' ? Math.max(2, window.devicePixelRatio || 2) : 2)}
                   width={612}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
-                  className="shadow-lg"
+                  className="shadow-lg relative"
                   style={{ 
                     display: 'block', 
                     position: 'relative', 
@@ -1634,8 +1636,17 @@ export default function FastPlanCanvas({
                           
                           const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
                           if (canvas) {
-                            const ctx = canvas.getContext('2d')
+                            const ctx = canvas.getContext('2d', { willReadFrequently: false })
                             if (ctx) {
+                              // Fill canvas with white background behind PDF content
+                              // This ensures any transparent areas show white instead of showing through
+                              // Using destination-over to draw white behind existing content
+                              const originalComposite = ctx.globalCompositeOperation
+                              ctx.globalCompositeOperation = 'destination-over'
+                              ctx.fillStyle = 'white'
+                              ctx.fillRect(0, 0, canvas.width, canvas.height)
+                              ctx.globalCompositeOperation = originalComposite
+                              
                               // Enable image smoothing for better quality when zoomed
                               // The high-resolution render combined with smoothing gives best results
                               ctx.imageSmoothingEnabled = true
@@ -1725,7 +1736,7 @@ export default function FastPlanCanvas({
             ref={drawingCanvasRef}
             style={{ 
               display: 'block',
-              position: 'absolute',
+              position: 'relative',
               backgroundColor: 'transparent',
             }}
           />
