@@ -160,7 +160,6 @@ export default function MasqueradePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <MasqueradeBanner />
       
       {/* Header */}
       <header className="bg-white border-b">

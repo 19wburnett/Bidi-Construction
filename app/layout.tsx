@@ -43,7 +43,6 @@ export default function RootLayout({
       </head>
       <body className={barlow.className} suppressHydrationWarning>
         <Providers>
-          <MasqueradeBanner />
           <AuthErrorBoundary>
             <MasqueradeBanner />
             {children}

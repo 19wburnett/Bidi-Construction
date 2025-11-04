@@ -12,13 +12,16 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Use getSession which automatically extracts tokens from URL hash/query
-        // This is the same approach as the regular auth callback
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        // Extract tokens from URL hash manually
+        const hash = window.location.hash
+        const hashParams = hash ? new URLSearchParams(hash.substring(1)) : null
+        const accessToken = hashParams?.get('access_token')
+        const refreshToken = hashParams?.get('refresh_token')
+        const type = hashParams?.get('type')
         
-        if (sessionError) {
-          console.error('Session error:', sessionError)
-          setError(`Authentication error: ${sessionError.message}`)
+        if (!accessToken || type !== 'magiclink') {
+          console.error('No valid tokens in URL')
+          setError('No valid authentication tokens found. The magic link may have expired.')
           setTimeout(() => {
             router.push('/auth/login?error=masquerade_failed')
             router.refresh()
@@ -26,9 +29,18 @@ export default function MasqueradeCallback() {
           return
         }
         
-        if (!session?.user) {
-          console.error('No session found after callback')
-          setError('No session found. The magic link may have expired.')
+        console.log('Found tokens in URL, setting session...')
+        
+        // Explicitly set the session - this will store in localStorage
+        // The middleware will sync it to cookies on the next request
+        const { data, error: setSessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || ''
+        })
+        
+        if (setSessionError || !data.session) {
+          console.error('Failed to set session:', setSessionError)
+          setError(`Failed to establish session: ${setSessionError?.message || 'Unknown error'}`)
           setTimeout(() => {
             router.push('/auth/login?error=masquerade_failed')
             router.refresh()
@@ -36,30 +48,31 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('Session found, user:', session.user.email)
+        console.log('Session set successfully, user:', data.session.user.email)
         
-        // Wait longer to ensure cookies are synced from localStorage to cookies
-        // The middleware needs time to process the session
-        await new Promise(resolve => setTimeout(resolve, 1500))
+        // Clear hash from URL
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
         
-        // Verify session is still there after waiting
-        const { data: { session: verifySession } } = await supabase.auth.getSession()
-        if (!verifySession) {
-          console.error('Session lost after waiting!')
-          setError('Session was lost. Please try again.')
+        // Wait for session to be established
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // Verify the session
+        const { data: { user }, error: userError } = await supabase.auth.getUser()
+        if (userError || !user) {
+          console.error('Failed to verify user:', userError)
+          setError('Failed to verify user after authentication')
           setTimeout(() => {
-            router.push('/auth/login?error=session_lost')
+            router.push('/auth/login?error=masquerade_failed')
             router.refresh()
-          }, 2000)
+          }, 3000)
           return
         }
         
-        console.log('Session verified, redirecting...')
+        console.log('User verified, redirecting to dashboard...')
         
-        // Use router like the regular auth callback does
-        // This allows Next.js to properly handle the navigation and cookie sync
-        router.push('/dashboard')
-        router.refresh() // Force refresh to ensure middleware sees the new session
+        // Use window.location instead of router to force a full page reload
+        // This ensures middleware processes the request and syncs cookies
+        window.location.href = '/dashboard'
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
