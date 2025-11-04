@@ -12,9 +12,30 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
+        // Check if we already have a session (after reload)
+        const { data: { session: existingSession } } = await supabase.auth.getSession()
+        
+        if (existingSession?.user) {
+          // Session already exists (likely from a reload), redirect to dashboard
+          console.log('Session already exists, redirecting to dashboard...')
+          window.location.href = '/dashboard'
+          return
+        }
+        
+        // No existing session, check URL hash for tokens
+        const hash = window.location.hash
+        if (!hash || !hash.includes('access_token')) {
+          console.error('No tokens found in URL and no existing session')
+          setError('No authentication tokens found. The magic link may have expired.')
+          setTimeout(() => {
+            router.push('/auth/login?error=masquerade_failed')
+            router.refresh()
+          }, 3000)
+          return
+        }
+        
         // Use getSession() which automatically extracts tokens from URL hash
         // This is the same approach as the regular auth callback
-        // getSession() will automatically sync localStorage to cookies via middleware
         const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
         if (sessionError) {
