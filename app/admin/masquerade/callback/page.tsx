@@ -12,16 +12,14 @@ export default function MasqueradeCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Extract tokens from URL hash manually
-        const hash = window.location.hash
-        const hashParams = hash ? new URLSearchParams(hash.substring(1)) : null
-        const accessToken = hashParams?.get('access_token')
-        const refreshToken = hashParams?.get('refresh_token')
-        const type = hashParams?.get('type')
+        // Use getSession() which automatically extracts tokens from URL hash
+        // This is the same approach as the regular auth callback
+        // getSession() will automatically sync localStorage to cookies via middleware
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
-        if (!accessToken || type !== 'magiclink') {
-          console.error('No valid tokens in URL')
-          setError('No valid authentication tokens found. The magic link may have expired.')
+        if (sessionError) {
+          console.error('Session error:', sessionError)
+          setError(`Authentication error: ${sessionError.message}`)
           setTimeout(() => {
             router.push('/auth/login?error=masquerade_failed')
             router.refresh()
@@ -29,18 +27,9 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('Found tokens in URL, setting session...')
-        
-        // Explicitly set the session - this will store in localStorage
-        // The middleware will sync it to cookies on the next request
-        const { data, error: setSessionError } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken || ''
-        })
-        
-        if (setSessionError || !data.session) {
-          console.error('Failed to set session:', setSessionError)
-          setError(`Failed to establish session: ${setSessionError?.message || 'Unknown error'}`)
+        if (!session?.user) {
+          console.error('No session found after callback')
+          setError('No session found. The magic link may have expired.')
           setTimeout(() => {
             router.push('/auth/login?error=masquerade_failed')
             router.refresh()
@@ -48,15 +37,15 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('Session set successfully, user:', data.session.user.email)
+        console.log('Session found via getSession(), user:', session.user.email)
         
-        // Clear hash from URL
+        // Clear hash from URL now that we've extracted the session
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
         
-        // Wait for session to be established
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Wait a moment for the session to be fully established
+        await new Promise(resolve => setTimeout(resolve, 1000))
         
-        // Verify the session
+        // Verify the user one more time
         const { data: { user }, error: userError } = await supabase.auth.getUser()
         if (userError || !user) {
           console.error('Failed to verify user:', userError)
@@ -68,47 +57,12 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('User verified, waiting for middleware to sync cookies...')
+        console.log('User verified, redirecting to dashboard...')
         
-        // The middleware needs to process this callback URL to sync localStorage to cookies
-        // Make a fetch request to trigger middleware processing on this page
-        // This will cause the middleware to read the localStorage session and write cookies
-        try {
-          // Fetch the current page to trigger middleware
-          const response = await fetch(window.location.href, {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-              'Cache-Control': 'no-cache'
-            }
-          })
-          
-          // The middleware should have synced cookies by now
-          console.log('Middleware sync triggered, response status:', response.status)
-        } catch (fetchError) {
-          console.warn('Failed to trigger middleware sync:', fetchError)
-        }
-        
-        // Wait for cookies to be written
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Verify session is still there
-        const { data: { session: finalSession } } = await supabase.auth.getSession()
-        if (!finalSession) {
-          console.error('Session lost before redirect!')
-          setError('Session was lost. Please try again.')
-          setTimeout(() => {
-            router.push('/auth/login?error=session_lost')
-            router.refresh()
-          }, 2000)
-          return
-        }
-        
-        console.log('Final session verified, redirecting...')
-        
-        // Use window.location instead of router to force a full page reload
-        // This ensures middleware processes the request and can read the synced cookies
-        window.location.href = '/dashboard'
+        // Use router.push + refresh like the auth callback does
+        // This allows Next.js middleware to properly sync cookies
+        router.push('/dashboard')
+        router.refresh()
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
