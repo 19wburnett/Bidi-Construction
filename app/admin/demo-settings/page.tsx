@@ -22,7 +22,8 @@ import {
   Activity,
   ArrowRight,
   ArrowLeft,
-  PlayCircle
+  PlayCircle,
+  User
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
@@ -198,6 +199,13 @@ export default function AdminDashboardPage() {
       icon: Zap,
       href: '/admin/ai-plan-demo',
       color: 'yellow'
+    },
+    {
+      title: 'User Masquerade',
+      description: 'Sign in as other users for debugging and support',
+      icon: UserPlus,
+      href: '/admin/masquerade',
+      color: 'red'
     }
   ]
 
