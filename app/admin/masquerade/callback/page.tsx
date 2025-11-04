@@ -68,7 +68,27 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('User verified, redirecting to dashboard...')
+        console.log('User verified, syncing session to server...')
+        
+        // Make a request to sync the session to server-side cookies
+        // This ensures the middleware can read the session
+        try {
+          const syncResponse = await fetch('/api/admin/masquerade/sync', {
+            method: 'POST',
+            credentials: 'include'
+          })
+          
+          if (!syncResponse.ok) {
+            console.warn('Session sync failed, but continuing anyway')
+          } else {
+            console.log('Session synced successfully')
+          }
+        } catch (syncError) {
+          console.warn('Session sync error:', syncError)
+        }
+        
+        // Wait a bit for cookies to be written
+        await new Promise(resolve => setTimeout(resolve, 500))
         
         // Use window.location instead of router to force a full page reload
         // This ensures middleware processes the request and syncs cookies
