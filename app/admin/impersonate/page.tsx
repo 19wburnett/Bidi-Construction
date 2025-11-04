@@ -87,20 +87,24 @@ export default function ImpersonatePage() {
           'Content-Type': 'application/json'
         },
         credentials: 'include',
+        redirect: 'manual', // Don't follow redirects automatically
         body: JSON.stringify({ email: targetEmailToUse })
       })
 
-      // The API will redirect directly, so if we get here it's an error
+      // Check if it's a redirect (3xx status)
+      if (response.status >= 300 && response.status < 400) {
+        const redirectUrl = response.headers.get('Location')
+        if (redirectUrl) {
+          // Follow the redirect manually
+          window.location.href = redirectUrl
+          return
+        }
+      }
+
+      // If not a redirect, check for errors
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to start impersonation')
-      }
-      
-      // If response is a redirect (3xx), the browser will follow it automatically
-      // So we don't need to do anything here
-      if (response.redirected) {
-        // Browser will follow redirect automatically
-        return
       }
       
       // If we get here, something went wrong
