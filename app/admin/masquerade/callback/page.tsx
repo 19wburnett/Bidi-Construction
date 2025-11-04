@@ -68,30 +68,46 @@ export default function MasqueradeCallback() {
           return
         }
         
-        console.log('User verified, syncing session to server...')
+        console.log('User verified, waiting for middleware to sync cookies...')
         
-        // Make a request to sync the session to server-side cookies
-        // This ensures the middleware can read the session
+        // The middleware needs to process this callback URL to sync localStorage to cookies
+        // Make a fetch request to trigger middleware processing on this page
+        // This will cause the middleware to read the localStorage session and write cookies
         try {
-          const syncResponse = await fetch('/api/admin/masquerade/sync', {
-            method: 'POST',
-            credentials: 'include'
+          // Fetch the current page to trigger middleware
+          const response = await fetch(window.location.href, {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+              'Cache-Control': 'no-cache'
+            }
           })
           
-          if (!syncResponse.ok) {
-            console.warn('Session sync failed, but continuing anyway')
-          } else {
-            console.log('Session synced successfully')
-          }
-        } catch (syncError) {
-          console.warn('Session sync error:', syncError)
+          // The middleware should have synced cookies by now
+          console.log('Middleware sync triggered, response status:', response.status)
+        } catch (fetchError) {
+          console.warn('Failed to trigger middleware sync:', fetchError)
         }
         
-        // Wait a bit for cookies to be written
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Wait for cookies to be written
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        
+        // Verify session is still there
+        const { data: { session: finalSession } } = await supabase.auth.getSession()
+        if (!finalSession) {
+          console.error('Session lost before redirect!')
+          setError('Session was lost. Please try again.')
+          setTimeout(() => {
+            router.push('/auth/login?error=session_lost')
+            router.refresh()
+          }, 2000)
+          return
+        }
+        
+        console.log('Final session verified, redirecting...')
         
         // Use window.location instead of router to force a full page reload
-        // This ensures middleware processes the request and syncs cookies
+        // This ensures middleware processes the request and can read the synced cookies
         window.location.href = '/dashboard'
       } catch (error) {
         console.error('Callback error:', error)
