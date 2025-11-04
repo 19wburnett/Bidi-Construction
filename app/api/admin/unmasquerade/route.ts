@@ -56,52 +56,7 @@ export async function POST(request: NextRequest) {
                    request.headers.get('origin') || 
                    'http://localhost:3000'
     
-    // Try to create session directly first (more reliable)
-    const { data: sessionData, error: sessionError } = await supabaseAdmin.auth.admin.createSession({
-      userId: adminId,
-    })
-
-    if (!sessionError && sessionData?.session) {
-      // Successfully created session - set cookies directly
-      const response = NextResponse.json({
-        success: true,
-        message: 'Successfully returned to admin account',
-        session: {
-          access_token: sessionData.session.access_token,
-          refresh_token: sessionData.session.refresh_token,
-        },
-        useRedirect: false
-      })
-
-      // Clear masquerade cookies
-      response.cookies.delete('masquerade_admin_id')
-      response.cookies.delete('masquerade_admin_email')
-
-      // Set the session cookie using Supabase's format
-      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL?.split('//')[1]?.split('.')[0]
-      const cookieName = projectRef ? `sb-${projectRef}-auth-token` : 'sb-auth-token'
-      
-      const sessionCookie = {
-        access_token: sessionData.session.access_token,
-        refresh_token: sessionData.session.refresh_token,
-        expires_at: sessionData.session.expires_at,
-        expires_in: sessionData.session.expires_in,
-        token_type: 'bearer',
-        user: sessionData.session.user,
-      }
-
-      response.cookies.set(cookieName, JSON.stringify(sessionCookie), {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/',
-        maxAge: sessionData.session.expires_in || 60 * 60 * 24 * 7,
-      })
-
-      return response
-    }
-
-    // Fallback to magic link if createSession fails
+    // Generate magic link to restore admin session
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: adminEmail || authUser.user.email || '',
@@ -127,8 +82,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Successfully returned to admin account',
       redirectUrl: linkData.properties.action_link,
-      useRedirect: true,
-      requiresRedirect: true
+      useRedirect: true
     })
 
     response.cookies.delete('masquerade_admin_id')
