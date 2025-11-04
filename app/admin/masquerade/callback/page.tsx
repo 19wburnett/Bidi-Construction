@@ -63,14 +63,58 @@ export default function MasqueradeCallback() {
         // Clear hash from URL now that we've extracted the session
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
         
-        // Wait a moment for the session to be fully established in localStorage
+        // Make a Supabase API call to trigger middleware cookie sync
+        // Supabase SSR automatically syncs localStorage to cookies when making API calls
+        try {
+          console.log('Making Supabase API call to trigger cookie sync...')
+          // This will trigger the middleware to sync localStorage to cookies
+          const { data: userData, error: userError } = await supabase.auth.getUser()
+          
+          if (userError) {
+            console.warn('getUser() error during sync:', userError)
+          } else {
+            console.log('getUser() successful, user:', userData.user?.email)
+          }
+          
+          // Also make a request to an API route to ensure middleware processes it
+          const syncResponse = await fetch('/api/admin/masquerade/sync', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          })
+          
+          if (syncResponse.ok) {
+            const syncData = await syncResponse.json()
+            console.log('Middleware sync successful, user:', syncData.user?.email)
+          } else {
+            const errorData = await syncResponse.json().catch(() => ({}))
+            console.warn('Middleware sync failed:', errorData.error || syncResponse.status)
+          }
+        } catch (syncError) {
+          console.warn('Sync error:', syncError)
+        }
+        
+        // Wait for cookies to be written
         await new Promise(resolve => setTimeout(resolve, 1000))
         
-        // Reload the page to trigger middleware processing
-        // This will cause the middleware to read localStorage and sync to cookies
-        // The middleware will process this callback URL and set the cookies
-        console.log('Reloading page to trigger middleware cookie sync...')
-        window.location.reload()
+        // Verify session is still there
+        const { data: { session: verifySession } } = await supabase.auth.getSession()
+        if (!verifySession) {
+          console.error('Session lost after sync!')
+          setError('Session was lost. Please try again.')
+          setTimeout(() => {
+            router.push('/auth/login?error=session_lost')
+            router.refresh()
+          }, 2000)
+          return
+        }
+        
+        console.log('Session verified, redirecting to dashboard...')
+        
+        // Use window.location for full page reload
+        window.location.href = '/dashboard'
       } catch (error) {
         console.error('Callback error:', error)
         setError(`An error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`)
