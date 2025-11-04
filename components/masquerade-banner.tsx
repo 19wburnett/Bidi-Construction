@@ -51,28 +51,9 @@ export default function MasqueradeBanner() {
         return
       }
 
-      if (data.useRedirect && data.redirectUrl) {
-        // Fallback: Redirect to magic link
+      if (data.success && data.redirectUrl) {
+        // Redirect to magic link to restore admin session
         window.location.href = data.redirectUrl
-      } else if (data.session) {
-        // Direct session creation - set session client-side
-        const { createClient } = await import('@/lib/supabase')
-        const supabase = createClient()
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        })
-
-        if (sessionError) {
-          console.error('Failed to set session:', sessionError)
-          alert('Failed to restore admin session. Please try again.')
-          setUnmasquerading(false)
-          return
-        }
-
-        // Wait a bit for cookies to be set, then reload
-        await new Promise(resolve => setTimeout(resolve, 500))
-        window.location.href = '/admin/demo-settings'
       } else {
         // Refresh the page to update the auth state
         router.refresh()
