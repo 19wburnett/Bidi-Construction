@@ -38,8 +38,23 @@ export default function MasqueradeCallback() {
         
         console.log('Session found, user:', session.user.email)
         
-        // Wait a moment for cookies to be written
-        await new Promise(resolve => setTimeout(resolve, 500))
+        // Wait longer to ensure cookies are synced from localStorage to cookies
+        // The middleware needs time to process the session
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        
+        // Verify session is still there after waiting
+        const { data: { session: verifySession } } = await supabase.auth.getSession()
+        if (!verifySession) {
+          console.error('Session lost after waiting!')
+          setError('Session was lost. Please try again.')
+          setTimeout(() => {
+            router.push('/auth/login?error=session_lost')
+            router.refresh()
+          }, 2000)
+          return
+        }
+        
+        console.log('Session verified, redirecting...')
         
         // Use router like the regular auth callback does
         // This allows Next.js to properly handle the navigation and cookie sync
