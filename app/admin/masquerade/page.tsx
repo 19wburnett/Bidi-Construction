@@ -128,17 +128,42 @@ export default function MasqueradePage() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ targetUserId })
+        body: JSON.stringify({ targetUserId }),
+        credentials: 'include' // Important: include cookies
       })
 
       const data = await response.json()
 
-      if (data.success && data.redirectUrl) {
-        // Redirect to the magic link, which will authenticate the user
+      if (!response.ok || !data.success) {
+        setError(data.error || 'Failed to masquerade as user')
+        setLoading(false)
+        return
+      }
+
+      if (data.useRedirect && data.redirectUrl) {
+        // Fallback: Redirect to the magic link, which will authenticate the user
         // and redirect to the callback page
         window.location.href = data.redirectUrl
+      } else if (data.session) {
+        // Direct session creation - set session client-side and reload
+        const supabase = createClient()
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        })
+
+        if (sessionError) {
+          console.error('Failed to set session:', sessionError)
+          setError('Failed to establish session. Please try again.')
+          setLoading(false)
+          return
+        }
+
+        // Wait a bit for cookies to be set, then reload
+        await new Promise(resolve => setTimeout(resolve, 500))
+        window.location.href = '/dashboard'
       } else {
-        setError(data.error || 'Failed to masquerade as user')
+        setError('Invalid response from masquerade API')
         setLoading(false)
       }
     } catch (err: any) {

@@ -40,22 +40,43 @@ export default function MasqueradeBanner() {
     setUnmasquerading(true)
     try {
       const response = await fetch('/api/admin/unmasquerade', {
-        method: 'POST'
+        method: 'POST',
+        credentials: 'include' // Important: include cookies
       })
       const data = await response.json()
 
-      if (data.success) {
-        // If redirect URL is provided, use it to restore session
-        if (data.redirectUrl) {
-          window.location.href = data.redirectUrl
-        } else {
-          // Refresh the page to update the auth state
-          router.refresh()
-          window.location.href = '/admin/demo-settings'
-        }
-      } else {
+      if (!response.ok || !data.success) {
         alert('Failed to unmasquerade: ' + (data.error || 'Unknown error'))
         setUnmasquerading(false)
+        return
+      }
+
+      if (data.useRedirect && data.redirectUrl) {
+        // Fallback: Redirect to magic link
+        window.location.href = data.redirectUrl
+      } else if (data.session) {
+        // Direct session creation - set session client-side
+        const { createClient } = await import('@/lib/supabase')
+        const supabase = createClient()
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        })
+
+        if (sessionError) {
+          console.error('Failed to set session:', sessionError)
+          alert('Failed to restore admin session. Please try again.')
+          setUnmasquerading(false)
+          return
+        }
+
+        // Wait a bit for cookies to be set, then reload
+        await new Promise(resolve => setTimeout(resolve, 500))
+        window.location.href = '/admin/demo-settings'
+      } else {
+        // Refresh the page to update the auth state
+        router.refresh()
+        window.location.href = '/admin/demo-settings'
       }
     } catch (error) {
       console.error('Error unmasquerading:', error)
