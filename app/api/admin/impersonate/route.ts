@@ -91,16 +91,17 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    console.log('Magic link generated successfully, redirecting to:', linkData.properties.action_link.substring(0, 100) + '...')
-
-    // Store admin info in cookies
+    console.log('Magic link generated successfully')
+    
+    // Instead of returning JSON, redirect directly to the magic link
+    // This ensures the magic link is processed immediately
+    const redirectUrl = linkData.properties.action_link
+    
+    // Store admin info in cookies before redirecting
     const cookieStore = await cookies()
-    const response = NextResponse.json({
-      success: true,
-      redirectUrl: linkData.properties.action_link
-    })
+    const response = NextResponse.redirect(redirectUrl)
 
-    // Set masquerade cookies
+    // Set impersonation cookies
     response.cookies.set('impersonate_admin_id', adminUser.id, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

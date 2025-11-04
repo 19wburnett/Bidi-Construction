@@ -90,18 +90,23 @@ export default function ImpersonatePage() {
         body: JSON.stringify({ email: targetEmailToUse })
       })
 
-      const data = await response.json()
-
-      if (!response.ok || !data.success) {
+      // The API will redirect directly, so if we get here it's an error
+      if (!response.ok) {
+        const data = await response.json()
         throw new Error(data.error || 'Failed to start impersonation')
       }
-
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl
-      } else {
-        setError('No redirect URL received')
-        setLoading(false)
+      
+      // If response is a redirect (3xx), the browser will follow it automatically
+      // So we don't need to do anything here
+      if (response.redirected) {
+        // Browser will follow redirect automatically
+        return
       }
+      
+      // If we get here, something went wrong
+      const data = await response.json()
+      setError(data.error || 'Failed to start impersonation')
+      setLoading(false)
     } catch (err: any) {
       setError(err.message || 'Failed to start impersonation')
       setLoading(false)
@@ -235,4 +240,5 @@ export default function ImpersonatePage() {
     </div>
   )
 }
+
 
