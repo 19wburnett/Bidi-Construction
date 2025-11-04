@@ -60,58 +60,52 @@ export default function MasqueradeCallback() {
         
         console.log('Session found via getSession(), user:', session.user.email)
         
-        // Clear hash from URL now that we've extracted the session
-        window.history.replaceState(null, '', window.location.pathname + window.location.search)
-        
-        // Make a Supabase API call to trigger middleware cookie sync
-        // Supabase SSR automatically syncs localStorage to cookies when making API calls
+        // Set session cookies on server via API route
+        // This ensures cookies are set server-side for middleware to read
         try {
-          console.log('Making Supabase API call to trigger cookie sync...')
-          // This will trigger the middleware to sync localStorage to cookies
-          const { data: userData, error: userError } = await supabase.auth.getUser()
-          
-          if (userError) {
-            console.warn('getUser() error during sync:', userError)
-          } else {
-            console.log('getUser() successful, user:', userData.user?.email)
-          }
-          
-          // Also make a request to an API route to ensure middleware processes it
-          const syncResponse = await fetch('/api/admin/masquerade/sync', {
+          console.log('Setting session cookies on server...')
+          const setSessionResponse = await fetch('/api/admin/masquerade/set-session', {
             method: 'POST',
             credentials: 'include',
             headers: {
               'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token
+            })
           })
           
-          if (syncResponse.ok) {
-            const syncData = await syncResponse.json()
-            console.log('Middleware sync successful, user:', syncData.user?.email)
-          } else {
-            const errorData = await syncResponse.json().catch(() => ({}))
-            console.warn('Middleware sync failed:', errorData.error || syncResponse.status)
+          if (!setSessionResponse.ok) {
+            const errorData = await setSessionResponse.json().catch(() => ({}))
+            console.error('Failed to set session cookies:', errorData.error || setSessionResponse.status)
+            setError('Failed to set session cookies. Please try again.')
+            setTimeout(() => {
+              router.push('/auth/login?error=session_set_failed')
+              router.refresh()
+            }, 3000)
+            return
           }
-        } catch (syncError) {
-          console.warn('Sync error:', syncError)
-        }
-        
-        // Wait for cookies to be written
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Verify session is still there
-        const { data: { session: verifySession } } = await supabase.auth.getSession()
-        if (!verifySession) {
-          console.error('Session lost after sync!')
-          setError('Session was lost. Please try again.')
+          
+          const setSessionData = await setSessionResponse.json()
+          console.log('Session cookies set successfully, user:', setSessionData.user?.email)
+        } catch (setSessionError) {
+          console.error('Error setting session cookies:', setSessionError)
+          setError('Failed to set session cookies. Please try again.')
           setTimeout(() => {
-            router.push('/auth/login?error=session_lost')
+            router.push('/auth/login?error=session_set_failed')
             router.refresh()
-          }, 2000)
+          }, 3000)
           return
         }
         
-        console.log('Session verified, redirecting to dashboard...')
+        // Clear hash from URL
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        
+        // Wait for cookies to be written
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        console.log('Session cookies set, redirecting to dashboard...')
         
         // Use window.location for full page reload
         window.location.href = '/dashboard'
