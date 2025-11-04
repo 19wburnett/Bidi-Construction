@@ -39,10 +39,9 @@ export async function middleware(request: NextRequest) {
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/careers']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
-    const isMasqueradeCallback = request.nextUrl.pathname === '/admin/masquerade/callback'
     
     // For API routes, only refresh cookies/session and pass through without redirects
-    if (!isApiRoute && !isMasqueradeCallback) {
+    if (!isApiRoute) {
       // If user is signed in and hits the home page, send them to dashboard
       if (user && request.nextUrl.pathname === '/') {
         const url = request.nextUrl.clone()
@@ -71,9 +70,8 @@ export async function middleware(request: NextRequest) {
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/careers']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
-    const isMasqueradeCallback = request.nextUrl.pathname === '/admin/masquerade/callback'
     
-    if (!isApiRoute && !isPublicPath && !isMasqueradeCallback) {
+    if (!isApiRoute && !isPublicPath) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
       return NextResponse.redirect(url)

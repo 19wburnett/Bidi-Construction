@@ -201,10 +201,10 @@ export default function AdminDashboardPage() {
       color: 'yellow'
     },
     {
-      title: 'User Masquerade',
+      title: 'Impersonate User',
       description: 'Sign in as other users for debugging and support',
       icon: UserPlus,
-      href: '/admin/masquerade',
+      href: '/admin/impersonate',
       color: 'red'
     }
   ]
