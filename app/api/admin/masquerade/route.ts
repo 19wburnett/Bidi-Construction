@@ -83,9 +83,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Use the request origin to dynamically determine the base URL
-    // This ensures it works on localhost in dev and production URLs in prod
-    const baseUrl = request.nextUrl.origin
+    // Use localhost for development
+    const baseUrl = 'http://localhost:3000'
     
     // Generate magic link which will authenticate the target user
     // The redirect URL will handle setting the session via a callback page

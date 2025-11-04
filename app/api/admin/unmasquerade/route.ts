@@ -50,9 +50,8 @@ export async function POST(request: NextRequest) {
       return response
     }
 
-    // Use the request origin to dynamically determine the base URL
-    // This ensures it works on localhost in dev and production URLs in prod
-    const baseUrl = request.nextUrl.origin
+    // Use localhost for development
+    const baseUrl = 'http://localhost:3000'
     
     // Generate link to restore admin session
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({

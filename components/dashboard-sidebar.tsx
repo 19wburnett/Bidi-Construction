@@ -65,10 +65,21 @@ export default function DashboardSidebar({ className }: SidebarProps) {
     }
   }, [])
 
-  // Load stats
+  // Check admin status on mount and listen to auth changes
   useEffect(() => {
     checkAdminStatus()
-  }, [])
+
+    // Listen for auth state changes to re-check admin status
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      checkAdminStatus()
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase])
 
   useEffect(() => {
     loadStats()
@@ -76,18 +87,35 @@ export default function DashboardSidebar({ className }: SidebarProps) {
 
   async function checkAdminStatus() {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      
+      if (userError) {
+        console.error('Error getting user:', userError)
+        setIsAdmin(false)
+        return
+      }
+      
+      if (!user) {
+        setIsAdmin(false)
+        return
+      }
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('users')
         .select('is_admin')
         .eq('id', user.id)
         .single()
 
+      if (error) {
+        console.error('Error fetching admin status:', error)
+        setIsAdmin(false)
+        return
+      }
+
       setIsAdmin(data?.is_admin || false)
     } catch (error) {
       console.error('Error checking admin status:', error)
+      setIsAdmin(false)
     }
   }
 
