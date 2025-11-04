@@ -60,11 +60,12 @@ export async function POST(request: NextRequest) {
     )
 
     // Generate magic link for target user
+    // Redirect to impersonate callback to handle session setup
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: targetUser.email,
       options: {
-        redirectTo: `${request.nextUrl.origin}/dashboard`
+        redirectTo: `${request.nextUrl.origin}/admin/impersonate/callback`
       }
     })
 
