@@ -23,7 +23,7 @@ import {
   ArrowRight,
   ArrowLeft,
   PlayCircle,
-  UserCog
+  User
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
@@ -35,8 +35,6 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-  const [masqueradeEmail, setMasqueradeEmail] = useState('')
-  const [masqueradeLoading, setMasqueradeLoading] = useState(false)
   const [stats, setStats] = useState({
     totalBids: 0,
     totalPlans: 0,
@@ -133,58 +131,6 @@ export default function AdminDashboardPage() {
     }
   }
 
-  const handleMasquerade = async (email: string) => {
-    if (!email || !user) return
-
-    setMasqueradeLoading(true)
-    setError('')
-
-    try {
-      // First, find the user by email
-      const { data: targetUser, error: findError } = await supabase
-        .from('users')
-        .select('id, email')
-        .eq('email', email)
-        .single()
-
-      if (findError || !targetUser) {
-        throw new Error('User not found')
-      }
-
-      // Call masquerade API
-      const response = await fetch('/api/masquerade', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ targetUserId: targetUser.id }),
-        credentials: 'include', // Important: include cookies
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to start masquerade')
-      }
-
-      // If session tokens are returned, set them client-side
-      if (data.session) {
-        const supabase = createClient()
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        })
-      }
-
-      // Reload the page to switch sessions
-      window.location.href = '/dashboard'
-    } catch (err: any) {
-      setError(err.message || 'Failed to masquerade as user')
-    } finally {
-      setMasqueradeLoading(false)
-    }
-  }
-
   if (authLoading) {
     return null
   }
@@ -253,6 +199,13 @@ export default function AdminDashboardPage() {
       icon: Zap,
       href: '/admin/ai-plan-demo',
       color: 'yellow'
+    },
+    {
+      title: 'User Masquerade',
+      description: 'Sign in as other users for debugging and support',
+      icon: UserPlus,
+      href: '/admin/masquerade',
+      color: 'red'
     }
   ]
 
@@ -517,49 +470,6 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Masquerade */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <UserCog className="h-5 w-5 text-orange-600" />
-                <span>Masquerade as User</span>
-              </CardTitle>
-              <CardDescription>
-                Take over a user's account to test their experience
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="masquerade-email" className="text-sm font-medium">
-                    User Email
-                  </Label>
-                  <p className="text-sm text-gray-600 mb-2">
-                    Enter the email of the user you want to masquerade as
-                  </p>
-                  <div className="flex space-x-2">
-                    <Input
-                      id="masquerade-email"
-                      type="email"
-                      placeholder="user@example.com"
-                      value={masqueradeEmail}
-                      onChange={(e) => setMasqueradeEmail(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Button
-                      onClick={() => handleMasquerade(masqueradeEmail)}
-                      disabled={masqueradeLoading || !masqueradeEmail}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {masqueradeLoading ? 'Starting...' : 'Masquerade'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Admin Tools */}
           <Card>
             <CardHeader>
@@ -581,11 +491,11 @@ export default function AdminDashboardPage() {
                     Enter an email address to grant admin privileges
                   </p>
                   <div className="flex space-x-2">
-                    <Input
+                    <input
                       id="admin-email"
                       type="email"
                       placeholder="user@example.com"
-                      className="flex-1"
+                      className="flex-1 px-3 py-2 border border-border rounded-md text-sm"
                     />
                     <Button
                       onClick={() => {

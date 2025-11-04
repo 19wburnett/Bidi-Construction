@@ -49,12 +49,18 @@ export default function ProfileDropdown() {
         })
 
         // Determine admin status
-        const { data: userData } = await supabase
+        const { data: userData, error } = await supabase
           .from('users')
           .select('is_admin')
           .eq('id', authUser.id)
           .single()
-        setIsAdmin(!!userData?.is_admin)
+        
+        if (error) {
+          console.error('Error checking admin status in profile dropdown:', error)
+          setIsAdmin(false)
+        } else {
+          setIsAdmin(!!userData?.is_admin)
+        }
 
         // Fetch notifications
         fetchNotifications(authUser.id)
@@ -62,8 +68,20 @@ export default function ProfileDropdown() {
         setIsAdmin(false)
       }
     }
+    
     getUser()
-  }, []) // Remove auth listener to prevent re-renders
+
+    // Listen for auth state changes to re-check admin status
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      getUser()
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase])
 
   const fetchNotifications = async (userId: string) => {
     try {

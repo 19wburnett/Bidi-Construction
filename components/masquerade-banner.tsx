@@ -1,39 +1,34 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { X, User } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { User, X, LogOut } from 'lucide-react'
 
-interface MasqueradeState {
-  isMasquerading: boolean
-  masqueradingAs?: {
-    id: string
-    email: string
-  }
-  adminUser?: {
-    id: string
-    email: string
-  }
+interface MasqueradeInfo {
+  masquerading: boolean
+  adminId?: string
+  adminEmail?: string
+  currentUserId?: string
+  currentUserEmail?: string
 }
 
 export default function MasqueradeBanner() {
-  const [masqueradeState, setMasqueradeState] = useState<MasqueradeState | null>(null)
+  const [masqueradeInfo, setMasqueradeInfo] = useState<MasqueradeInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  const [unmasquerading, setUnmasquerading] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     checkMasqueradeStatus()
-    // Check periodically
-    const interval = setInterval(checkMasqueradeStatus, 5000)
-    return () => clearInterval(interval)
   }, [])
 
   const checkMasqueradeStatus = async () => {
     try {
-      const response = await fetch('/api/masquerade')
-      if (response.ok) {
-        const data = await response.json()
-        setMasqueradeState(data)
-      }
+      const response = await fetch('/api/admin/masquerade')
+      const data = await response.json()
+      setMasqueradeInfo(data)
     } catch (error) {
       console.error('Error checking masquerade status:', error)
     } finally {
@@ -41,53 +36,72 @@ export default function MasqueradeBanner() {
     }
   }
 
-  const endMasquerade = async () => {
+  const handleUnmasquerade = async () => {
+    setUnmasquerading(true)
     try {
-      const response = await fetch('/api/masquerade', {
-        method: 'DELETE',
+      const response = await fetch('/api/admin/unmasquerade', {
+        method: 'POST'
       })
-      
-      if (response.ok) {
-        // Refresh the page to clear masquerade state
-        window.location.reload()
+      const data = await response.json()
+
+      if (data.success) {
+        // If redirect URL is provided, use it to restore session
+        if (data.redirectUrl) {
+          window.location.href = data.redirectUrl
+        } else {
+          // Refresh the page to update the auth state
+          router.refresh()
+          window.location.href = '/admin/demo-settings'
+        }
       } else {
-        const error = await response.json()
-        alert(`Failed to end masquerade: ${error.error}`)
+        alert('Failed to unmasquerade: ' + (data.error || 'Unknown error'))
+        setUnmasquerading(false)
       }
     } catch (error) {
-      console.error('Error ending masquerade:', error)
-      alert('Failed to end masquerade')
+      console.error('Error unmasquerading:', error)
+      alert('Failed to unmasquerade. Please try again.')
+      setUnmasquerading(false)
     }
   }
 
-  if (loading || !masqueradeState?.isMasquerading) {
+  if (loading || !masqueradeInfo?.masquerading) {
     return null
   }
 
   return (
-    <div className="bg-orange-50 border-b border-orange-200 dark:bg-orange-950/50 dark:border-orange-800 px-4 py-3">
-      <div className="container mx-auto flex items-center justify-between">
+    <Alert className="bg-yellow-50 border-yellow-200 border-l-4 border-l-yellow-500 rounded-none">
+      <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <User className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-          <div className="text-orange-800 dark:text-orange-200 text-sm">
-            <strong>Masquerading as:</strong> {masqueradeState.masqueradingAs?.email || 'Unknown user'}
-            {masqueradeState.adminUser && (
-              <span className="ml-2 text-xs">
-                (Admin: {masqueradeState.adminUser.email})
+          <User className="h-5 w-5 text-yellow-600" />
+          <AlertDescription className="text-yellow-800">
+            <strong>Masquerading as:</strong> {masqueradeInfo.currentUserEmail || 'Unknown user'}
+            {masqueradeInfo.adminEmail && (
+              <span className="ml-2 text-sm text-yellow-600">
+                (Admin: {masqueradeInfo.adminEmail})
               </span>
             )}
-          </div>
+          </AlertDescription>
         </div>
         <Button
-          variant="outline"
+          onClick={handleUnmasquerade}
+          disabled={unmasquerading}
           size="sm"
-          onClick={endMasquerade}
-          className="border-orange-300 text-orange-700 hover:bg-orange-100 dark:border-orange-700 dark:text-orange-300 dark:hover:bg-orange-900"
+          variant="outline"
+          className="border-yellow-300 text-yellow-800 hover:bg-yellow-100"
         >
-          <X className="h-4 w-4 mr-1" />
-          End Masquerade
+          {unmasquerading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600 mr-2"></div>
+              Returning...
+            </>
+          ) : (
+            <>
+              <LogOut className="h-4 w-4 mr-2" />
+              Return to Admin
+            </>
+          )}
         </Button>
       </div>
-    </div>
+    </Alert>
   )
 }
