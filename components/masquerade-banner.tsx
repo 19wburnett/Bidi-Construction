@@ -22,16 +22,37 @@ export default function MasqueradeBanner() {
 
   useEffect(() => {
     checkMasqueradeStatus()
+    
+    // Check periodically to catch when session becomes available
+    const interval = setInterval(() => {
+      checkMasqueradeStatus()
+    }, 2000) // Check every 2 seconds
+    
+    return () => clearInterval(interval)
   }, [])
 
   const checkMasqueradeStatus = async () => {
     try {
-      const response = await fetch('/api/admin/masquerade')
+      const response = await fetch('/api/admin/masquerade', {
+        credentials: 'include' // Important: include cookies
+      })
       const data = await response.json()
-      setMasqueradeInfo(data)
+      
+      // Only update if we got valid data
+      if (data && typeof data === 'object') {
+        setMasqueradeInfo(data)
+        // If we found masquerading and have a user email, stop loading
+        if (data.masquerading && data.currentUserEmail && data.currentUserEmail !== 'Loading...') {
+          setLoading(false)
+        } else if (data.masquerading) {
+          // Still masquerading but user not loaded yet, keep checking
+          setLoading(false) // But don't hide the banner
+        } else {
+          setLoading(false)
+        }
+      }
     } catch (error) {
       console.error('Error checking masquerade status:', error)
-    } finally {
       setLoading(false)
     }
   }
@@ -66,9 +87,15 @@ export default function MasqueradeBanner() {
     }
   }
 
-  if (loading || !masqueradeInfo?.masquerading) {
+  // Only show if we're definitely masquerading
+  if (!masqueradeInfo?.masquerading) {
     return null
   }
+
+  // Don't show "Loading..." in production - wait for actual email
+  const displayEmail = masqueradeInfo.currentUserEmail && masqueradeInfo.currentUserEmail !== 'Loading...' 
+    ? masqueradeInfo.currentUserEmail 
+    : 'Authenticating...'
 
   return (
     <Alert className="bg-yellow-50 border-yellow-200 border-l-4 border-l-yellow-500 rounded-none">
@@ -76,7 +103,7 @@ export default function MasqueradeBanner() {
         <div className="flex items-center space-x-3">
           <User className="h-5 w-5 text-yellow-600" />
           <AlertDescription className="text-yellow-800">
-            <strong>Masquerading as:</strong> {masqueradeInfo.currentUserEmail || 'Unknown user'}
+            <strong>Masquerading as:</strong> {displayEmail}
             {masqueradeInfo.adminEmail && (
               <span className="ml-2 text-sm text-yellow-600">
                 (Admin: {masqueradeInfo.adminEmail})

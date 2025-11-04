@@ -157,14 +157,29 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = await createServerSupabaseClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    
+    // Try to get the current user - if session isn't ready yet, we still know we're masquerading
+    let currentUser = null
+    let currentUserEmail: string | undefined = undefined
+    
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (!userError && user) {
+        currentUser = user
+        currentUserEmail = user.email || undefined
+      }
+    } catch (error) {
+      // Session might not be ready yet, that's okay - we still return masquerading: true
+      console.log('User not yet available in masquerade check:', error)
+    }
 
+    // If we have masquerade cookies, we're masquerading even if session isn't ready yet
     return NextResponse.json({
       masquerading: true,
       adminId,
       adminEmail,
       currentUserId: currentUser?.id,
-      currentUserEmail: currentUser?.email
+      currentUserEmail: currentUserEmail || 'Loading...' // Show "Loading..." instead of "Unknown user"
     })
   } catch (error) {
     return NextResponse.json({ masquerading: false })
