@@ -410,6 +410,9 @@ export class TakeoffOrchestrator {
           // Try fallback provider
           if (job.model_policy.fallbacks && job.model_policy.fallbacks.length > 0) {
             try {
+              // Reload pages for fallback (in case they're out of scope)
+              const fallbackPages = await this.loadPagesForBatch(job.pdf_ref, batch.page_start, batch.page_end)
+              
               // Get job type for prompts
               const { data: planData } = await this.supabase
                 .from('plans')
@@ -422,7 +425,7 @@ export class TakeoffOrchestrator {
                 : 'residential'
 
               const fallbackResult = await this.callAIModelWithProvider(
-                pages,
+                fallbackPages,
                 job.model_policy.fallbacks[0],
                 job.mode,
                 jobType
