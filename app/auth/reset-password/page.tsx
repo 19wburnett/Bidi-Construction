@@ -23,36 +23,64 @@ export default function ResetPasswordPage() {
   const supabase = createClient()
 
   useEffect(() => {
+    let subscription: any = null
+
     const validateToken = async () => {
       try {
-        // Check if we have a session (which would be set by Supabase when the user clicks the reset link)
+        // First, check if we already have a session
         const { data: { session } } = await supabase.auth.getSession()
         
-        if (!session) {
-          // Try to get session from URL hash if it exists
-          const hashParams = new URLSearchParams(window.location.hash.substring(1))
-          const accessToken = hashParams.get('access_token')
-          const type = hashParams.get('type')
+        if (session) {
+          setValidatingToken(false)
+          return
+        }
+
+        // Listen for auth state changes (this handles the hash parameters from the email link)
+        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'PASSWORD_RECOVERY') {
+            // Password recovery link clicked, session is now available
+            setValidatingToken(false)
+          } else if (event === 'SIGNED_IN' && session) {
+            // Session established
+            setValidatingToken(false)
+          }
+        })
+        subscription = authSubscription
+
+        // Also check URL hash directly for recovery tokens
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const accessToken = hashParams.get('access_token')
+        const type = hashParams.get('type')
+        
+        if (accessToken && type === 'recovery') {
+          // Give Supabase a moment to process the hash
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          const { data: { session: newSession } } = await supabase.auth.getSession()
           
-          if (accessToken && type === 'recovery') {
-            // Session should be automatically set by Supabase when the link is clicked
-            // Wait a moment for it to be processed
-            await new Promise(resolve => setTimeout(resolve, 500))
-            const { data: { session: newSession } } = await supabase.auth.getSession()
+          if (newSession) {
+            setValidatingToken(false)
+          } else {
+            // Wait a bit more and check again
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            const { data: { session: finalSession } } = await supabase.auth.getSession()
             
-            if (!newSession) {
+            if (!finalSession) {
               setError('Invalid or expired reset link. Please request a new password reset.')
               setValidatingToken(false)
-              return
+            } else {
+              setValidatingToken(false)
             }
-          } else {
-            setError('Invalid or expired reset link. Please request a new password reset.')
-            setValidatingToken(false)
-            return
           }
+        } else {
+          // No hash parameters, check if we have a valid session after a delay
+          setTimeout(async () => {
+            const { data: { session: delayedSession } } = await supabase.auth.getSession()
+            if (!delayedSession) {
+              setError('Invalid or expired reset link. Please request a new password reset.')
+            }
+            setValidatingToken(false)
+          }, 2000)
         }
-        
-        setValidatingToken(false)
       } catch (err) {
         setError('An error occurred validating the reset link.')
         setValidatingToken(false)
@@ -60,6 +88,13 @@ export default function ResetPasswordPage() {
     }
 
     validateToken()
+
+    // Cleanup subscription on unmount
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe()
+      }
+    }
   }, [supabase])
 
   const handleResetPassword = async (e: React.FormEvent) => {
