@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,13 +12,24 @@ import { Building2, ArrowLeft } from 'lucide-react'
 import logo from '../../../public/brand/Bidi Contracting Logo.svg'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  useEffect(() => {
+    // Check for success message from password reset
+    if (searchParams.get('password_reset') === 'success') {
+      setSuccessMessage('Password reset successful! Please sign in with your new password.')
+      // Clear the query parameter from URL
+      router.replace('/auth/login', { scroll: false })
+    }
+  }, [searchParams, router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -144,7 +155,12 @@ export default function LoginPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link href="/auth/forgot-password" className="text-sm text-orange-600 hover:text-orange-700 hover:underline font-medium">
+                    Forgot password?
+                  </Link>
+                </div>
                 <Input
                   id="password"
                   type="password"
@@ -154,6 +170,16 @@ export default function LoginPage() {
                   required
                 />
               </div>
+              {successMessage && (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                  <div className="flex items-center space-x-2">
+                    <svg className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <p className="text-sm text-green-800 dark:text-green-200">{successMessage}</p>
+                  </div>
+                </div>
+              )}
               {error && (
                 <div className="text-red-600 text-sm text-center">{error}</div>
               )}
@@ -208,5 +234,17 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center">
+        <FallingBlocksLoader text="Loading..." size="lg" />
+      </div>
+    }>
+      <LoginPageContent />
+    </Suspense>
   )
 }

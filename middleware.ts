@@ -57,7 +57,8 @@ export async function middleware(request: NextRequest) {
       }
 
       // If user is signed in and trying to access auth pages, redirect to dashboard
-      if (user && request.nextUrl.pathname.startsWith('/auth')) {
+      // Exception: allow /auth/reset-password for password reset flow
+      if (user && request.nextUrl.pathname.startsWith('/auth') && request.nextUrl.pathname !== '/auth/reset-password') {
         const url = request.nextUrl.clone()
         url.pathname = '/dashboard'
         return NextResponse.redirect(url)
