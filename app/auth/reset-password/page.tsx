@@ -23,78 +23,57 @@ export default function ResetPasswordPage() {
   const supabase = createClient()
 
   useEffect(() => {
-    let subscription: any = null
-
     const validateToken = async () => {
       try {
-        // First, check if we already have a session
-        const { data: { session } } = await supabase.auth.getSession()
+        // Supabase automatically processes hash parameters when getSession() is called
+        // The hash contains access_token, type=recovery, etc.
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
-        if (session) {
+        if (sessionError) {
+          console.error('Session error:', sessionError)
+          setError('Invalid or expired reset link. Please request a new password reset.')
           setValidatingToken(false)
           return
         }
-
-        // Listen for auth state changes (this handles the hash parameters from the email link)
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === 'PASSWORD_RECOVERY') {
-            // Password recovery link clicked, session is now available
-            setValidatingToken(false)
-          } else if (event === 'SIGNED_IN' && session) {
-            // Session established
-            setValidatingToken(false)
-          }
-        })
-        subscription = authSubscription
-
-        // Also check URL hash directly for recovery tokens
-        const hashParams = new URLSearchParams(window.location.hash.substring(1))
-        const accessToken = hashParams.get('access_token')
-        const type = hashParams.get('type')
         
-        if (accessToken && type === 'recovery') {
-          // Give Supabase a moment to process the hash
+        // Check if we have hash parameters (from email link)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const hasHashToken = hashParams.get('access_token') && hashParams.get('type') === 'recovery'
+        
+        if (!session && !hasHashToken) {
+          // No session and no recovery token in URL
+          setError('Invalid or expired reset link. Please request a new password reset.')
+          setValidatingToken(false)
+          return
+        }
+        
+        // If we have hash params but no session yet, wait for Supabase to process them
+        if (hasHashToken && !session) {
+          // Give Supabase a moment to process the hash and create the session
           await new Promise(resolve => setTimeout(resolve, 1000))
           const { data: { session: newSession } } = await supabase.auth.getSession()
           
-          if (newSession) {
+          if (!newSession) {
+            setError('Invalid or expired reset link. Please request a new password reset.')
             setValidatingToken(false)
-          } else {
-            // Wait a bit more and check again
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            const { data: { session: finalSession } } = await supabase.auth.getSession()
-            
-            if (!finalSession) {
-              setError('Invalid or expired reset link. Please request a new password reset.')
-              setValidatingToken(false)
-            } else {
-              setValidatingToken(false)
-            }
+            return
           }
-        } else {
-          // No hash parameters, check if we have a valid session after a delay
-          setTimeout(async () => {
-            const { data: { session: delayedSession } } = await supabase.auth.getSession()
-            if (!delayedSession) {
-              setError('Invalid or expired reset link. Please request a new password reset.')
-            }
-            setValidatingToken(false)
-          }, 2000)
         }
+        
+        // Clear hash from URL for security
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+        
+        setValidatingToken(false)
       } catch (err) {
+        console.error('Validation error:', err)
         setError('An error occurred validating the reset link.')
         setValidatingToken(false)
       }
     }
 
     validateToken()
-
-    // Cleanup subscription on unmount
-    return () => {
-      if (subscription) {
-        subscription.unsubscribe()
-      }
-    }
   }, [supabase])
 
   const handleResetPassword = async (e: React.FormEvent) => {

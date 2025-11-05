@@ -155,12 +155,7 @@ function LoginPageContent() {
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  <Link href="/auth/forgot-password" className="text-sm text-orange-600 hover:text-orange-700 hover:underline font-medium">
-                    Forgot password?
-                  </Link>
-                </div>
+                <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -169,6 +164,11 @@ function LoginPageContent() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                <div className="flex justify-end">
+                  <Link href="/auth/forgot-password" className="text-sm text-orange-600 hover:text-orange-700 hover:underline font-medium">
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
               {successMessage && (
                 <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
