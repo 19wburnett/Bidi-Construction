@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       user = { id: planCheck.user_id }
     } else {
       // Regular user call - verify auth
-      const { data: userData, error: authError } = await supabase.auth.getUser()
+      const { data: { user: userData }, error: authError } = await supabase.auth.getUser()
 
       if (authError || !userData) {
         return NextResponse.json(
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
           { status: 401 }
         )
       }
-      user = userData
+      user = { id: userData.id }
 
       // Check if user is admin (for live site safety)
       if (ADMIN_ONLY) {
