@@ -830,9 +830,9 @@ export class TakeoffOrchestrator {
       quality_analysis: {
         summary: this.generateSummary(allRisks, allMissingInfo),
         risks: allRisks,
-        missing_info: [...new Set(allMissingInfo)], // Dedupe
-        assumptions: [...new Set(allAssumptions)],
-        code_refs: [...new Set(allCodeRefs)],
+        missing_info: Array.from(new Set(allMissingInfo)), // Dedupe
+        assumptions: Array.from(new Set(allAssumptions)),
+        code_refs: Array.from(new Set(allCodeRefs)),
         confidence: this.calculateOverallConfidence(allItems)
       }
     }
