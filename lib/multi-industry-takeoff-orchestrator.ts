@@ -340,6 +340,10 @@ export class MultiIndustryTakeoffOrchestrator {
 
     // Process each PDF in batches
     for (const { pdf, pages: totalPages } of pdfPageCounts) {
+      if (totalPages === 0) {
+        this.log('warn', `Skipping segment ${segment.industry} for ${pdf} - no pages available (PDF conversion failed?)`)
+        continue
+      }
       const batches = this.createBatches(totalPages, batchSize)
 
       // Process batches with parallelism control
@@ -489,9 +493,13 @@ export class MultiIndustryTakeoffOrchestrator {
       
       const buffer = Buffer.from(await response.arrayBuffer())
       const imageUrls = await extractImageUrlsOnly(buffer, 'plan.pdf')
+      if (!imageUrls || imageUrls.length === 0) {
+        throw new Error('No pages extracted from PDF (conversion returned zero results).')
+      }
       return imageUrls.length
     } catch (error) {
-      this.log('error', `Failed to get page count for ${pdfUrl}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.log('error', `Failed to get page count for ${pdfUrl}: ${message}`)
       return 0
     }
   }
@@ -511,6 +519,9 @@ export class MultiIndustryTakeoffOrchestrator {
 
       // Extract images and text
       const imageUrls = await extractImageUrlsOnly(buffer, 'plan.pdf')
+      if (!imageUrls || imageUrls.length === 0) {
+        throw new Error('No images extracted from PDF (check PDF_CO_API_KEY or file format).')
+      }
       const pageTexts = await extractTextPerPage(buffer)
 
       // Build pages array for the batch range
