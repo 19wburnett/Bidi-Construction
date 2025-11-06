@@ -490,6 +490,10 @@ export class MultiIndustryTakeoffOrchestrator {
       // Download PDF to get page count
       const response = await fetch(pdfUrl)
       if (!response.ok) throw new Error('Failed to fetch PDF')
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('pdf')) {
+        throw new Error(`URL does not appear to be a PDF (content-type: ${contentType || 'unknown'})`)
+      }
       
       const buffer = Buffer.from(await response.arrayBuffer())
       const imageUrls = await extractImageUrlsOnly(buffer, 'plan.pdf')
@@ -514,6 +518,10 @@ export class MultiIndustryTakeoffOrchestrator {
       const response = await fetch(pdfUrl)
       if (!response.ok) {
         throw new Error(`Failed to fetch PDF: ${response.statusText}`)
+      }
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('pdf')) {
+        throw new Error(`URL does not appear to be a PDF (content-type: ${contentType || 'unknown'})`)
       }
       const buffer = Buffer.from(await response.arrayBuffer())
 
@@ -807,33 +815,36 @@ REQUIREMENTS:
 - Include analysis items for issues, conflicts, and RFIs`
 
     const extractedText = pages.map(p => p.text).filter(Boolean).join('\n\n')
-    const user = `Analyze pages ${pages[0]?.page || 1}-${pages[pages.length - 1]?.page || 1} for ${segment.industry} work (${segment.categories.join(', ')}).
-
-${extractedText ? `=== EXTRACTED TEXT ===\n${extractedText.slice(0, 4000)}\n\n` : ''}
-
-Extract all items and analysis for this segment scope.`
+    const extractedBlock = extractedText
+      ? `=== EXTRACTED TEXT ===\n${extractedText.slice(0, 4000)}\n`
+      : ''
+    const user = [
+      `Analyze pages ${pages[0]?.page || 1}-${pages[pages.length - 1]?.page || 1} for ${segment.industry} work (${segment.categories.join(', ')}).`,
+      extractedBlock,
+      'Extract all items and analysis for this segment scope.'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
 
     return { system, user }
   }
 
-  // ============================================================================
-  // RESPONSE PARSERS
-  // ============================================================================
-
   private parseScopingResponse(response: string): SegmentPlan[] {
     try {
-      const parsed = extractAnalysisPayload(response) as any
-      if (parsed.suggested_segments && Array.isArray(parsed.suggested_segments)) {
-        return parsed.suggested_segments.map((s: any, idx: number) => ({
-          industry: s.industry || 'other',
-          categories: Array.isArray(s.categories) ? s.categories : [],
-          priority: s.priority || idx + 1
+      const json = JSON.parse(response)
+      if (json.suggested_segments && Array.isArray(json.suggested_segments)) {
+        return json.suggested_segments.map((s: any, idx: number) => ({
+          industry: s.industry,
+          categories: s.categories,
+          priority: idx + 1
         }))
       }
-    } catch (error) {
-      this.log('warn', 'Failed to parse scoping response')
+      this.log('warn', 'Scoping response did not contain suggested_segments')
+      return []
+    } catch (e) {
+      this.log('error', `Failed to parse scoping response: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      return []
     }
-    return []
   }
 
   private parseExecutionResponse(
@@ -842,69 +853,55 @@ Extract all items and analysis for this segment scope.`
     pages: Array<{ page: number; imageUrl?: string; text?: string }>,
     segment: SegmentPlan,
     input: MultiIndustryTakeoffInput
-  ): {
-    takeoff: TakeoffItem[]
-    analysis: AnalysisItem[]
-  } {
+  ): { takeoff: TakeoffItem[]; analysis: AnalysisItem[] } {
     try {
-      const parsed = extractAnalysisPayload(response) as any
-      
-      const takeoff: TakeoffItem[] = []
-      const analysis: AnalysisItem[] = []
+      const json = JSON.parse(response)
+      if (json.items && Array.isArray(json.items)) {
+        const takeoffItems: TakeoffItem[] = json.items.map((item: any) => ({
+          name: item.name,
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          unit_cost: item.unit_cost,
+          unit_cost_source: item.unit_cost_source,
+          unit_cost_notes: item.unit_cost_notes,
+          location: item.location,
+          industry: segment.industry,
+          category: item.category,
+          subcategory: item.subcategory,
+          cost_code: item.cost_code,
+          cost_code_description: item.cost_code_description,
+          dimensions: item.dimensions,
+          bounding_box: item.bounding_box,
+          page_refs: item.page_refs,
+          confidence: item.confidence,
+          notes: item.notes
+        }))
 
-      // Parse items
-      if (parsed.items && Array.isArray(parsed.items)) {
-        for (const item of parsed.items) {
-          takeoff.push({
-            name: item.name || '',
-            description: item.description || '',
-            quantity: typeof item.quantity === 'number' ? item.quantity : 0,
-            unit: item.unit || 'EA',
-            unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
-            unit_cost_source: item.unit_cost_source || (input.unit_cost_policy === 'estimate' ? 'model_estimate' : 'lookup_pending'),
-            unit_cost_notes: item.unit_cost_notes,
-            location: item.location || '',
-            industry: segment.industry,
-            category: item.category || segment.categories[0] || '',
-            subcategory: item.subcategory || '',
-            cost_code: item.cost_code || '',
-            cost_code_description: item.cost_code_description || '',
-            dimensions: item.dimensions || '',
-            bounding_box: item.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: pages[0]?.page || 1 },
-            page_refs: item.page_refs || [{ pdf: pdfUrl, page: pages[0]?.page || 1 }],
-            confidence: typeof item.confidence === 'number' ? item.confidence : 0.5,
-            notes: item.notes
-          })
-        }
-      }
-
-      // Parse analysis
-      if (parsed.analysis && Array.isArray(parsed.analysis)) {
-        for (const item of parsed.analysis) {
-          analysis.push({
-            type: item.type || 'code_issue',
+        if (json.analysis && Array.isArray(json.analysis)) {
+          const analysisItems: AnalysisItem[] = json.analysis.map((item: any) => ({
+            type: item.type,
             title: item.title,
             question: item.question,
-            description: item.description || '',
+            description: item.description,
             sheet: item.sheet,
-            pages: Array.isArray(item.pages) ? item.pages : [item.bounding_box?.page || pages[0]?.page || 1],
-            bounding_box: item.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: pages[0]?.page || 1 },
+            pages: item.pages,
+            bounding_box: item.bounding_box,
             severity: item.severity,
             priority: item.priority,
             recommendation: item.recommendation,
-            confidence: typeof item.confidence === 'number' ? item.confidence : 0.5
-          })
+            confidence: item.confidence
+          }))
+          return { takeoff: takeoffItems, analysis: analysisItems }
         }
       }
-
-      return { takeoff, analysis }
-    } catch (error) {
-      this.log('error', `Failed to parse execution response: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      this.log('warn', 'Execution response did not contain items or analysis')
+      return { takeoff: [], analysis: [] }
+    } catch (e) {
+      this.log('error', `Failed to parse execution response: ${e instanceof Error ? e.message : 'Unknown error'}`)
       return { takeoff: [], analysis: [] }
     }
   }
 }
 
-// Export singleton instance
 export const multiIndustryTakeoffOrchestrator = new MultiIndustryTakeoffOrchestrator()
-
