@@ -7,6 +7,21 @@ type UsersTableRow = {
   is_admin?: boolean | null
 }
 
+function buildErrorResult(message: string) {
+  const result: [any[], any[], any[], any[]] = [
+    [],
+    [],
+    [],
+    [
+      {
+        type: 'error' as const,
+        message
+      }
+    ]
+  ]
+  return result
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient()
@@ -14,7 +29,7 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+      return NextResponse.json(buildErrorResult('Authentication required'), { status: 401 })
     }
 
     // Ensure caller is an admin (admin tools only)
@@ -26,18 +41,18 @@ export async function POST(request: NextRequest) {
 
     if (userError) {
       console.error('Failed to load user admin flag:', userError)
-      return NextResponse.json({ error: 'Failed to verify permissions' }, { status: 500 })
+      return NextResponse.json(buildErrorResult('Failed to verify permissions'), { status: 500 })
     }
 
     if (!userRow?.is_admin) {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+      return NextResponse.json(buildErrorResult('Admin access required'), { status: 403 })
     }
 
     const body = await request.json()
     const { plan_id: planId } = body
 
     if (!planId || typeof planId !== 'string') {
-      return NextResponse.json({ error: 'plan_id is required' }, { status: 400 })
+      return NextResponse.json(buildErrorResult('plan_id is required'), { status: 400 })
     }
 
     // Fetch plan metadata
@@ -48,11 +63,11 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (planError || !plan) {
-      return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
+      return NextResponse.json(buildErrorResult('Plan not found'), { status: 404 })
     }
 
     if (!plan.file_path) {
-      return NextResponse.json({ error: 'Plan is missing a file path' }, { status: 400 })
+      return NextResponse.json(buildErrorResult('Plan is missing a file path'), { status: 400 })
     }
 
     const storageClient = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -95,18 +110,12 @@ export async function POST(request: NextRequest) {
 
       if (!primaryPdfUrl) {
         console.error('Failed to create signed URL for plan file:', plan.file_path)
-        const fallback: [any[], any[], any[], any[]] = [
-          [],
-          [],
-          [],
-          [
-            {
-              type: 'error' as const,
-              message: `Unable to access plan file at ${plan.file_path}. Verify storage bucket permissions and path.`
-            }
-          ]
-        ]
-        return NextResponse.json(fallback, { status: 500 })
+        return NextResponse.json(
+          buildErrorResult(
+            `Unable to access plan file at ${plan.file_path}. Verify storage bucket permissions and path.`
+          ),
+          { status: 500 }
+        )
       }
     }
 
@@ -151,13 +160,8 @@ export async function POST(request: NextRequest) {
     const result = await multiIndustryTakeoffOrchestrator.execute(input)
 
     if (!Array.isArray(result) || result.length !== 4) {
-      return NextResponse.json(
-        {
-          error: 'Invalid orchestrator output',
-          details: 'Expected [takeoff[], analysis[], segments[], runLog[]]'
-        },
-        { status: 500 }
-      )
+      console.error('Invalid orchestrator output', { planId, result })
+      return NextResponse.json(buildErrorResult('Unexpected orchestrator output'), { status: 500 })
     }
 
     return NextResponse.json(result, {
@@ -168,18 +172,9 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Multi-industry by-plan error:', error)
 
-    const fallback: [any[], any[], any[], any[]] = [
-      [],
-      [],
-      [],
-      [
-        {
-          type: 'error' as const,
-          message: `Pipeline failed: ${error?.message || 'Unknown error'}`
-        }
-      ]
-    ]
-
-    return NextResponse.json(fallback, { status: 500 })
+    return NextResponse.json(
+      buildErrorResult(`Pipeline failed: ${error?.message || 'Unknown error'}`),
+      { status: 500 }
+    )
   }
 }
