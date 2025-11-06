@@ -330,8 +330,10 @@ export class EnhancedAIProvider {
         const modelProcessingTime = Date.now() - modelStartTime
         result.processingTime = modelProcessingTime
         
-        console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
-        return { success: true, model, result, error: null }
+        // Log with actual model used (important for Grok fallback cases)
+        const actualModel = result.model || model
+        console.log(`✅ ${actualModel} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
+        return { success: true, model: actualModel, result, error: null }
       } catch (error: any) {
         const errorMsg = error?.message || String(error)
         console.error(`❌ ${model} failed:`, errorMsg)
@@ -713,9 +715,11 @@ export class EnhancedAIProvider {
         }
       })
 
+      // Return with actual model used (important for fallback cases)
+      const actualModel = response.model || selectedModel
       return {
         provider: 'xai',
-        model: response.model || selectedModel,
+        model: actualModel, // Use the actual model that was called (grok-2-1212 if fallback, grok-2-vision-beta if vision worked)
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
         content: response.content,
         finishReason: response.finish_reason,
