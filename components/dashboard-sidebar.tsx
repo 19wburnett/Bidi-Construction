@@ -199,6 +199,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
           href: '/admin/analyze-plans',
           badge: stats.pendingAnalyses > 0 ? stats.pendingAnalyses : undefined
         },
+        { label: 'Test Multi Takeoff', href: '/admin/test-multi-takeoff' },
         { label: 'Crawler', href: '/admin/crawler' },
         { label: 'Subcontractors', href: '/admin/manage-subcontractors' },
         { label: 'Manage Bids', href: '/admin/manage-bids' },
