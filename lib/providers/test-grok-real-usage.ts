@@ -224,7 +224,7 @@ Concrete: 50 CY
 if (require.main === module) {
   testRealPlanAnalysis()
     .then((result) => {
-      if (result.success) {
+      if (result?.success) {
         console.log('✅ Real usage test completed successfully!')
         process.exit(0)
       } else {

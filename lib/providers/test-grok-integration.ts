@@ -271,19 +271,19 @@ function compareResults(grok: TestResult, gpt: TestResult, claude: TestResult): 
   const gptFields = new Set(gptItems.map((item: any) => item.name?.toLowerCase()).filter(Boolean))
   const claudeFields = new Set(claudeItems.map((item: any) => item.name?.toLowerCase()).filter(Boolean))
 
-  // Calculate overlap
-  const grokGptIntersection = new Set([...grokFields].filter(x => gptFields.has(x)))
-  const grokClaudeIntersection = new Set([...grokFields].filter(x => claudeFields.has(x)))
-  const gptClaudeIntersection = new Set([...gptFields].filter(x => claudeFields.has(x)))
+  // Calculate overlap (using Array.from to avoid downlevelIteration requirement)
+  const grokGptIntersection = new Set(Array.from(grokFields).filter(x => gptFields.has(x)))
+  const grokClaudeIntersection = new Set(Array.from(grokFields).filter(x => claudeFields.has(x)))
+  const gptClaudeIntersection = new Set(Array.from(gptFields).filter(x => claudeFields.has(x)))
 
   const grokVsGpt = grokFields.size > 0 ? (grokGptIntersection.size / Math.max(grokFields.size, gptFields.size)) * 100 : 0
   const grokVsClaude = grokFields.size > 0 ? (grokClaudeIntersection.size / Math.max(grokFields.size, claudeFields.size)) * 100 : 0
   const gptVsClaude = gptFields.size > 0 ? (gptClaudeIntersection.size / Math.max(gptFields.size, claudeFields.size)) * 100 : 0
 
-  // Find unique items
-  const grokUnique = [...grokFields].filter(x => !gptFields.has(x) && !claudeFields.has(x))
-  const gptUnique = [...gptFields].filter(x => !grokFields.has(x) && !claudeFields.has(x))
-  const claudeUnique = [...claudeFields].filter(x => !grokFields.has(x) && !gptFields.has(x))
+  // Find unique items (using Array.from to avoid downlevelIteration requirement)
+  const grokUnique = Array.from(grokFields).filter(x => !gptFields.has(x) && !claudeFields.has(x))
+  const gptUnique = Array.from(gptFields).filter(x => !grokFields.has(x) && !claudeFields.has(x))
+  const claudeUnique = Array.from(claudeFields).filter(x => !grokFields.has(x) && !gptFields.has(x))
 
   return {
     grok,
