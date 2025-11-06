@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { AlertCircle, CheckCircle2, Loader2, PlayCircle } from 'lucide-react'
+import { createClient } from '@/lib/supabase'
 
 type PipelineArrays = [any[], any[], any[], any[]]
 
@@ -23,6 +24,15 @@ interface PipelineResult {
   analysis: any[]
   segments: any[]
   runLog: any[]
+}
+
+interface PlanSummary {
+  planId: string
+  title: string | null
+  projectName: string | null
+  projectLocation: string | null
+  createdAt: string
+  jobId: string | null
 }
 
 export default function TestMultiTakeoffPage() {
@@ -41,6 +51,9 @@ export default function TestMultiTakeoffPage() {
   const [result, setResult] = useState<PipelineResult | null>(null)
   const [rawResponse, setRawResponse] = useState<PipelineArrays | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [plans, setPlans] = useState<PlanSummary[]>([])
+  const [plansLoading, setPlansLoading] = useState(false)
+  const [plansError, setPlansError] = useState<string | null>(null)
 
   const parsedAdditionalUrls = useMemo(() => {
     return additionalPdfUrls
@@ -48,6 +61,78 @@ export default function TestMultiTakeoffPage() {
       .map((url) => url.trim())
       .filter(Boolean)
   }, [additionalPdfUrls])
+
+  useEffect(() => {
+    const loadPlans = async () => {
+      try {
+        setPlansLoading(true)
+        setPlansError(null)
+
+        const supabase = createClient()
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        if (authError || !user) {
+          setPlansError('Authentication required to load plans.')
+          setPlans([])
+          return
+        }
+
+        const { data, error } = await supabase
+          .from('plans')
+          .select('id, title, project_name, project_location, created_at, job_id')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50)
+
+        if (error) {
+          setPlansError(error.message)
+          setPlans([])
+          return
+        }
+
+        const summaries: PlanSummary[] = (data || []).map((plan) => ({
+          planId: plan.id,
+          title: plan.title,
+          projectName: plan.project_name,
+          projectLocation: plan.project_location,
+          createdAt: plan.created_at,
+          jobId: plan.job_id ?? null
+        }))
+
+        setPlans(summaries)
+
+        if (summaries.length > 0 && !planId) {
+          setPlanId(summaries[0].planId)
+          if (!projectName && summaries[0].projectName) {
+            setProjectName(summaries[0].projectName)
+          }
+          if (!location && summaries[0].projectLocation) {
+            setLocation(summaries[0].projectLocation)
+          }
+        }
+      } catch (err) {
+        setPlansError(err instanceof Error ? err.message : 'Failed to load plans.')
+        setPlans([])
+      } finally {
+        setPlansLoading(false)
+      }
+    }
+
+    loadPlans()
+  }, [])
+
+  const handlePlanSelect = (selectedId: string) => {
+    setPlanId(selectedId)
+
+    const selectedPlan = plans.find((plan) => plan.planId === selectedId)
+    if (selectedPlan) {
+      if (selectedPlan.projectName) {
+        setProjectName(selectedPlan.projectName)
+      }
+      if (selectedPlan.projectLocation) {
+        setLocation(selectedPlan.projectLocation)
+      }
+    }
+  }
 
   const summary = useMemo(() => {
     if (!result) return null
@@ -162,17 +247,46 @@ export default function TestMultiTakeoffPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="planId">Plan ID</Label>
-            <Input
-              id="planId"
-              value={planId}
-              onChange={(event) => setPlanId(event.target.value)}
-              placeholder="e.g. 2f9b2dcd-..."
-            />
-            <p className="text-xs text-muted-foreground">
-              The ID is visible in the URL when viewing a plan (e.g. <code>/dashboard/plans/[planId]</code>).
-            </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="planSelector">Select a Plan</Label>
+              <Select value={planId} onValueChange={handlePlanSelect} disabled={plansLoading || plans.length === 0}>
+                <SelectTrigger id="planSelector">
+                  <SelectValue placeholder={plansLoading ? 'Loading plans…' : 'Choose a plan'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {plans.map((plan) => {
+                    const label = plan.title || plan.projectName || plan.planId
+                    return (
+                      <SelectItem key={plan.planId} value={plan.planId}>
+                        <div className="flex flex-col text-left">
+                          <span className="font-medium truncate">{label}</span>
+                          <span className="text-xs text-muted-foreground truncate">
+                            {plan.projectLocation ? `${plan.projectLocation} • ` : ''}
+                            {new Date(plan.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+              {plansError && (
+                <p className="text-xs text-red-500">{plansError}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="planId">Plan ID (override)</Label>
+              <Input
+                id="planId"
+                value={planId}
+                onChange={(event) => setPlanId(event.target.value)}
+                placeholder="e.g. 2f9b2dcd-..."
+              />
+              <p className="text-xs text-muted-foreground">
+                The ID is visible in the URL when viewing a plan (e.g. <code>/dashboard/plans/[planId]</code>).
+              </p>
+            </div>
           </div>
 
           <div className="space-y-2">

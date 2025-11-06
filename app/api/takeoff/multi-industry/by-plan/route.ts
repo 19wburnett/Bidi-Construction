@@ -85,25 +85,40 @@ export async function POST(request: NextRequest) {
       const bucketsToTry = ['plans', 'job-plans']
 
       for (const bucket of bucketsToTry) {
-        const relativePath = plan.file_path.startsWith(`${bucket}/`)
-          ? plan.file_path.slice(bucket.length + 1)
-          : plan.file_path
-
-        const { data: signedUrlData, error: signedUrlError } = await storageClient.storage
-          .from(bucket)
-          .createSignedUrl(relativePath, 60 * 60)
-
-        if (signedUrlError) {
-          console.warn('Signed URL attempt failed', {
-            bucket,
-            relativePath,
-            error: signedUrlError.message
-          })
-          continue
+        const candidatePaths = [plan.file_path]
+        if (plan.file_path.startsWith(`${bucket}/`)) {
+          candidatePaths.push(plan.file_path.slice(bucket.length + 1))
         }
 
-        if (signedUrlData?.signedUrl) {
-          primaryPdfUrl = signedUrlData.signedUrl
+        // Handle fully-qualified public URLs stored in the database
+        if (plan.file_path.includes('/storage/v1/object/public/')) {
+          const [, afterPublic] = plan.file_path.split('/storage/v1/object/public/')
+          if (afterPublic) {
+            candidatePaths.push(afterPublic)
+          }
+        }
+
+        for (const candidatePath of candidatePaths) {
+          const { data: signedUrlData, error: signedUrlError } = await storageClient.storage
+            .from(bucket)
+            .createSignedUrl(candidatePath, 60 * 60)
+
+          if (signedUrlError) {
+            console.warn('Signed URL attempt failed', {
+              bucket,
+              candidatePath,
+              error: signedUrlError.message
+            })
+            continue
+          }
+
+          if (signedUrlData?.signedUrl) {
+            primaryPdfUrl = signedUrlData.signedUrl
+            break
+          }
+        }
+
+        if (primaryPdfUrl) {
           break
         }
       }
