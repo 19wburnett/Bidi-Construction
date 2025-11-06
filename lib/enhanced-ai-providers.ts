@@ -310,7 +310,10 @@ export class EnhancedAIProvider {
       
       try {
         // Add timeout to prevent Vercel 300s limit
-        const timeoutMs = 120000 // 120 seconds
+        // Scale timeout based on number of images (more pages = more time needed)
+        const baseTimeoutMs = 120000 // 120 seconds base
+        const perPageTimeoutMs = 5000 // 5 seconds per page
+        const timeoutMs = Math.min(baseTimeoutMs + (images.length * perPageTimeoutMs), 240000) // Max 240 seconds (4 min)
         const timeoutPromise = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
@@ -1575,12 +1578,22 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           console.warn(`JSON parse failed for ${result.model}, attempting to repair:`, parseError)
           
           // Fix missing commas before closing brackets/braces in arrays
+          // More aggressive pattern to catch cases like: "value"] where ] should be preceded by comma
           jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
           jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+          
+          // Fix: "key": "value"] where ] should be ,] (missing comma in array)
+          // This handles the common error at position 11565
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?=\s*[,\}\]])/g, '$1,$2]')
+          
+          // Fix missing commas before closing braces in objects within arrays
           jsonText = jsonText.replace(/"([^"]+)"(\s*)\}(?!\s*[,}\]\s]|$)/g, '"$1",$2}')
           jsonText = jsonText.replace(/\}(\s*)\](?!\s*[,}\]\s]|$)/g, '},$1]')
           
-          // Remove trailing commas
+          // Fix: }] where } should be },] (missing comma before closing array bracket)
+          jsonText = jsonText.replace(/\}(\s*)\](?=\s*[,\}\]])/g, '},$1]')
+          
+          // Remove trailing commas (do this AFTER fixing missing commas)
           jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
           
           // Close incomplete objects/arrays
@@ -1603,8 +1616,27 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           } catch (secondError) {
             // Last resort: extract partial data
             console.warn(`JSON repair failed for ${result.model}, attempting partial extraction`)
-            const itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)\]/)
+            console.warn(`Error at position: ${secondError instanceof SyntaxError ? (secondError as any).message.match(/position (\d+)/)?.[1] : 'unknown'}`)
+            
+            // Try to find items array - use non-greedy match first, then greedy if needed
+            let itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)\]/)
+            if (!itemsMatch) {
+              // Try greedy match to get more items even if incomplete
+              itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*)/)
+            }
+            
             const extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+            
+            // Also try extracting from the full jsonText as fallback
+            if (extractedItems.length === 0) {
+              console.warn(`No items found in items array, trying full-text extraction`)
+              const fallbackItems = this.extractPartialItems(jsonText)
+              if (fallbackItems.length > 0) {
+                extractedItems.push(...fallbackItems)
+                console.log(`Fallback extraction found ${fallbackItems.length} items`)
+              }
+            }
+            
             const extractedIssues = this.extractPartialIssues(jsonText)
             
             // Extract quality analysis if present, otherwise create fallback
