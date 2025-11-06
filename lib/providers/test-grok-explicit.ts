@@ -250,7 +250,7 @@ async function runAllTests() {
     console.log('❌ Direct Grok API: FAILED')
   }
 
-  if (providerResult.grokUsed) {
+  if (providerResult?.grokUsed) {
     console.log('✅ Grok in Enhanced Provider: WORKING')
   } else {
     console.log('⚠️  Grok in Enhanced Provider: Not selected (but available as fallback)')
@@ -260,7 +260,7 @@ async function runAllTests() {
 
   return {
     direct: directResult || { success: false, error: 'Test not run' },
-    provider: providerResult
+    provider: providerResult || { grokUsed: false, error: 'Test not run' }
   }
 }
 
