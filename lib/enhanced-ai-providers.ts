@@ -205,7 +205,7 @@ export class EnhancedAIProvider {
     const priorityModels = [
       'gpt-4o',                    // 1. ChatGPT (GPT-4o)
       'claude-sonnet-4-20250514',  // 2. Claude Sonnet
-      'grok-2-vision-beta'         // 3. Grok (vision model for image support)
+      'grok-2-1212'                // 3. Grok (text-only model - vision not available)
     ]
     
     // Filter to only include models that exist in modelPerformance
@@ -318,9 +318,9 @@ export class EnhancedAIProvider {
           setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
         
-        // For Grok: try vision model first, will auto-fallback to text if vision model unavailable
+        // For Grok: always use text-only mode (grok-2-1212)
         // GPT and Claude always use images
-        const inputType = 'images' as const // Always try images first, Grok will auto-fallback to text if needed
+        const inputType = model.includes('grok') ? ('text' as const) : ('images' as const)
         
         const result = await Promise.race([
           this.analyzeWithModel(images, options, model, inputType),
@@ -689,9 +689,8 @@ export class EnhancedAIProvider {
     }
 
     try {
-      // Try vision model first if images provided, otherwise use text model
-      const tryVisionModel = !useTextOnly && images.length > 0
-      const selectedModel = tryVisionModel ? 'grok-2-vision-beta' : 'grok-2-1212'
+      // Always use text-only model (grok-2-1212) - vision model not available
+      const selectedModel = 'grok-2-1212'
       
       // Call Grok adapter
       const response = await callGrok({
@@ -715,11 +714,11 @@ export class EnhancedAIProvider {
         }
       })
 
-      // Return with actual model used (important for fallback cases)
+      // Return with actual model used
       const actualModel = response.model || selectedModel
       return {
         provider: 'xai',
-        model: actualModel, // Use the actual model that was called (grok-2-1212 if fallback, grok-2-vision-beta if vision worked)
+        model: actualModel, // Always grok-2-1212 (text-only model)
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
         content: response.content,
         finishReason: response.finish_reason,
@@ -738,13 +737,7 @@ export class EnhancedAIProvider {
       if (error.type && error.message) {
         console.error(`Grok API error (${error.type}):`, error.message)
         
-        // If vision model failed and we have text, try text-only fallback
-        if (error.type === 'model_not_found' && !useTextOnly && images.length > 0 && options.extractedText && options.extractedText.length > 0) {
-          console.log('🔄 Vision model not available, falling back to text-only mode for Grok...')
-          return this.analyzeWithXAI(images, options, model, 'text')
-        }
-        
-        // Map error types to actionable messages (only if we can't fallback)
+        // Map error types to actionable messages
         if (error.type === 'auth_error') {
           throw new Error('XAI API authentication failed. Check your XAI_API_KEY.')
         } else if (error.type === 'rate_limit') {
@@ -752,12 +745,8 @@ export class EnhancedAIProvider {
         } else if (error.type === 'context_overflow') {
           console.error('⚠️ Grok context overflow - text may be too long even after truncation')
           throw new Error('Grok context window exceeded. Text was truncated but still too long. Consider reducing extracted text size.')
-        } else if (error.type === 'model_not_found' && useTextOnly) {
-          // Already tried text mode, can't fallback further
-          throw new Error(`Grok model not found: ${model}. Vision model unavailable and text fallback also failed.`)
         } else if (error.type === 'model_not_found') {
-          // Will be handled by fallback above, but if fallback conditions not met, throw
-          throw new Error(`Grok model not found: ${model}. Use grok-2-1212 instead.`)
+          throw new Error(`Grok model not found: ${model}. Using grok-2-1212.`)
         }
       }
       
