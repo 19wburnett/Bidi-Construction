@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { multiIndustryTakeoffOrchestrator, type MultiIndustryTakeoffInput } from '@/lib/multi-industry-takeoff-orchestrator'
+import { createClient } from '@supabase/supabase-js'
 
 type UsersTableRow = {
   is_admin?: boolean | null
@@ -54,6 +55,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan is missing a file path' }, { status: 400 })
     }
 
+    const storageClient = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          { auth: { persistSession: false } }
+        )
+      : supabase
+
     let primaryPdfUrl: string | null = null
     if (plan.file_path.startsWith('http')) {
       primaryPdfUrl = plan.file_path
@@ -65,11 +74,16 @@ export async function POST(request: NextRequest) {
           ? plan.file_path.slice(bucket.length + 1)
           : plan.file_path
 
-        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        const { data: signedUrlData, error: signedUrlError } = await storageClient.storage
           .from(bucket)
           .createSignedUrl(relativePath, 60 * 60)
 
         if (signedUrlError) {
+          console.warn('Signed URL attempt failed', {
+            bucket,
+            relativePath,
+            error: signedUrlError.message
+          })
           continue
         }
 
@@ -81,7 +95,18 @@ export async function POST(request: NextRequest) {
 
       if (!primaryPdfUrl) {
         console.error('Failed to create signed URL for plan file:', plan.file_path)
-        return NextResponse.json({ error: 'Unable to access plan file' }, { status: 500 })
+        const fallback: [any[], any[], any[], any[]] = [
+          [],
+          [],
+          [],
+          [
+            {
+              type: 'error' as const,
+              message: `Unable to access plan file at ${plan.file_path}. Verify storage bucket permissions and path.`
+            }
+          ]
+        ]
+        return NextResponse.json(fallback, { status: 500 })
       }
     }
 
