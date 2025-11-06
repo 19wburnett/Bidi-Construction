@@ -663,13 +663,9 @@ export class EnhancedAIProvider {
       const truncatedText = options.extractedText.slice(0, maxTextLength)
       console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted, ${truncatedText.length} chars sent after truncation)`)
       
-      // Also truncate userPrompt if it's too long (it can be very long with all the instructions)
-      const maxUserPromptLength = 10000 // Limit user prompt to 10k chars
-      const truncatedUserPrompt = options.userPrompt.length > maxUserPromptLength 
-        ? options.userPrompt.slice(0, maxUserPromptLength) + '\n\n...(user prompt truncated for length)'
-        : options.userPrompt
-      
-      const textPrompt = `${truncatedUserPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
+      // Don't truncate userPrompt - it contains critical instructions
+      // Instead, be more aggressive with text truncation to leave room
+      const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
       userContent = textPrompt
     } else {
       // IMAGE MODE: Use images (will try vision model first)
@@ -1570,7 +1566,72 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           })
         }
         
-        const parsed = JSON.parse(jsonText)
+        // Try to parse, with JSON repair if needed (same logic as single-model path)
+        let parsed: any
+        try {
+          parsed = JSON.parse(jsonText)
+        } catch (parseError) {
+          // Apply JSON repair logic (same as single-model path)
+          console.warn(`JSON parse failed for ${result.model}, attempting to repair:`, parseError)
+          
+          // Fix missing commas before closing brackets/braces in arrays
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+          jsonText = jsonText.replace(/"([^"]+)"(\s*)\}(?!\s*[,}\]\s]|$)/g, '"$1",$2}')
+          jsonText = jsonText.replace(/\}(\s*)\](?!\s*[,}\]\s]|$)/g, '},$1]')
+          
+          // Remove trailing commas
+          jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+          
+          // Close incomplete objects/arrays
+          const openBraces = (jsonText.match(/\{/g) || []).length
+          const closeBraces = (jsonText.match(/\}/g) || []).length
+          const openBrackets = (jsonText.match(/\[/g) || []).length
+          const closeBrackets = (jsonText.match(/\]/g) || []).length
+          
+          if (openBraces > closeBraces) {
+            jsonText += '}'.repeat(openBraces - closeBraces)
+          }
+          if (openBrackets > closeBrackets) {
+            jsonText += ']'.repeat(openBrackets - closeBrackets)
+          }
+          
+          // Try parsing again after repair
+          try {
+            parsed = JSON.parse(jsonText)
+            console.log(`✅ Successfully repaired JSON for ${result.model}`)
+          } catch (secondError) {
+            // Last resort: extract partial data
+            console.warn(`JSON repair failed for ${result.model}, attempting partial extraction`)
+            const itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)\]/)
+            const extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+            const extractedIssues = this.extractPartialIssues(jsonText)
+            
+            // Extract quality analysis if present, otherwise create fallback
+            let qualityAnalysis: any = null
+            try {
+              const qaMatch = jsonText.match(/"quality_analysis"\s*:\s*(\{[\s\S]*?\})/)
+              if (qaMatch) {
+                qualityAnalysis = JSON.parse(qaMatch[1])
+              }
+            } catch {
+              // Use fallback quality analysis
+            }
+            
+            parsed = {
+              items: extractedItems,
+              issues: extractedIssues,
+              quality_analysis: qualityAnalysis || {
+                completeness: { overall_score: 0.5, missing_sheets: [], missing_dimensions: [], notes: 'Partially extracted' },
+                consistency: { notes: 'Partially extracted' },
+                risk_flags: [],
+                audit_trail: { pages_analyzed: [], coverage_percentage: 0 }
+              },
+              summary: { total_items: extractedItems.length, notes: 'Partially extracted due to JSON parse error' }
+            }
+            console.warn(`Using partially extracted data for ${result.model}: ${extractedItems.length} items`)
+          }
+        }
         
         // Validate the parsed JSON has the expected structure
         if (!parsed.items && !parsed.issues && !parsed.summary) {
