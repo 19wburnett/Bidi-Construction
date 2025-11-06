@@ -1725,8 +1725,13 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       : this.buildConsensus(parsedResults, options.taskType)
     
     console.log(`Consensus analysis complete: ${consensus.consensusCount}/${parsedResults.length} models agreed`)
+    console.log(`Items before cleanup: ${consensus.items.length}`)
     
-    return consensus
+    // Post-processing: Clean up and enhance the final result
+    const cleanedConsensus = this.cleanupAndEnhanceResults(consensus, parsedResults)
+    console.log(`Items after cleanup: ${cleanedConsensus.items.length}`)
+    
+    return cleanedConsensus
   }
 
   // Build result from single model (when only 1 model succeeds)
@@ -2060,6 +2065,211 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     }
     
     return bestQA
+  }
+  
+  // Clean up and enhance final results from all models
+  // This runs AFTER consensus building to:
+  // 1. Deduplicate items more intelligently (fuzzy matching)
+  // 2. Fill in missing fields from similar items
+  // 3. Validate and normalize data
+  // 4. Merge similar items that were missed by grouping
+  private cleanupAndEnhanceResults(
+    consensus: ConsensusResult,
+    parsedResults: Array<{ parsed: any; model: string; confidence?: number }>
+  ): ConsensusResult {
+    let items = [...consensus.items]
+    
+    // Step 1: Intelligent deduplication (fuzzy matching by name + category)
+    items = this.deduplicateItemsFuzzy(items)
+    console.log(`After fuzzy deduplication: ${items.length} items`)
+    
+    // Step 2: Fill in missing fields from other items with similar names
+    items = this.fillMissingFields(items)
+    console.log(`After filling missing fields: ${items.length} items`)
+    
+    // Step 3: Validate and normalize data
+    items = this.validateAndNormalizeItems(items)
+    console.log(`After validation: ${items.length} items`)
+    
+    // Step 4: Merge very similar items that might have been missed
+    items = this.mergeVerySimilarItems(items)
+    console.log(`After merging similar items: ${items.length} items`)
+    
+    return {
+      ...consensus,
+      items
+    }
+  }
+  
+  // Deduplicate items using fuzzy name matching
+  private deduplicateItemsFuzzy(items: any[]): any[] {
+    const deduplicated: any[] = []
+    const processed = new Set<number>()
+    
+    items.forEach((item, index) => {
+      if (processed.has(index)) return
+      
+      // Find similar items (same category, similar name)
+      const similar = items.filter((other, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return false
+        if (item.category !== other.category) return false
+        
+        // Fuzzy name matching (case-insensitive, handles variations)
+        const name1 = (item.name || '').toLowerCase().trim()
+        const name2 = (other.name || '').toLowerCase().trim()
+        
+        // Exact match
+        if (name1 === name2) return true
+        
+        // One name contains the other (e.g., "2x6 Framing" vs "2x6 Exterior Wall Framing")
+        if (name1.includes(name2) || name2.includes(name1)) {
+          // But not too different (avoid matching "Door" with "Door Frame")
+          const shorter = name1.length < name2.length ? name1 : name2
+          const longer = name1.length >= name2.length ? name1 : name2
+          return longer.length <= shorter.length * 1.5 // Max 50% longer
+        }
+        
+        // Similar words (e.g., "Framing" vs "Frame")
+        const words1 = name1.split(/\s+/)
+        const words2 = name2.split(/\s+/)
+        const commonWords = words1.filter((w: string) => words2.includes(w) && w.length > 3)
+        return commonWords.length >= Math.min(words1.length, words2.length) * 0.6 // 60% word overlap
+      })
+      
+      if (similar.length > 0) {
+        // Merge similar items
+        const allItems = [item, ...similar]
+        const merged = this.mergeItemGroup(allItems)
+        deduplicated.push(merged)
+        processed.add(index)
+        similar.forEach((_, idx) => {
+          const originalIndex = items.findIndex(i => i === similar[idx])
+          if (originalIndex >= 0) processed.add(originalIndex)
+        })
+      } else {
+        deduplicated.push(item)
+        processed.add(index)
+      }
+    })
+    
+    return deduplicated
+  }
+  
+  // Fill in missing fields from similar items
+  private fillMissingFields(items: any[]): any[] {
+    return items.map(item => {
+      // If item is missing critical fields, try to find similar items with those fields
+      if (!item.unit || item.unit === 'EA' || !item.category || item.category === 'other') {
+        const similar = items.find(other => {
+          if (other === item) return false
+          const name1 = (item.name || '').toLowerCase()
+          const name2 = (other.name || '').toLowerCase()
+          return name1.includes(name2) || name2.includes(name1) || name1 === name2
+        })
+        
+        if (similar) {
+          return {
+            ...item,
+            unit: item.unit || similar.unit || 'EA',
+            category: item.category === 'other' ? similar.category : item.category,
+            subcategory: item.subcategory === 'Uncategorized' ? similar.subcategory : item.subcategory,
+            cost_code: item.cost_code || similar.cost_code,
+            unit_cost: item.unit_cost || similar.unit_cost
+          }
+        }
+      }
+      return item
+    })
+  }
+  
+  // Validate and normalize items
+  private validateAndNormalizeItems(items: any[]): any[] {
+    return items.map(item => {
+      // Ensure required fields exist
+      if (!item.name || item.name.trim().length === 0) {
+        return null // Filter out items without names
+      }
+      
+      // Normalize units
+      const unitMap: Record<string, string> = {
+        'lf': 'LF', 'linear feet': 'LF', 'linear ft': 'LF',
+        'sf': 'SF', 'sq ft': 'SF', 'square feet': 'SF', 'sqft': 'SF',
+        'cf': 'CF', 'cubic feet': 'CF', 'cubic ft': 'CF',
+        'cy': 'CY', 'cubic yards': 'CY', 'cubic yds': 'CY',
+        'ea': 'EA', 'each': 'EA', 'e.a.': 'EA',
+        'sq': 'SQ', 'square': 'SQ',
+        'lb': 'LB', 'pounds': 'LB', 'lbs': 'LB',
+        'ton': 'TON', 'tons': 'TON'
+      }
+      if (item.unit) {
+        item.unit = unitMap[item.unit.toLowerCase()] || item.unit.toUpperCase()
+      }
+      
+      // Ensure quantity is a number
+      if (typeof item.quantity !== 'number' || isNaN(item.quantity)) {
+        item.quantity = 0
+      }
+      
+      // Ensure confidence is between 0 and 1
+      if (typeof item.confidence !== 'number' || item.confidence < 0 || item.confidence > 1) {
+        item.confidence = item.confidence || 0.5
+      }
+      
+      // Infer category/subcategory if missing
+      if (!item.category || item.category === 'other') {
+        const inferred = this.inferCategoryFromName(item.name)
+        item.category = inferred.category
+      }
+      if (!item.subcategory || item.subcategory === 'Uncategorized') {
+        item.subcategory = this.inferSubcategoryFromName(item.name)
+      }
+      
+      return item
+    }).filter((item): item is any => item !== null)
+  }
+  
+  // Merge very similar items that might have been missed
+  private mergeVerySimilarItems(items: any[]): any[] {
+    const merged: any[] = []
+    const processed = new Set<number>()
+    
+    items.forEach((item, index) => {
+      if (processed.has(index)) return
+      
+      // Find items with very similar names (more lenient than deduplication)
+      const similar = items.filter((other, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return false
+        if (item.category !== other.category) return false
+        
+        const name1 = (item.name || '').toLowerCase().trim()
+        const name2 = (other.name || '').toLowerCase().trim()
+        
+        // Check if they're essentially the same (e.g., "2x6 Framing" vs "2x6 Wall Framing")
+        const words1 = new Set<string>(name1.split(/\s+/).filter((w: string) => w.length > 2))
+        const words2 = new Set<string>(name2.split(/\s+/).filter((w: string) => w.length > 2))
+        const intersection = new Set<string>(Array.from(words1).filter((w: string) => words2.has(w)))
+        const union = new Set<string>([...Array.from(words1), ...Array.from(words2)])
+        const similarity = intersection.size / union.size
+        
+        return similarity >= 0.7 // 70% word overlap
+      })
+      
+      if (similar.length > 0) {
+        const allItems = [item, ...similar]
+        const mergedItem = this.mergeItemGroup(allItems)
+        merged.push(mergedItem)
+        processed.add(index)
+        similar.forEach((_, idx) => {
+          const originalIndex = items.findIndex(i => i === similar[idx])
+          if (originalIndex >= 0) processed.add(originalIndex)
+        })
+      } else {
+        merged.push(item)
+        processed.add(index)
+      }
+    })
+    
+    return merged
   }
 }
 
