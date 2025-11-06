@@ -244,7 +244,7 @@ async function runAllTests() {
   console.log('📋 FINAL VERIFICATION')
   console.log('='.repeat(80) + '\n')
 
-  if (directResult.success) {
+  if (directResult?.success) {
     console.log('✅ Direct Grok API: WORKING')
   } else {
     console.log('❌ Direct Grok API: FAILED')
@@ -259,7 +259,7 @@ async function runAllTests() {
   console.log('\n' + '='.repeat(80) + '\n')
 
   return {
-    direct: directResult,
+    direct: directResult || { success: false, error: 'Test not run' },
     provider: providerResult
   }
 }
