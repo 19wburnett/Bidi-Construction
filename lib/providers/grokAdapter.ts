@@ -65,8 +65,8 @@ export interface GrokModel {
 }
 
 class GrokAdapter {
-  private apiKey: string
-  private baseUrl: string
+  private apiKey!: string // Definite assignment - initialized by init()
+  private baseUrl!: string // Definite assignment - initialized by init()
   private orgId?: string
   private initialized: boolean = false
 
