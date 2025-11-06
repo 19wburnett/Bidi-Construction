@@ -1587,7 +1587,7 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
           
           // Fix: "key": "value"] where ] should be ,] (missing comma in array)
-          // This handles the common error at position 11565
+          // This handles the common error at position 11565/11427
           jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?=\s*[,\}\]])/g, '$1,$2]')
           
           // Fix missing commas before closing braces in objects within arrays
@@ -1596,6 +1596,14 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           
           // Fix: }] where } should be },] (missing comma before closing array bracket)
           jsonText = jsonText.replace(/\}(\s*)\](?=\s*[,\}\]])/g, '},$1]')
+          
+          // Fix: Missing comma after property value before closing brace (common at position 11427)
+          // Pattern: "key": value} should be "key": value,}
+          jsonText = jsonText.replace(/(:\s*(?:"[^"]*"|[0-9.]+|true|false|null))(\s*)\}(?!\s*[,}\]\s]|$)/g, '$1,$2}')
+          
+          // Fix: Missing comma after property value before closing bracket
+          // Pattern: "key": value] should be "key": value,]
+          jsonText = jsonText.replace(/(:\s*(?:"[^"]*"|[0-9.]+|true|false|null))(\s*)\](?!\s*[,}\]\s]|$)/g, '$1,$2]')
           
           // Remove trailing commas (do this AFTER fixing missing commas)
           jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
@@ -1629,15 +1637,32 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
               itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*)/)
             }
             
-            const extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+            let extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
             
-            // Also try extracting from the full jsonText as fallback
+            // ALWAYS also try extracting from the full jsonText as fallback to catch items outside the array
+            // This is important because malformed JSON might have items scattered throughout
+            console.log(`Extracted ${extractedItems.length} items from items array, now trying full-text extraction for additional items`)
+            const fallbackItems = this.extractPartialItems(jsonText)
+            
+            // Merge items, avoiding duplicates (by name)
+            const existingNames = new Set(extractedItems.map(item => item.name?.toLowerCase() || ''))
+            const newItems = fallbackItems.filter(item => {
+              const name = item.name?.toLowerCase() || ''
+              return name && !existingNames.has(name)
+            })
+            
+            if (newItems.length > 0) {
+              extractedItems.push(...newItems)
+              console.log(`Full-text extraction found ${newItems.length} additional items (total: ${extractedItems.length})`)
+            }
+            
+            // If still no items, try extracting just names from anywhere in the text
             if (extractedItems.length === 0) {
-              console.warn(`No items found in items array, trying full-text extraction`)
-              const fallbackItems = this.extractPartialItems(jsonText)
-              if (fallbackItems.length > 0) {
-                extractedItems.push(...fallbackItems)
-                console.log(`Fallback extraction found ${fallbackItems.length} items`)
+              console.warn(`No items found with standard extraction, trying name-only extraction`)
+              const nameOnlyItems = this.extractPartialItems(jsonText)
+              if (nameOnlyItems.length > 0) {
+                extractedItems = nameOnlyItems
+                console.log(`Name-only extraction found ${nameOnlyItems.length} items`)
               }
             }
             
