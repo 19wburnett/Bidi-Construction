@@ -373,7 +373,8 @@ export async function POST(request: NextRequest) {
       userPrompt,
       taskType: taskType as TaskType,
       prioritizeAccuracy: true,
-      includeConsensus: true
+      includeConsensus: true,
+      extractedText: extractedText || undefined // Pass extracted text for Grok text-only fallback
     }
 
     // Run enhanced consensus analysis

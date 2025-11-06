@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { grokAdapter, initGrok, callGrok } from './providers/grokAdapter'
 
 // Enhanced AI Provider System with Specialized Models
 // This system uses 5+ specialized models with different strengths for maximum accuracy
@@ -10,7 +11,20 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '')
 
 // XAI/Grok integration for additional redundancy
-const xaiApiKey = process.env.XAI_API_KEY
+const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY
+
+// Initialize Grok adapter if API key is available
+if (xaiApiKey) {
+  try {
+    initGrok({
+      apiKey: xaiApiKey,
+      baseUrl: process.env.GROK_BASE_URL || 'https://api.x.ai/v1'
+    })
+    console.log('✅ Grok adapter initialized')
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize Grok adapter:', error)
+  }
+}
 
 // Model specializations for different construction analysis tasks
 export const MODEL_SPECIALIZATIONS = {
@@ -19,7 +33,8 @@ export const MODEL_SPECIALIZATIONS = {
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
   'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
   'claude-sonnet-4-20250514': 'general_construction', // Latest Sonnet model (better quality than haiku)
-  'grok-2-1212': 'alternative_analysis' // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
+  'grok-2-1212': 'alternative_analysis', // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
+  'grok-2-vision-beta': 'alternative_analysis' // Grok vision model for image analysis
 } as const
 
 export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
@@ -33,6 +48,7 @@ export interface EnhancedAnalysisOptions {
   taskType: TaskType
   prioritizeAccuracy?: boolean
   includeConsensus?: boolean
+  extractedText?: string // Optional: extracted text from PDF for text-only models like Grok
 }
 
 export interface EnhancedAIResponse {
@@ -160,12 +176,19 @@ export class EnhancedAIProvider {
         code_compliance: 0.90,
         cost_estimation: 0.93
       },
-             'grok-2-1212': {
+      'grok-2-1212': {
         takeoff: 0.95,
-               quality: 0.92,
-               bid_analysis: 0.95,
-               code_compliance: 0.90,
-               cost_estimation: 0.92
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
+      },
+      'grok-2-vision-beta': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
       }
       // Gemini removed - model not available or causing errors
     }
@@ -173,11 +196,27 @@ export class EnhancedAIProvider {
 
   // Route tasks to best-performing models
   // Prioritizes GPT models first, then falls back to Claude/Grok
-  private getBestModelsForTask(taskType: TaskType, count: number = 10): string[] {
-    // Get max models from environment or default to 10 (enough for all OpenAI + Claude + Grok)
-    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '10')
+  private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
+    // Get max models from environment or default to 3 (GPT, Claude, Grok)
+    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '3')
     const actualCount = Math.min(count, maxModels)
     
+    // NEW: Fixed 3-model priority order (GPT, Claude, Grok) - all run in parallel
+    const priorityModels = [
+      'gpt-4o',                    // 1. ChatGPT (GPT-4o)
+      'claude-sonnet-4-20250514',  // 2. Claude Sonnet
+      'grok-2-1212'                // 3. Grok (text-only model - vision not available)
+    ]
+    
+    // Filter to only include models that exist in modelPerformance
+    const availablePriorityModels = priorityModels.filter(model => 
+      this.modelPerformance[model] !== undefined
+    )
+    
+    // Return the top N models from priority list
+    return availablePriorityModels.slice(0, actualCount)
+    
+    /* OLD SORTING LOGIC - REPLACED WITH FIXED PRIORITY ORDER
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
       .sort((a, b) => {
@@ -224,27 +263,20 @@ export class EnhancedAIProvider {
       .slice(0, actualCount)
     
     return modelScores.map(m => m.model)
+    */
   }
 
   // Analyze with specialized models
+  // NEW: Run all 3 models in PARALLEL (GPT, Claude, Grok) to combine all findings
+  // GPT/Claude get images, Grok gets text (if vision model not available)
   async analyzeWithSpecializedModels(
     images: string[],
     options: EnhancedAnalysisOptions
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
-    let selectedModels = this.getBestModelsForTask(options.taskType, 10)
-    
-    // CRITICAL: Always ensure Claude Sonnet is included for fallback (better than haiku)
-    // Add it if it's not already in the list
-    const requiredFallbacks = ['claude-sonnet-4-20250514']
-    requiredFallbacks.forEach(fallback => {
-      if (!selectedModels.includes(fallback)) {
-        // Add to the end (will be tried after primary models)
-        selectedModels.push(fallback)
-      }
-    })
+    // Get the 3 priority models: GPT-4o, Claude Sonnet, Grok
+    const selectedModels = this.getBestModelsForTask(options.taskType, 3)
     
     // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
@@ -264,93 +296,79 @@ export class EnhancedAIProvider {
       return true
     })
     
-    console.log(`Using specialized models for ${options.taskType} (sequential with fallback):`, enabledModels)
-    console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
-    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
+    console.log(`🚀 Running ${enabledModels.length} models in PARALLEL for ${options.taskType}:`, enabledModels)
+    console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS || '3'}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
+    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run models SEQUENTIALLY - try to get at least 2 for cross-validation, but accept 1 if needed
-    // Goal: Cross-validate with multiple models for better accuracy, but don't fail if only 1 works
-    const successfulResults: EnhancedAIResponse[] = []
-    const failedResults: any[] = []
-    const TARGET_MODELS = 2 // Try to get at least 2 models for cross-validation
+    // Run all models in PARALLEL (not sequential fallback)
+    // Goal: Get ALL findings from all 3 models, then combine them
     const MIN_MODELS = 1 // Minimum required (will accept single model if others fail)
     
-    for (let i = 0; i < enabledModels.length; i++) {
-      const model = enabledModels[i]
-      console.log(`\n[${i + 1}/${enabledModels.length}] Attempting analysis with: ${model}`)
+    // Create promises for all models running in parallel
+    const modelPromises = enabledModels.map(async (model) => {
+      const modelStartTime = Date.now()
       
       try {
-        // Add timeout to prevent Vercel 300s limit (increased to 120s for large prompts)
-        const timeoutMs = 120000 // 120 seconds - large prompts with images can take longer
+        // Add timeout to prevent Vercel 300s limit
+        // Scale timeout based on number of images (more pages = more time needed)
+        const baseTimeoutMs = 120000 // 120 seconds base
+        const perPageTimeoutMs = 5000 // 5 seconds per page
+        const timeoutMs = Math.min(baseTimeoutMs + (images.length * perPageTimeoutMs), 240000) // Max 240 seconds (4 min)
         const timeoutPromise = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
         
-        const modelStartTime = Date.now()
+        // For Grok: always use text-only mode (grok-2-1212)
+        // GPT and Claude always use images
+        const inputType = model.includes('grok') ? ('text' as const) : ('images' as const)
+        
         const result = await Promise.race([
-          this.analyzeWithModel(images, options, model),
+          this.analyzeWithModel(images, options, model, inputType),
           timeoutPromise
         ]) as EnhancedAIResponse
         
         const modelProcessingTime = Date.now() - modelStartTime
         result.processingTime = modelProcessingTime
         
-        console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
-        successfulResults.push(result)
-        
-        // If we have enough models for cross-validation, we can stop early (but not required)
-        if (successfulResults.length >= TARGET_MODELS) {
-          console.log(`🎯 Got ${successfulResults.length} successful models - sufficient for cross-validation. Continuing to try more models...`)
-          // Continue trying more models for better consensus, but we can stop if we want
-          // For now, continue to try all models if we have time
-        }
-        
-        // Continue to next model to try for cross-validation
-        // Only stop early if we have enough models AND remaining models are likely to fail
-        // Otherwise, keep trying for better consensus
-        
+        // Log with actual model used (important for Grok fallback cases)
+        const actualModel = result.model || model
+        console.log(`✅ ${actualModel} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
+        return { success: true, model: actualModel, result, error: null }
       } catch (error: any) {
         const errorMsg = error?.message || String(error)
         console.error(`❌ ${model} failed:`, errorMsg)
-        failedResults.push({ model, error: errorMsg })
-        
-        // Continue to next model - we need at least MIN_MODELS working
-        if (i < enabledModels.length - 1) {
-          // Check if we already have minimum required models and remaining models likely to fail
-          if (successfulResults.length >= MIN_MODELS && (enabledModels.length - i - 1) === 0) {
-            console.log(`✅ Have ${successfulResults.length} successful model(s) - minimum requirement met. Can proceed.`)
-        } else {
-            console.log(`⏭️  Continuing to next model (${successfulResults.length}/${MIN_MODELS} minimum, ${successfulResults.length}/${TARGET_MODELS} target)...`)
-          }
-        } else {
-          // Last model failed
-          if (successfulResults.length >= MIN_MODELS) {
-            console.log(`✅ Completed trying all models: ${successfulResults.length} succeeded (meets minimum of ${MIN_MODELS})`)
-          } else {
-            console.error(`⚠️  All ${enabledModels.length} models failed! Have ${successfulResults.length} successful (need ${MIN_MODELS} minimum)`)
-          }
-        }
+        return { success: false, model, result: null, error: errorMsg }
       }
-    }
+    })
+    
+    // Wait for all models to complete (parallel execution)
+    const allResults = await Promise.all(modelPromises)
+    
+    const successfulResults: EnhancedAIResponse[] = []
+    const failedResults: any[] = []
+    
+    allResults.forEach(({ success, model, result, error }) => {
+      if (success && result) {
+        successfulResults.push(result)
+      } else {
+        failedResults.push({ model, error })
+      }
+    })
     
     const totalProcessingTime = Date.now() - startTime
     
-    console.log(`\n📊 Sequential analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
+    console.log(`\n📊 Parallel analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
     if (failedResults.length > 0) {
       console.log(`❌ Failed models:`, failedResults.map(r => `${r.model}: ${r.error}`))
     }
     
     // If we don't have minimum required models, throw an error
     if (successfulResults.length < MIN_MODELS) {
-      throw new Error(`Only ${successfulResults.length} model(s) succeeded (need ${MIN_MODELS} minimum). Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
+      throw new Error(`Only ${successfulResults.length} model(s) succeeded (need ${MIN_MODELS} minimum). Errors: ${failedResults.map(r => r.error).join('; ')}`)
     }
     
-    // Log if we have enough for good cross-validation
-    if (successfulResults.length >= TARGET_MODELS) {
-      console.log(`✅ Cross-validation ready: ${successfulResults.length} models for consensus analysis`)
-    } else {
-      console.log(`⚠️  Single model analysis: ${successfulResults.length} model(s) (target: ${TARGET_MODELS} for better consensus)`)
-    }
+    // Log success
+    console.log(`✅ All ${successfulResults.length} model(s) completed - combining ALL findings (not just consensus)`)
     
     return successfulResults
   }
@@ -359,7 +377,8 @@ export class EnhancedAIProvider {
   private async analyzeWithModel(
     images: string[],
     options: EnhancedAnalysisOptions,
-    model: string
+    model: string,
+    inputType: 'images' | 'text' = 'images'
   ): Promise<EnhancedAIResponse> {
     const startTime = Date.now()
     
@@ -382,7 +401,8 @@ export class EnhancedAIProvider {
         case 'claude-sonnet-4-20250514':
           return await this.analyzeWithClaude(images, options, model)
         case 'grok-2-1212':
-          return await this.analyzeWithXAI(images, options, model)
+        case 'grok-2-vision-beta':
+          return await this.analyzeWithXAI(images, options, model, inputType)
         // case 'gemini-1.5-flash':
         //   return await this.analyzeWithGemini(images, options, model)
         // Gemini removed - model not available
@@ -408,11 +428,24 @@ export class EnhancedAIProvider {
     }
     
     const imageContent = images.map(img => {
-      // Handle both data URLs and base64 strings
-      const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+      if (img.startsWith('http://') || img.startsWith('https://')) {
+        return {
+          type: 'image_url' as const,
+          image_url: { url: img, detail: 'high' as const }
+        }
+      }
+
+      if (img.startsWith('data:')) {
+        return {
+          type: 'image_url' as const,
+          image_url: { url: img, detail: 'high' as const }
+        }
+      }
+
+      // Assume bare base64 payload
       return {
         type: 'image_url' as const,
-        image_url: { url: url, detail: 'high' as const }
+        image_url: { url: `data:image/jpeg;base64,${img}`, detail: 'high' as const }
       }
     })
 
@@ -513,22 +546,38 @@ export class EnhancedAIProvider {
       throw new Error('Anthropic API key not configured')
     }
     
-    const imageContent = images.map(img => {
-      const base64Data = img.split(',')[1] || img
-      // Default to JPEG for raw base64 generated by our PDF conversion
-      const mediaType = img.startsWith('data:')
-        ? (img.includes('image/png') ? 'image/png' : 'image/jpeg')
-        : 'image/jpeg'
-      
+    const imageContent = await Promise.all(images.map(async img => {
+      let mediaType: 'image/jpeg' | 'image/png' = 'image/jpeg'
+      let base64Data: string
+
+      if (img.startsWith('http://') || img.startsWith('https://')) {
+        const response = await fetch(img)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image for Claude (${response.status} ${response.statusText})`)
+        }
+        const contentType = response.headers.get('content-type') || ''
+        if (contentType.includes('png')) {
+          mediaType = 'image/png'
+        }
+        const buffer = Buffer.from(await response.arrayBuffer())
+        base64Data = buffer.toString('base64')
+      } else if (img.startsWith('data:')) {
+        mediaType = img.includes('image/png') ? 'image/png' : 'image/jpeg'
+        base64Data = img.split(',')[1] || ''
+      } else {
+        // Assume bare base64 payload
+        base64Data = img
+      }
+
       return {
         type: 'image' as const,
         source: {
           type: 'base64' as const,
-          media_type: mediaType as 'image/jpeg' | 'image/png',
+          media_type: mediaType,
           data: base64Data
         }
       }
-    })
+    }))
 
     // Set model-specific token limits for Claude
     let maxTokens = options.maxTokens || 8192
@@ -621,73 +670,136 @@ export class EnhancedAIProvider {
     }
   }
 
-  // Enhanced XAI/Grok analysis
+  // Enhanced XAI/Grok analysis using standardized adapter
+  // Supports both image and text-only modes (text fallback when vision model unavailable)
   private async analyzeWithXAI(
     images: string[],
     options: EnhancedAnalysisOptions,
-    model: string
+    model: string,
+    inputType: 'images' | 'text' = 'images'
   ): Promise<EnhancedAIResponse> {
-    console.log(`XAI analysis starting with model: ${model}`)
+    console.log(`XAI analysis starting with model: ${model} (input: ${inputType})`)
     
     if (!xaiApiKey) {
       throw new Error('XAI API key not configured')
     }
 
-    // XAI API integration (similar to OpenAI format)
-    const imageContent = images.map(img => {
-      // Handle both data URLs and base64 strings
-      const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
-      return {
-        type: 'image_url' as const,
-        image_url: { url: url, detail: 'high' as const }
-      }
-    })
+    // Determine if we should use text-only mode
+    const useTextOnly = inputType === 'text' && options.extractedText && options.extractedText.length > 0
 
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: this.buildSpecializedPrompt(options) },
-          { 
-            role: 'user', 
-            content: [
-              { type: 'text', text: options.userPrompt },
-              ...imageContent
-            ] 
+    let userContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+
+    if (useTextOnly && options.extractedText) {
+      // TEXT-ONLY MODE: Use extracted PDF text instead of images
+      // Grok has 131k context window, but we need to leave room for system prompt and response
+      // Truncate text more aggressively to avoid context overflow
+      const maxTextLength = 50000 // Reduced from 100k to 50k to leave room for system prompt
+      const truncatedText = options.extractedText.slice(0, maxTextLength)
+      console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted, ${truncatedText.length} chars sent after truncation)`)
+      
+      // Don't truncate userPrompt - it contains critical instructions
+      // Instead, be more aggressive with text truncation to leave room
+      const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
+      userContent = textPrompt
+    } else {
+      // IMAGE MODE: Use images (will try vision model first)
+      const imageContent = images.map(img => {
+        if (img.startsWith('http://') || img.startsWith('https://')) {
+          return {
+            type: 'image_url' as const,
+            image_url: { url: img, detail: 'high' as const }
           }
-        ],
-        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Try max_tokens instead of max_completion_tokens
-        temperature: options.temperature || 0.2
-        // Note: Grok may not support response_format, remove it for now
-      })
-    })
+        }
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`XAI API error (${response.status}):`, errorText)
-      if (response.status === 403) {
-        console.warn('XAI API access forbidden - skipping Grok model')
-        throw new Error('XAI API access forbidden')
-      }
-      throw new Error(`XAI API error: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
+        if (img.startsWith('data:')) {
+          return {
+            type: 'image_url' as const,
+            image_url: { url: img, detail: 'high' as const }
+          }
+        }
+
+        // Assume bare base64 payload
+        return {
+          type: 'image_url' as const,
+          image_url: { url: `data:image/jpeg;base64,${img}`, detail: 'high' as const }
+        }
+      })
+
+      userContent = [
+        { type: 'text', text: options.userPrompt },
+        ...imageContent
+      ]
     }
 
-    const data = await response.json()
-    
-    return {
-      provider: 'xai',
-      model: model,
-      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-      content: data.choices[0].message.content || '',
-      finishReason: data.choices[0].finish_reason,
-      tokensUsed: data.usage?.total_tokens,
-      confidence: this.calculateConfidence(data.choices[0].message.content || ''),
-      taskType: options.taskType
+    try {
+      // Always use text-only model (grok-2-1212) - vision model not available
+      const selectedModel = 'grok-2-1212'
+      
+      // Call Grok adapter
+      const response = await callGrok({
+        system: this.buildSpecializedPrompt(options),
+        user: userContent,
+        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Grok limit is 4096
+        temperature: options.temperature || 0.2,
+        json_schema: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              items: { type: 'object' }
+            },
+            issues: {
+              type: 'array',
+              items: { type: 'object' }
+            }
+          },
+          required: ['items']
+        }
+      })
+
+      // Return with actual model used
+      const actualModel = response.model || selectedModel
+      return {
+        provider: 'xai',
+        model: actualModel, // Always grok-2-1212 (text-only model)
+        specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+        content: response.content,
+        finishReason: response.finish_reason,
+        tokensUsed: response.usage.total_tokens,
+        confidence: this.calculateConfidence(response.content),
+        taskType: options.taskType
+      }
+    } catch (error: any) {
+      // Enhanced error logging for debugging
+      console.error(`[Grok Error] Type: ${error?.type || 'unknown'}, Message: ${error?.message || String(error)}`)
+      if (error?.stack) {
+        console.error(`[Grok Error] Stack: ${error.stack.substring(0, 500)}`)
+      }
+      
+      // Handle normalized Grok errors
+      if (error.type && error.message) {
+        console.error(`Grok API error (${error.type}):`, error.message)
+        
+        // Map error types to actionable messages
+        if (error.type === 'auth_error') {
+          throw new Error('XAI API authentication failed. Check your XAI_API_KEY.')
+        } else if (error.type === 'rate_limit') {
+          throw new Error(`Grok rate limit exceeded. Retry after ${error.retry_after || 'some time'}.`)
+        } else if (error.type === 'context_overflow') {
+          console.error('⚠️ Grok context overflow - text may be too long even after truncation')
+          throw new Error('Grok context window exceeded. Text was truncated but still too long. Consider reducing extracted text size.')
+        } else if (error.type === 'model_not_found') {
+          throw new Error(`Grok model not found: ${model}. Using grok-2-1212.`)
+        }
+      }
+      
+      // Log unknown errors for debugging
+      if (!error.type) {
+        console.error(`[Grok Unknown Error] Full error:`, JSON.stringify(error, null, 2).substring(0, 1000))
+      }
+      
+      // Re-throw original error
+      throw error
     }
   }
 
@@ -1493,7 +1605,126 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
           })
         }
         
-        const parsed = JSON.parse(jsonText)
+        // Try to parse, with JSON repair if needed (same logic as single-model path)
+        let parsed: any
+        try {
+          parsed = JSON.parse(jsonText)
+        } catch (parseError) {
+          // Apply JSON repair logic (same as single-model path)
+          console.warn(`JSON parse failed for ${result.model}, attempting to repair:`, parseError)
+          
+          // Fix missing commas before closing brackets/braces in arrays
+          // More aggressive pattern to catch cases like: "value"] where ] should be preceded by comma
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)+")(\s*)\](?!\s*[,}\]]|$)/g, '$1,$2]')
+          
+          // Fix: "key": "value"] where ] should be ,] (missing comma in array)
+          // This handles the common error at position 11565/11427
+          jsonText = jsonText.replace(/(:\s*"(?:[^"\\]|\\.)*")(\s*)\](?=\s*[,\}\]])/g, '$1,$2]')
+          
+          // Fix missing commas before closing braces in objects within arrays
+          jsonText = jsonText.replace(/"([^"]+)"(\s*)\}(?!\s*[,}\]\s]|$)/g, '"$1",$2}')
+          jsonText = jsonText.replace(/\}(\s*)\](?!\s*[,}\]\s]|$)/g, '},$1]')
+          
+          // Fix: }] where } should be },] (missing comma before closing array bracket)
+          jsonText = jsonText.replace(/\}(\s*)\](?=\s*[,\}\]])/g, '},$1]')
+          
+          // Fix: Missing comma after property value before closing brace (common at position 11427)
+          // Pattern: "key": value} should be "key": value,}
+          jsonText = jsonText.replace(/(:\s*(?:"[^"]*"|[0-9.]+|true|false|null))(\s*)\}(?!\s*[,}\]\s]|$)/g, '$1,$2}')
+          
+          // Fix: Missing comma after property value before closing bracket
+          // Pattern: "key": value] should be "key": value,]
+          jsonText = jsonText.replace(/(:\s*(?:"[^"]*"|[0-9.]+|true|false|null))(\s*)\](?!\s*[,}\]\s]|$)/g, '$1,$2]')
+          
+          // Remove trailing commas (do this AFTER fixing missing commas)
+          jsonText = jsonText.replace(/,(\s*[}\]])/g, '$1')
+          
+          // Close incomplete objects/arrays
+          const openBraces = (jsonText.match(/\{/g) || []).length
+          const closeBraces = (jsonText.match(/\}/g) || []).length
+          const openBrackets = (jsonText.match(/\[/g) || []).length
+          const closeBrackets = (jsonText.match(/\]/g) || []).length
+          
+          if (openBraces > closeBraces) {
+            jsonText += '}'.repeat(openBraces - closeBraces)
+          }
+          if (openBrackets > closeBrackets) {
+            jsonText += ']'.repeat(openBrackets - closeBrackets)
+          }
+          
+          // Try parsing again after repair
+          try {
+            parsed = JSON.parse(jsonText)
+            console.log(`✅ Successfully repaired JSON for ${result.model}`)
+          } catch (secondError) {
+            // Last resort: extract partial data
+            console.warn(`JSON repair failed for ${result.model}, attempting partial extraction`)
+            console.warn(`Error at position: ${secondError instanceof SyntaxError ? (secondError as any).message.match(/position (\d+)/)?.[1] : 'unknown'}`)
+            
+            // Try to find items array - use non-greedy match first, then greedy if needed
+            let itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*?)\]/)
+            if (!itemsMatch) {
+              // Try greedy match to get more items even if incomplete
+              itemsMatch = jsonText.match(/"items"\s*:\s*\[([\s\S]*)/)
+            }
+            
+            let extractedItems = itemsMatch ? this.extractPartialItems(itemsMatch[1]) : []
+            
+            // ALWAYS also try extracting from the full jsonText as fallback to catch items outside the array
+            // This is important because malformed JSON might have items scattered throughout
+            console.log(`Extracted ${extractedItems.length} items from items array, now trying full-text extraction for additional items`)
+            const fallbackItems = this.extractPartialItems(jsonText)
+            
+            // Merge items, avoiding duplicates (by name)
+            const existingNames = new Set(extractedItems.map(item => item.name?.toLowerCase() || ''))
+            const newItems = fallbackItems.filter(item => {
+              const name = item.name?.toLowerCase() || ''
+              return name && !existingNames.has(name)
+            })
+            
+            if (newItems.length > 0) {
+              extractedItems.push(...newItems)
+              console.log(`Full-text extraction found ${newItems.length} additional items (total: ${extractedItems.length})`)
+            }
+            
+            // If still no items, try extracting just names from anywhere in the text
+            if (extractedItems.length === 0) {
+              console.warn(`No items found with standard extraction, trying name-only extraction`)
+              const nameOnlyItems = this.extractPartialItems(jsonText)
+              if (nameOnlyItems.length > 0) {
+                extractedItems = nameOnlyItems
+                console.log(`Name-only extraction found ${nameOnlyItems.length} items`)
+              }
+            }
+            
+            const extractedIssues = this.extractPartialIssues(jsonText)
+            
+            // Extract quality analysis if present, otherwise create fallback
+            let qualityAnalysis: any = null
+            try {
+              const qaMatch = jsonText.match(/"quality_analysis"\s*:\s*(\{[\s\S]*?\})/)
+              if (qaMatch) {
+                qualityAnalysis = JSON.parse(qaMatch[1])
+              }
+            } catch {
+              // Use fallback quality analysis
+            }
+            
+            parsed = {
+              items: extractedItems,
+              issues: extractedIssues,
+              quality_analysis: qualityAnalysis || {
+                completeness: { overall_score: 0.5, missing_sheets: [], missing_dimensions: [], notes: 'Partially extracted' },
+                consistency: { notes: 'Partially extracted' },
+                risk_flags: [],
+                audit_trail: { pages_analyzed: [], coverage_percentage: 0 }
+              },
+              summary: { total_items: extractedItems.length, notes: 'Partially extracted due to JSON parse error' }
+            }
+            console.warn(`Using partially extracted data for ${result.model}: ${extractedItems.length} items`)
+          }
+        }
         
         // Validate the parsed JSON has the expected structure
         if (!parsed.items && !parsed.issues && !parsed.summary) {
@@ -1526,8 +1757,13 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       : this.buildConsensus(parsedResults, options.taskType)
     
     console.log(`Consensus analysis complete: ${consensus.consensusCount}/${parsedResults.length} models agreed`)
+    console.log(`Items before cleanup: ${consensus.items.length}`)
     
-    return consensus
+    // Post-processing: Clean up and enhance the final result
+    const cleanedConsensus = this.cleanupAndEnhanceResults(consensus, parsedResults)
+    console.log(`Items after cleanup: ${cleanedConsensus.items.length}`)
+    
+    return cleanedConsensus
   }
 
   // Build result from single model (when only 1 model succeeds)
@@ -1586,16 +1822,38 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
   }
 
   // Find items that multiple models agree on
+  // NEW: Keep ALL items from all models, not just consensus
+  // This gives us way more items (combining findings from GPT, Claude, and Grok)
   private findConsensusItems(items: any[], totalModels: number): any[] {
     // Group similar items
     const groupedItems = this.groupSimilarItems(items)
     
-    // Only include items with consensus (agreed upon by multiple models)
-    const consensusItems = groupedItems.filter(group => 
-      group.length >= Math.ceil(totalModels * 0.3) // 30% consensus threshold (more lenient)
-    )
+    // NEW APPROACH: Keep ALL items, even from single models
+    // Only merge items when multiple models found the same thing (for averaging quantities)
+    const allItems: any[] = []
+    const processedKeys = new Set<string>()
     
-    return consensusItems.map(group => this.mergeItemGroup(group))
+    groupedItems.forEach(group => {
+      if (group.length >= 2) {
+        // Multiple models found this - merge and average
+        const merged = this.mergeItemGroup(group)
+        const key = `${merged.name}_${merged.category}_${merged.location}`
+        if (!processedKeys.has(key)) {
+          allItems.push(merged)
+          processedKeys.add(key)
+        }
+      } else if (group.length === 1) {
+        // Single model found this - keep it anyway (this is the key change!)
+        const item = group[0]
+        const key = `${item.name}_${item.category}_${item.location || ''}`
+        if (!processedKeys.has(key)) {
+          allItems.push(item)
+          processedKeys.add(key)
+        }
+      }
+    })
+    
+    return allItems
   }
 
   // Find issues that multiple models agree on
@@ -1839,6 +2097,216 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     }
     
     return bestQA
+  }
+  
+  // Clean up and enhance final results from all models
+  // This runs AFTER consensus building to:
+  // 1. Deduplicate items more intelligently (fuzzy matching)
+  // 2. Fill in missing fields from similar items
+  // 3. Validate and normalize data
+  // 4. Merge similar items that were missed by grouping
+  private cleanupAndEnhanceResults(
+    consensus: ConsensusResult,
+    parsedResults: Array<{ parsed: any; model: string; confidence?: number }>
+  ): ConsensusResult {
+    let items = [...consensus.items]
+    
+    // Step 1: Intelligent deduplication (fuzzy matching by name + category)
+    items = this.deduplicateItemsFuzzy(items)
+    console.log(`After fuzzy deduplication: ${items.length} items`)
+    
+    // Step 2: Fill in missing fields from other items with similar names
+    items = this.fillMissingFields(items)
+    console.log(`After filling missing fields: ${items.length} items`)
+    
+    // Step 3: Validate and normalize data
+    items = this.validateAndNormalizeItems(items)
+    console.log(`After validation: ${items.length} items`)
+    
+    // Step 4: Merge very similar items that might have been missed
+    items = this.mergeVerySimilarItems(items)
+    console.log(`After merging similar items: ${items.length} items`)
+    
+    return {
+      ...consensus,
+      items
+    }
+  }
+  
+  // Deduplicate items using fuzzy name matching
+  private deduplicateItemsFuzzy(items: any[]): any[] {
+    const deduplicated: any[] = []
+    const processed = new Set<number>()
+    
+    items.forEach((item, index) => {
+      if (processed.has(index)) return
+      
+      // Find similar items (same category, similar name)
+      const similar = items.filter((other, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return false
+        if (item.category !== other.category) return false
+        
+        // Fuzzy name matching (case-insensitive, handles variations)
+        const name1 = (item.name || '').toLowerCase().trim()
+        const name2 = (other.name || '').toLowerCase().trim()
+        
+        // Exact match
+        if (name1 === name2) return true
+        
+        // One name contains the other (e.g., "2x6 Framing" vs "2x6 Exterior Wall Framing")
+        // BUT: Be more strict - only merge if they're very similar (avoid over-merging)
+        if (name1.includes(name2) || name2.includes(name1)) {
+          // Only merge if the shorter name is at least 80% of the longer name
+          // This prevents merging "Door" with "Door Frame" or "Window" with "Window Sill"
+          const shorter = name1.length < name2.length ? name1 : name2
+          const longer = name1.length >= name2.length ? name1 : name2
+          // Require at least 80% similarity in length (more strict)
+          return shorter.length >= longer.length * 0.8
+        }
+        
+        // Similar words - require higher overlap to merge (avoid over-merging)
+        const words1 = name1.split(/\s+/)
+        const words2 = name2.split(/\s+/)
+        const commonWords = words1.filter((w: string) => words2.includes(w) && w.length > 3)
+        // Require 80% word overlap (more strict than 60%)
+        return commonWords.length >= Math.min(words1.length, words2.length) * 0.8
+      })
+      
+      if (similar.length > 0) {
+        // Merge similar items
+        const allItems = [item, ...similar]
+        const merged = this.mergeItemGroup(allItems)
+        deduplicated.push(merged)
+        processed.add(index)
+        similar.forEach((_, idx) => {
+          const originalIndex = items.findIndex(i => i === similar[idx])
+          if (originalIndex >= 0) processed.add(originalIndex)
+        })
+      } else {
+        deduplicated.push(item)
+        processed.add(index)
+      }
+    })
+    
+    return deduplicated
+  }
+  
+  // Fill in missing fields from similar items
+  private fillMissingFields(items: any[]): any[] {
+    return items.map(item => {
+      // If item is missing critical fields, try to find similar items with those fields
+      if (!item.unit || item.unit === 'EA' || !item.category || item.category === 'other') {
+        const similar = items.find(other => {
+          if (other === item) return false
+          const name1 = (item.name || '').toLowerCase()
+          const name2 = (other.name || '').toLowerCase()
+          return name1.includes(name2) || name2.includes(name1) || name1 === name2
+        })
+        
+        if (similar) {
+          return {
+            ...item,
+            unit: item.unit || similar.unit || 'EA',
+            category: item.category === 'other' ? similar.category : item.category,
+            subcategory: item.subcategory === 'Uncategorized' ? similar.subcategory : item.subcategory,
+            cost_code: item.cost_code || similar.cost_code,
+            unit_cost: item.unit_cost || similar.unit_cost
+          }
+        }
+      }
+      return item
+    })
+  }
+  
+  // Validate and normalize items
+  private validateAndNormalizeItems(items: any[]): any[] {
+    return items.map(item => {
+      // Ensure required fields exist
+      if (!item.name || item.name.trim().length === 0) {
+        return null // Filter out items without names
+      }
+      
+      // Normalize units
+      const unitMap: Record<string, string> = {
+        'lf': 'LF', 'linear feet': 'LF', 'linear ft': 'LF',
+        'sf': 'SF', 'sq ft': 'SF', 'square feet': 'SF', 'sqft': 'SF',
+        'cf': 'CF', 'cubic feet': 'CF', 'cubic ft': 'CF',
+        'cy': 'CY', 'cubic yards': 'CY', 'cubic yds': 'CY',
+        'ea': 'EA', 'each': 'EA', 'e.a.': 'EA',
+        'sq': 'SQ', 'square': 'SQ',
+        'lb': 'LB', 'pounds': 'LB', 'lbs': 'LB',
+        'ton': 'TON', 'tons': 'TON'
+      }
+      if (item.unit) {
+        item.unit = unitMap[item.unit.toLowerCase()] || item.unit.toUpperCase()
+      }
+      
+      // Ensure quantity is a number
+      if (typeof item.quantity !== 'number' || isNaN(item.quantity)) {
+        item.quantity = 0
+      }
+      
+      // Ensure confidence is between 0 and 1
+      if (typeof item.confidence !== 'number' || item.confidence < 0 || item.confidence > 1) {
+        item.confidence = item.confidence || 0.5
+      }
+      
+      // Infer category/subcategory if missing
+      if (!item.category || item.category === 'other') {
+        const inferred = this.inferCategoryFromName(item.name)
+        item.category = inferred.category
+      }
+      if (!item.subcategory || item.subcategory === 'Uncategorized') {
+        item.subcategory = this.inferSubcategoryFromName(item.name)
+      }
+      
+      return item
+    }).filter((item): item is any => item !== null)
+  }
+  
+  // Merge very similar items that might have been missed
+  private mergeVerySimilarItems(items: any[]): any[] {
+    const merged: any[] = []
+    const processed = new Set<number>()
+    
+    items.forEach((item, index) => {
+      if (processed.has(index)) return
+      
+      // Find items with very similar names (more lenient than deduplication)
+      const similar = items.filter((other, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return false
+        if (item.category !== other.category) return false
+        
+        const name1 = (item.name || '').toLowerCase().trim()
+        const name2 = (other.name || '').toLowerCase().trim()
+        
+        // Check if they're essentially the same (e.g., "2x6 Framing" vs "2x6 Wall Framing")
+        const words1 = new Set<string>(name1.split(/\s+/).filter((w: string) => w.length > 2))
+        const words2 = new Set<string>(name2.split(/\s+/).filter((w: string) => w.length > 2))
+        const intersection = new Set<string>(Array.from(words1).filter((w: string) => words2.has(w)))
+        const union = new Set<string>([...Array.from(words1), ...Array.from(words2)])
+        const similarity = intersection.size / union.size
+        
+        // Require 85% similarity (more strict) to avoid over-merging different items
+        return similarity >= 0.85
+      })
+      
+      if (similar.length > 0) {
+        const allItems = [item, ...similar]
+        const mergedItem = this.mergeItemGroup(allItems)
+        merged.push(mergedItem)
+        processed.add(index)
+        similar.forEach((_, idx) => {
+          const originalIndex = items.findIndex(i => i === similar[idx])
+          if (originalIndex >= 0) processed.add(originalIndex)
+        })
+      } else {
+        merged.push(item)
+        processed.add(index)
+      }
+    })
+    
+    return merged
   }
 }
 

@@ -3,7 +3,6 @@ import { Saira_Stencil_One, Barlow } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import AuthErrorBoundary from '@/components/auth-error-boundary'
-import ImpersonateBanner from '@/components/impersonate-banner'
 
 const sairaStencilOne = Saira_Stencil_One({ 
   weight: '400',
@@ -44,7 +43,6 @@ export default function RootLayout({
       <body className={barlow.className} suppressHydrationWarning>
         <Providers>
           <AuthErrorBoundary>
-            <ImpersonateBanner />
             {children}
           </AuthErrorBoundary>
         </Providers>

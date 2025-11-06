@@ -199,13 +199,6 @@ export default function AdminDashboardPage() {
       icon: Zap,
       href: '/admin/ai-plan-demo',
       color: 'yellow'
-    },
-    {
-      title: 'Impersonate User',
-      description: 'Sign in as other users for debugging and support',
-      icon: UserPlus,
-      href: '/admin/impersonate',
-      color: 'red'
     }
   ]
 
