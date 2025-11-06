@@ -2111,18 +2111,22 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         if (name1 === name2) return true
         
         // One name contains the other (e.g., "2x6 Framing" vs "2x6 Exterior Wall Framing")
+        // BUT: Be more strict - only merge if they're very similar (avoid over-merging)
         if (name1.includes(name2) || name2.includes(name1)) {
-          // But not too different (avoid matching "Door" with "Door Frame")
+          // Only merge if the shorter name is at least 80% of the longer name
+          // This prevents merging "Door" with "Door Frame" or "Window" with "Window Sill"
           const shorter = name1.length < name2.length ? name1 : name2
           const longer = name1.length >= name2.length ? name1 : name2
-          return longer.length <= shorter.length * 1.5 // Max 50% longer
+          // Require at least 80% similarity in length (more strict)
+          return shorter.length >= longer.length * 0.8
         }
         
-        // Similar words (e.g., "Framing" vs "Frame")
+        // Similar words - require higher overlap to merge (avoid over-merging)
         const words1 = name1.split(/\s+/)
         const words2 = name2.split(/\s+/)
         const commonWords = words1.filter((w: string) => words2.includes(w) && w.length > 3)
-        return commonWords.length >= Math.min(words1.length, words2.length) * 0.6 // 60% word overlap
+        // Require 80% word overlap (more strict than 60%)
+        return commonWords.length >= Math.min(words1.length, words2.length) * 0.8
       })
       
       if (similar.length > 0) {
@@ -2240,7 +2244,8 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
         const union = new Set<string>([...Array.from(words1), ...Array.from(words2)])
         const similarity = intersection.size / union.size
         
-        return similarity >= 0.7 // 70% word overlap
+        // Require 85% similarity (more strict) to avoid over-merging different items
+        return similarity >= 0.85
       })
       
       if (similar.length > 0) {
