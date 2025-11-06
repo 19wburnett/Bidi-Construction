@@ -169,7 +169,15 @@ export async function POST(request: NextRequest) {
       max_parallel_batches: body.max_parallel_batches,
       currency: body.currency || 'USD',
       unit_cost_policy: body.unit_cost_policy || 'estimate',
-      prior_segments: body.prior_segments
+      prior_segments: body.prior_segments,
+      plan_id: planId,
+      plan_metadata: {
+        file_path: plan.file_path,
+        project_name: plan.project_name,
+        project_location: plan.project_location,
+        job_type: resolvedBuildingType || null,
+        additional_urls: additionalPdfUrls
+      }
     }
 
     const result = await multiIndustryTakeoffOrchestrator.execute(input)
