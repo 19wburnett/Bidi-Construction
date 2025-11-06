@@ -655,7 +655,7 @@ export class EnhancedAIProvider {
 
     let userContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
 
-    if (useTextOnly) {
+    if (useTextOnly && options.extractedText) {
       // TEXT-ONLY MODE: Use extracted PDF text instead of images
       console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted from PDF)`)
       const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${options.extractedText.slice(0, 100000)}\n${options.extractedText.length > 100000 ? '\n...(text truncated)' : ''}`
