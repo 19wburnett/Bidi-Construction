@@ -657,8 +657,19 @@ export class EnhancedAIProvider {
 
     if (useTextOnly && options.extractedText) {
       // TEXT-ONLY MODE: Use extracted PDF text instead of images
-      console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted from PDF)`)
-      const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${options.extractedText.slice(0, 100000)}\n${options.extractedText.length > 100000 ? '\n...(text truncated)' : ''}`
+      // Grok has 131k context window, but we need to leave room for system prompt and response
+      // Truncate text more aggressively to avoid context overflow
+      const maxTextLength = 50000 // Reduced from 100k to 50k to leave room for system prompt
+      const truncatedText = options.extractedText.slice(0, maxTextLength)
+      console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted, ${truncatedText.length} chars sent after truncation)`)
+      
+      // Also truncate userPrompt if it's too long (it can be very long with all the instructions)
+      const maxUserPromptLength = 10000 // Limit user prompt to 10k chars
+      const truncatedUserPrompt = options.userPrompt.length > maxUserPromptLength 
+        ? options.userPrompt.slice(0, maxUserPromptLength) + '\n\n...(user prompt truncated for length)'
+        : options.userPrompt
+      
+      const textPrompt = `${truncatedUserPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
       userContent = textPrompt
     } else {
       // IMAGE MODE: Use images (will try vision model first)
@@ -714,6 +725,12 @@ export class EnhancedAIProvider {
         taskType: options.taskType
       }
     } catch (error: any) {
+      // Enhanced error logging for debugging
+      console.error(`[Grok Error] Type: ${error?.type || 'unknown'}, Message: ${error?.message || String(error)}`)
+      if (error?.stack) {
+        console.error(`[Grok Error] Stack: ${error.stack.substring(0, 500)}`)
+      }
+      
       // Handle normalized Grok errors
       if (error.type && error.message) {
         console.error(`Grok API error (${error.type}):`, error.message)
@@ -730,7 +747,8 @@ export class EnhancedAIProvider {
         } else if (error.type === 'rate_limit') {
           throw new Error(`Grok rate limit exceeded. Retry after ${error.retry_after || 'some time'}.`)
         } else if (error.type === 'context_overflow') {
-          throw new Error('Grok context window exceeded. Reduce prompt size or use fewer images.')
+          console.error('⚠️ Grok context overflow - text may be too long even after truncation')
+          throw new Error('Grok context window exceeded. Text was truncated but still too long. Consider reducing extracted text size.')
         } else if (error.type === 'model_not_found' && useTextOnly) {
           // Already tried text mode, can't fallback further
           throw new Error(`Grok model not found: ${model}. Vision model unavailable and text fallback also failed.`)
@@ -738,6 +756,11 @@ export class EnhancedAIProvider {
           // Will be handled by fallback above, but if fallback conditions not met, throw
           throw new Error(`Grok model not found: ${model}. Use grok-2-1212 instead.`)
         }
+      }
+      
+      // Log unknown errors for debugging
+      if (!error.type) {
+        console.error(`[Grok Unknown Error] Full error:`, JSON.stringify(error, null, 2).substring(0, 1000))
       }
       
       // Re-throw original error
