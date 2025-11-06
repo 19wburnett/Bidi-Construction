@@ -49,7 +49,7 @@ export default function TestMultiTakeoffPage() {
 
   const [isRunning, setIsRunning] = useState(false)
   const [result, setResult] = useState<PipelineResult | null>(null)
-  const [rawResponse, setRawResponse] = useState<PipelineArrays | null>(null)
+  const [rawResponse, setRawResponse] = useState<unknown>(null)
   const [error, setError] = useState<string | null>(null)
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [plansLoading, setPlansLoading] = useState(false)
