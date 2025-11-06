@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { grokAdapter, initGrok, callGrok } from './providers/grokAdapter'
 
 // Enhanced AI Provider System with Specialized Models
 // This system uses 5+ specialized models with different strengths for maximum accuracy
@@ -10,7 +11,20 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '')
 
 // XAI/Grok integration for additional redundancy
-const xaiApiKey = process.env.XAI_API_KEY
+const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY
+
+// Initialize Grok adapter if API key is available
+if (xaiApiKey) {
+  try {
+    initGrok({
+      apiKey: xaiApiKey,
+      baseUrl: process.env.GROK_BASE_URL || 'https://api.x.ai/v1'
+    })
+    console.log('✅ Grok adapter initialized')
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize Grok adapter:', error)
+  }
+}
 
 // Model specializations for different construction analysis tasks
 export const MODEL_SPECIALIZATIONS = {
@@ -19,7 +33,8 @@ export const MODEL_SPECIALIZATIONS = {
   'gpt-4-turbo': 'quality_control', // Best at identifying issues and problems
   'claude-3-haiku-20240307': 'fast_processing', // Fastest for simple tasks
   'claude-sonnet-4-20250514': 'general_construction', // Latest Sonnet model (better quality than haiku)
-  'grok-2-1212': 'alternative_analysis' // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
+  'grok-2-1212': 'alternative_analysis', // Alternative perspective model (XAI) - grok-beta was deprecated, using grok-2-1212
+  'grok-2-vision-beta': 'alternative_analysis' // Grok vision model for image analysis
 } as const
 
 export type ModelSpecialization = keyof typeof MODEL_SPECIALIZATIONS
@@ -33,6 +48,7 @@ export interface EnhancedAnalysisOptions {
   taskType: TaskType
   prioritizeAccuracy?: boolean
   includeConsensus?: boolean
+  extractedText?: string // Optional: extracted text from PDF for text-only models like Grok
 }
 
 export interface EnhancedAIResponse {
@@ -160,12 +176,19 @@ export class EnhancedAIProvider {
         code_compliance: 0.90,
         cost_estimation: 0.93
       },
-             'grok-2-1212': {
+      'grok-2-1212': {
         takeoff: 0.95,
-               quality: 0.92,
-               bid_analysis: 0.95,
-               code_compliance: 0.90,
-               cost_estimation: 0.92
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
+      },
+      'grok-2-vision-beta': {
+        takeoff: 0.95,
+        quality: 0.92,
+        bid_analysis: 0.95,
+        code_compliance: 0.90,
+        cost_estimation: 0.92
       }
       // Gemini removed - model not available or causing errors
     }
@@ -173,11 +196,27 @@ export class EnhancedAIProvider {
 
   // Route tasks to best-performing models
   // Prioritizes GPT models first, then falls back to Claude/Grok
-  private getBestModelsForTask(taskType: TaskType, count: number = 10): string[] {
-    // Get max models from environment or default to 10 (enough for all OpenAI + Claude + Grok)
-    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '10')
+  private getBestModelsForTask(taskType: TaskType, count: number = 3): string[] {
+    // Get max models from environment or default to 3 (GPT, Claude, Grok)
+    const maxModels = parseInt(process.env.MAX_MODELS_PER_ANALYSIS || '3')
     const actualCount = Math.min(count, maxModels)
     
+    // NEW: Fixed 3-model priority order (GPT, Claude, Grok) - all run in parallel
+    const priorityModels = [
+      'gpt-4o',                    // 1. ChatGPT (GPT-4o)
+      'claude-sonnet-4-20250514',  // 2. Claude Sonnet
+      'grok-2-vision-beta'         // 3. Grok (vision model for image support)
+    ]
+    
+    // Filter to only include models that exist in modelPerformance
+    const availablePriorityModels = priorityModels.filter(model => 
+      this.modelPerformance[model] !== undefined
+    )
+    
+    // Return the top N models from priority list
+    return availablePriorityModels.slice(0, actualCount)
+    
+    /* OLD SORTING LOGIC - REPLACED WITH FIXED PRIORITY ORDER
     const modelScores = Object.entries(this.modelPerformance)
       .map(([model, scores]) => ({ model, score: scores[taskType] }))
       .sort((a, b) => {
@@ -224,27 +263,20 @@ export class EnhancedAIProvider {
       .slice(0, actualCount)
     
     return modelScores.map(m => m.model)
+    */
   }
 
   // Analyze with specialized models
+  // NEW: Run all 3 models in PARALLEL (GPT, Claude, Grok) to combine all findings
+  // GPT/Claude get images, Grok gets text (if vision model not available)
   async analyzeWithSpecializedModels(
     images: string[],
     options: EnhancedAnalysisOptions
   ): Promise<EnhancedAIResponse[]> {
     const startTime = Date.now()
     
-    // Get best models for this task type (get enough for all OpenAI + Claude + Grok fallbacks)
-    let selectedModels = this.getBestModelsForTask(options.taskType, 10)
-    
-    // CRITICAL: Always ensure Claude Sonnet is included for fallback (better than haiku)
-    // Add it if it's not already in the list
-    const requiredFallbacks = ['claude-sonnet-4-20250514']
-    requiredFallbacks.forEach(fallback => {
-      if (!selectedModels.includes(fallback)) {
-        // Add to the end (will be tried after primary models)
-        selectedModels.push(fallback)
-      }
-    })
+    // Get the 3 priority models: GPT-4o, Claude Sonnet, Grok
+    const selectedModels = this.getBestModelsForTask(options.taskType, 3)
     
     // Filter out disabled providers and check API key availability
     const enabledModels = selectedModels.filter(model => {
@@ -264,31 +296,31 @@ export class EnhancedAIProvider {
       return true
     })
     
-    console.log(`Using specialized models for ${options.taskType} (sequential with fallback):`, enabledModels)
-    console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
-    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, GOOGLE=${!!process.env.GOOGLE_GEMINI_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
+    console.log(`🚀 Running ${enabledModels.length} models in PARALLEL for ${options.taskType}:`, enabledModels)
+    console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS || '3'}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
+    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
     
-    // Run models SEQUENTIALLY - try to get at least 2 for cross-validation, but accept 1 if needed
-    // Goal: Cross-validate with multiple models for better accuracy, but don't fail if only 1 works
-    const successfulResults: EnhancedAIResponse[] = []
-    const failedResults: any[] = []
-    const TARGET_MODELS = 2 // Try to get at least 2 models for cross-validation
+    // Run all models in PARALLEL (not sequential fallback)
+    // Goal: Get ALL findings from all 3 models, then combine them
     const MIN_MODELS = 1 // Minimum required (will accept single model if others fail)
     
-    for (let i = 0; i < enabledModels.length; i++) {
-      const model = enabledModels[i]
-      console.log(`\n[${i + 1}/${enabledModels.length}] Attempting analysis with: ${model}`)
+    // Create promises for all models running in parallel
+    const modelPromises = enabledModels.map(async (model) => {
+      const modelStartTime = Date.now()
       
       try {
-        // Add timeout to prevent Vercel 300s limit (increased to 120s for large prompts)
-        const timeoutMs = 120000 // 120 seconds - large prompts with images can take longer
+        // Add timeout to prevent Vercel 300s limit
+        const timeoutMs = 120000 // 120 seconds
         const timeoutPromise = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error(`Model timeout after ${timeoutMs/1000} seconds`)), timeoutMs)
         )
         
-        const modelStartTime = Date.now()
+        // For Grok: try vision model first, will auto-fallback to text if vision model unavailable
+        // GPT and Claude always use images
+        const inputType = 'images' as const // Always try images first, Grok will auto-fallback to text if needed
+        
         const result = await Promise.race([
-          this.analyzeWithModel(images, options, model),
+          this.analyzeWithModel(images, options, model, inputType),
           timeoutPromise
         ]) as EnhancedAIResponse
         
@@ -296,61 +328,42 @@ export class EnhancedAIProvider {
         result.processingTime = modelProcessingTime
         
         console.log(`✅ ${model} succeeded: ${result.content.length} chars in ${modelProcessingTime}ms`)
-        successfulResults.push(result)
-        
-        // If we have enough models for cross-validation, we can stop early (but not required)
-        if (successfulResults.length >= TARGET_MODELS) {
-          console.log(`🎯 Got ${successfulResults.length} successful models - sufficient for cross-validation. Continuing to try more models...`)
-          // Continue trying more models for better consensus, but we can stop if we want
-          // For now, continue to try all models if we have time
-        }
-        
-        // Continue to next model to try for cross-validation
-        // Only stop early if we have enough models AND remaining models are likely to fail
-        // Otherwise, keep trying for better consensus
-        
+        return { success: true, model, result, error: null }
       } catch (error: any) {
         const errorMsg = error?.message || String(error)
         console.error(`❌ ${model} failed:`, errorMsg)
-        failedResults.push({ model, error: errorMsg })
-        
-        // Continue to next model - we need at least MIN_MODELS working
-        if (i < enabledModels.length - 1) {
-          // Check if we already have minimum required models and remaining models likely to fail
-          if (successfulResults.length >= MIN_MODELS && (enabledModels.length - i - 1) === 0) {
-            console.log(`✅ Have ${successfulResults.length} successful model(s) - minimum requirement met. Can proceed.`)
-        } else {
-            console.log(`⏭️  Continuing to next model (${successfulResults.length}/${MIN_MODELS} minimum, ${successfulResults.length}/${TARGET_MODELS} target)...`)
-          }
-        } else {
-          // Last model failed
-          if (successfulResults.length >= MIN_MODELS) {
-            console.log(`✅ Completed trying all models: ${successfulResults.length} succeeded (meets minimum of ${MIN_MODELS})`)
-          } else {
-            console.error(`⚠️  All ${enabledModels.length} models failed! Have ${successfulResults.length} successful (need ${MIN_MODELS} minimum)`)
-          }
-        }
+        return { success: false, model, result: null, error: errorMsg }
       }
-    }
+    })
+    
+    // Wait for all models to complete (parallel execution)
+    const allResults = await Promise.all(modelPromises)
+    
+    const successfulResults: EnhancedAIResponse[] = []
+    const failedResults: any[] = []
+    
+    allResults.forEach(({ success, model, result, error }) => {
+      if (success && result) {
+        successfulResults.push(result)
+      } else {
+        failedResults.push({ model, error })
+      }
+    })
     
     const totalProcessingTime = Date.now() - startTime
     
-    console.log(`\n📊 Sequential analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
+    console.log(`\n📊 Parallel analysis completed: ${successfulResults.length}/${enabledModels.length} models succeeded in ${totalProcessingTime}ms`)
     if (failedResults.length > 0) {
       console.log(`❌ Failed models:`, failedResults.map(r => `${r.model}: ${r.error}`))
     }
     
     // If we don't have minimum required models, throw an error
     if (successfulResults.length < MIN_MODELS) {
-      throw new Error(`Only ${successfulResults.length} model(s) succeeded (need ${MIN_MODELS} minimum). Last error: ${failedResults[failedResults.length - 1]?.error || 'Unknown'}`)
+      throw new Error(`Only ${successfulResults.length} model(s) succeeded (need ${MIN_MODELS} minimum). Errors: ${failedResults.map(r => r.error).join('; ')}`)
     }
     
-    // Log if we have enough for good cross-validation
-    if (successfulResults.length >= TARGET_MODELS) {
-      console.log(`✅ Cross-validation ready: ${successfulResults.length} models for consensus analysis`)
-    } else {
-      console.log(`⚠️  Single model analysis: ${successfulResults.length} model(s) (target: ${TARGET_MODELS} for better consensus)`)
-    }
+    // Log success
+    console.log(`✅ All ${successfulResults.length} model(s) completed - combining ALL findings (not just consensus)`)
     
     return successfulResults
   }
@@ -359,7 +372,8 @@ export class EnhancedAIProvider {
   private async analyzeWithModel(
     images: string[],
     options: EnhancedAnalysisOptions,
-    model: string
+    model: string,
+    inputType: 'images' | 'text' = 'images'
   ): Promise<EnhancedAIResponse> {
     const startTime = Date.now()
     
@@ -382,7 +396,8 @@ export class EnhancedAIProvider {
         case 'claude-sonnet-4-20250514':
           return await this.analyzeWithClaude(images, options, model)
         case 'grok-2-1212':
-          return await this.analyzeWithXAI(images, options, model)
+        case 'grok-2-vision-beta':
+          return await this.analyzeWithXAI(images, options, model, inputType)
         // case 'gemini-1.5-flash':
         //   return await this.analyzeWithGemini(images, options, model)
         // Gemini removed - model not available
@@ -621,73 +636,112 @@ export class EnhancedAIProvider {
     }
   }
 
-  // Enhanced XAI/Grok analysis
+  // Enhanced XAI/Grok analysis using standardized adapter
+  // Supports both image and text-only modes (text fallback when vision model unavailable)
   private async analyzeWithXAI(
     images: string[],
     options: EnhancedAnalysisOptions,
-    model: string
+    model: string,
+    inputType: 'images' | 'text' = 'images'
   ): Promise<EnhancedAIResponse> {
-    console.log(`XAI analysis starting with model: ${model}`)
+    console.log(`XAI analysis starting with model: ${model} (input: ${inputType})`)
     
     if (!xaiApiKey) {
       throw new Error('XAI API key not configured')
     }
 
-    // XAI API integration (similar to OpenAI format)
-    const imageContent = images.map(img => {
-      // Handle both data URLs and base64 strings
-      const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
-      return {
-        type: 'image_url' as const,
-        image_url: { url: url, detail: 'high' as const }
-      }
-    })
+    // Determine if we should use text-only mode
+    const useTextOnly = inputType === 'text' && options.extractedText && options.extractedText.length > 0
 
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: this.buildSpecializedPrompt(options) },
-          { 
-            role: 'user', 
-            content: [
-              { type: 'text', text: options.userPrompt },
-              ...imageContent
-            ] 
-          }
-        ],
-        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Try max_tokens instead of max_completion_tokens
-        temperature: options.temperature || 0.2
-        // Note: Grok may not support response_format, remove it for now
+    let userContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+
+    if (useTextOnly) {
+      // TEXT-ONLY MODE: Use extracted PDF text instead of images
+      console.log(`📝 Grok using text-only mode (${options.extractedText.length} chars extracted from PDF)`)
+      const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${options.extractedText.slice(0, 100000)}\n${options.extractedText.length > 100000 ? '\n...(text truncated)' : ''}`
+      userContent = textPrompt
+    } else {
+      // IMAGE MODE: Use images (will try vision model first)
+      const imageContent = images.map(img => {
+        const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
+        return {
+          type: 'image_url' as const,
+          image_url: { url: url, detail: 'high' as const }
+        }
       })
-    })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`XAI API error (${response.status}):`, errorText)
-      if (response.status === 403) {
-        console.warn('XAI API access forbidden - skipping Grok model')
-        throw new Error('XAI API access forbidden')
-      }
-      throw new Error(`XAI API error: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`)
+      userContent = [
+        { type: 'text', text: options.userPrompt },
+        ...imageContent
+      ]
     }
 
-    const data = await response.json()
-    
-    return {
-      provider: 'xai',
-      model: model,
-      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-      content: data.choices[0].message.content || '',
-      finishReason: data.choices[0].finish_reason,
-      tokensUsed: data.usage?.total_tokens,
-      confidence: this.calculateConfidence(data.choices[0].message.content || ''),
-      taskType: options.taskType
+    try {
+      // Try vision model first if images provided, otherwise use text model
+      const tryVisionModel = !useTextOnly && images.length > 0
+      const selectedModel = tryVisionModel ? 'grok-2-vision-beta' : 'grok-2-1212'
+      
+      // Call Grok adapter
+      const response = await callGrok({
+        system: this.buildSpecializedPrompt(options),
+        user: userContent,
+        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Grok limit is 4096
+        temperature: options.temperature || 0.2,
+        json_schema: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              items: { type: 'object' }
+            },
+            issues: {
+              type: 'array',
+              items: { type: 'object' }
+            }
+          },
+          required: ['items']
+        }
+      })
+
+      return {
+        provider: 'xai',
+        model: response.model || selectedModel,
+        specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+        content: response.content,
+        finishReason: response.finish_reason,
+        tokensUsed: response.usage.total_tokens,
+        confidence: this.calculateConfidence(response.content),
+        taskType: options.taskType
+      }
+    } catch (error: any) {
+      // Handle normalized Grok errors
+      if (error.type && error.message) {
+        console.error(`Grok API error (${error.type}):`, error.message)
+        
+        // If vision model failed and we have text, try text-only fallback
+        if (error.type === 'model_not_found' && !useTextOnly && images.length > 0 && options.extractedText && options.extractedText.length > 0) {
+          console.log('🔄 Vision model not available, falling back to text-only mode for Grok...')
+          return this.analyzeWithXAI(images, options, model, 'text')
+        }
+        
+        // Map error types to actionable messages (only if we can't fallback)
+        if (error.type === 'auth_error') {
+          throw new Error('XAI API authentication failed. Check your XAI_API_KEY.')
+        } else if (error.type === 'rate_limit') {
+          throw new Error(`Grok rate limit exceeded. Retry after ${error.retry_after || 'some time'}.`)
+        } else if (error.type === 'context_overflow') {
+          throw new Error('Grok context window exceeded. Reduce prompt size or use fewer images.')
+        } else if (error.type === 'model_not_found' && useTextOnly) {
+          // Already tried text mode, can't fallback further
+          throw new Error(`Grok model not found: ${model}. Vision model unavailable and text fallback also failed.`)
+        } else if (error.type === 'model_not_found') {
+          // Will be handled by fallback above, but if fallback conditions not met, throw
+          throw new Error(`Grok model not found: ${model}. Use grok-2-1212 instead.`)
+        }
+      }
+      
+      // Re-throw original error
+      throw error
     }
   }
 
@@ -1586,16 +1640,38 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
   }
 
   // Find items that multiple models agree on
+  // NEW: Keep ALL items from all models, not just consensus
+  // This gives us way more items (combining findings from GPT, Claude, and Grok)
   private findConsensusItems(items: any[], totalModels: number): any[] {
     // Group similar items
     const groupedItems = this.groupSimilarItems(items)
     
-    // Only include items with consensus (agreed upon by multiple models)
-    const consensusItems = groupedItems.filter(group => 
-      group.length >= Math.ceil(totalModels * 0.3) // 30% consensus threshold (more lenient)
-    )
+    // NEW APPROACH: Keep ALL items, even from single models
+    // Only merge items when multiple models found the same thing (for averaging quantities)
+    const allItems: any[] = []
+    const processedKeys = new Set<string>()
     
-    return consensusItems.map(group => this.mergeItemGroup(group))
+    groupedItems.forEach(group => {
+      if (group.length >= 2) {
+        // Multiple models found this - merge and average
+        const merged = this.mergeItemGroup(group)
+        const key = `${merged.name}_${merged.category}_${merged.location}`
+        if (!processedKeys.has(key)) {
+          allItems.push(merged)
+          processedKeys.add(key)
+        }
+      } else if (group.length === 1) {
+        // Single model found this - keep it anyway (this is the key change!)
+        const item = group[0]
+        const key = `${item.name}_${item.category}_${item.location || ''}`
+        if (!processedKeys.has(key)) {
+          allItems.push(item)
+          processedKeys.add(key)
+        }
+      }
+    })
+    
+    return allItems
   }
 
   // Find issues that multiple models agree on
