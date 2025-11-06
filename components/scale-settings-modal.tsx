@@ -73,12 +73,21 @@ export default function ScaleSettingsModal({
           setCalibrationDistance('')
         }
       } else {
-        setPreset(current?.ratio || '1/4" = 1\'')
-        setUnit(current?.unit || 'ft')
-        setCustomPixels('')
-        setCalibrationDistance('')
-        setCalibrationUnit('ft')
-        setMode('ratio')
+        // Only reset if we're not in the middle of calibration (have 1 point)
+        // If we have 1 point, we're waiting for the second, so keep calibration mode
+        const hasOnePoint = calibrationPoints && Array.isArray(calibrationPoints) && calibrationPoints.length === 1
+        
+        if (!hasOnePoint) {
+          setPreset(current?.ratio || '1/4" = 1\'')
+          setUnit(current?.unit || 'ft')
+          setCustomPixels('')
+          setCalibrationDistance('')
+          setCalibrationUnit('ft')
+          setMode('ratio')
+        } else {
+          // We have 1 point, so we're in calibration mode waiting for the second point
+          setMode('calibration')
+        }
       }
     }
   }, [open, current?.ratio, current?.unit, calibrationPoints])
@@ -252,7 +261,7 @@ export default function ScaleSettingsModal({
               </p>
             </div>
 
-            {(!calibrationPoints || !Array.isArray(calibrationPoints) || calibrationPoints.length < 2) ? (
+            {(!calibrationPoints || !Array.isArray(calibrationPoints) || calibrationPoints.length === 0) ? (
               <div>
                 <Button 
                   onClick={handleStartCalibration}
@@ -264,6 +273,29 @@ export default function ScaleSettingsModal({
                 <p className="text-xs text-gray-500 mt-2">
                   This will close the modal and let you click two points on the plan.
                 </p>
+              </div>
+            ) : calibrationPoints.length === 1 ? (
+              <div className="space-y-3">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                  <p className="text-sm text-yellow-800 font-medium">
+                    ⏳ First point placed - click the second point on the plan
+                  </p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    The modal will reopen automatically when both points are placed.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => {
+                    if (onStartCalibration) {
+                      onStartCalibration()
+                    }
+                  }}
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                >
+                  Cancel and Start Over
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">

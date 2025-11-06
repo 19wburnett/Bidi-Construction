@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   Accordion,
   AccordionContent,
@@ -78,16 +78,26 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
   const [draftItem, setDraftItem] = useState<Partial<TakeoffItem> | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [newCategoryName, setNewCategoryName] = useState<string>('')
+  const [editingCategory, setEditingCategory] = useState<string | null>(null)
+  const [editingSubcategory, setEditingSubcategory] = useState<{category: string, subcategory: string} | null>(null)
+  const [draftCategoryName, setDraftCategoryName] = useState<string>('')
+  const [draftSubcategoryName, setDraftSubcategoryName] = useState<string>('')
 
   // Ensure items is always an array
   const safeItems = Array.isArray(items) ? items : []
 
   // Organize items into 3-level hierarchy
+  // Note: Items with parent_id are excluded from main hierarchy - they only appear as sub-items
   const { hierarchy, categoryDisplayName } = useMemo(() => {
     const organized: Record<string, Record<string, TakeoffItem[]>> = {}
     const displayName: Record<string, string> = {}
 
     safeItems.forEach(item => {
+      // Skip items with parent_id - they are sub-items and should only appear in sub-items section
+      if (item.parent_id) {
+        return
+      }
+
       const rawCategory = (item.category || 'Other').trim()
       const categoryKey = rawCategory.toLowerCase()
       const subcategory = item.subcategory || 'Uncategorized'
@@ -167,6 +177,25 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
     setDraftItem(null)
   }
 
+  // Keep draftItem in sync when items change (e.g., when parent updates items array)
+  // This ensures that newly added items remain in edit mode when items prop updates
+  // Only update if draftItem is missing or stale (not while user is actively editing)
+  useEffect(() => {
+    if (editingId && items.length > 0) {
+      const currentItem = items.find(i => i.id === editingId)
+      if (currentItem) {
+        // Only update if draftItem doesn't exist or is for a different item
+        // This prevents overwriting user's input while they're typing
+        if (!draftItem || draftItem.id !== editingId) {
+          setDraftItem({ ...currentItem })
+        }
+      } else {
+        // Item was deleted, cancel editing
+        cancelEdit()
+      }
+    }
+  }, [items, editingId])
+
   const saveEdit = () => {
     if (!draftItem || !editingId) return
     // Calculate total_cost from quantity and unit_cost
@@ -182,6 +211,77 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
     }
     upsertItem(updated)
     cancelEdit()
+  }
+
+  const startEditCategory = (categoryKey: string) => {
+    setEditingCategory(categoryKey)
+    // Find the display name for this category from the first item with this category
+    const firstItem = items.find(item => {
+      const itemCategory = (item.category || 'Other').trim()
+      return itemCategory.toLowerCase() === categoryKey.toLowerCase()
+    })
+    const displayName = firstItem?.category || categoryDisplayName[categoryKey] || categoryKey
+    setDraftCategoryName(displayName)
+  }
+
+  const saveCategoryEdit = () => {
+    if (!editingCategory || !draftCategoryName.trim()) {
+      cancelCategoryEdit()
+      return
+    }
+    
+    const newCategoryName = draftCategoryName.trim()
+    // Update all items with this category
+    const updatedItems = items.map(item => {
+      const itemCategory = (item.category || 'Other').trim()
+      const categoryKey = itemCategory.toLowerCase()
+      if (categoryKey === editingCategory.toLowerCase()) {
+        return { ...item, category: newCategoryName, user_modified: true }
+      }
+      return item
+    })
+    
+    onItemsChange?.(updatedItems)
+    cancelCategoryEdit()
+  }
+
+  const cancelCategoryEdit = () => {
+    setEditingCategory(null)
+    setDraftCategoryName('')
+  }
+
+  const startEditSubcategory = (category: string, subcategory: string) => {
+    setEditingSubcategory({ category, subcategory })
+    setDraftSubcategoryName(subcategory)
+  }
+
+  const saveSubcategoryEdit = () => {
+    if (!editingSubcategory || !draftSubcategoryName.trim()) {
+      cancelSubcategoryEdit()
+      return
+    }
+    
+    const newSubcategoryName = draftSubcategoryName.trim()
+    // Update all items with this category + subcategory combination
+    const updatedItems = items.map(item => {
+      const itemCategory = (item.category || 'Other').trim()
+      const itemSubcategory = item.subcategory || 'Uncategorized'
+      const categoryKey = itemCategory.toLowerCase()
+      
+      if (categoryKey === editingSubcategory.category.toLowerCase() && 
+          itemSubcategory === editingSubcategory.subcategory) {
+        return { ...item, subcategory: newSubcategoryName, user_modified: true }
+      }
+      return item
+    })
+    
+    onItemsChange?.(updatedItems)
+    cancelSubcategoryEdit()
+  }
+
+  const cancelSubcategoryEdit = () => {
+    setEditingSubcategory(null)
+    setDraftSubcategoryName('')
   }
 
   // Format currency helper
@@ -354,26 +454,72 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                   <div className="flex items-center gap-3">
                     {React.createElement(config.icon, { className: 'h-5 w-5' })}
                     <div className="text-left">
-                      <h3 className="font-bold text-lg">{displayCategory}</h3>
+                      {editable && editingCategory === category ? (
+                        <Input
+                          value={draftCategoryName}
+                          onChange={(e) => setDraftCategoryName(e.target.value)}
+                          className="h-8 w-48 text-lg font-bold"
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation()
+                              saveCategoryEdit()
+                            } else if (e.key === 'Escape') {
+                              e.stopPropagation()
+                              cancelCategoryEdit()
+                            }
+                          }}
+                        />
+                      ) : (
+                        <h3 className="font-bold text-lg">{displayCategory}</h3>
+                      )}
                       <p className="text-xs text-gray-500">
                         {totals.items} items
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge className={config.color}>
-                      {totals.items} items
-                    </Badge>
-                    <Badge variant="outline" className="font-semibold text-green-700 dark:text-green-400 border-green-300 dark:border-green-700">
-                      {formatCurrency(totals.cost)}
-                    </Badge>
-                    {editable && (
-                      <div 
-                        className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1"
-                        onClick={(e) => { e.stopPropagation(); addItem(displayCategory) }}
-                      >
-                        <Plus className="h-4 w-4 mr-1" /> Add Item
-                      </div>
+                    {editable && editingCategory === category ? (
+                      <>
+                        <div 
+                          className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-8 px-3 py-1 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); saveCategoryEdit() }}
+                        >
+                          <Save className="h-3 w-3 mr-1" /> Save
+                        </div>
+                        <div 
+                          className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); cancelCategoryEdit() }}
+                        >
+                          <X className="h-3 w-3 mr-1" /> Cancel
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Badge className={config.color}>
+                          {totals.items} items
+                        </Badge>
+                        <Badge variant="outline" className="font-semibold text-green-700 dark:text-green-400 border-green-300 dark:border-green-700">
+                          {formatCurrency(totals.cost)}
+                        </Badge>
+                        {editable && (
+                          <>
+                            <div 
+                              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); startEditCategory(category) }}
+                            >
+                              <Pencil className="h-3 w-3 mr-1" /> Edit
+                            </div>
+                            <div 
+                              className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); addItem(displayCategory) }}
+                            >
+                              <Plus className="h-4 w-4 mr-1" /> Add Item
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -394,25 +540,71 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                         <AccordionTrigger className="px-3 py-2 hover:no-underline hover:bg-orange-50/50">
                           <div className="flex items-center justify-between w-full pr-4">
                             <div className="text-left">
-                              <h4 className="font-semibold text-sm">{subcategory}</h4>
+                              {editable && editingSubcategory?.category === category && editingSubcategory?.subcategory === subcategory ? (
+                                <Input
+                                  value={draftSubcategoryName}
+                                  onChange={(e) => setDraftSubcategoryName(e.target.value)}
+                                  className="h-7 w-40 text-sm font-semibold"
+                                  autoFocus
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.stopPropagation()
+                                      saveSubcategoryEdit()
+                                    } else if (e.key === 'Escape') {
+                                      e.stopPropagation()
+                                      cancelSubcategoryEdit()
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <h4 className="font-semibold text-sm">{subcategory}</h4>
+                              )}
                               <p className="text-xs text-gray-500">
                                 {subcatTotals.items} items
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                {subcatTotals.items}
-                              </Badge>
-                              <Badge variant="outline" className="text-xs font-semibold text-green-700 dark:text-green-400 border-green-300 dark:border-green-700">
-                                {formatCurrency(subcatTotals.cost)}
-                              </Badge>
-                              {editable && (
-                                <div 
-                                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1"
-                                  onClick={(e) => { e.stopPropagation(); addItem(displayCategory, subcategory) }}
-                                >
-                                  <Plus className="h-4 w-4 mr-1" /> Add Item
-                                </div>
+                              {editable && editingSubcategory?.category === category && editingSubcategory?.subcategory === subcategory ? (
+                                <>
+                                  <div 
+                                    className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-8 px-3 py-1 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); saveSubcategoryEdit() }}
+                                  >
+                                    <Save className="h-3 w-3 mr-1" /> Save
+                                  </div>
+                                  <div 
+                                    className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                                    onClick={(e) => { e.stopPropagation(); cancelSubcategoryEdit() }}
+                                  >
+                                    <X className="h-3 w-3 mr-1" /> Cancel
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <Badge variant="outline" className="text-xs">
+                                    {subcatTotals.items}
+                                  </Badge>
+                                  <Badge variant="outline" className="text-xs font-semibold text-green-700 dark:text-green-400 border-green-300 dark:border-green-700">
+                                    {formatCurrency(subcatTotals.cost)}
+                                  </Badge>
+                                  {editable && (
+                                    <>
+                                      <div 
+                                        className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                                        onClick={(e) => { e.stopPropagation(); startEditSubcategory(category, subcategory) }}
+                                      >
+                                        <Pencil className="h-3 w-3 mr-1" /> Edit
+                                      </div>
+                                      <div 
+                                        className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 px-3 py-1 cursor-pointer"
+                                        onClick={(e) => { e.stopPropagation(); addItem(displayCategory, subcategory) }}
+                                      >
+                                        <Plus className="h-4 w-4 mr-1" /> Add Item
+                                      </div>
+                                    </>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
@@ -446,6 +638,8 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                                               value={draftItem?.name || ''}
                                               onChange={(e) => setDraftItem(d => ({ ...(d || {}), name: e.target.value }))}
                                               className="h-8 flex-1"
+                                              autoFocus
+                                              placeholder="Item name"
                                             />
                                           ) : (
                                             <h5 className="font-semibold text-base leading-tight text-gray-900">
@@ -625,28 +819,102 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
                                         <div className="text-xs font-semibold text-gray-600 mb-1">Sub-items:</div>
                                         {childrenByParentId[item.id]!.map((child) => {
                                           const childCost = calculateItemCost(child)
+                                          const isEditing = editingId === child.id
                                           return (
-                                            <div key={child.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded p-2">
-                                              <div className="text-xs text-gray-700 dark:text-gray-300 flex-1">
-                                                <span className="font-medium">{child.name}</span>
-                                                <span className="text-gray-500 ml-2">— {child.quantity} {child.unit}</span>
-                                                {child.unit_cost !== undefined && (
-                                                  <span className="text-gray-500 ml-2">@ {formatCurrency(child.unit_cost)}/{child.unit}</span>
-                                                )}
-                                              </div>
-                                              <div className="flex items-center gap-2">
-                                                {childCost > 0 && (
-                                                  <Badge variant="outline" className="text-xs font-semibold text-green-700 dark:text-green-400">
-                                                    {formatCurrency(childCost)}
-                                                  </Badge>
-                                                )}
-                                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(child) }}>
-                                                  <Pencil className="h-3 w-3" />
-                                                </Button>
-                                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteItem(child.id) }}>
-                                                  <Trash2 className="h-3 w-3" />
-                                                </Button>
-                                              </div>
+                                            <div key={child.id} className="bg-gray-50 dark:bg-gray-800 rounded p-2 space-y-2">
+                                              {isEditing ? (
+                                                <>
+                                                  <div className="space-y-2">
+                                                    <Input
+                                                      value={draftItem?.name || ''}
+                                                      onChange={(e) => setDraftItem(d => ({ ...(d || {}), name: e.target.value }))}
+                                                      className="h-8 text-xs"
+                                                      placeholder="Item name"
+                                                      autoFocus
+                                                    />
+                                                    <Textarea
+                                                      value={draftItem?.description || ''}
+                                                      onChange={(e) => setDraftItem(d => ({ ...(d || {}), description: e.target.value }))}
+                                                      className="h-16 text-xs"
+                                                      placeholder="Description"
+                                                    />
+                                                    <div className="flex gap-2">
+                                                      <Input
+                                                        value={String(draftItem?.quantity ?? '')}
+                                                        onChange={(e) => {
+                                                          const qty = Number(e.target.value) || 0
+                                                          const unitCost = draftItem?.unit_cost || 0
+                                                          setDraftItem(d => ({ 
+                                                            ...(d || {}), 
+                                                            quantity: qty,
+                                                            total_cost: qty * unitCost
+                                                          }))
+                                                        }}
+                                                        className="h-8 w-20 text-xs"
+                                                        placeholder="Qty"
+                                                      />
+                                                      <Input
+                                                        value={draftItem?.unit || ''}
+                                                        onChange={(e) => setDraftItem(d => ({ ...(d || {}), unit: e.target.value }))}
+                                                        className="h-8 w-24 text-xs"
+                                                        placeholder="Unit"
+                                                      />
+                                                      <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={String(draftItem?.unit_cost ?? '')}
+                                                        onChange={(e) => {
+                                                          const unitCost = Number(e.target.value) || 0
+                                                          const qty = draftItem?.quantity || 0
+                                                          setDraftItem(d => ({ 
+                                                            ...(d || {}), 
+                                                            unit_cost: unitCost,
+                                                            total_cost: qty * unitCost
+                                                          }))
+                                                        }}
+                                                        className="h-8 flex-1 text-xs"
+                                                        placeholder="$/unit"
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <Button size="sm" onClick={(e) => { e.stopPropagation(); saveEdit() }}>
+                                                      <Save className="h-3 w-3 mr-1" /> Save
+                                                    </Button>
+                                                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEdit() }}>
+                                                      <X className="h-3 w-3 mr-1" /> Cancel
+                                                    </Button>
+                                                  </div>
+                                                </>
+                                              ) : (
+                                                <div className="flex items-center justify-between">
+                                                  <div className="text-xs text-gray-700 dark:text-gray-300 flex-1">
+                                                    <span className="font-medium">{child.name}</span>
+                                                    {child.description && child.name !== child.description && (
+                                                      <div className="text-gray-500 text-xs mt-1">{child.description}</div>
+                                                    )}
+                                                    <div className="text-gray-500 mt-1">
+                                                      {child.quantity} {child.unit}
+                                                      {child.unit_cost !== undefined && (
+                                                        <span className="ml-2">@ {formatCurrency(child.unit_cost)}/{child.unit}</span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    {childCost > 0 && (
+                                                      <Badge variant="outline" className="text-xs font-semibold text-green-700 dark:text-green-400">
+                                                        {formatCurrency(childCost)}
+                                                      </Badge>
+                                                    )}
+                                                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(child) }}>
+                                                      <Pencil className="h-3 w-3" />
+                                                    </Button>
+                                                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteItem(child.id) }}>
+                                                      <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              )}
                                             </div>
                                           )
                                         })}

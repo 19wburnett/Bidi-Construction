@@ -101,10 +101,10 @@ export default function EnhancedPlanViewer() {
   const [showBidsModal, setShowBidsModal] = useState(false)
   
   // Sidebar resize state
-	const [sidebarWidth, setSidebarWidth] = useState(384) // Default 384px (w-96)
+	const [sidebarWidth, setSidebarWidth] = useState(600) // Default 600px to match resize constraints
 	const [isResizing, setIsResizing] = useState(false)
 	const [startX, setStartX] = useState(0)
-	const [startWidth, setStartWidth] = useState(384)
+	const [startWidth, setStartWidth] = useState(600)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   
@@ -160,11 +160,29 @@ export default function EnhancedPlanViewer() {
     }))
   }
 
-  // Initialize comment persistence
+  // Initialize comment persistence and load comments
   useEffect(() => {
-    if (user && planId) {
-      commentPersistenceRef.current = new CommentPersistence(planId, user.id)
+    const initializeAndLoadComments = async () => {
+      if (user && planId) {
+        // Initialize comment persistence
+        commentPersistenceRef.current = new CommentPersistence(planId, user.id)
+        
+        // Load comments immediately after initialization
+        try {
+          const comments = await commentPersistenceRef.current.loadComments()
+          console.log('Loaded comments:', comments.length)
+          setDrawings(prev => {
+            // Merge with existing non-comment drawings
+            const nonCommentDrawings = prev.filter(d => d.type !== 'comment')
+            return [...nonCommentDrawings, ...comments]
+          })
+        } catch (error) {
+          console.error('Error loading comments:', error)
+        }
+      }
     }
+    
+    initializeAndLoadComments()
     return () => {
       // Cleanup if needed
     }
@@ -264,23 +282,8 @@ export default function EnhancedPlanViewer() {
         
         setPlanUrl(pdfUrl)
         
-        // Load comments from the comment system
-        try {
-          let comments: Drawing[] = []
-          
-          // Load comments from new system
-          if (commentPersistenceRef.current) {
-            try {
-              comments = await commentPersistenceRef.current.loadComments()
-            } catch (error) {
-              console.warn('Could not load from plan_comments:', error)
-            }
-          }
-          
-          setDrawings(comments)
-        } catch (error) {
-          console.error('Error loading comments:', error)
-        }
+        // Comments are now loaded separately in a useEffect that watches commentPersistenceRef
+        // This ensures the ref is initialized before we try to load comments
       }
 
       // Load scale settings
@@ -326,7 +329,17 @@ export default function EnhancedPlanViewer() {
 
   // Save scale settings to database
   const saveScaleSettings = useCallback(async (pageNumber: number, setting: ScaleSetting) => {
-    if (!planId) return
+    if (!planId) {
+      console.error('Cannot save scale settings: planId is missing')
+      return
+    }
+    
+    // Ensure pageNumber is a valid integer
+    const pageNum = Number.parseInt(String(pageNumber), 10)
+    if (isNaN(pageNum) || pageNum < 1) {
+      console.error('Invalid page number:', pageNumber)
+      return
+    }
     
     try {
       const response = await fetch('/api/plan/scale-settings', {
@@ -334,7 +347,7 @@ export default function EnhancedPlanViewer() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId,
-          pageNumber,
+          pageNumber: pageNum,
           scaleRatio: setting.ratio,
           pixelsPerUnit: setting.pixelsPerUnit,
           unit: setting.unit
@@ -342,10 +355,23 @@ export default function EnhancedPlanViewer() {
       })
       
       if (!response.ok) {
-        console.error('Failed to save scale settings')
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Failed to save scale settings:', {
+          status: response.status,
+          error: errorData,
+          planId,
+          pageNumber: pageNum,
+          setting
+        })
+        throw new Error(errorData.error || `Failed to save scale settings: ${response.status}`)
       }
+      
+      const result = await response.json()
+      console.log(`Successfully saved scale settings for page ${pageNum}:`, result)
+      return result
     } catch (error) {
       console.error('Error saving scale settings:', error)
+      throw error
     }
   }, [planId])
 
@@ -1481,13 +1507,15 @@ export default function EnhancedPlanViewer() {
                   exit="exit"
                   className={`bg-white border-l border-gray-200 flex flex-col overflow-y-auto ${
                     isMobile || isTablet 
-                      ? 'fixed right-0 top-0 bottom-0 w-full max-w-sm z-50 shadow-xl h-screen' 
+                      ? 'fixed right-0 top-0 bottom-0 w-full z-50 shadow-xl h-screen' 
                       : 'relative'
                   }`}
                   style={{ 
-                    width: isMobile || isTablet 
-                      ? '90vw' 
-                      : `${sidebarWidth}px`,
+                    width: isMobile
+                      ? '100vw'
+                      : isTablet
+                        ? 'min(90vw, 640px)'
+                        : `${sidebarWidth}px`,
                     ...(isMobile || isTablet 
                       ? { height: '100vh' }
                       : { height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)' }
@@ -1753,11 +1781,14 @@ export default function EnhancedPlanViewer() {
             {/* Floating button to open sidebar on mobile/tablet */}
             {!rightSidebarOpen && (isMobile || isTablet) && (
               <Button
-                className="fixed bottom-4 right-4 z-40 h-12 w-12 rounded-full shadow-lg"
+                className="fixed bottom-4 right-4 z-40 h-12 px-5 rounded-full shadow-xl bg-gray-900 text-white flex items-center gap-2 hover:bg-gray-800 active:bg-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
                 onClick={() => setRightSidebarOpen(true)}
                 size="lg"
+                aria-label="Open analysis sidebar"
               >
                 <BarChart3 className="h-5 w-5" />
+                <span className="text-sm font-medium">Analysis</span>
+                <ChevronLeft className="h-4 w-4" />
               </Button>
             )}
         </div>
@@ -1825,9 +1856,14 @@ export default function EnhancedPlanViewer() {
               return
             }
             
-            console.log('Applying scale to all pages:', { currentSetting, totalPages })
+            console.log('Applying scale to all pages:', { 
+              currentSetting, 
+              totalPages, 
+              currentPage,
+              planId 
+            })
             
-            // Apply current page's scale to all pages
+            // Apply current page's scale to all pages in state
             const updatedSettings: Record<number, ScaleSetting> = {}
             for (let page = 1; page <= totalPages; page++) {
               updatedSettings[page] = currentSetting
@@ -1837,48 +1873,89 @@ export default function EnhancedPlanViewer() {
               ...updatedSettings
             }))
             
-            // Save all pages to database
-            const savePromises = Array.from({ length: totalPages }, (_, i) => i + 1).map(page =>
-              saveScaleSettings(page, currentSetting)
-            )
-            await Promise.all(savePromises)
+            // Save all pages to database - wait for all to complete
+            const savePromises = Array.from({ length: totalPages }, (_, i) => i + 1).map(async (page) => {
+              try {
+                console.log(`Saving scale settings for page ${page}...`)
+                const result = await saveScaleSettings(page, currentSetting)
+                console.log(`Successfully saved scale settings for page ${page}`)
+                return { page, success: true, result }
+              } catch (error) {
+                console.error(`Failed to save scale settings for page ${page}:`, error)
+                return { page, success: false, error }
+              }
+            })
             
-            console.log(`Successfully applied scale to all ${totalPages} pages`)
-            // Close modal after successful save
-            setScaleSettingsModalOpen(false)
+            const results = await Promise.all(savePromises)
+            const failures = results.filter(r => !r.success)
+            
+            if (failures.length > 0) {
+              console.error(`Failed to save ${failures.length} pages:`, failures)
+              alert(`Failed to apply scale to ${failures.length} of ${totalPages} pages. Please try again.`)
+            } else {
+              console.log(`Successfully applied scale to all ${totalPages} pages`)
+              // Close modal after successful save
+              setScaleSettingsModalOpen(false)
+            }
           } catch (error) {
             console.error('Error applying scale to all pages:', error)
             alert('Failed to apply scale to all pages. Please try again.')
           }
         }}
         onApply={async (setting: ScaleSetting, applyToAllPages = false) => {
-          if (applyToAllPages && plan?.num_pages) {
-            // Apply to all pages
-            const updatedSettings: Record<number, ScaleSetting> = {}
-            for (let page = 1; page <= plan.num_pages; page++) {
-              updatedSettings[page] = setting
+          try {
+            if (applyToAllPages && plan?.num_pages) {
+              // Apply to all pages
+              const totalPages = pdfNumPages || plan.num_pages
+              console.log(`Applying scale to all ${totalPages} pages...`)
+              
+              const updatedSettings: Record<number, ScaleSetting> = {}
+              for (let page = 1; page <= totalPages; page++) {
+                updatedSettings[page] = setting
+              }
+              setMeasurementScaleSettings(prev => ({
+                ...prev,
+                ...updatedSettings
+              }))
+              
+              // Save all pages to database
+              const savePromises = Array.from({ length: totalPages }, (_, i) => i + 1).map(async (page) => {
+                try {
+                  await saveScaleSettings(page, setting)
+                  return { page, success: true }
+                } catch (error) {
+                  console.error(`Failed to save scale settings for page ${page}:`, error)
+                  return { page, success: false, error }
+                }
+              })
+              
+              const results = await Promise.all(savePromises)
+              const failures = results.filter(r => !r.success)
+              
+              if (failures.length > 0) {
+                console.error(`Failed to save ${failures.length} pages:`, failures)
+                alert(`Failed to apply scale to ${failures.length} of ${totalPages} pages. Please try again.`)
+              } else {
+                console.log(`Successfully applied scale to all ${totalPages} pages`)
+              }
+            } else {
+              // Apply to current page only
+              console.log(`Applying scale to page ${currentPage}...`)
+              setMeasurementScaleSettings(prev => ({
+                ...prev,
+                [currentPage]: setting
+              }))
+              
+              // Save to database
+              await saveScaleSettings(currentPage, setting)
+              console.log(`Successfully applied scale to page ${currentPage}`)
             }
-            setMeasurementScaleSettings(prev => ({
-              ...prev,
-              ...updatedSettings
-            }))
-            // Save all pages to database
-            await Promise.all(
-              Array.from({ length: plan.num_pages }, (_, i) => i + 1).map(page =>
-                saveScaleSettings(page, setting)
-              )
-            )
-          } else {
-            // Apply to current page only
-            setMeasurementScaleSettings(prev => ({
-              ...prev,
-              [currentPage]: setting
-            }))
-            // Save to database
-            await saveScaleSettings(currentPage, setting)
+            setIsCalibrating(false)
+            setCalibrationPoints([])
+          } catch (error) {
+            console.error('Error applying scale:', error)
+            alert('Failed to apply scale. Please try again.')
           }
-          setIsCalibrating(false)
-          setCalibrationPoints([])
         }}
         onStartCalibration={() => {
           setScaleSettingsModalOpen(false)

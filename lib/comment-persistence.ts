@@ -39,6 +39,7 @@ export class CommentPersistence {
 
   async loadComments(): Promise<Drawing[]> {
     try {
+      console.log('Loading comments for plan:', this.planId)
       const { data, error } = await this.supabase
         .from('plan_comments')
         .select('*')
@@ -46,18 +47,20 @@ export class CommentPersistence {
         .order('created_at', { ascending: true })
 
       if (error) {
-        console.error('Error loading comments:', error)
+        console.error('Error loading comments from database:', error)
         return []
       }
 
       if (!data || data.length === 0) {
+        console.log('No comments found for plan:', this.planId)
         return []
       }
 
+      console.log(`Found ${data.length} comments for plan ${this.planId}`)
       // Convert database comments to Drawing format
       return data.map(comment => this.commentToDrawing(comment))
     } catch (error) {
-      console.error('Error loading comments:', error)
+      console.error('Exception loading comments:', error)
       return []
     }
   }

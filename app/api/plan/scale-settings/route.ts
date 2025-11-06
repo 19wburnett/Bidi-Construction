@@ -107,38 +107,94 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
+    // Ensure pageNumber is an integer
+    const pageNum = Number.parseInt(String(pageNumber), 10)
+    if (isNaN(pageNum) || pageNum < 1) {
+      return NextResponse.json({ 
+        error: 'Invalid page number' 
+      }, { status: 400 })
+    }
+
     // Upsert scale setting
-    const { data: setting, error: upsertError } = await supabase
+    // First try to update existing record
+    const { data: existing, error: checkError } = await supabase
       .from('plan_scale_settings')
-      .upsert({
-        plan_id: planId,
-        page_number: pageNumber,
-        scale_ratio: scaleRatio,
-        pixels_per_unit: pixelsPerUnit,
-        unit: unit,
-        calibration_line: calibrationLine || null,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'plan_id,page_number'
-      })
-      .select()
+      .select('id')
+      .eq('plan_id', planId)
+      .eq('page_number', pageNum)
       .single()
 
+    let setting
+    let upsertError
+
+    if (existing && !checkError) {
+      // Update existing record
+      const { data: updated, error: updateError } = await supabase
+        .from('plan_scale_settings')
+        .update({
+          scale_ratio: scaleRatio,
+          pixels_per_unit: pixelsPerUnit,
+          unit: unit,
+          calibration_line: calibrationLine || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id)
+        .select()
+        .single()
+      
+      setting = updated
+      upsertError = updateError
+    } else {
+      // Insert new record
+      const { data: inserted, error: insertError } = await supabase
+        .from('plan_scale_settings')
+        .insert({
+          plan_id: planId,
+          page_number: pageNum,
+          scale_ratio: scaleRatio,
+          pixels_per_unit: pixelsPerUnit,
+          unit: unit,
+          calibration_line: calibrationLine || null,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single()
+      
+      setting = inserted
+      upsertError = insertError
+    }
+
     if (upsertError) {
-      console.error('Error saving scale setting:', upsertError)
+      console.error('Error saving scale setting:', {
+        error: upsertError,
+        planId,
+        pageNumber: pageNum,
+        scaleRatio,
+        pixelsPerUnit,
+        unit
+      })
       // Check if table doesn't exist
       if (upsertError.code === '42P01') {
         return NextResponse.json({ 
           error: 'Database table not found. Please run the migration: supabase/migrations/20250128_plan_scale_settings.sql' 
         }, { status: 500 })
       }
-      return NextResponse.json({ error: 'Failed to save scale setting' }, { status: 500 })
+      return NextResponse.json({ 
+        error: 'Failed to save scale setting',
+        details: upsertError.message 
+      }, { status: 500 })
     }
 
-    console.log(`Saved scale setting for plan ${planId}, page ${pageNumber}:`, {
-      ratio: scaleRatio,
-      pixelsPerUnit,
-      unit
+    if (!setting) {
+      console.error('No setting returned after upsert')
+      return NextResponse.json({ error: 'Failed to save scale setting - no data returned' }, { status: 500 })
+    }
+
+    console.log(`Successfully saved scale setting for plan ${planId}, page ${pageNum}:`, {
+      id: setting.id,
+      ratio: setting.scale_ratio,
+      pixelsPerUnit: setting.pixels_per_unit,
+      unit: setting.unit
     })
 
     return NextResponse.json({ 

@@ -24,6 +24,7 @@ import {
 
 import { Drawing } from '@/lib/canvas-utils'
 import CommentPopup from '@/components/comment-popup'
+import CommentBubble from '@/components/comment-bubble'
 
 // Dynamically import react-pdf to avoid SSR issues
 const Document = dynamic(
@@ -190,6 +191,38 @@ export default function FastPlanCanvas({
   // Configure PDF.js worker on mount - only needed for getting page count
   const [workerReady, setWorkerReady] = useState(false)
   
+  // Render PDF at fixed high resolution for consistent coordinate system
+  // Always use the same render scale regardless of zoom to ensure comments stay aligned
+  // CSS transform handles visual zoom, so we don't need to include zoom in render scale
+  const pageScale = useMemo(() => {
+    const BASE_WIDTH = 612
+    const BASE_HEIGHT = 792
+    const MAX_CANVAS_DIMENSION = 8192
+    const MIN_EFFECTIVE_DPR = 2
+
+    const rawDevicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : MIN_EFFECTIVE_DPR
+    const effectiveDevicePixelRatio = Math.max(MIN_EFFECTIVE_DPR, rawDevicePixelRatio)
+    const desiredScale = scale * 3 * effectiveDevicePixelRatio
+    const minQualityScale = scale * 2
+
+    const baselineScale = Math.max(minQualityScale, desiredScale)
+    const maxScaleByWidth = MAX_CANVAS_DIMENSION / BASE_WIDTH
+    const maxScaleByHeight = MAX_CANVAS_DIMENSION / BASE_HEIGHT
+    const cappedScale = Math.min(baselineScale, maxScaleByWidth, maxScaleByHeight)
+
+    if (typeof window !== 'undefined' && cappedScale < desiredScale - 0.01) {
+      console.warn('Capping PDF render scale to avoid canvas error state', {
+        desiredScale,
+        cappedScale,
+        maxScaleByWidth,
+        maxScaleByHeight,
+        effectiveDevicePixelRatio
+      })
+    }
+
+    return cappedScale
+  }, [scale])
+  
   useEffect(() => {
     if (typeof window !== 'undefined' && !workerReady) {
       const initWorker = async () => {
@@ -204,8 +237,8 @@ export default function FastPlanCanvas({
             console.log('PDF.js worker configured:', pdfjs.pdfjs.GlobalWorkerOptions.workerSrc)
             
             // Give the worker more time to initialize properly
-            // Increased delay to ensure worker is fully ready
-            await new Promise(resolve => setTimeout(resolve, 1000))
+            // Increased delay to ensure worker is fully ready (especially for slower systems)
+            await new Promise(resolve => setTimeout(resolve, 1500))
             
             // Verify worker is actually ready
             if (pdfjs.pdfjs.GlobalWorkerOptions.workerSrc) {
@@ -224,13 +257,13 @@ export default function FastPlanCanvas({
             if (pdfjs.pdfjs) {
               pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.pdfjs.version}/pdf.worker.min.js`
               console.log('PDF.js worker configured with CDN fallback')
-              await new Promise(resolve => setTimeout(resolve, 1000))
+              await new Promise(resolve => setTimeout(resolve, 1500))
               setWorkerReady(true)
             }
           } catch (fallbackError) {
             console.error('CDN fallback also failed:', fallbackError)
             // Still set ready after delay to allow rendering attempts
-            setTimeout(() => setWorkerReady(true), 1500)
+            setTimeout(() => setWorkerReady(true), 2000)
           }
         }
       }
@@ -261,7 +294,13 @@ export default function FastPlanCanvas({
         }
         setPdfLoaded(true)
         setPdfError(null)
-        setDocumentReady(true)
+        
+        // Add a longer delay before marking document as ready to ensure worker is fully stable
+        // This prevents "messageHandler is null" errors when Page components render
+        // Increased delay to handle slower systems
+        setTimeout(() => {
+          setDocumentReady(true)
+        }, 800)
 
         // Destroy PDF object immediately to free memory
         pdf.destroy()
@@ -482,20 +521,35 @@ export default function FastPlanCanvas({
   // Render drawings on the drawing canvas
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
-    if (!canvas) return
+    if (!canvas) {
+      console.warn('Canvas ref is null, cannot render drawings')
+      return
+    }
 
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const ctx = canvas.getContext('2d', { alpha: true })
+    if (!ctx) {
+      console.warn('Could not get 2d context from canvas')
+      return
+    }
 
     // Check if canvas is in a valid state
     try {
       // Test if canvas is accessible
-      if (canvas.width === 0 || canvas.height === 0) return
+      if (canvas.width === 0 || canvas.height === 0) {
+        console.warn('Canvas has zero dimensions:', { width: canvas.width, height: canvas.height })
+        return
+      }
       
-      // Clear canvas
+      // Clear canvas with transparent background
       ctx.clearRect(0, 0, canvas.width, canvas.height)
+      
+      // Ensure context settings are correct
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      
+      // Canvas is ready for drawing
     } catch (error) {
-      console.warn('Canvas context error, skipping render:', error)
+      console.error('Canvas context error, skipping render:', error)
       return
     }
 
@@ -756,89 +810,7 @@ export default function FastPlanCanvas({
       }
     }
 
-    // Draw comment drawings for current page only
-    currentPageComments.forEach(drawing => {
-      // Check if geometry has valid x and y values
-      if (!drawing.geometry || typeof drawing.geometry.x === 'undefined' || typeof drawing.geometry.y === 'undefined') {
-        console.warn('Comment missing geometry:', drawing)
-        return
-      }
-      
-      // Use world coordinates directly - the canvas transform handles the viewport
-      const worldX = drawing.geometry.x
-      const worldY = drawing.geometry.y
-        
-        // Draw comment bubble at world position
-        // Note: size is in world coordinates, actual pixel size will be scaled by canvas transform
-        const bubbleRadius = 24  // Increased size for better visibility
-        
-        // Draw selection highlight if this comment is selected
-        if (selectedComment?.id === drawing.id) {
-          ctx.fillStyle = '#3b82f6'
-          ctx.beginPath()
-          ctx.arc(worldX, worldY, bubbleRadius + 3, 0, Math.PI * 2)
-          ctx.fill()
-        }
-        
-        // Draw comment bubble background
-        ctx.fillStyle = drawing.style.color
-        ctx.strokeStyle = 'white'
-        ctx.lineWidth = 2
-
-        ctx.beginPath()
-        ctx.arc(worldX, worldY, bubbleRadius, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.stroke()
-        
-        // Draw icon for comment type as a simple shape
-        ctx.strokeStyle = 'white'
-        ctx.fillStyle = 'white'
-        ctx.lineWidth = 2
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        
-        if (drawing.noteType === 'requirement') {
-          // Checkmark - thicker for visibility
-          ctx.beginPath()
-          ctx.moveTo(worldX - 4, worldY)
-          ctx.lineTo(worldX - 1, worldY + 3)
-          ctx.lineTo(worldX + 4, worldY - 3)
-          ctx.lineWidth = 2.5
-          ctx.stroke()
-        } else if (drawing.noteType === 'concern') {
-          // Exclamation mark
-          ctx.beginPath()
-          ctx.arc(worldX, worldY - 3, 1.5, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.beginPath()
-          ctx.moveTo(worldX, worldY)
-          ctx.lineTo(worldX, worldY + 5)
-          ctx.stroke()
-        } else if (drawing.noteType === 'suggestion') {
-          // Star/lightbulb shape
-          const sides = 4
-          const outerRadius = 3
-          ctx.beginPath()
-          for (let i = 0; i < sides * 2; i++) {
-            const radius = i % 2 === 0 ? outerRadius : outerRadius * 0.5
-            const angle = (i * Math.PI) / sides
-            const x = worldX + radius * Math.cos(angle)
-            const y = worldY + radius * Math.sin(angle)
-            if (i === 0) ctx.moveTo(x, y)
-            else ctx.lineTo(x, y)
-          }
-          ctx.closePath()
-          ctx.stroke()
-        } else {
-          // Default: message icon (two circles)
-          ctx.beginPath()
-          ctx.arc(worldX - 2, worldY - 1, 2, 0, Math.PI * 2)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.arc(worldX + 2, worldY + 1, 2.5, 0, Math.PI * 2)
-          ctx.stroke()
-        }
-      })
+    // Comments are now rendered as HTML elements, not on canvas
   }, [drawings, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
@@ -851,9 +823,18 @@ export default function FastPlanCanvas({
 
     const resizeCanvas = () => {
       // Size canvas to match current PDF page at base scale (zoom is handled by transform)
+      // Use the same dimensions as the PDF container to ensure perfect alignment
       const pageHeight = pageHeights.get(currentPage) || (792 * scale)
       const pageWidth = 612 * scale
       
+      // Ensure we have valid dimensions
+      if (pageWidth <= 0 || pageHeight <= 0) {
+        console.warn('Invalid canvas dimensions:', { pageWidth, pageHeight, scale, currentPage })
+        return
+      }
+      
+      // Set canvas internal resolution to match display size (1:1 pixel ratio)
+      // This ensures crisp rendering that matches the PDF container exactly
       canvas.width = pageWidth
       canvas.height = pageHeight
       canvas.style.width = `${pageWidth}px`
@@ -863,9 +844,21 @@ export default function FastPlanCanvas({
       // Use relative positioning to match PDF positioning
       canvas.style.position = 'relative'
       canvas.style.margin = '0'
+      canvas.style.display = 'block'
+      canvas.style.visibility = 'visible'
+      canvas.style.opacity = '1'
       
       // Force re-render of drawings after canvas resize
-      setTimeout(() => renderDrawings(), 0)
+      setTimeout(() => {
+        renderDrawings()
+        console.log('Canvas resized and drawings rendered:', { 
+          width: canvas.width, 
+          height: canvas.height, 
+          styleWidth: canvas.style.width,
+          styleHeight: canvas.style.height,
+          comments: drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage).length
+        })
+      }, 0)
     }
 
     resizeCanvas()
@@ -894,8 +887,8 @@ export default function FastPlanCanvas({
         // Calculate zoom to fit page width with 5% padding
         const fitZoom = (containerWidth * 0.95) / estimatedWidth
         
-        // Limit zoom to reasonable range
-        const finalZoom = Math.max(0.3, Math.min(2.0, fitZoom))
+        // Limit zoom to reasonable range but default to 100%
+        const finalZoom = Math.min(2.0, Math.max(1.0, fitZoom))
         
         // Start at top of first page (panY = 0 means first page starts at top)
         setViewport({
@@ -923,6 +916,11 @@ export default function FastPlanCanvas({
   useEffect(() => {
     renderDrawings()
   }, [drawings, renderDrawings])
+  
+  // Re-render drawings when zoom changes to ensure alignment with PDF
+  useEffect(() => {
+    renderDrawings()
+  }, [viewport.zoom, renderDrawings])
 
 
   // Convert screen coordinates to world coordinates (for centered page view)
@@ -1078,22 +1076,23 @@ export default function FastPlanCanvas({
         // Handle calibration point clicks (store at base scale)
         if (calibrationPoints.length < 2) {
           const newPoints = [...calibrationPoints, { x: baseWorldX, y: baseWorldY }]
-        setCalibrationPoints(newPoints)
-        if (newPoints.length === 2) {
-          setIsCalibrating(false)
-          // Reopen modal with points - use a longer delay to ensure state is updated
-          // Use requestAnimationFrame to ensure state updates are processed
-          requestAnimationFrame(() => {
+          setCalibrationPoints(newPoints)
+          
+          // Only reopen modal when we have exactly 2 points
+          if (newPoints.length === 2) {
+            // Set calibrating to false first
+            setIsCalibrating(false)
+            // Wait a bit longer for state to update, then reopen modal
             setTimeout(() => {
               if (onOpenScaleSettings) {
                 onOpenScaleSettings()
               }
-            }, 100)
-          })
+            }, 200)
+          }
+          // If we only have 1 point, don't do anything - keep modal closed and stay in calibration mode
         }
+        return // Exit early - don't process other click handlers
       }
-      return // Exit early - don't process other click handlers
-    }
     
     // Priority 2: Check if clicking on an existing comment (current page only)
     const clickedComment = drawings.find(d => 
@@ -1194,22 +1193,9 @@ export default function FastPlanCanvas({
           }
         })
       }
-    } else {
-      // Check for hovered comment (current page only)
-      const container = containerRef.current
-      if (!container) return
-
-      const rect = container.getBoundingClientRect()
-      const screenX = e.clientX - rect.left
-      const screenY = e.clientY - rect.top
-      const world = screenToWorld(screenX, screenY)
-
-      const hovered = drawings.find(d => 
-        d.type === 'comment' && d.pageNumber === currentPage && isPointInComment(world.x, world.y, d)
-      )
-      setHoveredComment(hovered || null)
     }
-  }, [isPanning, lastPanPoint, selectedTool, screenToWorld, currentPage, drawings, isPointInComment, isDrawingMeasurement, currentMeasurement])
+    // Comment hover detection is now handled by HTML elements via onMouseEnter/onMouseLeave
+  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement])
 
   const handleMouseUp = useCallback(() => {
     if (isPanning) {
@@ -1568,6 +1554,7 @@ export default function FastPlanCanvas({
               transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
               transformOrigin: 'center center',
               willChange: 'transform',
+              pointerEvents: 'none', // Let drawing canvas handle interactions
             }}
           >
             <Document
@@ -1580,12 +1567,23 @@ export default function FastPlanCanvas({
                   </div>
                 </div>
               }
-              error={
-                <div className="p-8 text-center text-red-600">
-                  <p className="font-medium mb-2">Failed to load PDF</p>
-                  <p className="text-sm text-gray-600">You can still use drawing tools on a blank canvas</p>
-                </div>
-              }
+              error={(error: Error) => {
+                console.error('Document loading error:', error)
+                return (
+                  <div className="p-8 text-center text-red-600">
+                    <p className="font-medium mb-2">Failed to load PDF</p>
+                    <p className="text-sm text-gray-600">You can still use drawing tools on a blank canvas</p>
+                  </div>
+                )
+              }}
+              onLoadSuccess={() => {
+                // Document is fully loaded, ensure worker is ready
+                console.log('PDF Document loaded successfully')
+              }}
+              onLoadError={(error: Error) => {
+                console.error('PDF Document load error:', error)
+                setPdfError('Failed to load PDF document')
+              }}
             >
               <div 
                 className="relative shadow-lg bg-white" 
@@ -1593,12 +1591,17 @@ export default function FastPlanCanvas({
                 style={{ 
                   width: `${612 * scale}px`,
                   backgroundColor: 'white',
+                  // Ensure exact positioning to match drawing canvas
+                  margin: '0 auto',
+                  display: 'block',
+                  position: 'relative',
+                  flexShrink: 0,
                 }}
               >
                 <Page
                   key={`page-${currentPage}`}
                   pageNumber={currentPage}
-                  scale={scale * (typeof window !== 'undefined' ? Math.max(2, window.devicePixelRatio || 2) : 2)}
+                  scale={pageScale}
                   width={612}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
@@ -1624,6 +1627,22 @@ export default function FastPlanCanvas({
                       newHeights.set(currentPage, height)
                       return newHeights
                     })
+                  }}
+                  onLoadError={(error: Error) => {
+                    console.error(`Error loading page ${currentPage}:`, error)
+                    // Don't crash the app, just log the error
+                  }}
+                  onRenderError={(error: Error) => {
+                    console.error(`Error rendering page ${currentPage}:`, error)
+                    // If it's a worker error, reset document ready state to force re-initialization
+                    if (error.message?.includes('messageHandler') || error.message?.includes('worker') || error.message?.includes('sendWithPromise')) {
+                      console.warn('PDF.js worker error detected, resetting document ready state')
+                      setDocumentReady(false)
+                      // Wait a bit then try again
+                      setTimeout(() => {
+                        setDocumentReady(true)
+                      }, 1000)
+                    }
                   }}
                   onRenderSuccess={() => {
                     // Ensure canvas quality settings are applied for crisp rendering
@@ -1654,12 +1673,17 @@ export default function FastPlanCanvas({
                             }
                             
                             // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
-                            // but displayed at base size (scale). CSS transform handles visual zoom
-                            // This ensures crisp rendering when zoomed in
+                            // but MUST be displayed at base size (612 * scale) to match drawing canvas exactly
+                            // CSS transform handles visual zoom, keeping coordinate systems aligned
                             const baseDisplayWidth = 612 * scale
+                            // Force exact width to match drawing canvas exactly - critical for alignment
                             canvas.style.width = `${baseDisplayWidth}px`
                             canvas.style.height = 'auto'
                             canvas.style.maxWidth = `${baseDisplayWidth}px`
+                            canvas.style.minWidth = `${baseDisplayWidth}px`
+                            // Ensure no transforms are applied to canvas element itself
+                            canvas.style.transform = 'none'
+                            canvas.style.objectFit = 'contain'
                             canvas.style.backgroundColor = 'white'
                             // Use high-quality rendering for better appearance when zoomed
                             canvas.style.imageRendering = 'auto'
@@ -1673,9 +1697,6 @@ export default function FastPlanCanvas({
                         }
                       }, 100)
                     }
-                  }}
-                  onRenderError={(error: Error) => {
-                    console.error(`Error rendering page ${currentPage}:`, error)
                   }}
                 />
               </div>
@@ -1724,7 +1745,10 @@ export default function FastPlanCanvas({
             width: '100%',
             height: '100%',
             display: !pdfError ? 'flex' : 'none',
-            zIndex: 10 // Ensure it's above PDF canvas elements
+            zIndex: 10, // Ensure it's above PDF canvas elements
+            // Ensure perfect alignment with PDF container
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -1738,8 +1762,76 @@ export default function FastPlanCanvas({
               display: 'block',
               position: 'relative',
               backgroundColor: 'transparent',
+              // Ensure pixel-perfect alignment
+              margin: '0',
+              padding: '0',
+              verticalAlign: 'top',
+              // Ensure canvas is visible and above PDF
+              zIndex: 11,
+              visibility: 'visible',
+              opacity: 1,
+              pointerEvents: 'auto'
             }}
           />
+          
+          {/* Comment Bubbles - HTML elements that automatically follow CSS transforms */}
+          {(() => {
+            const currentPageComments = drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
+            const pageHeight = pageHeights.get(currentPage) || (792 * scale)
+            const pageWidth = 612 * scale
+            
+            return (
+              <div 
+                style={{ 
+                  position: 'absolute',
+                  zIndex: 12,
+                  width: `${pageWidth}px`,
+                  height: `${pageHeight}px`,
+                  // Position to overlay canvas exactly - canvas is centered by flex parent
+                  // Use absolute positioning with centering to match canvas position
+                  left: '50%',
+                  top: '50%',
+                  marginLeft: `-${pageWidth / 2}px`,
+                  marginTop: `-${pageHeight / 2}px`,
+                  pointerEvents: 'none' // Container doesn't capture events, but children will
+                }}
+              >
+                {currentPageComments.map((comment) => {
+                  // Check if geometry has valid x and y values
+                  if (!comment.geometry || typeof comment.geometry.x === 'undefined' || typeof comment.geometry.y === 'undefined') {
+                    return null
+                  }
+                  
+                  return (
+                    <CommentBubble
+                      key={comment.id}
+                      comment={comment}
+                      isSelected={selectedComment?.id === comment.id}
+                      isHovered={hoveredComment?.id === comment.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const container = containerRef.current
+                        if (!container) return
+                        
+                        const rect = container.getBoundingClientRect()
+                        const screenX = e.clientX - rect.left
+                        const screenY = e.clientY - rect.top
+                        
+                        setSelectedComment(comment)
+                        setPopupPosition({ x: screenX, y: screenY })
+                        setShowCommentPopup(true)
+                        if (onCommentClick) {
+                          onCommentClick(comment)
+                        }
+                      }}
+                      onMouseEnter={() => setHoveredComment(comment)}
+                      onMouseLeave={() => setHoveredComment(null)}
+                    />
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
 
         {/* Comment Popup */}
