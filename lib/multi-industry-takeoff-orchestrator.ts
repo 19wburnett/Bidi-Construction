@@ -15,6 +15,8 @@ import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
 import { extractAnalysisPayload } from '@/lib/json/repair'
 import { enhancedAIProvider } from '@/lib/enhanced-ai-providers'
 import type { EnhancedAnalysisOptions, TaskType } from '@/lib/enhanced-ai-providers'
+import { buildTakeoffSystemPrompt, buildTakeoffUserPrompt } from '@/lib/takeoff-prompts'
+import PDFParser from 'pdf2json'
 
 // ============================================================================
 // TYPES
@@ -37,6 +39,14 @@ export interface MultiIndustryTakeoffInput {
     industry: string
     categories: string[]
   }>
+  plan_id?: string
+  plan_metadata?: {
+    file_path: string
+    project_name?: string | null
+    project_location?: string | null
+    job_type?: string | null
+    additional_urls?: string[]
+  }
 }
 
 export interface SegmentPlan {
@@ -261,6 +271,11 @@ export class MultiIndustryTakeoffOrchestrator {
     segments: SegmentResult[]
     runLog: RunLogEntry[]
   }> {
+    // If we have plan metadata (plan-driven path), reuse enhanced consensus pipeline
+    if (input.plan_metadata?.file_path) {
+      return this.runConsensusExecutionStage(input, segments)
+    }
+
     const allTakeoffItems: TakeoffItem[] = []
     const allAnalysisItems: AnalysisItem[] = []
     const segmentResults: SegmentResult[] = []
@@ -313,6 +328,151 @@ export class MultiIndustryTakeoffOrchestrator {
     }
   }
 
+  private async runConsensusExecutionStage(
+    input: MultiIndustryTakeoffInput,
+    segments: SegmentPlan[]
+  ): Promise<{
+    takeoff: TakeoffItem[]
+    analysis: AnalysisItem[]
+    segments: SegmentResult[]
+    runLog: RunLogEntry[]
+  }> {
+    const images: string[] = []
+    const additionalPdfUrls = input.plan_metadata?.additional_urls || []
+    const allPdfUrls = [...input.pdf_urls, ...additionalPdfUrls]
+    let extractedTextCombined = ''
+    let totalPages = 0
+
+    for (const url of allPdfUrls) {
+      try {
+        this.log('info', `Fetching PDF for consensus: ${url}`)
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          this.log('warn', `Failed to fetch PDF (${response.status}) for ${url}`)
+          continue
+        }
+
+        const contentType = response.headers.get('content-type') || ''
+        if (!contentType.toLowerCase().includes('pdf')) {
+          this.log('warn', `Skipping non-PDF url during consensus ingestion: ${url} (${contentType || 'unknown content-type'})`)
+          continue
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer())
+
+        const text = await this.extractTextFromPDF(buffer)
+        if (text) {
+          extractedTextCombined += `${text}\n\n`
+        }
+
+        const imageUrls = await this.convertPDFToImages(buffer, 'plan.pdf')
+
+        if (!imageUrls || imageUrls.length === 0) {
+          this.log('warn', `PDF conversion returned no images for ${url}`)
+          continue
+        }
+
+        images.push(...imageUrls)
+        totalPages += imageUrls.length
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        this.log('warn', `Failed to prepare PDF ${url}: ${message}`)
+      }
+    }
+
+    if (images.length === 0) {
+      throw new Error('No valid PDF pages available after preprocessing. Ensure the plan PDF is accessible.')
+    }
+
+    const { systemPrompt, userPrompt } = this.buildConsensusPrompts(
+      input,
+      segments,
+      images.length,
+      extractedTextCombined
+    )
+
+    const analysisOptions: EnhancedAnalysisOptions = {
+      maxTokens: 4096,
+      temperature: 0.2,
+      systemPrompt,
+      userPrompt,
+      taskType: 'takeoff',
+      prioritizeAccuracy: true,
+      includeConsensus: true,
+      extractedText: extractedTextCombined || undefined
+    }
+
+    this.log('info', `Running consensus analysis across ${images.length} pages`)
+    const consensusResult = await enhancedAIProvider.analyzeWithConsensus(images, analysisOptions)
+    this.log('info', `Consensus returned ${consensusResult.items?.length || 0} takeoff items, ${consensusResult.issues?.length || 0} analysis items (confidence ${(consensusResult.confidence * 100).toFixed(1)}%)`)
+
+    const takeoffItems = (consensusResult.items || []).map((item: any) => this.normalizeConsensusItem(item))
+    const analysisItems = (consensusResult.issues || []).map((issue: any) => this.normalizeConsensusIssue(issue))
+
+    // Assign takeoff items to segments based on category mapping
+    const categoryMap = new Map<string, SegmentPlan>()
+    segments.forEach(segment => {
+      segment.categories.forEach(category => {
+        categoryMap.set(category.toLowerCase(), segment)
+      })
+    })
+
+    const itemsBySegment = new Map<string, TakeoffItem[]>()
+    const analysisBySegment = new Map<string, AnalysisItem[]>()
+    const unassignedItems: TakeoffItem[] = []
+
+    takeoffItems.forEach(item => {
+      const categoryKey = (item.category || '').toLowerCase()
+      const segment = categoryMap.get(categoryKey)
+      if (segment) {
+        item.industry = segment.industry
+        item.category = segment.categories.find(cat => cat.toLowerCase() === categoryKey) || item.category
+        const key = segment.industry
+        if (!itemsBySegment.has(key)) {
+          itemsBySegment.set(key, [])
+        }
+        itemsBySegment.get(key)!.push(item)
+      } else {
+        unassignedItems.push(item)
+      }
+    })
+
+    if (unassignedItems.length > 0) {
+      this.log('warn', `There are ${unassignedItems.length} takeoff items without matching segment categories`)
+    }
+
+    analysisItems.forEach(issue => {
+      const categoryKey = (issue.type || '').toLowerCase()
+      const segment = categoryMap.get(categoryKey)
+      if (segment) {
+        const key = segment.industry
+        if (!analysisBySegment.has(key)) {
+          analysisBySegment.set(key, [])
+        }
+        analysisBySegment.get(key)!.push(issue)
+      }
+    })
+
+    const segmentSummaries: SegmentResult[] = []
+    const orderedSegments = [...segments].sort((a, b) => a.priority - b.priority)
+
+    orderedSegments.forEach(segment => {
+      const items = itemsBySegment.get(segment.industry) || []
+      const issues = analysisBySegment.get(segment.industry) || []
+      const summary = this.generateSegmentSummary(segment, items, issues, totalPages, 0)
+      segmentSummaries.push(summary)
+      this.log('info', `Segment ${segment.industry}: ${summary.items_count} items, ${summary.analysis_count} analysis entries`)
+    })
+
+    return {
+      takeoff: takeoffItems,
+      analysis: analysisItems,
+      segments: segmentSummaries,
+      runLog: this.runLog
+    }
+  }
+
   /**
    * Process a single segment across all PDFs
    */
@@ -340,6 +500,10 @@ export class MultiIndustryTakeoffOrchestrator {
 
     // Process each PDF in batches
     for (const { pdf, pages: totalPages } of pdfPageCounts) {
+      if (totalPages === 0) {
+        this.log('warn', `Skipping segment ${segment.industry} for ${pdf} - no pages available (PDF conversion failed?)`)
+        continue
+      }
       const batches = this.createBatches(totalPages, batchSize)
 
       // Process batches with parallelism control
@@ -486,12 +650,20 @@ export class MultiIndustryTakeoffOrchestrator {
       // Download PDF to get page count
       const response = await fetch(pdfUrl)
       if (!response.ok) throw new Error('Failed to fetch PDF')
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('pdf')) {
+        throw new Error(`URL does not appear to be a PDF (content-type: ${contentType || 'unknown'})`)
+      }
       
       const buffer = Buffer.from(await response.arrayBuffer())
       const imageUrls = await extractImageUrlsOnly(buffer, 'plan.pdf')
+      if (!imageUrls || imageUrls.length === 0) {
+        throw new Error('No pages extracted from PDF (conversion returned zero results).')
+      }
       return imageUrls.length
     } catch (error) {
-      this.log('error', `Failed to get page count for ${pdfUrl}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.log('error', `Failed to get page count for ${pdfUrl}: ${message}`)
       return 0
     }
   }
@@ -507,10 +679,17 @@ export class MultiIndustryTakeoffOrchestrator {
       if (!response.ok) {
         throw new Error(`Failed to fetch PDF: ${response.statusText}`)
       }
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.toLowerCase().includes('pdf')) {
+        throw new Error(`URL does not appear to be a PDF (content-type: ${contentType || 'unknown'})`)
+      }
       const buffer = Buffer.from(await response.arrayBuffer())
 
       // Extract images and text
       const imageUrls = await extractImageUrlsOnly(buffer, 'plan.pdf')
+      if (!imageUrls || imageUrls.length === 0) {
+        throw new Error('No images extracted from PDF (check PDF_CO_API_KEY or file format).')
+      }
       const pageTexts = await extractTextPerPage(buffer)
 
       // Build pages array for the batch range
@@ -678,6 +857,177 @@ export class MultiIndustryTakeoffOrchestrator {
     ]
   }
 
+  private async convertPDFToImages(buffer: Buffer, fileName: string): Promise<string[]> {
+    const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY
+
+    if (!PDF_CO_API_KEY) {
+      this.log('warn', 'PDF_CO_API_KEY not configured - skipping image extraction')
+      return []
+    }
+
+    try {
+      const uploadFormData = new FormData()
+      const uint8Array = new Uint8Array(buffer)
+      const blob = new Blob([uint8Array], { type: 'application/pdf' })
+      uploadFormData.append('file', blob, fileName)
+
+      const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {
+        method: 'POST',
+        headers: {
+          'x-api-key': PDF_CO_API_KEY,
+        },
+        body: uploadFormData,
+      })
+
+      if (!uploadResponse.ok) {
+        throw new Error(`PDF.co upload failed: ${uploadResponse.statusText}`)
+      }
+
+      const uploadData = await uploadResponse.json()
+      const fileUrl = uploadData.url
+
+      const convertResponse = await fetch('https://api.pdf.co/v1/pdf/convert/to/png', {
+        method: 'POST',
+        headers: {
+          'x-api-key': PDF_CO_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: fileUrl,
+          async: false,
+          pages: '',
+          name: `${fileName}-page`,
+        }),
+      })
+
+      if (!convertResponse.ok) {
+        throw new Error(`PDF.co conversion failed: ${convertResponse.statusText}`)
+      }
+
+      const convertData = await convertResponse.json()
+
+      if (convertData.error) {
+        throw new Error(`PDF.co error: ${convertData.message}`)
+      }
+
+      return convertData.urls || []
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.log('warn', `Error converting PDF to images: ${message}`)
+      return []
+    }
+  }
+
+  private async extractTextFromPDF(buffer: Buffer): Promise<string> {
+    return new Promise((resolve) => {
+      const pdfParser = new PDFParser()
+
+      pdfParser.on('pdfParser_dataError', () => {
+        resolve('')
+      })
+
+      pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+        try {
+          let text = ''
+          pdfData?.formImage?.Pages?.forEach((page: any, index: number) => {
+            const pageText = page.Texts?.map((textItem: any) => decodeURIComponent(textItem.R[0].T || '')).join(' ') || ''
+            text += `=== PAGE ${index + 1} ===\n${pageText}\n\n`
+          })
+          resolve(text)
+        } catch (error) {
+          console.warn('Failed to extract text from PDF page:', error)
+          resolve('')
+        }
+      })
+
+      try {
+        pdfParser.parseBuffer(buffer)
+      } catch (error) {
+        console.warn('PDF text extraction failed:', error)
+        resolve('')
+      }
+    })
+  }
+
+  private buildConsensusPrompts(
+    input: MultiIndustryTakeoffInput,
+    segments: SegmentPlan[],
+    pageCount: number,
+    extractedText?: string
+  ): { systemPrompt: string; userPrompt: string } {
+    const currency = input.currency || 'USD'
+    const baseSystem = buildTakeoffSystemPrompt('takeoff', input.job_context.building_type || 'residential')
+
+    const segmentInstructions = segments
+      .map(segment => `- ${segment.industry.toUpperCase()}: ${segment.categories.join(', ')}`)
+      .join('\n')
+
+    const scopingNotes = segments.length > 0
+      ? `FOCUS SEGMENTS (in priority order):\n${segmentInstructions}\n\n`
+      : ''
+
+    const systemPrompt = `${baseSystem}
+
+ADDITIONAL INSTRUCTIONS:
+- Prioritize the scoped industries/categories listed below.
+- Assign each takeoff item an industry/category/subcategory that aligns with these segments.
+- Include Procore/CSI cost codes and realistic unit costs in ${currency}.
+
+${scopingNotes}`
+
+    let userPrompt = buildTakeoffUserPrompt(
+      pageCount,
+      1,
+      pageCount,
+      extractedText || undefined
+    )
+
+    if (segments.length > 0) {
+      userPrompt += `\n\nSCOPED SEGMENTS (process thoroughly):\n${segmentInstructions}`
+    }
+
+    return { systemPrompt, userPrompt }
+  }
+
+  private normalizeConsensusItem(item: any): TakeoffItem {
+    return {
+      name: item.name || '',
+      description: item.description || '',
+      quantity: typeof item.quantity === 'number' ? item.quantity : 0,
+      unit: item.unit || 'EA',
+      unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
+      unit_cost_source: item.unit_cost_source || 'model_estimate',
+      unit_cost_notes: item.unit_cost_notes,
+      location: item.location || '',
+      industry: item.industry || 'other',
+      category: item.category || '',
+      subcategory: item.subcategory || '',
+      cost_code: item.cost_code || '',
+      cost_code_description: item.cost_code_description || '',
+      dimensions: item.dimensions || '',
+      bounding_box: item.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: item.page_refs?.[0]?.page || 1 },
+      page_refs: item.page_refs || [],
+      confidence: typeof item.confidence === 'number' ? item.confidence : 0.5,
+      notes: item.notes
+    }
+  }
+
+  private normalizeConsensusIssue(issue: any): AnalysisItem {
+    return {
+      type: issue.type || 'conflict',
+      title: issue.title,
+      question: issue.question,
+      description: issue.description || '',
+      sheet: issue.sheet,
+      pages: Array.isArray(issue.pages) && issue.pages.length > 0 ? issue.pages : [issue.bounding_box?.page || 1],
+      bounding_box: issue.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: issue.pages?.[0] || 1 },
+      severity: issue.severity,
+      priority: issue.priority,
+      recommendation: issue.recommendation,
+      confidence: typeof issue.confidence === 'number' ? issue.confidence : 0.5
+    }
+  }
+
   // ============================================================================
   // PROMPT BUILDERS
   // ============================================================================
@@ -796,33 +1146,36 @@ REQUIREMENTS:
 - Include analysis items for issues, conflicts, and RFIs`
 
     const extractedText = pages.map(p => p.text).filter(Boolean).join('\n\n')
-    const user = `Analyze pages ${pages[0]?.page || 1}-${pages[pages.length - 1]?.page || 1} for ${segment.industry} work (${segment.categories.join(', ')}).
-
-${extractedText ? `=== EXTRACTED TEXT ===\n${extractedText.slice(0, 4000)}\n\n` : ''}
-
-Extract all items and analysis for this segment scope.`
+    const extractedBlock = extractedText
+      ? `=== EXTRACTED TEXT ===\n${extractedText.slice(0, 4000)}\n`
+      : ''
+    const user = [
+      `Analyze pages ${pages[0]?.page || 1}-${pages[pages.length - 1]?.page || 1} for ${segment.industry} work (${segment.categories.join(', ')}).`,
+      extractedBlock,
+      'Extract all items and analysis for this segment scope.'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
 
     return { system, user }
   }
 
-  // ============================================================================
-  // RESPONSE PARSERS
-  // ============================================================================
-
   private parseScopingResponse(response: string): SegmentPlan[] {
     try {
-      const parsed = extractAnalysisPayload(response) as any
-      if (parsed.suggested_segments && Array.isArray(parsed.suggested_segments)) {
-        return parsed.suggested_segments.map((s: any, idx: number) => ({
-          industry: s.industry || 'other',
-          categories: Array.isArray(s.categories) ? s.categories : [],
-          priority: s.priority || idx + 1
+      const json = JSON.parse(response)
+      if (json.suggested_segments && Array.isArray(json.suggested_segments)) {
+        return json.suggested_segments.map((s: any, idx: number) => ({
+          industry: s.industry,
+          categories: s.categories,
+          priority: idx + 1
         }))
       }
-    } catch (error) {
-      this.log('warn', 'Failed to parse scoping response')
+      this.log('warn', 'Scoping response did not contain suggested_segments')
+      return []
+    } catch (e) {
+      this.log('error', `Failed to parse scoping response: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      return []
     }
-    return []
   }
 
   private parseExecutionResponse(
@@ -831,69 +1184,55 @@ Extract all items and analysis for this segment scope.`
     pages: Array<{ page: number; imageUrl?: string; text?: string }>,
     segment: SegmentPlan,
     input: MultiIndustryTakeoffInput
-  ): {
-    takeoff: TakeoffItem[]
-    analysis: AnalysisItem[]
-  } {
+  ): { takeoff: TakeoffItem[]; analysis: AnalysisItem[] } {
     try {
-      const parsed = extractAnalysisPayload(response) as any
-      
-      const takeoff: TakeoffItem[] = []
-      const analysis: AnalysisItem[] = []
+      const json = JSON.parse(response)
+      if (json.items && Array.isArray(json.items)) {
+        const takeoffItems: TakeoffItem[] = json.items.map((item: any) => ({
+          name: item.name,
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          unit_cost: item.unit_cost,
+          unit_cost_source: item.unit_cost_source,
+          unit_cost_notes: item.unit_cost_notes,
+          location: item.location,
+          industry: segment.industry,
+          category: item.category,
+          subcategory: item.subcategory,
+          cost_code: item.cost_code,
+          cost_code_description: item.cost_code_description,
+          dimensions: item.dimensions,
+          bounding_box: item.bounding_box,
+          page_refs: item.page_refs,
+          confidence: item.confidence,
+          notes: item.notes
+        }))
 
-      // Parse items
-      if (parsed.items && Array.isArray(parsed.items)) {
-        for (const item of parsed.items) {
-          takeoff.push({
-            name: item.name || '',
-            description: item.description || '',
-            quantity: typeof item.quantity === 'number' ? item.quantity : 0,
-            unit: item.unit || 'EA',
-            unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : 0,
-            unit_cost_source: item.unit_cost_source || (input.unit_cost_policy === 'estimate' ? 'model_estimate' : 'lookup_pending'),
-            unit_cost_notes: item.unit_cost_notes,
-            location: item.location || '',
-            industry: segment.industry,
-            category: item.category || segment.categories[0] || '',
-            subcategory: item.subcategory || '',
-            cost_code: item.cost_code || '',
-            cost_code_description: item.cost_code_description || '',
-            dimensions: item.dimensions || '',
-            bounding_box: item.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: pages[0]?.page || 1 },
-            page_refs: item.page_refs || [{ pdf: pdfUrl, page: pages[0]?.page || 1 }],
-            confidence: typeof item.confidence === 'number' ? item.confidence : 0.5,
-            notes: item.notes
-          })
-        }
-      }
-
-      // Parse analysis
-      if (parsed.analysis && Array.isArray(parsed.analysis)) {
-        for (const item of parsed.analysis) {
-          analysis.push({
-            type: item.type || 'code_issue',
+        if (json.analysis && Array.isArray(json.analysis)) {
+          const analysisItems: AnalysisItem[] = json.analysis.map((item: any) => ({
+            type: item.type,
             title: item.title,
             question: item.question,
-            description: item.description || '',
+            description: item.description,
             sheet: item.sheet,
-            pages: Array.isArray(item.pages) ? item.pages : [item.bounding_box?.page || pages[0]?.page || 1],
-            bounding_box: item.bounding_box || { x: 0, y: 0, width: 0, height: 0, page: pages[0]?.page || 1 },
+            pages: item.pages,
+            bounding_box: item.bounding_box,
             severity: item.severity,
             priority: item.priority,
             recommendation: item.recommendation,
-            confidence: typeof item.confidence === 'number' ? item.confidence : 0.5
-          })
+            confidence: item.confidence
+          }))
+          return { takeoff: takeoffItems, analysis: analysisItems }
         }
       }
-
-      return { takeoff, analysis }
-    } catch (error) {
-      this.log('error', `Failed to parse execution response: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      this.log('warn', 'Execution response did not contain items or analysis')
+      return { takeoff: [], analysis: [] }
+    } catch (e) {
+      this.log('error', `Failed to parse execution response: ${e instanceof Error ? e.message : 'Unknown error'}`)
       return { takeoff: [], analysis: [] }
     }
   }
 }
 
-// Export singleton instance
 export const multiIndustryTakeoffOrchestrator = new MultiIndustryTakeoffOrchestrator()
-

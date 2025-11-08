@@ -49,7 +49,7 @@ export default function TestMultiTakeoffPage() {
 
   const [isRunning, setIsRunning] = useState(false)
   const [result, setResult] = useState<PipelineResult | null>(null)
-  const [rawResponse, setRawResponse] = useState<PipelineArrays | null>(null)
+  const [rawResponse, setRawResponse] = useState<unknown>(null)
   const [error, setError] = useState<string | null>(null)
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [plansLoading, setPlansLoading] = useState(false)
@@ -194,15 +194,35 @@ export default function TestMultiTakeoffPage() {
         body: JSON.stringify(payload)
       })
 
-      const data = (await response.json()) as PipelineArrays
+      const rawText = await response.text()
+      let parsed: any = null
 
-      if (!Array.isArray(data) || data.length !== 4) {
-        throw new Error('Unexpected response format. Expected an array with four elements.')
+      try {
+        parsed = JSON.parse(rawText)
+      } catch (parseError) {
+        const preview = rawText?.slice(0, 200) || 'No response body'
+        const fallbackRunLog = [
+          {
+            type: 'error' as const,
+            message: `Pipeline returned non-JSON response (status ${response.status}). Preview: ${preview}`
+          }
+        ]
+        setResult({ takeoff: [], analysis: [], segments: [], runLog: fallbackRunLog })
+        setRawResponse(null)
+        setError('Pipeline response was not valid JSON. See run log preview for details.')
+        return
       }
 
-      const [takeoff, analysis, segments, runLog] = data
+      if (!Array.isArray(parsed) || parsed.length !== 4) {
+        setResult({ takeoff: [], analysis: [], segments: [], runLog: [] })
+        setRawResponse(parsed)
+        setError('Unexpected response format. Expected an array with four elements.')
+        return
+      }
+
+      const [takeoff, analysis, segments, runLog] = parsed as PipelineArrays
       setResult({ takeoff, analysis, segments, runLog })
-      setRawResponse(data)
+      setRawResponse(parsed)
 
       if (!response.ok) {
         setError('Pipeline returned an error. Check the run log for details.')
