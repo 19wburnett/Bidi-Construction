@@ -59,6 +59,8 @@ export default function ScaleSettingsModal({
   const [customPixels, setCustomPixels] = useState<string>('')
   const [calibrationDistance, setCalibrationDistance] = useState<string>('')
   const [calibrationUnit, setCalibrationUnit] = useState<Unit>('ft')
+  const [calibrationFeet, setCalibrationFeet] = useState<string>('')
+  const [calibrationInches, setCalibrationInches] = useState<string>('')
 
   // Reset state when modal opens with current settings
   useEffect(() => {
@@ -83,6 +85,8 @@ export default function ScaleSettingsModal({
           setCustomPixels('')
           setCalibrationDistance('')
           setCalibrationUnit('ft')
+          setCalibrationFeet('')
+          setCalibrationInches('')
           setMode('ratio')
         } else {
           // We have 1 point, so we're in calibration mode waiting for the second point
@@ -92,14 +96,81 @@ export default function ScaleSettingsModal({
     }
   }, [open, current?.ratio, current?.unit, calibrationPoints])
 
+  const calibrationDistanceInfo = useMemo(() => {
+    if (calibrationUnit === 'ft') {
+      const feetRaw = calibrationFeet.trim()
+      const inchesRaw = calibrationInches.trim()
+
+      const parsedFeet = feetRaw === '' ? null : Number(feetRaw)
+      const parsedInches = inchesRaw === '' ? null : Number(inchesRaw)
+
+      if (
+        (parsedFeet !== null && (!Number.isFinite(parsedFeet) || parsedFeet < 0)) ||
+        (parsedInches !== null && (!Number.isFinite(parsedInches) || parsedInches < 0))
+      ) {
+        return { value: null as number | null, label: '' }
+      }
+
+      const totalFeet =
+        (parsedFeet ?? 0) +
+        (parsedInches ?? 0) / 12
+
+      if (!Number.isFinite(totalFeet) || totalFeet <= 0) {
+        return { value: null as number | null, label: '' }
+      }
+
+      const formatSegment = (segment: string) => {
+        if (!segment.trim()) return null
+        const numeric = Number(segment)
+        if (!Number.isFinite(numeric)) return null
+        return Number.isInteger(numeric) ? `${numeric}` : numeric.toString()
+      }
+
+      const segments: string[] = []
+      const formattedFeet = formatSegment(calibrationFeet)
+      const formattedInches = formatSegment(calibrationInches)
+
+      if (parsedFeet !== null && parsedFeet > 0 && formattedFeet) {
+        segments.push(`${formattedFeet}'`)
+      }
+
+      if (parsedInches !== null && parsedInches > 0 && formattedInches) {
+        segments.push(`${formattedInches}"`)
+      }
+
+      if (segments.length === 0) {
+        segments.push(`0'`)
+      }
+
+      return {
+        value: totalFeet,
+        label: `${segments.join(' ')} (ft)`
+      }
+    }
+
+    const normalizedDistance = calibrationDistance.trim()
+    if (!normalizedDistance) {
+      return { value: null as number | null, label: '' }
+    }
+
+    const distance = Number(normalizedDistance)
+    if (!Number.isFinite(distance) || distance <= 0) {
+      return { value: null as number | null, label: '' }
+    }
+
+    return {
+      value: distance,
+      label: `${normalizedDistance} ${calibrationUnit}`
+    }
+  }, [calibrationUnit, calibrationDistance, calibrationFeet, calibrationInches])
+
+  const { value: calibrationDistanceValue, label: calibrationDistanceLabel } = calibrationDistanceInfo
+
   // Calculate pixelsPerUnit from calibration points
   const calibrationPixelsPerUnit = useMemo(() => {
-    if (!calibrationPoints || calibrationPoints.length !== 2 || !calibrationDistance.trim()) {
+    if (!calibrationPoints || calibrationPoints.length !== 2 || !calibrationDistanceValue) {
       return null
     }
-    
-    const distance = Number(calibrationDistance)
-    if (!Number.isFinite(distance) || distance <= 0) return null
     
     const pixelDistance = Math.sqrt(
       Math.pow(calibrationPoints[1].x - calibrationPoints[0].x, 2) +
@@ -108,8 +179,8 @@ export default function ScaleSettingsModal({
     
     if (pixelDistance === 0) return null
     
-    return pixelDistance / distance
-  }, [calibrationPoints, calibrationDistance])
+    return pixelDistance / calibrationDistanceValue
+  }, [calibrationPoints, calibrationDistanceValue])
 
   const computedPixelsPerUnit = useMemo(() => {
     if (customPixels.trim()) {
@@ -134,7 +205,8 @@ export default function ScaleSettingsModal({
         Math.pow(calibrationPoints[1].x - calibrationPoints[0].x, 2) +
         Math.pow(calibrationPoints[1].y - calibrationPoints[0].y, 2)
       )
-      const ratio = `${pixelDistance.toFixed(0)}px = ${calibrationDistance} ${calibrationUnit}`
+      const ratioDisplay = calibrationDistanceLabel || `${calibrationDistanceValue ?? ''} ${calibrationUnit}`
+      const ratio = `${pixelDistance.toFixed(0)}px = ${ratioDisplay}`
       
       onApply({ 
         ratio, 
@@ -312,15 +384,43 @@ export default function ScaleSettingsModal({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className={calibrationUnit === 'ft' ? 'col-span-2' : undefined}>
                     <Label className="mb-1 block">Known Distance</Label>
-                    <Input
-                      type="number"
-                      placeholder="e.g., 10"
-                      value={calibrationDistance}
-                      onChange={(e) => setCalibrationDistance(e.target.value)}
-                      step="0.01"
-                    />
+                    {calibrationUnit === 'ft' ? (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-gray-600 mb-1 block">Feet</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g., 10"
+                            value={calibrationFeet}
+                            onChange={(e) => setCalibrationFeet(e.target.value)}
+                            min="0"
+                            step="0.01"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-gray-600 mb-1 block">Inches</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g., 6"
+                            value={calibrationInches}
+                            onChange={(e) => setCalibrationInches(e.target.value)}
+                            min="0"
+                            step="0.01"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <Input
+                        type="number"
+                        placeholder="e.g., 10"
+                        value={calibrationDistance}
+                        onChange={(e) => setCalibrationDistance(e.target.value)}
+                        step="0.01"
+                        min="0"
+                      />
+                    )}
                   </div>
                   <div>
                     <Label className="mb-1 block">Unit</Label>
@@ -343,7 +443,11 @@ export default function ScaleSettingsModal({
                   {calibrationPixelsPerUnit ? (
                     <span>Computed: {calibrationPixelsPerUnit.toFixed(2)} px per {calibrationUnit}</span>
                   ) : (
-                    <span>Enter the known distance between the two points.</span>
+                    <span>
+                      {calibrationUnit === 'ft'
+                        ? 'Enter the known distance using feet and inches.'
+                        : 'Enter the known distance between the two points.'}
+                    </span>
                   )}
                 </div>
 

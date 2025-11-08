@@ -32,6 +32,7 @@ import FastPlanCanvas from '@/components/fast-plan-canvas'
 import CommentPinForm from '@/components/comment-pin-form'
 import { canvasUtils } from '@/lib/canvas-utils'
 import { Drawing } from '@/lib/canvas-utils'
+import { MeasurementPersistence, isMeasurementDrawing } from '@/lib/measurement-persistence'
 import { CommentPersistence } from '@/lib/comment-persistence'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
@@ -107,6 +108,7 @@ export default function EnhancedPlanViewer() {
 	const [startWidth, setStartWidth] = useState(600)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const drawingsRef = useRef<Drawing[]>([])
   
   // Mobile/tablet detection and responsive sidebar state
   const [isMobile, setIsMobile] = useState(false)
@@ -117,6 +119,10 @@ export default function EnhancedPlanViewer() {
   useEffect(() => {
     rightSidebarOpenRef.current = rightSidebarOpen
   }, [rightSidebarOpen])
+
+  useEffect(() => {
+    drawingsRef.current = drawings
+  }, [drawings])
   
   useEffect(() => {
     const checkScreenSize = () => {
@@ -137,6 +143,7 @@ export default function EnhancedPlanViewer() {
   }, [])
   
   const commentPersistenceRef = useRef<CommentPersistence | null>(null)
+  const measurementPersistenceRef = useRef<MeasurementPersistence | null>(null)
   const supabase = createClient()
 
   const jobId = params.jobId as string
@@ -187,6 +194,61 @@ export default function EnhancedPlanViewer() {
       // Cleanup if needed
     }
   }, [user, planId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const initializeMeasurements = async () => {
+      if (!planId || !user) {
+        return
+      }
+
+      const persistence = new MeasurementPersistence(planId, user.id)
+      measurementPersistenceRef.current = persistence
+
+      try {
+        const stored = await persistence.loadMeasurements()
+        if (cancelled) {
+          return
+        }
+
+        const existingMeasurements = drawingsRef.current.filter(isMeasurementDrawing)
+        const storedIds = new Set(stored.map(measurement => measurement.id))
+        const pendingLocal = existingMeasurements.filter(measurement => !storedIds.has(measurement.id))
+
+        let mergedMeasurements = stored
+
+        if (pendingLocal.length > 0) {
+          const synced = await persistence.syncMeasurements([...stored, ...pendingLocal])
+          if (cancelled) {
+            return
+          }
+          mergedMeasurements = synced
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        setDrawings(prev => {
+          const nonMeasurements = prev.filter(d => !isMeasurementDrawing(d))
+          if (mergedMeasurements.length === 0) {
+            return nonMeasurements
+          }
+          return [...nonMeasurements, ...mergedMeasurements]
+        })
+      } catch (error) {
+        console.error('Error loading measurements:', error)
+      }
+    }
+
+    initializeMeasurements()
+
+    return () => {
+      cancelled = true
+      measurementPersistenceRef.current = null
+    }
+  }, [planId, user])
 
   // Load data and PDF images
   useEffect(() => {
@@ -288,7 +350,9 @@ export default function EnhancedPlanViewer() {
 
       // Load scale settings
       try {
-        const response = await fetch(`/api/plan/scale-settings?planId=${planId}`)
+        const response = await fetch(`/api/plan/scale-settings?planId=${planId}`, {
+          credentials: 'include',
+        })
         if (response.ok) {
           const data = await response.json()
           if (data.settings && Object.keys(data.settings).length > 0) {
@@ -345,6 +409,7 @@ export default function EnhancedPlanViewer() {
       const response = await fetch('/api/plan/scale-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           planId,
           pageNumber: pageNum,
@@ -619,6 +684,23 @@ export default function EnhancedPlanViewer() {
   // Handle drawings change and save
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
     setDrawings(newDrawings)
+
+    const persistence = measurementPersistenceRef.current
+    if (!persistence) {
+      return
+    }
+
+    try {
+      const measurementDrawings = newDrawings.filter(isMeasurementDrawing)
+      const syncedMeasurements = await persistence.syncMeasurements(measurementDrawings)
+
+      setDrawings(current => {
+        const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
+        return [...nonMeasurements, ...syncedMeasurements]
+      })
+    } catch (error) {
+      console.error('Failed to sync measurements:', error)
+    }
   }, [])
 
   // Handle comment pin click (to place new comment)

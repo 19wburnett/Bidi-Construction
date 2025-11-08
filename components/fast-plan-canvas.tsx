@@ -1,8 +1,10 @@
 'use client'
 
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { 
   MessageSquare,
   ZoomIn,
@@ -19,7 +21,9 @@ import {
   Settings,
   Ruler,
   Square,
-  Hand
+  Hand,
+  Move,
+  Trash2
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
@@ -121,7 +125,20 @@ interface FastPlanCanvasProps {
   onSetCalibrating?: (calibrating: boolean) => void
 }
 
-type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area'
+type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit'
+
+interface EditingMeasurementState {
+  id: string
+  type: Drawing['type']
+  pageNumber: number
+  points: number[]
+  handleIndex: number
+}
+
+interface MeasurementHandleHit {
+  drawing: Drawing
+  handleIndex: number
+}
 
 export default function FastPlanCanvas({
   pdfUrl,
@@ -156,6 +173,8 @@ export default function FastPlanCanvas({
   // Measurement drawing state
   const [currentMeasurement, setCurrentMeasurement] = useState<Drawing | null>(null)
   const [isDrawingMeasurement, setIsDrawingMeasurement] = useState(false)
+  const [editingMeasurement, setEditingMeasurement] = useState<EditingMeasurementState | null>(null)
+  const [isAdjustingMeasurement, setIsAdjustingMeasurement] = useState(false)
   // Calibration mode state
   const [internalIsCalibrating, setInternalIsCalibrating] = useState(false)
   const [internalCalibrationPoints, setInternalCalibrationPoints] = useState<{ x: number; y: number }[]>([])
@@ -183,6 +202,7 @@ export default function FastPlanCanvas({
   const [pdfLoaded, setPdfLoaded] = useState(false)
   const [numPages, setNumPages] = useState(0) // Start at 0, will be set when PDF loads
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageInputValue, setPageInputValue] = useState('1')
   const [pageHeights, setPageHeights] = useState<Map<number, number>>(new Map())
   const [documentReady, setDocumentReady] = useState(false) // Track if PDF is ready for rendering
   const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set([1])) // Track visible pages for lazy loading
@@ -302,9 +322,11 @@ export default function FastPlanCanvas({
           setDocumentReady(true)
         }, 800)
 
-        // Destroy PDF object immediately to free memory
-        pdf.destroy()
-        console.log('PDF object destroyed after page count extraction')
+        // Clean up document resources without tearing down the shared worker
+        if (typeof pdf.cleanup === 'function') {
+          await pdf.cleanup()
+          console.log('PDF resources cleaned up after page count extraction')
+        }
       } catch (error) {
         console.error('PDF loading failed:', error)
         setPdfError('PDF could not be loaded. You can still use drawing tools on a blank canvas.')
@@ -321,6 +343,53 @@ export default function FastPlanCanvas({
       onPageChange(currentPage)
     }
   }, [currentPage, onPageChange])
+
+  useEffect(() => {
+    setPageInputValue(String(currentPage))
+  }, [currentPage])
+
+  const handlePageInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const rawValue = event.target.value
+    const sanitizedValue = rawValue.replace(/\D/g, '')
+    setPageInputValue(sanitizedValue)
+  }, [])
+
+  const handlePageInputFormSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (numPages <= 0) {
+      return
+    }
+
+    if (!pageInputValue) {
+      setPageInputValue(String(currentPage))
+      return
+    }
+
+    const parsedValue = parseInt(pageInputValue, 10)
+
+    if (Number.isNaN(parsedValue)) {
+      setPageInputValue(String(currentPage))
+      return
+    }
+
+    const targetPage = Math.min(Math.max(parsedValue, 1), numPages)
+
+    setPageInputValue(String(targetPage))
+
+    if (targetPage !== currentPage) {
+      setCurrentPage(targetPage)
+      setViewport(prev => ({
+        ...prev,
+        panX: 0,
+        panY: 0
+      }))
+    }
+  }, [numPages, pageInputValue, currentPage])
+
+  const handlePageInputBlur = useCallback(() => {
+    setPageInputValue(String(currentPage))
+  }, [currentPage])
 
   // Get icon for comment type
   const getCommentIcon = (noteType?: string) => {
@@ -518,6 +587,62 @@ export default function FastPlanCanvas({
     }
   }, [numPages, viewport, calculatePagePositions])
 
+  const computeLineMeasurementData = useCallback(
+    (points: number[], pageNumber: number) => {
+      if (points.length < 4) {
+        return null
+      }
+
+      const scaleSetting = getScaleSetting(pageNumber)
+      if (!scaleSetting) {
+        return null
+      }
+
+      const segmentLengths: number[] = []
+      let totalLength = 0
+
+      for (let i = 0; i < points.length - 2; i += 2) {
+        const pixelDist = calculatePixelDistance(points[i], points[i + 1], points[i + 2], points[i + 3])
+        const realDist = calculateRealWorldDistance(pixelDist, pageNumber)
+        if (realDist === null) {
+          return null
+        }
+        segmentLengths.push(realDist)
+        totalLength += realDist
+      }
+
+      return {
+        segmentLengths,
+        totalLength,
+        unit: scaleSetting.unit
+      }
+    },
+    [calculateRealWorldDistance, getScaleSetting]
+  )
+
+  const computeAreaMeasurementData = useCallback(
+    (points: number[], pageNumber: number) => {
+      if (points.length < 6) {
+        return null
+      }
+
+      const scaleSetting = getScaleSetting(pageNumber)
+      if (!scaleSetting) {
+        return null
+      }
+      const pixelArea = calculatePolygonArea(points)
+      const realArea = calculateRealWorldArea(pixelArea, pageNumber)
+      if (realArea === null) {
+        return null
+      }
+      return {
+        area: realArea,
+        unit: scaleSetting.unit
+      }
+    },
+    [calculateRealWorldArea, getScaleSetting]
+  )
+
   // Render drawings on the drawing canvas
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
@@ -558,19 +683,42 @@ export default function FastPlanCanvas({
     const currentPageMeasurements = drawings.filter(d => (d.type === 'measurement_line' || d.type === 'measurement_area') && d.pageNumber === currentPage)
     
     // Draw measurement lines for current page
+    const isEditMode = selectedTool === 'measurement_edit'
+
     currentPageMeasurements.forEach(drawing => {
-      if (!drawing.geometry?.points || drawing.geometry.points.length < 4) return
-      
+      const isEditingThis = editingMeasurement?.id === drawing.id
+      const points = (isEditingThis ? editingMeasurement?.points : drawing.geometry?.points) || []
+      if (drawing.type === 'measurement_line' && points.length < 4) {
+        return
+      }
+      if (drawing.type === 'measurement_area' && points.length < 6) {
+        return
+      }
+
       const scaleSetting = getScaleSetting(drawing.pageNumber)
-      const unit = scaleSetting?.unit || 'ft'
-      // Use points directly at base scale (zoom is handled by transform)
-      const points = drawing.geometry.points
-      
-      ctx.strokeStyle = drawing.style?.color || '#3b82f6'
-      ctx.fillStyle = drawing.style?.color || '#3b82f6'
+      let measurementData = drawing.measurements
+
+      if (isEditingThis) {
+        if (drawing.type === 'measurement_line') {
+          measurementData = computeLineMeasurementData(points, drawing.pageNumber) || drawing.measurements
+        } else if (drawing.type === 'measurement_area') {
+          measurementData = computeAreaMeasurementData(points, drawing.pageNumber) || drawing.measurements
+        }
+      }
+
+      const unit =
+        (measurementData && 'unit' in measurementData && measurementData.unit) ||
+        scaleSetting?.unit ||
+        'ft'
+      const color = drawing.style?.color || '#3b82f6'
+
+      ctx.save()
+      ctx.strokeStyle = color
+      ctx.fillStyle = color
       ctx.lineWidth = drawing.style?.strokeWidth || 2
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
+      ctx.setLineDash(isEditingThis ? [6, 4] : [])
       
       if (drawing.type === 'measurement_line') {
         // Draw polyline
@@ -580,9 +728,11 @@ export default function FastPlanCanvas({
           ctx.lineTo(points[i], points[i + 1])
         }
         ctx.stroke()
+        ctx.setLineDash([])
         
         // Draw labels for each segment
-        if (drawing.measurements?.segmentLengths && scaleSetting) {
+        if (measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
+          const segmentLengths = (measurementData as any).segmentLengths as number[]
           for (let i = 0; i < points.length - 2; i += 2) {
             const x1 = points[i]
             const y1 = points[i + 1]
@@ -590,7 +740,7 @@ export default function FastPlanCanvas({
             const y2 = points[i + 3]
             const midX = (x1 + x2) / 2
             const midY = (y1 + y2) / 2
-            const length = drawing.measurements.segmentLengths[i / 2]
+            const length = segmentLengths[i / 2]
             
             // Draw label background
             const label = formatMeasurement(length, unit)
@@ -613,10 +763,10 @@ export default function FastPlanCanvas({
           }
           
           // Draw total length if multiple segments
-          if (drawing.measurements.totalLength && points.length > 4) {
+          if ((measurementData as any)?.totalLength && points.length > 4) {
             const lastX = points[points.length - 2]
             const lastY = points[points.length - 1]
-            const label = `Total: ${formatMeasurement(drawing.measurements.totalLength, unit)}`
+            const label = `Total: ${formatMeasurement((measurementData as any).totalLength, unit)}`
             ctx.font = '14px Arial'
             ctx.textAlign = 'left'
             const textWidth = ctx.measureText(label).width
@@ -633,6 +783,24 @@ export default function FastPlanCanvas({
             }
           }
         }
+
+        const shouldShowHandles = isEditMode && (isEditingThis || !editingMeasurement)
+        if (shouldShowHandles) {
+          ctx.save()
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2
+          for (let i = 0; i < points.length; i += 2) {
+            const handleX = points[i]
+            const handleY = points[i + 1]
+            const radius = isEditingThis ? 6 : 5
+            ctx.fillStyle = isEditingThis ? '#ffffff' : 'rgba(255,255,255,0.75)'
+            ctx.beginPath()
+            ctx.arc(handleX, handleY, radius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
       } else if (drawing.type === 'measurement_area') {
         // Draw polygon
         ctx.beginPath()
@@ -646,7 +814,7 @@ export default function FastPlanCanvas({
         ctx.stroke()
         
         // Draw area label at centroid
-        if (drawing.measurements?.area && scaleSetting) {
+        if (measurementData && 'area' in (measurementData as any) && scaleSetting) {
           // Calculate centroid
           let sumX = 0, sumY = 0
           for (let i = 0; i < points.length; i += 2) {
@@ -657,7 +825,7 @@ export default function FastPlanCanvas({
           const centroidY = sumY / (points.length / 2)
           
           // Format area (convert to sqft if needed)
-          let area = drawing.measurements.area
+          let area = (measurementData as any).area
           const areaLabel = formatArea(area, unit)
           
           ctx.font = '14px Arial'
@@ -677,6 +845,7 @@ export default function FastPlanCanvas({
           }
         }
       }
+      ctx.restore()
     })
     
     // Draw current measurement being drawn (only if on current page)
@@ -811,7 +980,7 @@ export default function FastPlanCanvas({
     }
 
     // Comments are now rendered as HTML elements, not on canvas
-  }, [drawings, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting])
+  }, [drawings, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
@@ -1047,6 +1216,167 @@ export default function FastPlanCanvas({
     return dist <= threshold
   }, [currentPage])
 
+  const getMeasurementHandleAtPoint = useCallback(
+    (pageNumber: number, worldX: number, worldY: number): MeasurementHandleHit | null => {
+      const threshold = 24
+      let closest: MeasurementHandleHit | null = null
+      let minDistance = Infinity
+
+      drawings.forEach(drawing => {
+        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
+          return
+        }
+
+        const points = drawing.geometry?.points
+        if (!points || points.length < 4) {
+          return
+        }
+
+        for (let i = 0; i < points.length; i += 2) {
+          const pointX = points[i]
+          const pointY = points[i + 1]
+          const distance = Math.sqrt(Math.pow(pointX - worldX, 2) + Math.pow(pointY - worldY, 2))
+
+          if (distance <= threshold && distance < minDistance) {
+            closest = {
+              drawing,
+              handleIndex: i / 2
+            }
+            minDistance = distance
+          }
+        }
+      })
+
+      return closest
+    },
+    [drawings]
+  )
+
+  const getMeasurementSegmentAtPoint = useCallback(
+    (pageNumber: number, worldX: number, worldY: number): MeasurementHandleHit | null => {
+      const threshold = 18
+      let closest: MeasurementHandleHit | null = null
+      let minDistance = Infinity
+
+      const distanceToSegment = (
+        px: number,
+        py: number,
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number
+      ) => {
+        const dx = x2 - x1
+        const dy = y2 - y1
+        if (dx === 0 && dy === 0) {
+          return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
+        }
+        const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+        const clampedT = Math.max(0, Math.min(1, t))
+        const closestX = x1 + clampedT * dx
+        const closestY = y1 + clampedT * dy
+        return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
+      }
+
+      drawings.forEach(drawing => {
+        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
+          return
+        }
+
+        const points = drawing.geometry?.points
+        if (!points || points.length < 4) {
+          return
+        }
+
+        for (let i = 0; i < points.length - 2; i += 2) {
+          const x1 = points[i]
+          const y1 = points[i + 1]
+          const x2 = points[i + 2]
+          const y2 = points[i + 3]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            const distToStart = Math.sqrt(Math.pow(worldX - x1, 2) + Math.pow(worldY - y1, 2))
+            const distToEnd = Math.sqrt(Math.pow(worldX - x2, 2) + Math.pow(worldY - y2, 2))
+            const handleIndex = distToStart <= distToEnd ? i / 2 : i / 2 + 1
+            closest = {
+              drawing,
+              handleIndex
+            }
+            minDistance = distance
+          }
+        }
+      })
+
+      return closest
+    },
+    [drawings]
+  )
+
+  const finalizeMeasurementFromDrawing = useCallback(
+    (measurement: Drawing): Drawing | null => {
+      const rawPoints = measurement.geometry?.points
+      if (!rawPoints || rawPoints.length < 4) {
+        return null
+      }
+
+      const sanitizedPoints = (() => {
+        const cloned = [...rawPoints]
+        if (cloned.length >= 4) {
+          const lastX = cloned[cloned.length - 2]
+          const lastY = cloned[cloned.length - 1]
+          const prevX = cloned[cloned.length - 4]
+          const prevY = cloned[cloned.length - 3]
+          if (lastX === prevX && lastY === prevY) {
+            cloned.splice(cloned.length - 2, 2)
+          }
+        }
+        return cloned
+      })()
+
+      if (sanitizedPoints.length < 4) {
+        return null
+      }
+
+      if (measurement.type === 'measurement_line') {
+        const lineData = computeLineMeasurementData(sanitizedPoints, measurement.pageNumber)
+        if (!lineData) {
+          return null
+        }
+        return {
+          ...measurement,
+          geometry: {
+            ...measurement.geometry,
+            points: sanitizedPoints
+          },
+          measurements: lineData
+        }
+      }
+
+      if (measurement.type === 'measurement_area') {
+        if (sanitizedPoints.length < 6) {
+          return null
+        }
+
+        const areaData = computeAreaMeasurementData(sanitizedPoints, measurement.pageNumber)
+        if (!areaData) {
+          return null
+        }
+        return {
+          ...measurement,
+          geometry: {
+            ...measurement.geometry,
+            points: sanitizedPoints
+          },
+          measurements: areaData
+        }
+      }
+
+      return null
+    },
+    [computeAreaMeasurementData, computeLineMeasurementData]
+  )
+
   // Handle mouse events
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const container = containerRef.current
@@ -1111,6 +1441,34 @@ export default function FastPlanCanvas({
       // Place new comment pin (only if not calibrating)
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
+    } else if (selectedTool === 'measurement_edit') {
+      const existingHandle = getMeasurementHandleAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (existingHandle && existingHandle.drawing.geometry?.points) {
+        setEditingMeasurement({
+          id: existingHandle.drawing.id,
+          type: existingHandle.drawing.type,
+          pageNumber: existingHandle.drawing.pageNumber,
+          points: [...existingHandle.drawing.geometry.points],
+          handleIndex: existingHandle.handleIndex
+        })
+        setIsAdjustingMeasurement(true)
+        return
+      }
+
+      const nearbySegment = getMeasurementSegmentAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (nearbySegment && nearbySegment.drawing.geometry?.points) {
+        setEditingMeasurement({
+          id: nearbySegment.drawing.id,
+          type: nearbySegment.drawing.type,
+          pageNumber: nearbySegment.drawing.pageNumber,
+          points: [...nearbySegment.drawing.geometry.points],
+          handleIndex: nearbySegment.handleIndex
+        })
+        setIsAdjustingMeasurement(false)
+      } else {
+        setEditingMeasurement(null)
+        setIsAdjustingMeasurement(false)
+      }
     } else if (selectedTool === 'measurement_line' || selectedTool === 'measurement_area') {
       // Start or continue measurement drawing
       if (!currentMeasurement || !isDrawingMeasurement) {
@@ -1119,7 +1477,7 @@ export default function FastPlanCanvas({
           id: Date.now().toString(),
           type: selectedTool,
           geometry: {
-            points: [baseWorldX, baseWorldY]
+            points: [baseWorldX, baseWorldY, baseWorldX, baseWorldY]
           },
           style: {
             color: '#3b82f6',
@@ -1135,21 +1493,52 @@ export default function FastPlanCanvas({
         setIsDrawingMeasurement(true)
       } else {
         // Add point to existing measurement (store at base scale)
-        const updatedPoints = [...(currentMeasurement.geometry.points || []), baseWorldX, baseWorldY]
-        setCurrentMeasurement({
+        const existingPoints = currentMeasurement.geometry.points || []
+        if (existingPoints.length < 2) {
+          return
+        }
+
+        const updatedPoints = [...existingPoints]
+        const lastIndex = updatedPoints.length - 2
+        updatedPoints[lastIndex] = baseWorldX
+        updatedPoints[lastIndex + 1] = baseWorldY
+        updatedPoints.push(baseWorldX, baseWorldY)
+
+        const updatedMeasurement: Drawing = {
           ...currentMeasurement,
           geometry: {
             ...currentMeasurement.geometry,
             points: updatedPoints
           }
-        })
+        }
+
+        setCurrentMeasurement(updatedMeasurement)
+
+        if (selectedTool === 'measurement_line' && !e.shiftKey) {
+          const sanitizedPoints = updatedPoints.slice(0, Math.max(updatedPoints.length - 2, 0))
+          if (sanitizedPoints.length >= 4) {
+            const measurementToFinalize: Drawing = {
+              ...updatedMeasurement,
+              geometry: {
+                ...updatedMeasurement.geometry,
+                points: sanitizedPoints
+              }
+            }
+            const finalized = finalizeMeasurementFromDrawing(measurementToFinalize)
+            if (finalized) {
+              onDrawingsChange([...drawings, finalized])
+              setCurrentMeasurement(null)
+              setIsDrawingMeasurement(false)
+            }
+          }
+        }
       }
     } else if (selectedTool === 'none') {
       // Start panning
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
     }
-  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints])
+  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, finalizeMeasurementFromDrawing])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -1167,6 +1556,37 @@ export default function FastPlanCanvas({
         panY: prev.panY + (screenY - lastPanPoint.y)
       }))
       setLastPanPoint({ x: screenX, y: screenY })
+    } else if (selectedTool === 'measurement_edit' && editingMeasurement && isAdjustingMeasurement) {
+      const container = containerRef.current
+      if (!container) return
+
+      const rect = container.getBoundingClientRect()
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
+      const world = screenToWorld(screenX, screenY)
+      const baseWorldX = world.x
+      const baseWorldY = world.y
+
+      const handleIndex = editingMeasurement.handleIndex
+      const updatedPoints = [...editingMeasurement.points]
+
+      const pointXIndex = handleIndex * 2
+      const pointYIndex = pointXIndex + 1
+      if (pointYIndex >= updatedPoints.length) {
+        return
+      }
+
+      updatedPoints[pointXIndex] = baseWorldX
+      updatedPoints[pointYIndex] = baseWorldY
+
+      setEditingMeasurement(prev =>
+        prev
+          ? {
+              ...prev,
+              points: updatedPoints
+            }
+          : prev
+      )
     } else if (isDrawingMeasurement && currentMeasurement) {
       // Update preview point for measurement
       const container = containerRef.current
@@ -1184,7 +1604,9 @@ export default function FastPlanCanvas({
       // Update last point in measurement for preview (store at base scale)
       const points = currentMeasurement.geometry.points || []
       if (points.length >= 2) {
-        const updatedPoints = [...points.slice(0, points.length - 2), baseWorldX, baseWorldY]
+        const updatedPoints = [...points]
+        updatedPoints[updatedPoints.length - 2] = baseWorldX
+        updatedPoints[updatedPoints.length - 1] = baseWorldY
         setCurrentMeasurement({
           ...currentMeasurement,
           geometry: {
@@ -1195,74 +1617,117 @@ export default function FastPlanCanvas({
       }
     }
     // Comment hover detection is now handled by HTML elements via onMouseEnter/onMouseLeave
-  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement])
+  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement])
+
+  const finalizeEditingMeasurement = useCallback(() => {
+    if (!editingMeasurement) {
+      return
+    }
+
+    const { id, points, pageNumber, type } = editingMeasurement
+
+    let hasUpdate = false
+    const nextDrawings = drawings.map(drawing => {
+      if (drawing.id !== id) {
+        return drawing
+      }
+
+      hasUpdate = true
+      const updatedGeometry = {
+        ...drawing.geometry,
+        points: [...points]
+      }
+
+      if (type === 'measurement_line') {
+        const lineData = computeLineMeasurementData(points, pageNumber)
+        return {
+          ...drawing,
+          geometry: updatedGeometry,
+          measurements: lineData
+            ? {
+                ...lineData
+              }
+            : drawing.measurements
+        }
+      }
+
+      if (type === 'measurement_area') {
+        const areaData = computeAreaMeasurementData(points, pageNumber)
+        return {
+          ...drawing,
+          geometry: updatedGeometry,
+          measurements: areaData
+            ? {
+                ...areaData
+              }
+            : drawing.measurements
+        }
+      }
+
+      return {
+        ...drawing,
+        geometry: updatedGeometry
+      }
+    })
+
+    if (hasUpdate) {
+      onDrawingsChange(nextDrawings)
+    }
+
+    setEditingMeasurement(null)
+    setIsAdjustingMeasurement(false)
+  }, [editingMeasurement, drawings, onDrawingsChange, computeLineMeasurementData, computeAreaMeasurementData])
+
+  const deleteMeasurement = useCallback(
+    (id: string) => {
+      const nextDrawings = drawings.filter(drawing => {
+        if (drawing.type === 'measurement_line' || drawing.type === 'measurement_area') {
+          return drawing.id !== id
+        }
+        return true
+      })
+
+      if (nextDrawings.length === drawings.length) {
+        return
+      }
+
+      onDrawingsChange(nextDrawings)
+      setEditingMeasurement(null)
+      setIsAdjustingMeasurement(false)
+    },
+    [drawings, onDrawingsChange]
+  )
+
+  useEffect(() => {
+    if (selectedTool !== 'measurement_edit') {
+      setEditingMeasurement(null)
+      setIsAdjustingMeasurement(false)
+    }
+  }, [selectedTool])
 
   const handleMouseUp = useCallback(() => {
     if (isPanning) {
       setIsPanning(false)
     }
-    // For measurements, finalize on double-click or right-click will be handled separately
-  }, [isPanning])
+
+    if (isAdjustingMeasurement && editingMeasurement) {
+      finalizeEditingMeasurement()
+    }
+    // For new measurements, finalize on double-click or right-click will be handled separately
+  }, [isPanning, isAdjustingMeasurement, editingMeasurement, finalizeEditingMeasurement])
 
   // Finalize measurement (calculate and save)
   const finalizeMeasurement = useCallback(() => {
     if (!currentMeasurement || !isDrawingMeasurement) return
 
-    const scaleSetting = getScaleSetting(currentMeasurement.pageNumber)
-    if (!scaleSetting || !currentMeasurement.geometry.points || currentMeasurement.geometry.points.length < 4) {
-      setCurrentMeasurement(null)
-      setIsDrawingMeasurement(false)
-      return
-    }
-
-    const points = currentMeasurement.geometry.points
-    const unit = scaleSetting.unit || 'ft'
-
-    if (currentMeasurement.type === 'measurement_line') {
-      // Calculate segment lengths
-      const segmentLengths: number[] = []
-      let totalLength = 0
-      
-      for (let i = 0; i < points.length - 2; i += 2) {
-        const pixelDist = calculatePixelDistance(points[i], points[i + 1], points[i + 2], points[i + 3])
-        const realDist = calculateRealWorldDistance(pixelDist, currentMeasurement.pageNumber)
-        if (realDist !== null) {
-          segmentLengths.push(realDist)
-          totalLength += realDist
-        }
-      }
-
-      const finalized: Drawing = {
-        ...currentMeasurement,
-        measurements: {
-          segmentLengths,
-          totalLength,
-          unit
-        }
-      }
-      
+    const finalized = finalizeMeasurementFromDrawing(currentMeasurement)
+    if (finalized) {
       onDrawingsChange([...drawings, finalized])
-    } else if (currentMeasurement.type === 'measurement_area') {
-      // Calculate area
-      const pixelArea = calculatePolygonArea(points)
-      const realArea = calculateRealWorldArea(pixelArea, currentMeasurement.pageNumber)
-      
-      if (realArea !== null) {
-        const finalized: Drawing = {
-          ...currentMeasurement,
-          measurements: {
-            area: realArea,
-            unit
-          }
-        }
-        
-        onDrawingsChange([...drawings, finalized])
-      }
     }
 
     setCurrentMeasurement(null)
     setIsDrawingMeasurement(false)
-  }, [currentMeasurement, isDrawingMeasurement, measurementScaleSettings, drawings, onDrawingsChange, calculateRealWorldDistance, calculateRealWorldArea])
+  }, [currentMeasurement, isDrawingMeasurement, finalizeMeasurementFromDrawing, drawings, onDrawingsChange])
 
   // Handle double-click to finish measurement
   const handleDoubleClick = useCallback(() => {
@@ -1288,10 +1753,25 @@ export default function FastPlanCanvas({
         }
         setSelectedTool('measurement_area')
         e.preventDefault()
+      } else if (e.key === 'e' || e.key === 'E') {
+        if (isDrawingMeasurement) {
+          finalizeMeasurement()
+        }
+        setCurrentMeasurement(null)
+        setIsDrawingMeasurement(false)
+        setSelectedTool('measurement_edit')
+        e.preventDefault()
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTool === 'measurement_edit' && editingMeasurement) {
+        e.preventDefault()
+        deleteMeasurement(editingMeasurement.id)
       } else if (e.key === 'Escape') {
         if (isDrawingMeasurement) {
           setCurrentMeasurement(null)
           setIsDrawingMeasurement(false)
+          setSelectedTool('none')
+        } else if (selectedTool === 'measurement_edit') {
+          setEditingMeasurement(null)
+          setIsAdjustingMeasurement(false)
           setSelectedTool('none')
         }
       }
@@ -1299,14 +1779,17 @@ export default function FastPlanCanvas({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isDrawingMeasurement, finalizeMeasurement])
+  }, [isDrawingMeasurement, finalizeMeasurement, selectedTool, editingMeasurement, deleteMeasurement])
 
   const handleMouseLeave = useCallback(() => {
     if (isPanning) {
       setIsPanning(false)
     }
+    if (isAdjustingMeasurement && editingMeasurement) {
+      finalizeEditingMeasurement()
+    }
     setHoveredComment(null)
-  }, [isPanning])
+  }, [isPanning, isAdjustingMeasurement, editingMeasurement, finalizeEditingMeasurement])
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -1398,6 +1881,23 @@ export default function FastPlanCanvas({
               <Square className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
               <span className="text-xs md:text-sm hidden sm:inline">Measure Area</span>
             </Button>
+            <Button
+              variant={selectedTool === 'measurement_edit' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setCurrentMeasurement(null)
+                setIsDrawingMeasurement(false)
+                setSelectedTool('measurement_edit')
+              }}
+              title="Adjust Measurements (E)"
+              className="h-8 md:h-9"
+            >
+              <Move className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
+              <span className="text-xs md:text-sm hidden sm:inline">Adjust Lines</span>
+            </Button>
           </div>
 
           {/* Zoom Controls */}
@@ -1454,9 +1954,26 @@ export default function FastPlanCanvas({
               >
                 <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
               </Button>
-              <span className="text-xs md:text-sm text-gray-600 min-w-[60px] md:min-w-[80px] text-center">
-                <span className="hidden sm:inline">Page </span>{currentPage}<span className="hidden sm:inline"> of {numPages}</span>
+              <form
+                onSubmit={handlePageInputFormSubmit}
+                className="flex items-center space-x-1 md:space-x-2"
+                noValidate
+              >
+                <span className="text-xs md:text-sm text-gray-600 hidden sm:inline">Page</span>
+                <Input
+                  value={pageInputValue}
+                  onChange={handlePageInputChange}
+                  onBlur={handlePageInputBlur}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label="Go to page"
+                  className="h-8 md:h-9 w-16 text-center text-xs md:text-sm"
+                />
+              </form>
+              <span className="text-xs md:text-sm text-gray-600 hidden sm:inline">
+                of {numPages}
               </span>
+              <span className="text-xs text-gray-600 sm:hidden">/ {numPages}</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -1846,6 +2363,41 @@ export default function FastPlanCanvas({
           />
         )}
       </div>
+      {selectedTool === 'measurement_edit' && editingMeasurement && (
+        <div className="fixed bottom-4 left-4 z-[60]">
+          <div className="pointer-events-auto rounded-md border border-gray-200 bg-white/95 shadow-lg backdrop-blur px-4 py-3 w-72 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Measurement editing</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Drag the highlighted handles to adjust points. Press Delete/Backspace or use the button below to remove the line.
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-8"
+                onClick={() => deleteMeasurement(editingMeasurement.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                Remove line
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  setEditingMeasurement(null)
+                  setIsAdjustingMeasurement(false)
+                  setSelectedTool('none')
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
