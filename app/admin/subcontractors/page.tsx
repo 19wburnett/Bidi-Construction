@@ -30,12 +30,14 @@ import NotificationBell from '@/components/notification-bell'
 import ProfileDropdown from '@/components/profile-dropdown'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 
 type SortKey = 'created_at' | 'name' | 'trade_category' | 'location'
 type SortDirection = 'asc' | 'desc'
+type CheckboxState = boolean | 'indeterminate'
 
 interface Subcontractor {
   id: string
@@ -110,6 +112,7 @@ export default function AdminSubcontractorCRMPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [tradeFilter, setTradeFilter] = useState<string>('all')
   const [locationFilter, setLocationFilter] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'created_at',
@@ -119,6 +122,10 @@ export default function AdminSubcontractorCRMPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')
   const [activeSubcontractorId, setActiveSubcontractorId] = useState<string | null>(null)
+  const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false)
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
   const [formState, setFormState] = useState<FormState>({
     name: '',
     email: '',
@@ -231,6 +238,10 @@ export default function AdminSubcontractorCRMPage() {
       fetchSubcontractors()
     }
   }, [authLoading, fetchSubcontractors, isAdmin])
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => subcontractors.some((sub) => sub.id === id)))
+  }, [subcontractors])
 
   const openCreateDialog = () => {
     resetMessages()
@@ -434,6 +445,18 @@ export default function AdminSubcontractorCRMPage() {
     })
   }
 
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
+
+  const selectedSubcontractors = useMemo(
+    () => subcontractors.filter((record) => selectedIdSet.has(record.id)),
+    [subcontractors, selectedIdSet]
+  )
+
+  const selectedEmailsList = useMemo(
+    () => selectedSubcontractors.map((record) => record.email).join('; '),
+    [selectedSubcontractors]
+  )
+
   const filteredSubcontractors = useMemo(() => {
     let data = [...subcontractors]
 
@@ -472,6 +495,114 @@ export default function AdminSubcontractorCRMPage() {
 
     return data
   }, [locationFilter, searchTerm, sortConfig, subcontractors, tradeFilter])
+
+  const filteredSubcontractorIds = useMemo(
+    () => filteredSubcontractors.map((record) => record.id),
+    [filteredSubcontractors]
+  )
+
+  const allFilteredSelected =
+    filteredSubcontractors.length > 0 && filteredSubcontractors.every((record) => selectedIdSet.has(record.id))
+  const someFilteredSelected = filteredSubcontractors.some((record) => selectedIdSet.has(record.id))
+  const bulkSelectionState: CheckboxState = allFilteredSelected ? true : someFilteredSelected ? 'indeterminate' : false
+
+  const handleToggleSelect = (id: string, checked: CheckboxState) => {
+    const shouldSelect = checked === true || checked === 'indeterminate'
+    setSelectedIds((prev) => {
+      if (shouldSelect) {
+        if (prev.includes(id)) {
+          return prev
+        }
+        return [...prev, id]
+      }
+      return prev.filter((existingId) => existingId !== id)
+    })
+  }
+
+  const handleToggleSelectAll = (checked: CheckboxState) => {
+    const shouldSelectAll = checked === true || checked === 'indeterminate'
+    if (shouldSelectAll) {
+      setSelectedIds((prev) => {
+        const merged = new Set(prev)
+        filteredSubcontractors.forEach((record) => merged.add(record.id))
+        return Array.from(merged)
+      })
+    } else {
+      const removalSet = new Set(filteredSubcontractorIds)
+      setSelectedIds((prev) => prev.filter((id) => !removalSet.has(id)))
+    }
+  }
+
+  const handleClearSelection = () => {
+    setSelectedIds([])
+  }
+
+  const openEmailComposer = () => {
+    if (selectedSubcontractors.length === 0) return
+
+    const primaryTrade =
+      selectedSubcontractors.length === 1 ? selectedSubcontractors[0].trade_category : 'your trade crews'
+
+    const subject =
+      selectedSubcontractors.length === 1
+        ? `Project opportunity for ${primaryTrade}`
+        : `Project opportunity for ${selectedSubcontractors.length} subcontractors`
+
+    const namesPreview =
+      selectedSubcontractors.length === 1
+        ? selectedSubcontractors[0].name
+        : selectedSubcontractors.length <= 3
+        ? selectedSubcontractors.map((sub) => sub.name).join(', ')
+        : `${selectedSubcontractors.length} subcontractors`
+
+    const greeting =
+      selectedSubcontractors.length === 1
+        ? `Hi ${selectedSubcontractors[0].name.split(' ')[0] || selectedSubcontractors[0].name},`
+        : 'Hi team,'
+
+    const body = `${greeting}
+
+We have a new project opportunity that looks like a fit for ${namesPreview}. Reply if you'd like the full bid package, plans, and next steps from Bidi.
+
+Thanks,
+The Bidi Team`
+
+    setEmailSubject(subject)
+    setEmailBody(body)
+    setCopyStatus('idle')
+    setIsEmailDialogOpen(true)
+  }
+
+  const handleCloseEmailComposer = () => {
+    setIsEmailDialogOpen(false)
+    setCopyStatus('idle')
+  }
+
+  const copyEmailsToClipboard = async () => {
+    if (!selectedEmailsList) {
+      setCopyStatus('error')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(selectedEmailsList)
+      setCopyStatus('copied')
+      setTimeout(() => setCopyStatus('idle'), 2000)
+    } catch (err) {
+      console.error('Failed to copy emails', err)
+      setCopyStatus('error')
+    }
+  }
+
+  const handleLaunchEmailClient = () => {
+    if (selectedSubcontractors.length === 0) return
+
+    const bcc = selectedSubcontractors.map((sub) => sub.email).join(',')
+    const mailtoUrl = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(
+      emailSubject
+    )}&body=${encodeURIComponent(emailBody)}`
+    window.location.href = mailtoUrl
+  }
 
   if (authLoading || isCheckingAdmin) {
     return (
@@ -588,6 +719,23 @@ export default function AdminSubcontractorCRMPage() {
               <CardDescription>Search, filter, and maintain your subcontractor network.</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={openEmailComposer}
+                disabled={selectedSubcontractors.length === 0}
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                {`Compose Email${selectedSubcontractors.length > 0 ? ` (${selectedSubcontractors.length})` : ''}`}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearSelection}
+                disabled={selectedSubcontractors.length === 0}
+              >
+                Clear Selection
+              </Button>
               <Button variant="outline" size="sm" onClick={() => fetchSubcontractors()} disabled={tableLoading}>
                 <RefreshCcw className="h-4 w-4 mr-2" />
                 Refresh
@@ -636,6 +784,13 @@ export default function AdminSubcontractorCRMPage() {
               <table className="w-full min-w-[1300px] text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="w-12 py-3 px-4">
+                      <Checkbox
+                        checked={bulkSelectionState}
+                        onCheckedChange={handleToggleSelectAll}
+                        aria-label="Select all filtered subcontractors"
+                      />
+                    </th>
                     <th className="text-left py-3 px-4 font-medium text-muted-foreground">
                       <button
                         type="button"
@@ -692,7 +847,7 @@ export default function AdminSubcontractorCRMPage() {
                 <tbody>
                   {tableLoading ? (
                     <tr>
-                      <td colSpan={15} className="py-12">
+                      <td colSpan={16} className="py-12">
                         <div className="flex flex-col items-center justify-center space-y-3">
                           <FallingBlocksLoader text="" size="sm" />
                           <p className="text-sm text-muted-foreground">Loading subcontractors...</p>
@@ -701,7 +856,7 @@ export default function AdminSubcontractorCRMPage() {
                     </tr>
                   ) : filteredSubcontractors.length === 0 ? (
                     <tr>
-                      <td colSpan={15} className="py-12 text-center text-muted-foreground">
+                      <td colSpan={16} className="py-12 text-center text-muted-foreground">
                         {searchTerm || tradeFilter !== 'all' || locationFilter
                           ? 'No subcontractors match your filters.'
                           : 'No subcontractors have been added yet.'}
@@ -717,6 +872,13 @@ export default function AdminSubcontractorCRMPage() {
 
                       return (
                         <tr key={record.id} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
+                          <td className="py-3 px-4">
+                            <Checkbox
+                              checked={selectedIdSet.has(record.id)}
+                              onCheckedChange={(checked) => handleToggleSelect(record.id, checked)}
+                              aria-label={`Select ${record.name}`}
+                            />
+                          </td>
                           <td className="py-3 px-4">
                             <div className="font-medium text-foreground">{record.name}</div>
                           </td>
@@ -851,6 +1013,87 @@ export default function AdminSubcontractorCRMPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={isEmailDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCloseEmailComposer()
+          }
+        }}
+      >
+        <DialogContent className="w-full max-w-3xl p-6">
+          <DialogClose onClick={handleCloseEmailComposer} />
+          <DialogHeader>
+            <DialogTitle>Email Selected Subcontractors</DialogTitle>
+            <DialogDescription>
+              {selectedSubcontractors.length} recipient{selectedSubcontractors.length === 1 ? '' : 's'} selected.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 mt-2">
+            <div className="space-y-2">
+              <Label>Recipients</Label>
+              {selectedSubcontractors.length > 0 ? (
+                <div className="max-h-40 overflow-y-auto rounded-md border bg-muted/40 p-3 text-sm">
+                  <ul className="space-y-2">
+                    {selectedSubcontractors.map((sub) => (
+                      <li key={sub.id} className="leading-tight">
+                        <span className="font-medium text-foreground">{sub.name}</span>
+                        <span className="block text-muted-foreground">{sub.email}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No subcontractors selected.</p>
+              )}
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copyEmailsToClipboard}
+                  disabled={!selectedEmailsList}
+                >
+                  Copy Emails
+                </Button>
+                {copyStatus === 'copied' && <span className="text-sm text-green-600">Copied!</span>}
+                {copyStatus === 'error' && <span className="text-sm text-red-600">Copy failed. Try again.</span>}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="emailSubject">Subject</Label>
+              <Input
+                id="emailSubject"
+                value={emailSubject}
+                onChange={(event) => setEmailSubject(event.target.value)}
+                placeholder="Project opportunity from Bidi"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="emailBody">Email Body</Label>
+              <Textarea
+                id="emailBody"
+                rows={8}
+                value={emailBody}
+                onChange={(event) => setEmailBody(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-6">
+            <Button type="button" variant="outline" onClick={handleCloseEmailComposer}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleLaunchEmailClient} disabled={!selectedEmailsList}>
+              Open in Email Client
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={isDialogOpen}
