@@ -103,6 +103,42 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
           "reason": "Why assumption was needed"
         }
       ]
+    },
+    "trade_scope_review": {
+      "items": [
+        {
+          "category": "Structural & Sitework",
+          "trade": "Surveying",
+          "status": "complete|partial|missing",
+          "status_icon": "✅|⚠️|❌",
+          "notes": "Summary of trade-level findings",
+          "page_refs": ["P-1"]
+        }
+      ],
+      "summary": {
+        "complete": 0,
+        "partial": 0,
+        "missing": 0,
+        "notes": "High-level summary of trade coverage"
+      },
+      "raw": [
+        {
+          "category": "Structural & Sitework",
+          "trade": "Surveying",
+          "status": "missing",
+          "status_icon": "❌",
+          "notes": "Example entry for trade scope review",
+          "page_refs": ["P-1"]
+        },
+        {
+          "summary": {
+            "complete": 0,
+            "partial": 0,
+            "missing": 1,
+            "notes": "Summary entry must always appear"
+          }
+        }
+      ]
     }
   },
   "summary": {
@@ -118,8 +154,8 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
 
 MANDATORY REQUIREMENTS:
 1. "items" array: MUST contain all measurable quantities, even if empty array with note in summary
-2. "quality_analysis" object: MUST be fully populated with all sub-objects (completeness, consistency, risk_flags, audit_trail)
-3. If information is missing, explicitly mark it in the appropriate quality_analysis field (e.g., missing_sheets, missing_dimensions)
+2. "quality_analysis" object: MUST be fully populated with all sub-objects (completeness, consistency, risk_flags, audit_trail, trade_scope_review)
+3. If information is missing, explicitly mark it in the appropriate quality_analysis field (e.g., missing_sheets, missing_dimensions, trade scope notes)
 4. Never return partial structures - always include all top-level fields`
 
   // Add job type specific instructions
@@ -395,6 +431,7 @@ QUALITY ANALYSIS REQUIREMENTS:
 9. Check consistency - any conflicts or contradictions?
 10. Identify risk flags - safety, code, quality concerns
 11. Document audit trail - what was analyzed, what assumptions were made
+12. Build a trade_scope_review showing each trade's status (complete/partial/missing) with notes and page references
 
 IMPORTANT:
 - Be SPECIFIC: "2x6 Top Plate" not just "lumber"
@@ -412,6 +449,7 @@ QUALITY ANALYSIS REQUIREMENTS - POPULATE ALL FIELDS:
 - consistency: Check for conflicts (scales, units, dimensions, schedules)
 - risk_flags: Identify potential problems (safety, code, budget, timeline, quality)
 - audit_trail: Document coverage (pages analyzed, chunks, coverage %, assumptions)
+- trade_scope_review: Provide status_icon (✅, ⚠️, ❌) and notes for every relevant trade, plus a summary row with counts
 
 CRITICAL RESPONSE REQUIREMENTS:
 1. You MUST respond with ONLY the JSON object - no explanatory text

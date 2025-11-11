@@ -3,6 +3,8 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { callAnalysisLLM } from '@/lib/llm/providers'
 import { buildTakeoffQASystemPrompt, buildTakeoffQAUserPrompt } from '@/prompts/takeoff_qa.single'
 import { extractAnalysisPayload } from '@/lib/json/repair'
+import { enhancedAIProvider, EnhancedAnalysisOptions } from '@/lib/enhanced-ai-providers'
+import { normalizeTradeScopeReview } from '@/lib/trade-scope-review'
 
 /**
  * Single-Model Takeoff + QA Analysis Endpoint
@@ -262,6 +264,48 @@ async function saveAndReturnResults(
     ...item,
     id: item.id || `item-${Date.now()}-${idx}`
   }))
+
+  const baseQualityAnalysis = qualityAnalysis
+    ? { ...qualityAnalysis }
+    : {
+        completeness: {
+          overall_score: itemsWithIds.length > 0 ? 0.8 : 0.6,
+          missing_sheets: [],
+          missing_dimensions: [],
+          missing_details: [],
+          incomplete_sections: [],
+          notes: 'Quality analysis generated from single-model takeoff.'
+        },
+        consistency: {
+          scale_mismatches: [],
+          unit_conflicts: [],
+          dimension_contradictions: [],
+          schedule_vs_elevation_conflicts: [],
+          notes: 'No consistency conflicts detected in single-model analysis.'
+        },
+        risk_flags: [],
+        audit_trail: {
+          pages_analyzed: [],
+          chunks_processed: 1,
+          coverage_percentage: 100,
+          assumptions_made: []
+        }
+      }
+
+  if (!baseQualityAnalysis.risk_flags) {
+    baseQualityAnalysis.risk_flags = []
+  }
+
+  const tradeScopeReview = normalizeTradeScopeReview(
+    baseQualityAnalysis.trade_scope_review,
+    baseQualityAnalysis.risk_flags,
+    { defaultNotes: 'Trade scope review generated from single-model analysis.' }
+  )
+
+  const enhancedQualityAnalysis = {
+    ...baseQualityAnalysis,
+    trade_scope_review: tradeScopeReview
+  }
   
   // Save takeoff analysis
   const { data: takeoffAnalysis, error: takeoffError } = await supabase
@@ -277,7 +321,7 @@ async function saveAndReturnResults(
           : 0,
         consensus_count: 1,
         model_agreements: [provider],
-        quality_analysis: qualityAnalysis
+        quality_analysis: enhancedQualityAnalysis
       },
       ai_model: `single-${provider}`,
       confidence_scores: {
@@ -307,7 +351,7 @@ async function saveAndReturnResults(
   }
   
   // Transform quality_analysis.risk_flags to issues format for quality_analysis table
-  const issues = (qualityAnalysis?.risk_flags || []).map((flag: any) => ({
+  const issues = (enhancedQualityAnalysis.risk_flags || []).map((flag: any) => ({
     severity: flag.severity || 'info',
     category: flag.category || 'general',
     description: flag.description || flag.impact || '',
@@ -325,19 +369,20 @@ async function saveAndReturnResults(
     .insert({
       plan_id: planId,
       user_id: userId,
-      overall_score: qualityAnalysis?.completeness?.overall_score || 
+      overall_score: enhancedQualityAnalysis?.completeness?.overall_score || 
                      (itemsWithIds.length > 0 ? 0.8 : 0.5),
       issues: issues,
-      recommendations: (qualityAnalysis?.risk_flags || [])
+      recommendations: (enhancedQualityAnalysis?.risk_flags || [])
         .filter((f: any) => f.recommendation)
         .map((f: any) => f.recommendation),
-      missing_details: qualityAnalysis?.completeness?.missing_details || [],
+      missing_details: enhancedQualityAnalysis?.completeness?.missing_details || [],
       findings_by_category: {},
       findings_by_severity: {
         critical: issues.filter((i: any) => i.severity === 'critical'),
         warning: issues.filter((i: any) => i.severity === 'warning'),
         info: issues.filter((i: any) => i.severity === 'info')
       },
+      trade_scope_review: tradeScopeReview,
       ai_model: `single-${provider}`,
       processing_time_ms: 0,
       job_type: jobType
@@ -362,7 +407,7 @@ async function saveAndReturnResults(
   return NextResponse.json({
     success: true,
     items: itemsWithIds,
-    quality_analysis: qualityAnalysis,
+    quality_analysis: enhancedQualityAnalysis,
     meta: {
       provider,
       attempts: attempts || 1,
@@ -370,7 +415,7 @@ async function saveAndReturnResults(
       notes,
       reason,
       items_count: itemsWithIds.length,
-      quality_analysis_keys: Object.keys(qualityAnalysis || {}),
+      quality_analysis_keys: Object.keys(enhancedQualityAnalysis || {}),
       takeoff_analysis_id: takeoffAnalysis?.id,
       quality_analysis_id: qualityAnalysisRow?.id
     }

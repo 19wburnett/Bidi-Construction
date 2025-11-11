@@ -770,6 +770,7 @@ export interface Database {
           findings_by_category: any
           findings_by_severity: any
           page_findings: any
+          trade_scope_review: any
           ai_model: string | null
           processing_time_ms: number | null
           created_at: string
@@ -786,6 +787,7 @@ export interface Database {
           findings_by_category?: any
           findings_by_severity?: any
           page_findings?: any
+          trade_scope_review?: any
           ai_model?: string | null
           processing_time_ms?: number | null
           created_at?: string
@@ -802,6 +804,7 @@ export interface Database {
           findings_by_category?: any
           findings_by_severity?: any
           page_findings?: any
+          trade_scope_review?: any
           ai_model?: string | null
           processing_time_ms?: number | null
           created_at?: string

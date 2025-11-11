@@ -132,6 +132,42 @@ QUALITY_ANALYSIS FIELDS (use EXACT structure):
     "chunks_covered": string,
     "pages_covered": string,
     "method": string
+  },
+  "trade_scope_review": {
+    "items": [
+      {
+        "category": string,
+        "trade": string,
+        "status": "complete" | "partial" | "missing",
+        "status_icon": "✅" | "⚠️" | "❌",
+        "notes": string,
+        "page_refs": string[]
+      }
+    ],
+    "summary": {
+      "complete": number,
+      "partial": number,
+      "missing": number,
+      "notes": string
+    },
+    "raw": [
+      {
+        "category": string,
+        "trade": string,
+        "status": "complete" | "partial" | "missing",
+        "status_icon": "✅" | "⚠️" | "❌",
+        "notes": string,
+        "page_refs": string[]
+      },
+      {
+        "summary": {
+          "complete": number,
+          "partial": number,
+          "missing": number,
+          "notes": string
+        }
+      }
+    ]
   }
 }
 
@@ -144,7 +180,7 @@ INSTRUCTIONS:
 6. ALWAYS return both items array and quality_analysis object, even if empty arrays/objects.
 7. If dimensions are not visible, set dimensions: "Dimension not visible" and note in quality_analysis.completeness.
 8. If you make assumptions, document them in quality_analysis.audit_trail.method.
-9. Quality analysis should identify missing information, conflicts, and risks.
+9. Quality analysis should identify missing information, conflicts, risks, AND summarize each trade in trade_scope_review with status_icon and notes.
 
 DO NOT:
 - Return markdown code blocks

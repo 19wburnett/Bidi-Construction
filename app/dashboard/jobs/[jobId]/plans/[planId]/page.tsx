@@ -43,9 +43,19 @@ import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 import { CheckCircle2 } from 'lucide-react'
 import ScaleSettingsModal, { ScaleSetting } from '@/components/scale-settings-modal'
+import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-scope-review'
 
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
+
+type TradeScopeStatus = 'complete' | 'partial' | 'missing'
+
+type TradeScopeReviewSummary = {
+  complete: number
+  partial: number
+  missing: number
+  notes: string
+}
 
 export default function EnhancedPlanViewer() {
   const params = useParams()
@@ -477,6 +487,18 @@ export default function EnhancedPlanViewer() {
         
         // Extract quality_analysis from takeoff summary if it exists
         const qualityAnalysisFromTakeoff = takeoffAnalysis.summary?.quality_analysis
+        const normalizedTradeScopeReview = qualityAnalysisFromTakeoff
+          ? normalizeTradeScopeReview(
+              qualityAnalysisFromTakeoff.trade_scope_review,
+              qualityAnalysisFromTakeoff.risk_flags || []
+            )
+          : normalizeTradeScopeReview(null, [])
+        const normalizedQualityAnalysisFromTakeoff = qualityAnalysisFromTakeoff
+          ? {
+              ...qualityAnalysisFromTakeoff,
+              trade_scope_review: normalizedTradeScopeReview
+            }
+          : null
         
         setTakeoffResults({
           success: true,
@@ -490,13 +512,13 @@ export default function EnhancedPlanViewer() {
           results: {
             items: itemsWithIds,
             summary: takeoffAnalysis.summary || {},
-            quality_analysis: qualityAnalysisFromTakeoff // Include quality_analysis from takeoff
+            quality_analysis: normalizedQualityAnalysisFromTakeoff || undefined // Include quality analysis from takeoff
           }
         })
         
         // If quality_analysis is in takeoff results, populate quality tab
-        if (qualityAnalysisFromTakeoff) {
-          const issuesFromQA = qualityAnalysisFromTakeoff.risk_flags?.map((rf: any) => ({
+        if (normalizedQualityAnalysisFromTakeoff) {
+          const issuesFromQA = normalizedQualityAnalysisFromTakeoff.risk_flags?.map((rf: any) => ({
             id: crypto.randomUUID(),
             severity: rf.level === 'high' ? 'critical' : rf.level === 'medium' ? 'warning' : 'info',
             category: rf.category || 'general',
@@ -514,7 +536,7 @@ export default function EnhancedPlanViewer() {
             issues: issuesFromQA, // Top level for frontend compatibility
             results: {
               issues: issuesFromQA,
-              quality_analysis: qualityAnalysisFromTakeoff
+              quality_analysis: normalizedQualityAnalysisFromTakeoff
             }
           })
         }
@@ -568,6 +590,8 @@ export default function EnhancedPlanViewer() {
         const issuesWithIds = ensureIssueIds(issuesArray)
         
         // Build quality_analysis object from DB data
+        const tradeScopeReview = normalizeTradeScopeReview(qualityAnalysis.trade_scope_review, issuesArray)
+
         const qualityAnalysisObj = {
           completeness: {
             overall_score: qualityAnalysis.overall_score || 0.8,
@@ -596,7 +620,8 @@ export default function EnhancedPlanViewer() {
             chunks_processed: 1,
             coverage_percentage: 100,
             assumptions_made: []
-          }
+          },
+          trade_scope_review: tradeScopeReview
         }
         
         // Set issues at top level to match API response format for frontend display
@@ -1750,6 +1775,40 @@ export default function EnhancedPlanViewer() {
                               </p>
                             </div>
                           )}
+                          {qualityResults?.results?.quality_analysis?.trade_scope_review?.items?.length ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-gray-900">Trade Scope Review</h4>
+                                <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                                  <span>✅ {qualityResults.results.quality_analysis.trade_scope_review.summary.complete} complete</span>
+                                  <span>⚠️ {qualityResults.results.quality_analysis.trade_scope_review.summary.partial} partial</span>
+                                  <span>❌ {qualityResults.results.quality_analysis.trade_scope_review.summary.missing} missing</span>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {qualityResults.results.quality_analysis.trade_scope_review.items.map((entry: TradeScopeReviewEntry, idx: number) => (
+                                  <div key={`${entry.trade}-${idx}`} className="border rounded-md p-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-lg" aria-hidden>{entry.status_icon}</span>
+                                      <span className="font-semibold text-gray-900">{entry.trade}</span>
+                                      <Badge variant="outline" className="text-xs capitalize">{entry.category}</Badge>
+                                    </div>
+                                    {entry.notes && (
+                                      <div className="text-xs text-gray-600 mt-2">{entry.notes}</div>
+                                    )}
+                                    {entry.page_refs?.length ? (
+                                      <div className="text-[11px] text-gray-500 mt-1">Pages: {entry.page_refs.join(', ')}</div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                              {qualityResults.results.quality_analysis.trade_scope_review.summary.notes && (
+                                <p className="text-xs text-gray-500 italic">
+                                  {qualityResults.results.quality_analysis.trade_scope_review.summary.notes}
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
                           {qualityResults?.issues?.length ? (
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">

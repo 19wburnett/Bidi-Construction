@@ -7,6 +7,7 @@ import PDFParser from 'pdf2json'
 import type { ProjectMeta, Chunk, SheetIndex } from '@/types/ingestion'
 import { generateTemplateInstructions } from '@/lib/takeoff-template'
 import { Resend } from 'resend'
+import { normalizeTradeScopeReview } from '@/lib/trade-scope-review'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -456,40 +457,65 @@ export async function POST(request: NextRequest) {
     // Extract quality_analysis from consensusResult if it exists, or construct from issues
     // The consensus engine now extracts and merges quality_analysis from all models
     // This will be reused in the response, so construct once here
-    // Add confidence warning if overall confidence is low
     const overallConfidence = consensusResult.confidence || 0.8
     const confidenceWarning = overallConfidence < 0.6 
       ? `⚠️ LOW CONFIDENCE ANALYSIS (${(overallConfidence * 100).toFixed(0)}%) - Some items may need manual verification.`
       : ''
-    
-    const qualityAnalysisData = consensusResult.quality_analysis || {
-      completeness: {
-        overall_score: overallConfidence,
-        missing_sheets: [],
-        missing_dimensions: [],
-        missing_details: [],
-        incomplete_sections: [],
-        notes: confidenceWarning || 'Quality analysis included with takeoff'
-      },
-      consistency: {
-        scale_mismatches: [],
-        unit_conflicts: [],
-        dimension_contradictions: [],
-        schedule_vs_elevation_conflicts: [],
-        notes: 'No consistency issues detected'
-      },
-      risk_flags: consensusResult.issues?.map((issue: any) => ({
-        level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
-        category: issue.category || 'general',
-        description: issue.description || issue.detail || issue.message || '',
-        location: issue.location || '',
-        recommendation: issue.recommendation || ''
-      })) || [],
-      audit_trail: {
-        pages_analyzed: Array.from({ length: images.length }, (_, i) => i + 1),
-        chunks_processed: 1,
-        coverage_percentage: 100,
-        assumptions_made: []
+
+    const tradeScopeReview = normalizeTradeScopeReview(
+      consensusResult.quality_analysis?.trade_scope_review ?? consensusResult.trade_scope_review,
+      consensusResult.issues || [],
+      { defaultNotes: confidenceWarning || 'Trade scope review generated from consensus analysis' }
+    )
+
+    let qualityAnalysisData = consensusResult.quality_analysis
+      ? {
+          ...consensusResult.quality_analysis,
+          trade_scope_review: tradeScopeReview
+        }
+      : {
+          completeness: {
+            overall_score: overallConfidence,
+            missing_sheets: [],
+            missing_dimensions: [],
+            missing_details: [],
+            incomplete_sections: [],
+            notes: confidenceWarning || 'Quality analysis included with takeoff'
+          },
+          consistency: {
+            scale_mismatches: [],
+            unit_conflicts: [],
+            dimension_contradictions: [],
+            schedule_vs_elevation_conflicts: [],
+            notes: 'No consistency issues detected'
+          },
+          risk_flags: [],
+          audit_trail: {
+            pages_analyzed: Array.from({ length: images.length }, (_, i) => i + 1),
+            chunks_processed: 1,
+            coverage_percentage: 100,
+            assumptions_made: []
+          },
+          trade_scope_review: tradeScopeReview
+        }
+
+    if ((!qualityAnalysisData.risk_flags || qualityAnalysisData.risk_flags.length === 0) && (consensusResult.issues && consensusResult.issues.length > 0)) {
+      qualityAnalysisData = {
+        ...qualityAnalysisData,
+        risk_flags: consensusResult.issues.map((issue: any) => ({
+          level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
+          category: issue.category || 'general',
+          description: issue.description || issue.detail || issue.message || '',
+          location: issue.location || '',
+          recommendation: issue.recommendation || ''
+        }))
+      }
+    }
+
+    if (!qualityAnalysisData.trade_scope_review) {
+      qualityAnalysisData = {
+        ...qualityAnalysisData,
+        trade_scope_review: tradeScopeReview
       }
     }
 
@@ -566,6 +592,7 @@ export async function POST(request: NextRequest) {
             warning: warningIssues,
             info: infoIssues
           },
+          trade_scope_review: qualityAnalysisData.trade_scope_review,
           ai_model: 'enhanced-consensus',
           processing_time_ms: processingTime,
           job_type: finalJobType
@@ -731,6 +758,42 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
           "item": "Item or measurement",
           "assumption": "What was assumed",
           "reason": "Why assumption was needed"
+        }
+      ]
+    },
+    "trade_scope_review": {
+      "items": [
+        {
+          "category": "Structural & Sitework",
+          "trade": "Surveying",
+          "status": "complete|partial|missing",
+          "status_icon": "✅|⚠️|❌",
+          "notes": "Summary of what is missing or complete for this trade",
+          "page_refs": ["P-1"]
+        }
+      ],
+      "summary": {
+        "complete": 0,
+        "partial": 0,
+        "missing": 0,
+        "notes": "High-level summary of trade coverage and missing details"
+      },
+      "raw": [
+        {
+          "category": "Structural & Sitework",
+          "trade": "Surveying",
+          "status": "missing",
+          "status_icon": "❌",
+          "notes": "Example entry mirroring the trade scope list",
+          "page_refs": ["P-1"]
+        },
+        {
+          "summary": {
+            "complete": 0,
+            "partial": 0,
+            "missing": 1,
+            "notes": "Summary entry must always be included"
+          }
         }
       ]
     }
@@ -1016,6 +1079,7 @@ QUALITY ANALYSIS REQUIREMENTS:
 9. Check consistency - any conflicts or contradictions?
 10. Identify risk flags - safety, code, quality concerns
 11. Document audit trail - what was analyzed, what assumptions were made
+12. Build a detailed trade_scope_review list summarizing each trade's status (complete/partial/missing), including page references and a summary row with counts
 
 IMPORTANT:
 - Be SPECIFIC: "2x6 Top Plate" not just "lumber"
@@ -1033,6 +1097,7 @@ QUALITY ANALYSIS REQUIREMENTS - POPULATE ALL FIELDS:
 - consistency: Check for conflicts (scales, units, dimensions, schedules)
 - risk_flags: Identify potential problems (safety, code, budget, timeline, quality)
 - audit_trail: Document coverage (pages analyzed, chunks, coverage %, assumptions)
+- trade_scope_review: Provide an itemized list of categories/trades with status_icon (✅ complete, ⚠️ partial, ❌ missing), supporting notes, page references, and a summary entry with counts
 
 CRITICAL RESPONSE REQUIREMENTS:
 1. You MUST respond with ONLY the JSON object - no explanatory text

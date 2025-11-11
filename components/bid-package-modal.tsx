@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -34,6 +34,8 @@ import {
 } from 'lucide-react'
 import { modalBackdrop, modalContent, successCheck, staggerContainer, staggerItem } from '@/lib/animations'
 import { BidPackage, Job } from '@/types/takeoff'
+
+const normalizeTrade = (trade?: string | null) => (trade || '').trim().toLowerCase()
 
 interface BidPackageModalProps {
   jobId: string
@@ -110,7 +112,6 @@ export default function BidPackageModal({
   const [takeoffItems, setTakeoffItems] = useState<TakeoffItem[]>([])
   const [selectedTrades, setSelectedTrades] = useState<string[]>([])
   const [description, setDescription] = useState('')
-  const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectedSubs, setSelectedSubs] = useState<string[]>([])
   const [deadline, setDeadline] = useState('')
   const [loading, setLoading] = useState(false)
@@ -132,32 +133,12 @@ export default function BidPackageModal({
     { name: '', email: '', trade_category: '', location: '' }
   )
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [lineItemSearch, setLineItemSearch] = useState('')
+  const [selectedTradeLineItems, setSelectedTradeLineItems] = useState<Record<string, string[]>>({})
+  const [activeTrade, setActiveTrade] = useState<string | null>(null)
   
   const { user } = useAuth()
   const supabase = createClient()
-
-  const DEFAULT_LINE_ITEMS: Record<string, Array<TakeoffItem>> = {
-    Electrical: [
-      { id: 'def-elec-1', category: 'Electrical', description: 'Licensed electrician labor', quantity: 8, unit: 'hours', unit_cost: 95 },
-      { id: 'def-elec-2', category: 'Electrical', description: 'Standard 120V outlet', quantity: 10, unit: 'units', unit_cost: 75 },
-      { id: 'def-elec-3', category: 'Electrical', description: 'Switch and plate', quantity: 6, unit: 'units', unit_cost: 65 }
-    ],
-    Drywall: [
-      { id: 'def-dw-1', category: 'Drywall', description: 'Drywall installation', quantity: 500, unit: 'sq ft', unit_cost: 1.75 },
-      { id: 'def-dw-2', category: 'Drywall', description: 'Tape and mud to Level 4', quantity: 500, unit: 'sq ft', unit_cost: 0.5 }
-    ],
-    Concrete: [
-      { id: 'def-con-1', category: 'Concrete', description: 'Concrete slab 4in with rebar', quantity: 200, unit: 'sq ft', unit_cost: 6.5 },
-      { id: 'def-con-2', category: 'Concrete', description: 'Footings 18x8', quantity: 80, unit: 'linear ft', unit_cost: 12 }
-    ],
-    Plumbing: [
-      { id: 'def-pl-1', category: 'Plumbing', description: 'Water line 3/4in copper', quantity: 60, unit: 'linear ft', unit_cost: 8 },
-      { id: 'def-pl-2', category: 'Plumbing', description: 'Toilet install', quantity: 1, unit: 'units', unit_cost: 350 }
-    ],
-    'General Contractor': [
-      { id: 'def-gc-1', category: 'General Contractor', description: 'Professional labor', quantity: 8, unit: 'hours', unit_cost: 75 }
-    ]
-  }
 
   const [newItem, setNewItem] = useState<{ description: string; quantity: string; unit: string; unit_cost: string }>({
     description: '',
@@ -175,6 +156,33 @@ export default function BidPackageModal({
       setSelectedTrades(prev => prev.filter(t => t !== trimmed))
     }
   }, [otherSelected, customTrade])
+
+  useEffect(() => {
+    setSelectedTradeLineItems(prev => {
+      if (selectedTrades.length === 0) {
+        return Object.keys(prev).length === 0 ? prev : {}
+      }
+      const next: Record<string, string[]> = {}
+      let changed = Object.keys(prev).length !== selectedTrades.length
+      for (const trade of selectedTrades) {
+        const existing = prev[trade] ?? []
+        next[trade] = existing
+        if (!prev[trade]) changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [selectedTrades])
+
+  useEffect(() => {
+    if (selectedTrades.length === 0) {
+      setActiveTrade(null)
+      return
+    }
+    setActiveTrade(prev => {
+      if (prev && selectedTrades.includes(prev)) return prev
+      return selectedTrades[0]
+    })
+  }, [selectedTrades])
 
   useEffect(() => {
     if (isOpen && jobId) {
@@ -250,27 +258,30 @@ export default function BidPackageModal({
     setError('')
 
     try {
-      // Gather selected items (include defaults + custom by using filteredTakeoffItems)
-      const selectedLineItems = filteredTakeoffItems
-        .filter(item => selectedItems.includes(item.id))
-        .map(item => ({
-          id: item.id,
-          category: item.category,
-          description: item.description,
-          quantity: item.quantity,
-          unit: item.unit,
-          unit_cost: item.unit_cost
-        }))
+      // Create one bid package per selected trade based on assigned line items
+      const rowsToInsert = selectedTrades.map(trade => {
+        const assignedIds = selectedTradeLineItems[trade] ?? []
+        const minimumLineItems = assignedIds
+          .map(id => takeoffItemById[id])
+          .filter((item): item is TakeoffItem => Boolean(item))
+          .map(item => ({
+            id: item.id,
+            category: trade,
+            description: item.description,
+            quantity: item.quantity,
+            unit: item.unit,
+            unit_cost: item.unit_cost
+          }))
 
-      // Create one bid package per selected trade
-      const rowsToInsert = selectedTrades.map(trade => ({
-        job_id: jobId,
-        trade_category: trade,
-        description: description || null,
-        minimum_line_items: selectedLineItems.filter(li => li.category === trade),
-        status: 'draft',
-        deadline: deadline ? new Date(deadline).toISOString() : null
-      }))
+        return {
+          job_id: jobId,
+          trade_category: trade,
+          description: description || null,
+          minimum_line_items: minimumLineItems,
+          status: 'draft',
+          deadline: deadline ? new Date(deadline).toISOString() : null
+        }
+      })
 
       const { data, error: insertError } = await supabase
         .from('bid_packages')
@@ -281,11 +292,15 @@ export default function BidPackageModal({
 
       // Send emails to selected subcontractors (grouped per trade)
       if (selectedSubs.length > 0) {
+        const normalizedLookup = new Map(
+          selectedTrades.map(trade => [normalizeTrade(trade), trade])
+        )
         const selectedSubcontractors = subcontractors.filter(sub => selectedSubs.includes(sub.id))
         const byTrade: Record<string, Subcontractor[]> = {}
         for (const sub of selectedSubcontractors) {
-          if (!byTrade[sub.trade_category]) byTrade[sub.trade_category] = []
-          byTrade[sub.trade_category].push(sub)
+          const canonicalTrade = normalizedLookup.get(normalizeTrade(sub.trade_category)) ?? sub.trade_category
+          if (!byTrade[canonicalTrade]) byTrade[canonicalTrade] = []
+          byTrade[canonicalTrade].push(sub)
         }
         console.log('Would send emails grouped by trade:', byTrade)
       }
@@ -312,23 +327,169 @@ export default function BidPackageModal({
     setStep(1)
     setSelectedTrades([])
     setDescription('')
-    setSelectedItems([])
     setSelectedSubs([])
     setDeadline('')
     setError('')
+    setSelectedTradeLineItems({})
+    setActiveTrade(null)
+    setLineItemSearch('')
     onClose()
   }
 
-  const filteredTakeoffItems = selectedTrades.length > 0
-    ? [
-        // Merge defaults for each selected trade
-        ...selectedTrades.flatMap(trade => (DEFAULT_LINE_ITEMS[trade] as TakeoffItem[]) || []),
-        ...takeoffItems.filter(item => selectedTrades.includes(item.category))
-      ]
-    : [
-        ...((DEFAULT_LINE_ITEMS['General Contractor'] as TakeoffItem[]) || []),
-        ...takeoffItems
-      ]
+  const takeoffItemById = useMemo(() => {
+    const map: Record<string, TakeoffItem> = {}
+    for (const item of takeoffItems) {
+      map[item.id] = item
+    }
+    return map
+  }, [takeoffItems])
+
+  const filteredTakeoffItems = takeoffItems
+  const visibleTakeoffItems = useMemo(() => {
+    const normalizedSearch = lineItemSearch.trim().toLowerCase()
+    if (!normalizedSearch) return filteredTakeoffItems
+    return filteredTakeoffItems.filter(item => {
+      const description = item.description?.toLowerCase() ?? ''
+      const category = item.category?.toLowerCase() ?? ''
+      const unit = item.unit?.toLowerCase() ?? ''
+      return (
+        description.includes(normalizedSearch) ||
+        category.includes(normalizedSearch) ||
+        unit.includes(normalizedSearch)
+      )
+    })
+  }, [filteredTakeoffItems, lineItemSearch])
+
+  const lineItemsForActiveTrade = useMemo(() => {
+    if (!activeTrade) return visibleTakeoffItems
+    const normalized = normalizeTrade(activeTrade)
+    const assignedIds = new Set(selectedTradeLineItems[activeTrade] ?? [])
+
+    const prioritized: TakeoffItem[] = []
+    const remaining: TakeoffItem[] = []
+
+    for (const item of visibleTakeoffItems) {
+      const matchesTrade = normalized && normalizeTrade(item.category) === normalized
+      if (matchesTrade || assignedIds.has(item.id)) {
+        prioritized.push(item)
+      } else {
+        remaining.push(item)
+      }
+    }
+
+    return [...prioritized, ...remaining]
+  }, [activeTrade, visibleTakeoffItems, selectedTradeLineItems])
+  const canonicalTradeByNormalized = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const trade of selectedTrades) {
+      const normalized = normalizeTrade(trade)
+      if (!normalized) continue
+      if (!map[normalized]) {
+        map[normalized] = trade
+      }
+    }
+    return map
+  }, [selectedTrades])
+
+  const selectedLineItems = useMemo(() => {
+    const seen = new Set<string>()
+    const items: TakeoffItem[] = []
+    for (const ids of Object.values(selectedTradeLineItems)) {
+      for (const id of ids) {
+        if (seen.has(id)) continue
+        const item = takeoffItemById[id]
+        if (item) {
+          items.push(item)
+          seen.add(id)
+        }
+      }
+    }
+    return items
+  }, [selectedTradeLineItems, takeoffItemById])
+
+  const totalSelectedLineItemCount = selectedLineItems.length
+
+  const lineItemsByTrade = useMemo(() => {
+    const map: Record<string, TakeoffItem[]> = {}
+    for (const [trade, ids] of Object.entries(selectedTradeLineItems)) {
+      const items = ids
+        .map(id => takeoffItemById[id])
+        .filter((item): item is TakeoffItem => Boolean(item))
+      map[trade] = items
+    }
+    return map
+  }, [selectedTradeLineItems, takeoffItemById])
+
+  const tradeAssignmentByItemId = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const [trade, ids] of Object.entries(selectedTradeLineItems)) {
+      for (const id of ids) {
+        map[id] = trade
+      }
+    }
+    return map
+  }, [selectedTradeLineItems])
+
+  const selectedSubcontractorsByTrade = useMemo(() => {
+    const map: Record<string, Subcontractor[]> = {}
+    for (const sub of subcontractors) {
+      if (!selectedSubs.includes(sub.id)) continue
+      const normalized = normalizeTrade(sub.trade_category)
+      const canonicalTrade = canonicalTradeByNormalized[normalized]
+      if (!canonicalTrade) continue
+      if (!map[canonicalTrade]) {
+        map[canonicalTrade] = []
+      }
+      map[canonicalTrade].push(sub)
+    }
+    return map
+  }, [subcontractors, selectedSubs, canonicalTradeByNormalized])
+
+  const unassignedLineItems = useMemo(() => {
+    const items: TakeoffItem[] = []
+    for (const [trade, ids] of Object.entries(selectedTradeLineItems)) {
+      if (!selectedTrades.includes(trade)) {
+        ids.forEach(id => {
+          const item = takeoffItemById[id]
+          if (item) items.push(item)
+        })
+      }
+    }
+    return items
+  }, [selectedTradeLineItems, selectedTrades, takeoffItemById])
+
+  const handleToggleLineItemSelection = (trade: string | null, itemId: string, checked: boolean) => {
+    if (!trade) return
+    setSelectedTradeLineItems(prev => {
+      if (!selectedTrades.includes(trade)) return prev
+      let changed = false
+      const next: Record<string, string[]> = {}
+      for (const tradeName of selectedTrades) {
+        const existing = prev[tradeName] ?? []
+        if (tradeName === trade) {
+          const set = new Set(existing)
+          if (checked) {
+            if (!set.has(itemId)) {
+              set.add(itemId)
+              changed = true
+            }
+          } else if (set.delete(itemId)) {
+            changed = true
+          }
+          next[tradeName] = Array.from(set)
+        } else if (checked && existing.includes(itemId)) {
+          const filtered = existing.filter(id => id !== itemId)
+          if (filtered.length !== existing.length) {
+            changed = true
+          }
+          next[tradeName] = filtered
+        } else {
+          next[tradeName] = existing
+        }
+      }
+      return changed ? next : prev
+    })
+  }
 
   const filteredSubcontractors = subcontractors
     .filter(sub => (includeMyContacts && sub.source === 'gc') || (includeBidiDirectory && sub.source === 'bidi'))
@@ -369,8 +530,8 @@ export default function BidPackageModal({
       return jobs >= minJobs
     })
 
-  const canProceedToStep2 = selectedTrades.length > 0 && description.trim()
-  const canProceedToStep3 = selectedItems.length > 0
+  const canProceedToStep2 = selectedTrades.length > 0
+  const canProceedToStep3 = totalSelectedLineItemCount > 0
   const canCreatePackage = selectedSubs.length > 0
 
   if (!isOpen) return null
@@ -390,7 +551,7 @@ export default function BidPackageModal({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-[95vw] md:w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-lg shadow-xl w-[80vw] max-w-6xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="border-0 shadow-none">
@@ -458,7 +619,7 @@ export default function BidPackageModal({
                           value={tradeSearch}
                           onChange={(e) => setTradeSearch(e.target.value)}
                         />
-                        <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+                        <div className="grid grid-cols-4 gap-2 max-h-56 overflow-y-auto">
                           {TRADE_CATEGORIES.filter(trade => trade.toLowerCase().includes(tradeSearch.toLowerCase())).map((trade) => (
                             <label key={trade} className="flex items-center space-x-2 p-2 border rounded-md hover:bg-gray-50">
                               <Checkbox
@@ -490,7 +651,7 @@ export default function BidPackageModal({
                   </motion.div>
 
                       <motion.div variants={staggerItem} className="space-y-3">
-                        <Label>Package Description *</Label>
+                        <Label>Package Description</Label>
                         <Textarea
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
@@ -532,54 +693,118 @@ export default function BidPackageModal({
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <h3 className="text-base md:text-lg font-semibold">Minimum Line Items</h3>
                         <Badge variant="outline" className="text-xs md:text-sm">
-                          {selectedItems.length} selected
+                          {totalSelectedLineItemCount} selected
                         </Badge>
                       </div>
 
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {selectedTrades.map(trade => {
+                            const count = (selectedTradeLineItems[trade] ?? []).length
+                            const isActive = trade === activeTrade
+                            return (
+                              <Button
+                                key={trade}
+                                type="button"
+                                variant={isActive ? 'default' : 'outline'}
+                                size="sm"
+                                onClick={() => setActiveTrade(trade)}
+                                className="flex items-center gap-2"
+                              >
+                                <span className="truncate max-w-[140px]">{trade}</span>
+                                <Badge variant={isActive ? 'secondary' : 'outline'} className="text-[11px]">
+                                  {count}
+                                </Badge>
+                              </Button>
+                            )
+                          })}
+                          {selectedTrades.length === 0 && (
+                            <div className="text-sm text-gray-500">
+                              Add at least one trade in Step 1 to assign line items.
+                            </div>
+                          )}
+                        </div>
+                        {selectedTrades.length > 0 && !activeTrade && (
+                          <div className="text-sm text-gray-500">
+                            Select a trade to start assigning line items.
+                          </div>
+                        )}
+                      </div>
+
+                      <Input
+                        placeholder="Search line items..."
+                        value={lineItemSearch}
+                        onChange={(e) => setLineItemSearch(e.target.value)}
+                        disabled={!activeTrade}
+                      />
+
                       <div className="space-y-2 md:space-y-3 max-h-64 overflow-y-auto">
-                        {filteredTakeoffItems.map((item) => {
-                          const isSelected = selectedItems.includes(item.id)
-                          const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : null
-                          return (
-                            <motion.div
-                              key={item.id}
-                              variants={staggerItem}
-                              className={`flex items-center space-x-3 p-3 border rounded-lg transition-colors ${
-                                isSelected ? 'bg-orange-50 border-orange-300' : 'hover:bg-gray-50'
-                              }`}
-                            >
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={(checked: boolean) => {
-                                  if (checked) {
-                                    setSelectedItems(prev => [...prev, item.id])
-                                  } else {
-                                    setSelectedItems(prev => prev.filter(id => id !== item.id))
-                                  }
-                                }}
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium">{item.description}</div>
-                                <div className="text-sm text-gray-600">
-                                  {item.quantity} {item.unit}
-                                  {item.unit_cost && ` • $${item.unit_cost.toFixed(2)}/${item.unit}`}
-                                </div>
-                                {isSelected && totalCost !== null && (
-                                  <div className="text-sm font-semibold text-green-600 mt-1">
-                                    Total: ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {activeTrade ? (
+                          lineItemsForActiveTrade.map((item) => {
+                            const assignedTrade = tradeAssignmentByItemId[item.id]
+                            const isSelected = assignedTrade === activeTrade
+                            const isAssignedElsewhere = assignedTrade && assignedTrade !== activeTrade
+                            const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : null
+                            return (
+                              <motion.div
+                                key={item.id}
+                                variants={staggerItem}
+                                className={`flex flex-col md:flex-row md:items-center md:space-x-3 p-3 border rounded-lg transition-colors ${
+                                  isSelected
+                                    ? 'bg-orange-50 border-orange-300'
+                                    : isAssignedElsewhere
+                                      ? 'bg-gray-50 border-gray-300'
+                                      : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="flex items-start md:items-center gap-3">
+                                  <Checkbox
+                                    checked={isSelected}
+                                    onCheckedChange={(checked) =>
+                                      handleToggleLineItemSelection(activeTrade, item.id, checked === true)
+                                    }
+                                  />
+                                  <div className="flex-1">
+                                    <div className="font-medium">{item.description}</div>
+                                    <div className="text-sm text-gray-600">
+                                      {item.quantity} {item.unit}
+                                      {item.unit_cost && ` • $${item.unit_cost.toFixed(2)}/${item.unit}`}
+                                    </div>
+                                    {totalCost !== null && (
+                                      <div className="text-sm font-semibold text-green-600 mt-1">
+                                        Total: ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                              <Badge variant="outline" className="text-xs">
-                                {item.category}
-                              </Badge>
-                            </motion.div>
-                          )
-                        })}
+                                </div>
+                                <div className="flex items-center justify-between mt-3 md:mt-0 md:justify-end gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {item.category || 'Uncategorized'}
+                                  </Badge>
+                                  {isAssignedElsewhere && (
+                                    <Badge variant="secondary" className="text-[11px] text-gray-700 bg-gray-200">
+                                      Assigned to {assignedTrade}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )
+                          })
+                        ) : (
+                          <div className="p-6 text-center text-sm text-gray-500 border rounded-lg">
+                            Select a trade to view available line items.
+                          </div>
+                        )}
+
+                        {activeTrade && lineItemsForActiveTrade.length === 0 && (
+                          <div className="p-6 text-center text-sm text-gray-500 border rounded-lg">
+                            No line items match your search for this trade.
+                          </div>
+                        )}
                       </div>
 
                       {/* Selected Items Summary */}
-                      {selectedItems.length > 0 && (
+                      {totalSelectedLineItemCount > 0 && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -587,51 +812,60 @@ export default function BidPackageModal({
                         >
                           <h4 className="font-semibold text-blue-900 mb-3 flex items-center">
                             <FileText className="h-4 w-4 mr-2" />
-                            Selected Items Summary ({selectedItems.length})
+                            Selected Items Summary ({totalSelectedLineItemCount})
                           </h4>
-                          <div className="space-y-2 max-h-48 overflow-y-auto">
-                            {filteredTakeoffItems
-                              .filter(item => selectedItems.includes(item.id))
-                              .map((item) => {
-                                const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : null
-                                return (
-                                  <div
-                                    key={item.id}
-                                    className="flex items-start justify-between p-2 bg-white rounded border border-blue-100"
-                                  >
-                                    <div className="flex-1">
-                                      <div className="font-medium text-sm">{item.description}</div>
-                                      <div className="text-xs text-gray-600 mt-1">
-                                        <span className="font-mono">{item.quantity} {item.unit}</span>
-                                        {item.unit_cost && (
-                                          <>
-                                            {' × '}
-                                            <span className="font-mono">${item.unit_cost.toFixed(2)}</span>
-                                            {'/'}{item.unit}
-                                          </>
-                                        )}
-                                      </div>
-                                      <Badge variant="outline" className="text-xs mt-1">
-                                        {item.category}
-                                      </Badge>
-                                    </div>
-                                    {totalCost !== null && (
-                                      <div className="ml-4 text-right">
-                                        <div className="font-bold text-green-600">
-                                          ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </div>
-                                      </div>
-                                    )}
+                          <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                            {selectedTrades.map(trade => {
+                              const items = lineItemsByTrade[trade] ?? []
+                              if (items.length === 0) return null
+                              return (
+                                <div key={trade} className="bg-white border border-blue-100 rounded-lg p-3 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <Badge variant="outline" className="text-xs">{trade}</Badge>
+                                    <span className="text-xs text-gray-500">{items.length} item{items.length === 1 ? '' : 's'}</span>
                                   </div>
-                                )
-                              })}
+                                  <ul className="space-y-2">
+                                    {items.map(item => {
+                                      const totalCost = item.unit_cost ? item.quantity * item.unit_cost : null
+                                      const originalMatchesTrade = normalizeTrade(item.category) === normalizeTrade(trade)
+                                      return (
+                                        <li key={item.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                                          <div>
+                                            <div className="font-medium text-sm">{item.description}</div>
+                                            <div className="text-xs text-gray-600">
+                                              <span className="font-mono">{item.quantity} {item.unit}</span>
+                                              {item.unit_cost && (
+                                                <>
+                                                  {' × '}
+                                                  <span className="font-mono">${item.unit_cost.toFixed(2)}</span>
+                                                  {'/'}{item.unit}
+                                                </>
+                                              )}
+                                              {!originalMatchesTrade && (
+                                                <span className="ml-2 text-amber-600">
+                                                  Source category: {item.category || 'Uncategorized'}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                          {totalCost !== null && (
+                                            <div className="text-right text-xs md:text-sm font-semibold text-green-600">
+                                              ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </div>
+                                          )}
+                                        </li>
+                                      )
+                                    })}
+                                  </ul>
+                                </div>
+                              )
+                            })}
                           </div>
                           <div className="mt-3 pt-3 border-t border-blue-300 flex items-center justify-between">
                             <span className="font-semibold text-blue-900">Grand Total:</span>
                             <span className="text-xl font-bold text-green-600">
                               $
-                              {filteredTakeoffItems
-                                .filter(item => selectedItems.includes(item.id))
+                              {selectedLineItems
                                 .reduce((sum, item) => {
                                   const totalCost = item.unit_cost ? (item.quantity * item.unit_cost) : 0
                                   return sum + totalCost
@@ -647,17 +881,18 @@ export default function BidPackageModal({
                         <h4 className="font-semibold text-xs md:text-sm">Add Custom Line Item</h4>
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                           <Select
-                            value={selectedTrades[0] || ''}
+                            value={activeTrade ?? ''}
                             onValueChange={(val) => {
-                              // Reorder so chosen trade becomes first (used as default for new custom item)
-                              setSelectedTrades(prev => [val, ...prev.filter(t => t !== val)])
+                              if (!selectedTrades.includes(val)) return
+                              setActiveTrade(val)
                             }}
+                            disabled={selectedTrades.length === 0}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Trade" />
                             </SelectTrigger>
                             <SelectContent>
-                              {(selectedTrades.length > 0 ? selectedTrades : [...TRADE_CATEGORIES, ...(customTrade.trim() && !TRADE_CATEGORIES.includes(customTrade.trim()) ? [customTrade.trim()] : [])]).map((trade) => (
+                              {selectedTrades.map((trade) => (
                                 <SelectItem key={trade} value={trade}>
                                   {trade}
                                 </SelectItem>
@@ -689,19 +924,36 @@ export default function BidPackageModal({
                           <Button
                             variant="outline"
                             onClick={() => {
-                              if (selectedTrades.length === 0 || !newItem.description) return
+                              if (!activeTrade || !newItem.description) return
                               const qty = Number(newItem.quantity) || 1
                               const unitCost = newItem.unit_cost ? Number(newItem.unit_cost) : undefined
                               const created: TakeoffItem = {
                                 id: `custom-${Date.now()}`,
-                                category: selectedTrades[0],
+                                category: activeTrade,
                                 description: newItem.description,
                                 quantity: qty,
                                 unit: newItem.unit || 'unit',
                                 unit_cost: unitCost
                               }
                               setTakeoffItems(prev => [created, ...prev])
-                              setSelectedItems(prev => [created.id, ...prev])
+                              setSelectedTradeLineItems(prev => {
+                                if (!selectedTrades.includes(activeTrade)) return prev
+                                const next: Record<string, string[]> = {}
+                                let changed = false
+                                for (const trade of selectedTrades) {
+                                  const existing = prev[trade] ?? []
+                                  if (trade === activeTrade) {
+                                    const set = new Set(existing)
+                                    const sizeBefore = set.size
+                                    set.add(created.id)
+                                    if (set.size !== sizeBefore) changed = true
+                                    next[trade] = Array.from(set)
+                                  } else {
+                                    next[trade] = existing
+                                  }
+                                }
+                                return changed ? next : prev
+                              })
                               setNewItem({ description: '', quantity: '', unit: '', unit_cost: '' })
                             }}
                           >
@@ -770,6 +1022,97 @@ export default function BidPackageModal({
                           </Button>
                         </div>
                       </div>
+
+                      {(selectedTrades.length > 0 || totalSelectedLineItemCount > 0 || selectedSubs.length > 0) && (
+                        <div className="p-3 md:p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-sm md:text-base font-semibold text-gray-900 flex items-center gap-2">
+                              <Package className="h-4 w-4 text-orange-600" />
+                              Trade Package Summary
+                            </h4>
+                            <span className="text-xs text-gray-500">
+                              Line items are grouped by their assigned trade.
+                            </span>
+                          </div>
+                          <div className="space-y-3">
+                            {selectedTrades.map(trade => {
+                              const tradeLineItems = lineItemsByTrade[trade] || []
+                              const tradeSubs = selectedSubcontractorsByTrade[trade] || []
+                              return (
+                                <div key={trade} className="p-3 border border-gray-200 bg-white rounded-lg space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="font-semibold text-gray-900">{trade}</div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                                      <Badge variant="outline" className="text-xs">
+                                        {tradeLineItems.length} line item{tradeLineItems.length === 1 ? '' : 's'}
+                                      </Badge>
+                                      <Badge variant="outline" className="text-xs">
+                                        {tradeSubs.length} subcontractor{tradeSubs.length === 1 ? '' : 's'}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                  {tradeLineItems.length > 0 ? (
+                                    <ul className="text-xs md:text-sm text-gray-700 list-disc pl-4 space-y-1">
+                                      {tradeLineItems.map(item => {
+                                        const totalCost = item.unit_cost ? item.quantity * item.unit_cost : null
+                                        const originalMatchesTrade = normalizeTrade(item.category) === normalizeTrade(trade)
+                                        return (
+                                          <li key={item.id} className="flex flex-col gap-1">
+                                            <span>{item.description}</span>
+                                            <span className="text-gray-500">
+                                              ({item.quantity} {item.unit}
+                                              {item.unit_cost ? ` @ $${item.unit_cost}/${item.unit}` : ''}
+                                              )
+                                              {!originalMatchesTrade && (
+                                                <span className="ml-1 text-amber-600">
+                                                  Source category: {item.category || 'Uncategorized'}
+                                                </span>
+                                              )}
+                                              {totalCost !== null && (
+                                                <span className="ml-1 text-green-600 font-medium">
+                                                  = ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                              )}
+                                            </span>
+                                          </li>
+                                        )
+                                      })}
+                                    </ul>
+                                  ) : (
+                                    <div className="text-xs text-gray-500 italic">
+                                      No line items currently mapped to this trade. Select this trade in Step 2 to assign line items.
+                                    </div>
+                                  )}
+                                  {tradeSubs.length > 0 && (
+                                    <div className="text-xs text-gray-600">
+                                      <span className="font-medium text-gray-700">Recipients:</span>{' '}
+                                      {tradeSubs.map(sub => sub.name).join(', ')}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                            {unassignedLineItems.length > 0 && (
+                              <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs md:text-sm text-amber-900 space-y-1">
+                                <div className="font-semibold">Line items without a matching selected trade</div>
+                                <p>
+                                  These items will not be included in any bid package unless you add a trade that matches their category:
+                                </p>
+                                <ul className="list-disc pl-4 space-y-1">
+                                  {unassignedLineItems.map(item => (
+                                    <li key={item.id}>
+                                      {item.description}{' '}
+                                      <span className="text-amber-700">
+                                        ({item.category || 'Uncategorized'})
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Filters & directory toggles */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3">
@@ -956,6 +1299,17 @@ export default function BidPackageModal({
                                   </>
                                 )}
                               </div>
+                              {(() => {
+                                const tradeKey = normalizeTrade(sub.trade_category)
+                                const canonicalTrade = canonicalTradeByNormalized[tradeKey]
+                                const itemsForSub = canonicalTrade ? lineItemsByTrade[canonicalTrade] || [] : []
+                                return itemsForSub.length > 0 ? (
+                                  <div className="mt-2 text-xs text-gray-500">
+                                    <span className="font-semibold text-gray-600">Assigned line items:</span>{' '}
+                                    {itemsForSub.map(item => item.description).join(', ')}
+                                  </div>
+                                ) : null
+                              })()}
                             </div>
                             {sub.website_url && (
                               <Button asChild variant="secondary" size="sm">
@@ -1026,10 +1380,11 @@ export default function BidPackageModal({
 
                             <div className="space-y-6">
                               {selectedTrades.map((trade) => {
-                                const recipients = subcontractors
-                                  .filter(sub => selectedSubs.includes(sub.id) && (sub.trade_category || '').trim().toLowerCase() === trade.trim().toLowerCase())
-                                const lineItems = filteredTakeoffItems
-                                  .filter(item => selectedItems.includes(item.id) && item.category === trade)
+                                const recipients = selectedSubcontractorsByTrade[trade] ?? []
+                                const assignedIds = selectedTradeLineItems[trade] ?? []
+                                const lineItems = assignedIds
+                                  .map(id => takeoffItemById[id])
+                                  .filter((item): item is TakeoffItem => Boolean(item))
                                 const subject = `${job?.name || 'Project'} - Bid Request: ${trade}`
                                 const prettyDeadline = deadline ? new Date(deadline).toLocaleString() : 'No deadline set'
                                 const attachments = [

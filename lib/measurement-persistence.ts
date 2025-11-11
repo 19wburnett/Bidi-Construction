@@ -316,3 +316,5 @@ export class MeasurementPersistence {
 export const isMeasurementDrawing = (drawing: Drawing): boolean =>
   MEASUREMENT_TYPES.has(drawing.type)
 
+
+
