@@ -44,6 +44,7 @@ import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 import { CheckCircle2 } from 'lucide-react'
 import ScaleSettingsModal, { ScaleSetting } from '@/components/scale-settings-modal'
 import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-scope-review'
+import { getJobForUser } from '@/lib/job-access'
 
 
 type AnalysisMode = 'takeoff' | 'quality' | 'comments'
@@ -311,16 +312,16 @@ export default function EnhancedPlanViewer() {
     try {
       setLoading(true)
 
-      // Load job details
-      const { data: jobData, error: jobError } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('id', jobId)
-        .eq('user_id', user?.id)
-        .single()
+      if (!user) {
+        throw new Error('User not authenticated')
+      }
 
-      if (jobError) throw jobError
-      setJob(jobData)
+      // Load job details via membership
+      const membership = await getJobForUser(supabase, jobId, user.id, '*')
+      if (!membership?.job) {
+        throw new Error('Job not found or access denied')
+      }
+      setJob(membership.job as Job)
 
       // Load plan details
       const { data: planData, error: planError } = await supabase
@@ -328,10 +329,12 @@ export default function EnhancedPlanViewer() {
         .select('*')
         .eq('id', planId)
         .eq('job_id', jobId)
-        .single()
+        .maybeSingle()
 
-      if (planError) throw planError
-      setPlan(planData)
+      if (planError || !planData) {
+        throw planError || new Error('Plan not found or access denied')
+      }
+      setPlan(planData as Plan)
 
       // Get signed URL for PDF
       if (planData?.file_path) {

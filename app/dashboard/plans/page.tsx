@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { listJobsForUser } from '@/lib/job-access'
 
 interface Plan {
   id: string
@@ -52,6 +53,7 @@ interface Plan {
 export default function PlansPage() {
   const router = useRouter()
   const { user } = useAuth()
+  const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [plans, setPlans] = useState<Plan[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -74,13 +76,24 @@ export default function PlansPage() {
 
   async function loadPlans() {
     try {
-      const supabase = createClient()
-      
-      const { data, error } = await supabase
+      if (!user) return
+
+      const memberships = await listJobsForUser(supabase, user.id, 'id')
+      const jobIds = memberships.map(({ job }) => job.id).filter(Boolean) as string[]
+
+      let query = supabase
         .from('plans')
         .select('*')
-        .eq('user_id', user?.id)
         .order('created_at', { ascending: false })
+
+      if (jobIds.length > 0) {
+        const filters = [`user_id.eq.${user.id}`, `job_id.in.(${jobIds.join(',')})`]
+        query = query.or(filters.join(','))
+      } else {
+        query = query.eq('user_id', user.id)
+      }
+
+      const { data, error } = await query
 
       if (error) throw error
 
@@ -96,7 +109,6 @@ export default function PlansPage() {
     if (!confirm('Are you sure you want to delete this plan?')) return
 
     try {
-      const supabase = createClient()
       const { error } = await supabase
         .from('plans')
         .delete()

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Loader2 } from 'lucide-react'
+import { getJobForUser } from '@/lib/job-access'
 
 export default function LegacyPlanViewer() {
   const params = useParams()
@@ -22,8 +23,7 @@ export default function LegacyPlanViewer() {
           .from('plans')
           .select('job_id')
           .eq('id', params.id)
-          .eq('user_id', user.id)
-          .single()
+          .maybeSingle()
 
         if (error || !plan) {
           // Plan not found or no job_id, redirect to jobs list
@@ -32,6 +32,13 @@ export default function LegacyPlanViewer() {
         }
 
         if (plan.job_id) {
+          // Ensure the current user has access to the job
+          const membership = await getJobForUser(supabase, plan.job_id, user.id, 'id')
+          if (!membership) {
+            router.push('/dashboard/jobs')
+            return
+          }
+
           // Redirect to new job-centric plan viewer
           router.push(`/dashboard/jobs/${plan.job_id}/plans/${params.id}`)
         } else {

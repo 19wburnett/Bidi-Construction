@@ -28,11 +28,13 @@ import {
 import Link from 'next/link'
 import { staggerContainer, staggerItem, cardHover, pageVariants, skeletonPulse } from '@/lib/animations'
 import { Job } from '@/types/takeoff'
+import { listJobsForUser } from '@/lib/job-access'
 
 interface JobWithCounts extends Job {
   plan_count: number
   bid_package_count: number
   bid_count: number
+  membership_role: 'owner' | 'collaborator'
 }
 
 export default function JobsPage() {
@@ -52,28 +54,38 @@ export default function JobsPage() {
 
   async function loadJobs() {
     try {
-      let query = supabase
-        .from('jobs')
-        .select(`
+      if (!user) {
+        return
+      }
+
+      const memberships = await listJobsForUser(
+        supabase,
+        user.id,
+        `
           *,
           plans(count),
           bid_packages(count)
-        `)
-        .eq('user_id', user?.id)
+        `
+      )
+
+      let filteredMemberships = memberships
 
       if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter)
+        filteredMemberships = memberships.filter(({ job }) => job.status === statusFilter)
       }
 
-      query = query.order(sortBy, { ascending: false })
-
-      const { data, error } = await query
-
-      if (error) throw error
+      filteredMemberships = filteredMemberships.sort((a, b) => {
+        const aValue = a.job[sortBy as keyof Job] ?? ''
+        const bValue = b.job[sortBy as keyof Job] ?? ''
+        if (aValue === bValue) return 0
+        if (aValue === null) return 1
+        if (bValue === null) return -1
+        return aValue > bValue ? -1 : 1
+      })
 
       // Calculate bid counts for each job through bid_packages
       const formattedJobs = await Promise.all(
-        (data || []).map(async (job) => {
+        filteredMemberships.map(async ({ job, role }) => {
           // Get bid packages for this job
           const { data: jobBidPackages } = await supabase
             .from('bid_packages')
@@ -96,7 +108,8 @@ export default function JobsPage() {
             ...job,
             plan_count: job.plans?.[0]?.count || 0,
             bid_package_count: job.bid_packages?.[0]?.count || 0,
-            bid_count: bidCount
+            bid_count: bidCount,
+            membership_role: role
           }
         })
       )

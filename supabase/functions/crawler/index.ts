@@ -8,6 +8,16 @@ const FIRECRAWL_API_BASE_URL = "https://api.firecrawl.dev";
 // Categories to search
 const categories = ["plumber", "electrician", "roofer", "hvac", "drywall"];
 
+// Runtime guardrails (Edge Functions have ~60s limit)
+const DEFAULT_MAX_CATEGORIES_PER_RUN = 3;
+const DEFAULT_MAX_RESULTS_PER_CATEGORY = 5;
+const DEFAULT_MAX_QUERIES_PER_CATEGORY = 4;
+const RESULT_DELAY_MS = 1_200;
+const CATEGORY_DELAY_MS = 2_000;
+const ERROR_DELAY_MS = 4_000;
+const RATE_LIMIT_DELAY_MS = 1_500;
+const MAX_RUN_TIME_MS = 55_000;
+
 // Expanded search queries for better coverage
 const searchQueries = [
   // Standard searches
@@ -242,131 +252,259 @@ async function subcontractorExists(supabase: any, email: string | null, websiteU
 }
 
 /**
+ * Utility helpers for URL/email normalization
+ */
+function ensureProtocol(url: string): string {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  return `https://${url}`;
+}
+
+function normalizeUrl(rawUrl: string | null): string | null {
+  if (!rawUrl) return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+
+  try {
+    const url = new URL(ensureProtocol(trimmed));
+    url.hash = "";
+    url.search = "";
+    // Remove trailing slash unless root
+    if (url.pathname === "/") {
+      url.pathname = "";
+    } else {
+      url.pathname = url.pathname.replace(/\/+$/, "");
+    }
+    return url.toString();
+  } catch (_err) {
+    return trimmed;
+  }
+}
+
+function extractDomain(rawUrl: string | null): string | null {
+  const normalized = normalizeUrl(rawUrl);
+  if (!normalized) return null;
+
+  try {
+    const url = new URL(normalized);
+    return url.hostname.replace(/^www\./, "");
+  } catch (_err) {
+    return null;
+  }
+}
+
+function generatePlaceholderEmail(input: { businessName?: string | null; websiteUrl?: string | null; category: string }): string | null {
+  const domain = extractDomain(input.websiteUrl);
+  const basis = domain || input.businessName || `${input.category}-contractor`;
+  if (!basis) {
+    return null;
+  }
+
+  const sanitized = basis
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  if (!sanitized) {
+    return null;
+  }
+
+  return `${sanitized}@no-email.bidi`;
+}
+
+function pickQueriesForCategory(category: string, maxQueries: number) {
+  const shuffled = [...searchQueries].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, maxQueries).map((sq) => sq.query.replace("{category}", category));
+}
+
+/**
  * Main crawler function
  */
-async function crawlUtahSubcontractors(supabase: any) {
+async function crawlUtahSubcontractors(
+  supabase: any,
+  options: {
+    categoriesToProcess?: string[];
+    maxCategories?: number;
+    maxResultsPerCategory?: number;
+    maxQueriesPerCategory?: number;
+  } = {},
+) {
   console.log("\n🚀 Starting Utah subcontractor crawl...\n");
   
+  const runStartedAt = Date.now();
   let totalProcessed = 0;
   let totalAdded = 0;
   let totalSkipped = 0;
   let totalErrors = 0;
+  const categoriesHandled: string[] = [];
 
-  for (const category of categories) {
+  const {
+    categoriesToProcess,
+    maxCategories = DEFAULT_MAX_CATEGORIES_PER_RUN,
+    maxResultsPerCategory = DEFAULT_MAX_RESULTS_PER_CATEGORY,
+    maxQueriesPerCategory = DEFAULT_MAX_QUERIES_PER_CATEGORY,
+  } = options;
+
+  const categoryPool = categoriesToProcess && categoriesToProcess.length > 0 ? categoriesToProcess : categories;
+  const effectiveCategories = categoryPool.slice(0, Math.min(maxCategories, categoryPool.length));
+
+  const runDeadline = Date.now() + MAX_RUN_TIME_MS;
+
+  for (const category of effectiveCategories) {
     console.log(`📋 Processing category: ${category}`);
     
-    // Use weighted random search queries to find more obscure contractors
-    // Lower weight = more common searches (run more often)
-    // Higher weight = niche/obscure searches (run less often)
-    const weightedQueries = searchQueries.map(sq => 
-      Array(sq.weight).fill(sq.query.replace('{category}', category))
-    ).flat();
-    
-    // Randomly select query to use
-    const randomQuery = weightedQueries[Math.floor(Math.random() * weightedQueries.length)];
-    const searchResults = await firecrawlSearch(randomQuery, 20);
-    
-    if (!searchResults?.results || searchResults.results.length === 0) {
-      console.log(`  ⚠️  No results found for ${category}\n`);
+    let processedForCategory = 0;
+    const seenUrls = new Set<string>();
+
+    const queries = pickQueriesForCategory(category, maxQueriesPerCategory);
+    if (queries.length === 0) {
+      console.log(`  ⚠️  No queries available for ${category}\n`);
       continue;
     }
 
-    // Process each URL from search results
-    for (const result of searchResults.results) {
-      const url = result.url;
-      totalProcessed++;
-      
-      try {
-        // Check if this URL already exists in the database
-        const urlExists = await subcontractorExists(supabase, null, url);
-        if (urlExists) {
-          console.log(`  ⏩ Skipping duplicate URL: ${url}`);
-          totalSkipped++;
+    for (const query of queries) {
+      if (processedForCategory >= maxResultsPerCategory) {
+        break;
+      }
+
+      if (Date.now() >= runDeadline) {
+        console.log("⏹️  Runtime budget reached, stopping current run early");
+        break;
+      }
+
+      const remaining = maxResultsPerCategory - processedForCategory;
+      const searchResults = await firecrawlSearch(query, remaining);
+
+      if (!searchResults?.results || searchResults.results.length === 0) {
+        console.log(`  ⚠️  No results found for query "${query}"`);
+        continue;
+      }
+
+      for (const result of searchResults.results) {
+        if (processedForCategory >= maxResultsPerCategory) {
+          break;
+        }
+
+        if (Date.now() >= runDeadline) {
+          console.log("⏹️  Runtime budget reached during URL processing");
+          break;
+        }
+
+        const rawUrl = result.url;
+        const normalizedUrl = normalizeUrl(rawUrl);
+        if (!normalizedUrl) {
+          console.log("  ⚠️  Skipping result with invalid URL");
           continue;
         }
 
-        // Extract structured data from the webpage
-        const extracted = await firecrawlExtract(url);
-        const info = extracted?.data?.[0];
-        
-        if (!info || !info.business_name) {
-          console.log(`  ⚠️  No valid data extracted from: ${url}`);
+        if (seenUrls.has(normalizedUrl)) {
           continue;
         }
+        seenUrls.add(normalizedUrl);
+        totalProcessed++;
 
-        // Normalize email - use placeholder if none found
-        const email = info.email?.toLowerCase()?.trim() || `no-email-${Date.now()}@placeholder.local`;
-        
-        // Check for duplicates by email (only if it's not a placeholder)
-        if (email && !email.includes('placeholder')) {
-          const emailExists = await subcontractorExists(supabase, email, null);
-          if (emailExists) {
-            console.log(`  ⏩ Skipping duplicate email: ${email}`);
+        try {
+          // Check if this URL already exists in the database
+          const urlExists = await subcontractorExists(supabase, null, normalizedUrl);
+          if (urlExists) {
+            console.log(`  ⏩ Skipping duplicate URL: ${normalizedUrl}`);
             totalSkipped++;
             continue;
           }
-        }
 
-        // Search for Google Reviews if not already found on website
-        let googleData = null;
-        if (!info.google_review_score) {
-          const businessName = info.business_name || "Unknown";
-          const location = info.city || "Utah";
-          googleData = await searchGoogleReviews(businessName, location);
-          
-          // Add a delay after Google Reviews search
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
+          // Extract structured data from the webpage
+          const extracted = await firecrawlExtract(normalizedUrl);
+          const info = extracted?.data?.[0];
 
-        // Prepare data for insertion
-        const googleReviewScore = info.google_review_score || googleData?.average_rating || null;
-        const googleReviewsLink = info.google_reviews_link || googleData?.reviews_link || null;
-        
-        const subcontractorData = {
-          name: info.business_name || "Unknown",
-          email: email,
-          phone: info.phone || null,
-          trade_category: category,
-          location: info.city || "Utah",
-          website_url: url,
-          google_review_score: googleReviewScore,
-          google_reviews_link: googleReviewsLink,
-          time_in_business: info.time_in_business || null,
-          licensed: info.licensed || null,
-          bonded: info.bonded || null,
-          notes: info.notes || null,
-          created_at: new Date().toISOString(),
-        };
+          if (!info || !info.business_name) {
+            console.log(`  ⚠️  No valid data extracted from: ${normalizedUrl}`);
+            continue;
+          }
 
-        // Insert the new subcontractor
-        const { data: insertData, error: insertError } = await supabase
-          .from("subcontractors")
-          .insert(subcontractorData)
-          .select();
-        
-        if (insertError) {
-          console.error(`  ❌ Failed to add ${info.business_name}: ${insertError.message}`);
+          // Normalize email - use deterministic placeholder if none found
+          const extractedEmail = info.email?.toLowerCase()?.trim() || null;
+          const email = extractedEmail || generatePlaceholderEmail({
+            businessName: info.business_name,
+            websiteUrl: normalizedUrl,
+            category,
+          });
+
+          // Check for duplicates by email (only if it's not null)
+          if (email) {
+            const emailExists = await subcontractorExists(supabase, email, null);
+            if (emailExists) {
+              console.log(`  ⏩ Skipping duplicate email: ${email}`);
+              totalSkipped++;
+              continue;
+            }
+          }
+
+          // Search for Google Reviews if not already found on website
+          let googleData = null;
+          if (!info.google_review_score && info.business_name) {
+            const businessName = info.business_name || "Unknown";
+            const location = info.city || "Utah";
+            googleData = await searchGoogleReviews(businessName, location);
+
+            // Add a delay after Google Reviews search
+            await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS));
+          }
+
+          // Prepare data for insertion
+          const googleReviewScore = info.google_review_score || googleData?.average_rating || null;
+          const googleReviewsLink = info.google_reviews_link || googleData?.reviews_link || null;
+
+          const subcontractorData = {
+            name: info.business_name || "Unknown",
+            email: email,
+            phone: info.phone || null,
+            trade_category: category,
+            location: info.city || "Utah",
+            website_url: normalizedUrl,
+            google_review_score: googleReviewScore,
+            google_reviews_link: googleReviewsLink,
+            time_in_business: info.time_in_business || null,
+            licensed: info.licensed ?? null,
+            bonded: info.bonded ?? null,
+            notes: info.notes || null,
+            created_at: new Date().toISOString(),
+          };
+
+          // Insert the new subcontractor
+          const { error: insertError } = await supabase.from("subcontractors").insert(subcontractorData);
+
+          if (insertError) {
+            console.error(`  ❌ Failed to add ${info.business_name}: ${insertError.message}`);
+            totalErrors++;
+          } else {
+            console.log(`  ✅ Added: ${info.business_name} (${category})`);
+            totalAdded++;
+            processedForCategory++;
+          }
+
+          // Add a delay to be respectful to the APIs and avoid rate limits
+          await new Promise((resolve) => setTimeout(resolve, RESULT_DELAY_MS));
+        } catch (error) {
+          console.error(`  ❌ Error processing ${normalizedUrl}:`, error);
           totalErrors++;
-        } else {
-          console.log(`  ✅ Added: ${info.business_name} (${category})`);
-          totalAdded++;
+          // Longer delay on errors to avoid compounding rate limit issues
+          await new Promise((resolve) => setTimeout(resolve, ERROR_DELAY_MS));
         }
-
-        // Add a delay to be respectful to the APIs and avoid rate limits
-        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 seconds between extractions
-
-      } catch (error) {
-        console.error(`  ❌ Error processing ${url}:`, error);
-        totalErrors++;
-        // Longer delay on errors to avoid compounding rate limit issues
-        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
-    console.log(`  ✓ Finished ${category}\n`);
-    
-    // Add a longer delay between categories
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log(`  ✓ Finished ${category} (${processedForCategory} processed)\n`);
+    categoriesHandled.push(category);
+
+    if (Date.now() >= runDeadline) {
+      console.log("⏹️  Runtime budget reached after category processing");
+      break;
+    }
+
+    if (category !== effectiveCategories[effectiveCategories.length - 1]) {
+      await new Promise((resolve) => setTimeout(resolve, CATEGORY_DELAY_MS));
+    }
   }
 
   // Print summary
@@ -378,6 +516,9 @@ async function crawlUtahSubcontractors(supabase: any) {
   console.log("\n✅ Crawl completed!\n");
   
   return {
+    categoriesProcessed: categoriesHandled,
+    runtimeMs: Date.now() - runStartedAt,
+    maxRuntimeMs: MAX_RUN_TIME_MS,
     totalProcessed,
     totalAdded,
     totalSkipped,
@@ -410,13 +551,50 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    let payload: Record<string, unknown> = {};
+     if (req.method !== "GET" && req.method !== "HEAD") {
+       try {
+        payload = await req.json();
+       } catch (_err) {
+         payload = {};
+       }
+     }
+
+    const payloadCategories = payload["categories"];
+    const categoriesOverride = Array.isArray(payloadCategories)
+      ? payloadCategories.filter((item): item is string => typeof item === "string").map((item) => item.toLowerCase())
+       : undefined;
+
+    const payloadMaxCategories = payload["maxCategories"];
+    const maxCategoriesOverride =
+      typeof payloadMaxCategories === "number" && payloadMaxCategories > 0 ? Math.floor(payloadMaxCategories) : undefined;
+
+    const payloadMaxResults = payload["maxResultsPerCategory"];
+    const maxResultsOverride =
+      typeof payloadMaxResults === "number" && payloadMaxResults > 0 ? Math.floor(payloadMaxResults) : undefined;
+
+    const payloadMaxQueries = payload["maxQueriesPerCategory"];
+    const maxQueriesOverride =
+      typeof payloadMaxQueries === "number" && payloadMaxQueries > 0 ? Math.floor(payloadMaxQueries) : undefined;
+
     // Run the crawler
-    const results = await crawlUtahSubcontractors(supabase);
+    const results = await crawlUtahSubcontractors(supabase, {
+      categoriesToProcess: categoriesOverride,
+      maxCategories: maxCategoriesOverride,
+      maxResultsPerCategory: maxResultsOverride,
+      maxQueriesPerCategory: maxQueriesOverride,
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
         message: "Crawl completed successfully",
+        config: {
+          categories: results?.categoriesProcessed ?? categoriesOverride ?? categories,
+          maxCategories: maxCategoriesOverride ?? DEFAULT_MAX_CATEGORIES_PER_RUN,
+          maxResultsPerCategory: maxResultsOverride ?? DEFAULT_MAX_RESULTS_PER_CATEGORY,
+          maxQueriesPerCategory: maxQueriesOverride ?? DEFAULT_MAX_QUERIES_PER_CATEGORY,
+        },
         results,
       }),
       {

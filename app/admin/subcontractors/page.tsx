@@ -113,6 +113,7 @@ export default function AdminSubcontractorCRMPage() {
   const [tradeFilter, setTradeFilter] = useState<string>('all')
   const [locationFilter, setLocationFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [tradeSearchTerm, setTradeSearchTerm] = useState('')
 
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'created_at',
@@ -159,6 +160,18 @@ export default function AdminSubcontractorCRMPage() {
     bonded: 'unknown',
     notes: ''
   }
+
+  const knownTradeCategories = useMemo(() => {
+    const categories = new Set<string>()
+    TRADE_CATEGORIES.forEach((trade) => categories.add(trade))
+    subcontractors.forEach((sub) => {
+      const trade = sub.trade_category?.trim()
+      if (trade) {
+        categories.add(trade)
+      }
+    })
+    return Array.from(categories).sort((a, b) => a.localeCompare(b))
+  }, [subcontractors])
 
   const resetMessages = useCallback(() => {
     setError(null)
@@ -238,6 +251,10 @@ export default function AdminSubcontractorCRMPage() {
       fetchSubcontractors()
     }
   }, [authLoading, fetchSubcontractors, isAdmin])
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => subcontractors.some((sub) => sub.id === id)))
+  }, [subcontractors])
 
   useEffect(() => {
     setSelectedIds((prev) => prev.filter((id) => subcontractors.some((sub) => sub.id === id)))
@@ -451,6 +468,14 @@ export default function AdminSubcontractorCRMPage() {
     () => subcontractors.filter((record) => selectedIdSet.has(record.id)),
     [subcontractors, selectedIdSet]
   )
+
+  const tradeSuggestions = useMemo(() => {
+    const query = formState.trade_category.trim().toLowerCase()
+    const suggestions = query
+      ? knownTradeCategories.filter((trade) => trade.toLowerCase().includes(query))
+      : knownTradeCategories
+    return suggestions.slice(0, 12)
+  }, [formState.trade_category, knownTradeCategories])
 
   const selectedEmailsList = useMemo(
     () => selectedSubcontractors.map((record) => record.email).join('; '),
@@ -763,7 +788,7 @@ The Bidi Team`
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Trades</SelectItem>
-                  {TRADE_CATEGORIES.map((trade) => (
+                  {knownTradeCategories.map((trade) => (
                     <SelectItem key={trade} value={trade}>
                       {trade}
                     </SelectItem>
@@ -1103,209 +1128,234 @@ The Bidi Team`
           }
         }}
       >
-        <DialogContent className="w-full max-w-3xl p-6">
-          <DialogClose onClick={closeDialog} />
-          <DialogHeader>
-            <DialogTitle>{dialogMode === 'create' ? 'Add Subcontractor' : 'Edit Subcontractor'}</DialogTitle>
-            <DialogDescription>
-              {dialogMode === 'create'
-                ? 'Add a subcontractor to the Bidi network.'
-                : 'Update subcontractor contact information.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="name">Company / Contact Name *</Label>
-                <Input
-                  id="name"
-                  value={formState.name}
-                  onChange={(event) => handleFormChange('name', event.target.value)}
-                  placeholder="ABC Electrical Services"
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="email">Email *</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formState.email}
-                  onChange={(event) => handleFormChange('email', event.target.value)}
-                  placeholder="contact@abccontracting.com"
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formState.phone}
-                  onChange={(event) => handleFormChange('phone', event.target.value)}
-                  placeholder="(555) 555-1234"
-                />
-              </div>
-              <div>
-                <Label htmlFor="website_url">Website</Label>
-                <Input
-                  id="website_url"
-                  type="url"
-                  value={formState.website_url}
-                  onChange={(event) => handleFormChange('website_url', event.target.value)}
-                  placeholder="https://example.com"
-                />
-              </div>
+        <DialogContent className="w-full max-w-3xl p-0">
+          <div className="max-h-[85vh] flex flex-col overflow-hidden rounded-lg border border-border bg-background shadow-lg">
+            <div className="relative border-b bg-background px-6 py-4">
+              <DialogClose className="absolute right-6 top-4 text-muted-foreground transition hover:text-foreground" />
+              <DialogHeader className="pr-8">
+                <DialogTitle>{dialogMode === 'create' ? 'Add Subcontractor' : 'Edit Subcontractor'}</DialogTitle>
+                <DialogDescription>
+                  {dialogMode === 'create'
+                    ? 'Add a subcontractor to the Bidi network.'
+                    : 'Update subcontractor contact information.'}
+                </DialogDescription>
+              </DialogHeader>
             </div>
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <form onSubmit={handleSubmit} className="space-y-6 pb-24">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="name">Company / Contact Name *</Label>
+                    <Input
+                      id="name"
+                      value={formState.name}
+                      onChange={(event) => handleFormChange('name', event.target.value)}
+                      placeholder="ABC Electrical Services"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="email">Email *</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formState.email}
+                      onChange={(event) => handleFormChange('email', event.target.value)}
+                      placeholder="contact@abccontracting.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      value={formState.phone}
+                      onChange={(event) => handleFormChange('phone', event.target.value)}
+                      placeholder="(555) 555-1234"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="website_url">Website</Label>
+                    <Input
+                      id="website_url"
+                      type="url"
+                      value={formState.website_url}
+                      onChange={(event) => handleFormChange('website_url', event.target.value)}
+                      placeholder="https://example.com"
+                    />
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="trade">Trade *</Label>
-                <Select
-                  value={formState.trade_category}
-                  onValueChange={(value) => handleFormChange('trade_category', value)}
-                >
-                  <SelectTrigger id="trade">
-                    <SelectValue placeholder="Select trade category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TRADE_CATEGORIES.map((trade) => (
-                      <SelectItem key={trade} value={trade}>
-                        {trade}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="location">Service Area *</Label>
-                <Input
-                  id="location"
-                  value={formState.location}
-                  onChange={(event) => handleFormChange('location', event.target.value)}
-                  placeholder="City, State"
-                  required
-                />
-              </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="trade">Trade *</Label>
+                    <Input
+                      id="trade"
+                      value={formState.trade_category}
+                      onChange={(event) => handleFormChange('trade_category', event.target.value)}
+                      list="trade-category-options"
+                      placeholder="e.g., Fireproofing"
+                      required
+                    />
+                    <datalist id="trade-category-options">
+                      {knownTradeCategories.map((trade) => (
+                        <option key={trade} value={trade} />
+                      ))}
+                    </datalist>
+                    <p className="text-xs text-muted-foreground">
+                      Start typing to select an existing trade or create a new one.
+                    </p>
+                    {tradeSuggestions.length > 0 && (
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">Quick suggestions</p>
+                        <div className="flex flex-wrap gap-2">
+                          {tradeSuggestions.map((trade) => (
+                            <Button
+                              key={trade}
+                              type="button"
+                              size="sm"
+                              variant={formState.trade_category === trade ? 'default' : 'outline'}
+                              className="h-7 px-3 text-xs"
+                              onClick={() => handleFormChange('trade_category', trade)}
+                            >
+                              {trade}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="location">Service Area *</Label>
+                    <Input
+                      id="location"
+                      value={formState.location}
+                      onChange={(event) => handleFormChange('location', event.target.value)}
+                      placeholder="City, State"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="google_review_score">Google Review Score</Label>
+                    <Input
+                      id="google_review_score"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="5"
+                      value={formState.google_review_score}
+                      onChange={(event) => handleFormChange('google_review_score', event.target.value)}
+                      placeholder="4.7"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="google_reviews_link">Google Reviews Link</Label>
+                    <Input
+                      id="google_reviews_link"
+                      type="url"
+                      value={formState.google_reviews_link}
+                      onChange={(event) => handleFormChange('google_reviews_link', event.target.value)}
+                      placeholder="https://maps.google.com/..."
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="time_in_business">Time in Business</Label>
+                    <Input
+                      id="time_in_business"
+                      value={formState.time_in_business}
+                      onChange={(event) => handleFormChange('time_in_business', event.target.value)}
+                      placeholder="10 years"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="jobs_completed">Jobs Completed</Label>
+                    <Input
+                      id="jobs_completed"
+                      type="number"
+                      inputMode="numeric"
+                      value={formState.jobs_completed}
+                      onChange={(event) => handleFormChange('jobs_completed', event.target.value)}
+                      placeholder="150"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Licensed</Label>
+                    <Select
+                      value={formState.licensed}
+                      onValueChange={(value) => handleFormChange('licensed', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unknown">Unknown</SelectItem>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Bonded</Label>
+                    <Select
+                      value={formState.bonded}
+                      onValueChange={(value) => handleFormChange('bonded', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unknown">Unknown</SelectItem>
+                        <SelectItem value="true">Yes</SelectItem>
+                        <SelectItem value="false">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      value={formState.notes}
+                      onChange={(event) => handleFormChange('notes', event.target.value)}
+                      placeholder="Internal notes about the subcontractor..."
+                      rows={3}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="references">References (JSON)</Label>
+                    <Textarea
+                      id="references"
+                      value={formState.references}
+                      onChange={(event) => handleFormChange('references', event.target.value)}
+                      placeholder='[{"name":"Project A","contact":"Jane Doe"}]'
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Provide valid JSON (array or object). Leave blank if not available.
+                    </p>
+                  </div>
+                </div>
+
+                <DialogFooter className="sticky bottom-0 -mx-6 -mb-6 border-t bg-background px-6 py-4">
+                  <Button type="button" variant="outline" onClick={closeDialog}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving ? 'Saving...' : dialogMode === 'create' ? 'Add Subcontractor' : 'Save Changes'}
+                  </Button>
+                </DialogFooter>
+              </form>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="google_review_score">Google Review Score</Label>
-                <Input
-                  id="google_review_score"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="5"
-                  value={formState.google_review_score}
-                  onChange={(event) => handleFormChange('google_review_score', event.target.value)}
-                  placeholder="4.7"
-                />
-              </div>
-              <div>
-                <Label htmlFor="google_reviews_link">Google Reviews Link</Label>
-                <Input
-                  id="google_reviews_link"
-                  type="url"
-                  value={formState.google_reviews_link}
-                  onChange={(event) => handleFormChange('google_reviews_link', event.target.value)}
-                  placeholder="https://maps.google.com/..."
-                />
-              </div>
-              <div>
-                <Label htmlFor="time_in_business">Time in Business</Label>
-                <Input
-                  id="time_in_business"
-                  value={formState.time_in_business}
-                  onChange={(event) => handleFormChange('time_in_business', event.target.value)}
-                  placeholder="10 years"
-                />
-              </div>
-              <div>
-                <Label htmlFor="jobs_completed">Jobs Completed</Label>
-                <Input
-                  id="jobs_completed"
-                  type="number"
-                  inputMode="numeric"
-                  value={formState.jobs_completed}
-                  onChange={(event) => handleFormChange('jobs_completed', event.target.value)}
-                  placeholder="150"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label>Licensed</Label>
-                <Select
-                  value={formState.licensed}
-                  onValueChange={(value) => handleFormChange('licensed', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unknown">Unknown</SelectItem>
-                    <SelectItem value="true">Yes</SelectItem>
-                    <SelectItem value="false">No</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Bonded</Label>
-                <Select
-                  value={formState.bonded}
-                  onValueChange={(value) => handleFormChange('bonded', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unknown">Unknown</SelectItem>
-                    <SelectItem value="true">Yes</SelectItem>
-                    <SelectItem value="false">No</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={formState.notes}
-                  onChange={(event) => handleFormChange('notes', event.target.value)}
-                  placeholder="Internal notes about the subcontractor..."
-                  rows={3}
-                />
-              </div>
-              <div>
-                <Label htmlFor="references">References (JSON)</Label>
-                <Textarea
-                  id="references"
-                  value={formState.references}
-                  onChange={(event) => handleFormChange('references', event.target.value)}
-                  placeholder='[{"name":"Project A","contact":"Jane Doe"}]'
-                  rows={3}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Provide valid JSON (array or object). Leave blank if not available.
-                </p>
-              </div>
-            </div>
-
-            <DialogFooter className="mt-6">
-              <Button type="button" variant="outline" onClick={closeDialog}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSaving}>
-                {isSaving ? 'Saving...' : dialogMode === 'create' ? 'Add Subcontractor' : 'Save Changes'}
-              </Button>
-            </DialogFooter>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

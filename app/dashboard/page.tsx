@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
+import { listJobsForUser } from '@/lib/job-access'
 import { 
   Building2, 
   Plus, 
@@ -75,54 +76,64 @@ export default function DashboardPage() {
 
   async function loadDashboardData() {
     try {
-      // Load job stats
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('jobs')
-        .select('id, status, created_at')
-        .eq('user_id', user?.id)
+      if (!user) {
+        return
+      }
 
-      if (jobsError) throw jobsError
+      const memberships = await listJobsForUser(
+        supabase,
+        user.id,
+        'id, status, created_at, name, location'
+      )
 
-      // Load plan counts per job
-      const { data: plansData, error: plansError } = await supabase
-        .from('plans')
-        .select('job_id')
-        .eq('user_id', user?.id)
+      const jobsData = memberships.map(({ job, role }) => ({
+        ...job,
+        membership_role: role as 'owner' | 'collaborator'
+      }))
 
-      if (plansError) throw plansError
+      const userJobIds = jobsData.map(job => job.id)
 
-      // Load bid package counts per job  
-      // First get job IDs for this user
-      const userJobIds = jobsData?.map(job => job.id) || []
-      
-      const { data: packagesData, error: packagesError } = await supabase
-        .from('bid_packages')
-        .select('id, job_id, status')
-        .in('job_id', userJobIds)
+      let plansData: { id: string; job_id: string }[] = []
+      if (userJobIds.length > 0) {
+        const { data: plansResult, error: plansError } = await supabase
+          .from('plans')
+          .select('id, job_id')
+          .in('job_id', userJobIds)
 
-      if (packagesError) throw packagesError
+        if (plansError) throw plansError
+        plansData = plansResult || []
+      }
 
-      // Load bid counts for each bid package
-      const bidPackageIds = packagesData?.map(pkg => pkg.id) || []
-      let bidsData: any[] = []
+      let packagesData: { id: string; job_id: string; status: string | null }[] = []
+      if (userJobIds.length > 0) {
+        const { data: packagesResult, error: packagesError } = await supabase
+          .from('bid_packages')
+          .select('id, job_id, status')
+          .in('job_id', userJobIds)
+
+        if (packagesError) throw packagesError
+        packagesData = packagesResult || []
+      }
+
+      const bidPackageIds = packagesData.map(pkg => pkg.id)
+      let bidsData: { id: string; status: string | null; bid_package_id: string | null }[] = []
       if (bidPackageIds.length > 0) {
         const { data: bidsResult, error: bidsError } = await supabase
           .from('bids')
           .select('id, status, bid_package_id')
           .in('bid_package_id', bidPackageIds)
-        
+
         if (bidsError) throw bidsError
         bidsData = bidsResult || []
       }
 
-      // Calculate stats
-      const totalJobs = jobsData?.length || 0
-      const activeJobs = jobsData?.filter(job => job.status === 'active').length || 0
-      const completedJobs = jobsData?.filter(job => job.status === 'completed').length || 0
-      const totalPlans = plansData?.length || 0
-      const totalBidPackages = packagesData?.length || 0
-      const totalBids = bidsData?.length || 0
-      const pendingBids = bidsData?.filter(bid => bid.status === 'pending').length || 0
+      const totalJobs = jobsData.length
+      const activeJobs = jobsData.filter(job => job.status === 'active').length
+      const completedJobs = jobsData.filter(job => job.status === 'completed').length
+      const totalPlans = plansData.length
+      const totalBidPackages = packagesData.length
+      const totalBids = bidsData.length
+      const pendingBids = bidsData.filter(bid => bid.status === 'pending').length
 
       setStats({
         totalJobs,
@@ -134,56 +145,28 @@ export default function DashboardPage() {
         pendingBids
       })
 
-      // Load recent jobs with counts
-      const { data: recentJobsData, error: recentJobsError } = await supabase
-        .from('jobs')
-        .select(`
-          id,
-          name,
-          location,
-          status,
-          created_at,
-          plans(count)
-        `)
-        .eq('user_id', user?.id)
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      if (recentJobsError) throw recentJobsError
-
-      // Calculate bid counts for each job through bid_packages
-      const formattedRecentJobs = await Promise.all(
-        (recentJobsData || []).map(async (job) => {
-          // Get bid packages for this job
-          const { data: jobBidPackages } = await supabase
-            .from('bid_packages')
-            .select('id')
-            .eq('job_id', job.id)
-          
-          const packageIds = jobBidPackages?.map(pkg => pkg.id) || []
-          let bidCount = 0
-          
-          if (packageIds.length > 0) {
-            const { count } = await supabase
-              .from('bids')
-              .select('*', { count: 'exact', head: true })
-              .in('bid_package_id', packageIds)
-            
-            bidCount = count || 0
-          }
-
-          return {
-            id: job.id,
-            name: job.name,
-            location: job.location,
-            status: job.status,
-            created_at: job.created_at,
-            plan_count: job.plans?.[0]?.count || 0,
-            bid_package_count: packageIds.length,
-            bid_count: bidCount
-          }
-        })
+      const recentJobsSorted = [...jobsData].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
+
+      const formattedRecentJobs = recentJobsSorted.slice(0, 5).map((job) => {
+        const jobPackages = packagesData.filter(pkg => pkg.job_id === job.id)
+        const jobPackageIds = jobPackages.map(pkg => pkg.id)
+        const jobBids = bidsData.filter(bid =>
+          bid.bid_package_id ? jobPackageIds.includes(bid.bid_package_id) : false
+        )
+
+        return {
+          id: job.id,
+          name: job.name,
+          location: job.location,
+          status: job.status,
+          created_at: job.created_at,
+          plan_count: plansData.filter(plan => plan.job_id === job.id).length,
+          bid_package_count: jobPackages.length,
+          bid_count: jobBids.length
+        }
+      })
 
       setRecentJobs(formattedRecentJobs)
 

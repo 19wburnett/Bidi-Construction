@@ -68,17 +68,16 @@ curl -X POST 'https://YOUR_PROJECT_REF.functions.supabase.co/crawler' \
 
 ### Option 1: Using Supabase Dashboard
 
-1. Go to **SQL Editor** in your Supabase dashboard
+1. Go to **SQL Editor** in your Supabase dashboard  
 2. Run the migration file:
    ```sql
-   -- File: supabase/migrations/20250202_crawler_schedule.sql
+   -- File: supabase/migrations/20250202_crawler_schedule_v2.sql
    ```
-3. **IMPORTANT**: Update the `YOUR_PROJECT_REF` placeholder in the migration file
-4. Execute the migration
+   This version lets you pass a JSON payload to the Edge Function so each scheduled job can process a specific trade, tweak the results-per-run, etc.
 
 ### Option 2: Manual Setup
 
-Run this SQL in your Supabase SQL Editor:
+Run this SQL in your Supabase SQL Editor (remember to swap in your project ref):
 
 ```sql
 -- Enable pg_cron
@@ -89,18 +88,32 @@ CREATE EXTENSION IF NOT EXISTS http;
 
 -- Schedule daily crawl at 6 AM
 SELECT cron.schedule(
-  'daily-subcontractor-crawl',
+  'daily-subcontractor-crawl-default',
   '0 6 * * *', -- 6:00 AM UTC daily
-  $$
-  SELECT
-    net.http_post(
-      url := 'https://YOUR_PROJECT_REF.functions.supabase.co/crawler',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json'
-      ),
-      body := '{}'
-    ) AS request_id;
-  $$
+  $$SELECT call_crawler_edge_function()$$
+);
+
+-- Fan out by trade if you want more coverage without hitting the 60s Edge runtime limit.
+-- Each job can override the payload to focus on one category and/or adjust result caps.
+SELECT cron.schedule(
+  'daily-subcontractor-crawl-plumber',
+  '5 6 * * *',
+  $$SELECT call_crawler_edge_function(
+    jsonb_build_object(
+      'categories', jsonb_build_array('plumber'),
+      'maxResultsPerCategory', 8
+    )
+  )$$
+);
+SELECT cron.schedule(
+  'daily-subcontractor-crawl-electrician',
+  '15 6 * * *',
+  $$SELECT call_crawler_edge_function(
+    jsonb_build_object(
+      'categories', jsonb_build_array('electrician'),
+      'maxResultsPerCategory', 8
+    )
+  )$$
 );
 ```
 
@@ -148,9 +161,9 @@ curl -X POST 'https://dkpucbqphkghrhiwtseb.functions.supabase.co/crawler' \
 ### Function Times Out
 
 Edge Functions have a timeout limit. For long-running crawls:
-- Reduce the number of categories per run
-- Process fewer results per category
-- Consider splitting into multiple scheduled functions
+- The Edge Function now enforces sensible defaults (≤3 trades/run, ≤5 results/trade, <60s total)
+- Pass a payload in scheduled jobs to focus on specific trades or raise/lower limits per run
+- Split runs by trade/time if you need to process more vendors each day
 
 ### Rate Limits
 
@@ -166,6 +179,10 @@ Ensure your Edge Function uses the service role key for database access.
 ### Missing Environment Variables
 
 Double-check in **Settings** → **Edge Functions** that all variables are set.
+
+### Monitoring Payloads
+
+The function response now echoes the config used in the run (categories, limits, runtime). Use `supabase functions logs crawler` to confirm the schedule is sending the payload you expect.
 
 ## Cost Considerations
 

@@ -6,6 +6,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
@@ -30,6 +35,27 @@ import {
 import Link from 'next/link'
 import { staggerContainer, staggerItem, cardHover, skeletonPulse } from '@/lib/animations'
 import { Job, Plan, BidPackage } from '@/types/takeoff'
+import { getJobForUser } from '@/lib/job-access'
+
+const PROJECT_TYPES = [
+  'Residential',
+  'Commercial',
+  'Industrial',
+  'Renovation',
+  'New Construction',
+  'Other'
+]
+
+const JOB_STATUSES: Job['status'][] = ['draft', 'active', 'completed', 'archived']
+
+type EditFormState = {
+  name: string
+  location: string
+  budget_range: string
+  project_type: string
+  description: string
+  status: Job['status']
+}
 
 export default function JobDetailPage() {
   const params = useParams()
@@ -40,6 +66,17 @@ export default function JobDetailPage() {
   const [bidPackages, setBidPackages] = useState<BidPackage[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<EditFormState>({
+    name: '',
+    location: '',
+    budget_range: '',
+    project_type: '',
+    description: '',
+    status: 'draft'
+  })
   const supabase = createClient()
 
   const jobId = params.jobId as string
@@ -52,16 +89,19 @@ export default function JobDetailPage() {
 
   async function loadJobData() {
     try {
-      // Load job details
-      const { data: jobData, error: jobError } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('id', jobId)
-        .eq('user_id', user?.id)
-        .single()
+      if (!user) {
+        return
+      }
 
-      if (jobError) throw jobError
-      setJob(jobData)
+      // Load job details via membership
+      const membership = await getJobForUser(supabase, jobId, user.id, '*')
+
+      if (!membership?.job) {
+        setJob(null)
+        return
+      }
+
+      setJob(membership.job)
 
       // Load plans for this job
       const { data: plansData, error: plansError } = await supabase
@@ -87,6 +127,65 @@ export default function JobDetailPage() {
       console.error('Error loading job data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const openEditDialog = () => {
+    if (!job) return
+
+    setEditForm({
+      name: job.name || '',
+      location: job.location || '',
+      budget_range: job.budget_range || '',
+      project_type: job.project_type || '',
+      description: job.description || '',
+      status: job.status
+    })
+    setEditError(null)
+    setIsEditDialogOpen(true)
+  }
+
+  const handleEditChange = <K extends keyof EditFormState>(field: K, value: EditFormState[K]) => {
+    setEditForm((prev) => ({
+      ...prev,
+      [field]: value
+    }))
+    setEditError(null)
+  }
+
+  const handleUpdateJob = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!user || !job) return
+
+    setSaving(true)
+    setEditError(null)
+
+    try {
+      const { error: updateError } = await supabase
+        .from('jobs')
+        .update({
+          name: editForm.name.trim(),
+          location: editForm.location.trim(),
+          budget_range: editForm.budget_range.trim() || null,
+          project_type: editForm.project_type.trim() || null,
+          description: editForm.description.trim() || null,
+          status: editForm.status
+        })
+        .eq('id', job.id)
+
+      if (updateError) {
+        console.error('Error updating job:', updateError)
+        setEditError('Failed to update job. Please try again.')
+        return
+      }
+
+      await loadJobData()
+      setIsEditDialogOpen(false)
+    } catch (error) {
+      console.error('Unexpected error updating job:', error)
+      setEditError('Something went wrong while updating. Please try again.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -207,322 +306,443 @@ export default function JobDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
-          <Link href="/dashboard">
-            <Button variant="ghost" className="mb-4">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </Link>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">{job.name}</h1>
-              <div className="flex items-center space-x-4 text-sm text-gray-600">
-                <div className="flex items-center">
-                  <MapPin className="h-4 w-4 mr-1" />
-                  {job.location}
-                </div>
-                {job.budget_range && (
+    <>
+      <div className="min-h-screen bg-gray-50">
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8"
+          >
+            <Link href="/dashboard">
+              <Button variant="ghost" className="mb-4">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Button>
+            </Link>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">{job.name}</h1>
+                <div className="flex items-center space-x-4 text-sm text-gray-600">
                   <div className="flex items-center">
-                    <DollarSign className="h-4 w-4 mr-1" />
-                    {job.budget_range}
+                    <MapPin className="h-4 w-4 mr-1" />
+                    {job.location}
                   </div>
-                )}
-                <div className="flex items-center">
-                  <Calendar className="h-4 w-4 mr-1" />
-                  {new Date(job.created_at).toLocaleDateString()}
+                  {job.budget_range && (
+                    <div className="flex items-center">
+                      <DollarSign className="h-4 w-4 mr-1" />
+                      {job.budget_range}
+                    </div>
+                  )}
+                  <div className="flex items-center">
+                    <Calendar className="h-4 w-4 mr-1" />
+                    {new Date(job.created_at).toLocaleDateString()}
+                  </div>
                 </div>
               </div>
+              <div className="flex items-center space-x-2">
+                <Badge className={getStatusColor(job.status)}>
+                  {job.status}
+                </Badge>
+                <Button variant="outline" size="sm" onClick={openEditDialog}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Badge className={getStatusColor(job.status)}>
-                {job.status}
-              </Badge>
-              <Button variant="outline" size="sm">
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          variants={staggerContainer}
-          initial="initial"
-          animate="animate"
-          className="space-y-8"
-        >
-          {/* Job Overview */}
-          <motion.div variants={staggerItem}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Building2 className="h-5 w-5 mr-2 text-orange-600" />
-                  Project Overview
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {job.description ? (
-                  <p className="text-gray-700">{job.description}</p>
-                ) : (
-                  <p className="text-gray-500 italic">No description provided</p>
-                )}
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900">{plans.length}</div>
-                    <div className="text-sm text-gray-600">Plans</div>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900">{bidPackages.length}</div>
-                    <div className="text-sm text-gray-600">Bid Packages</div>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <div className="text-2xl font-bold text-gray-900">0</div>
-                    <div className="text-sm text-gray-600">Bids Received</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </motion.div>
 
-          {/* Plans Section */}
-          <motion.div variants={staggerItem}>
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center">
-                      <FileText className="h-5 w-5 mr-2 text-orange-600" />
-                      Project Plans
-                    </CardTitle>
-                    <CardDescription>
-                      Upload and manage your construction plans
-                    </CardDescription>
+          <motion.div
+            variants={staggerContainer}
+            initial="initial"
+            animate="animate"
+            className="space-y-8"
+          >
+            {/* Job Overview */}
+            <motion.div variants={staggerItem}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Building2 className="h-5 w-5 mr-2 text-orange-600" />
+                    Project Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {job.description ? (
+                    <p className="text-gray-700">{job.description}</p>
+                  ) : (
+                    <p className="text-gray-500 italic">No description provided</p>
+                  )}
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <div className="text-2xl font-bold text-gray-900">{plans.length}</div>
+                      <div className="text-sm text-gray-600">Plans</div>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <div className="text-2xl font-bold text-gray-900">{bidPackages.length}</div>
+                      <div className="text-sm text-gray-600">Bid Packages</div>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <div className="text-2xl font-bold text-gray-900">0</div>
+                      <div className="text-sm text-gray-600">Bids Received</div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="file"
-                      id="plan-upload"
-                      multiple
-                      accept=".pdf,.dwg,.jpg,.jpeg,.png,.tiff"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      disabled={uploading}
-                    />
-                    <label htmlFor="plan-upload">
-                      <Button asChild disabled={uploading}>
-                        <span>
-                          {uploading ? (
-                            <>
-                              <Clock className="h-4 w-4 mr-2 animate-spin" />
-                              Uploading...
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="h-4 w-4 mr-2" />
-                              Upload Plans
-                            </>
-                          )}
-                        </span>
-                      </Button>
-                    </label>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <AnimatePresence>
-                  {plans.length === 0 ? (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="text-center py-12"
-                    >
-                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No plans uploaded yet</h3>
-                      <p className="text-gray-600 mb-4">Upload your first plan to get started with analysis and bidding</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Plans Section */}
+            <motion.div variants={staggerItem}>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center">
+                        <FileText className="h-5 w-5 mr-2 text-orange-600" />
+                        Project Plans
+                      </CardTitle>
+                      <CardDescription>
+                        Upload and manage your construction plans
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="file"
+                        id="plan-upload"
+                        multiple
+                        accept=".pdf,.dwg,.jpg,.jpeg,.png,.tiff"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        disabled={uploading}
+                      />
                       <label htmlFor="plan-upload">
-                        <Button asChild>
+                        <Button asChild disabled={uploading}>
                           <span>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Upload Your First Plan
+                            {uploading ? (
+                              <>
+                                <Clock className="h-4 w-4 mr-2 animate-spin" />
+                                Uploading...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="h-4 w-4 mr-2" />
+                                Upload Plans
+                              </>
+                            )}
                           </span>
                         </Button>
                       </label>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      variants={staggerContainer}
-                      initial="initial"
-                      animate="animate"
-                      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-                    >
-                      {plans.map((plan) => (
-                        <motion.div
-                          key={plan.id}
-                          variants={staggerItem}
-                          whileHover="hover"
-                          whileTap="tap"
-                        >
-                          <Card className="cursor-pointer">
-                            <CardContent className="p-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center space-x-2 min-w-0 flex-1">
-                                  <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
-                                  <span className="font-medium text-sm truncate min-w-0">
-                                    {plan.title || plan.file_name}
-                                  </span>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <AnimatePresence>
+                    {plans.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-center py-12"
+                      >
+                        <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No plans uploaded yet</h3>
+                        <p className="text-gray-600 mb-4">Upload your first plan to get started with analysis and bidding</p>
+                        <label htmlFor="plan-upload">
+                          <Button asChild>
+                            <span>
+                              <Plus className="h-4 w-4 mr-2" />
+                              Upload Your First Plan
+                            </span>
+                          </Button>
+                        </label>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        variants={staggerContainer}
+                        initial="initial"
+                        animate="animate"
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                      >
+                        {plans.map((plan) => (
+                          <motion.div
+                            key={plan.id}
+                            variants={staggerItem}
+                            whileHover="hover"
+                            whileTap="tap"
+                          >
+                            <Card className="cursor-pointer">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                    <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
+                                    <span className="font-medium text-sm truncate min-w-0">
+                                      {plan.title || plan.file_name}
+                                    </span>
+                                  </div>
+                                  <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
+                                    {plan.status}
+                                  </Badge>
                                 </div>
-                                <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
-                                  {plan.status}
-                                </Badge>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex space-x-1">
+                                    <Link href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}>
+                                      <Button variant="ghost" size="sm">
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                    </Link>
+                                    <Button variant="ghost" size="sm">
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="sm">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex items-center justify-between">
-                                <div className="flex space-x-1">
-                                  <Link href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}>
+                            </Card>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Bid Packages Section */}
+            <motion.div variants={staggerItem}>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center">
+                        <Package className="h-5 w-5 mr-2 text-orange-600" />
+                        Bid Packages
+                      </CardTitle>
+                      <CardDescription>
+                        Create and manage bid requests for different trades
+                      </CardDescription>
+                    </div>
+                    {plans.length > 0 && (
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create Package
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <AnimatePresence>
+                    {bidPackages.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-center py-12"
+                      >
+                        <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No bid packages yet</h3>
+                        <p className="text-gray-600 mb-4">
+                          {plans.length === 0 
+                            ? "Upload plans first, then create bid packages to send to subcontractors"
+                            : "Create your first bid package to start collecting bids"
+                          }
+                        </p>
+                        {plans.length > 0 && (
+                          <Button>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create Your First Package
+                          </Button>
+                        )}
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        variants={staggerContainer}
+                        initial="initial"
+                        animate="animate"
+                        className="space-y-4"
+                      >
+                        {bidPackages.map((pkg) => (
+                          <motion.div
+                            key={pkg.id}
+                            variants={staggerItem}
+                            whileHover="hover"
+                            whileTap="tap"
+                          >
+                            <Card className="cursor-pointer">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <h4 className="font-semibold">{pkg.trade_category}</h4>
+                                    <p className="text-sm text-gray-600">{pkg.description}</p>
+                                  </div>
+                                  <div className="flex items-center space-x-2">
+                                    <Badge className={getStatusColor(pkg.status)}>
+                                      {pkg.status}
+                                    </Badge>
                                     <Button variant="ghost" size="sm">
                                       <Eye className="h-4 w-4" />
                                     </Button>
-                                  </Link>
-                                  <Button variant="ghost" size="sm">
-                                    <Download className="h-4 w-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="sm">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                                  </div>
                                 </div>
-                                <div className="text-xs text-gray-500">
-                                  {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </CardContent>
-            </Card>
-          </motion.div>
+                              </CardContent>
+                            </Card>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </CardContent>
+              </Card>
+            </motion.div>
 
-          {/* Bid Packages Section */}
-          <motion.div variants={staggerItem}>
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center">
-                      <Package className="h-5 w-5 mr-2 text-orange-600" />
-                      Bid Packages
-                    </CardTitle>
-                    <CardDescription>
-                      Create and manage bid requests for different trades
-                    </CardDescription>
+            {/* Bids Section */}
+            <motion.div variants={staggerItem}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Users className="h-5 w-5 mr-2 text-orange-600" />
+                    Received Bids
+                  </CardTitle>
+                  <CardDescription>
+                    View and manage bids from subcontractors
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center py-12">
+                    <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
+                    <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
                   </div>
-                  {plans.length > 0 && (
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Package
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <AnimatePresence>
-                  {bidPackages.length === 0 ? (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="text-center py-12"
-                    >
-                      <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No bid packages yet</h3>
-                      <p className="text-gray-600 mb-4">
-                        {plans.length === 0 
-                          ? "Upload plans first, then create bid packages to send to subcontractors"
-                          : "Create your first bid package to start collecting bids"
-                        }
-                      </p>
-                      {plans.length > 0 && (
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Create Your First Package
-                        </Button>
-                      )}
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      variants={staggerContainer}
-                      initial="initial"
-                      animate="animate"
-                      className="space-y-4"
-                    >
-                      {bidPackages.map((pkg) => (
-                        <motion.div
-                          key={pkg.id}
-                          variants={staggerItem}
-                          whileHover="hover"
-                          whileTap="tap"
-                        >
-                          <Card className="cursor-pointer">
-                            <CardContent className="p-4">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <h4 className="font-semibold">{pkg.trade_category}</h4>
-                                  <p className="text-sm text-gray-600">{pkg.description}</p>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <Badge className={getStatusColor(pkg.status)}>
-                                    {pkg.status}
-                                  </Badge>
-                                  <Button variant="ghost" size="sm">
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </motion.div>
           </motion.div>
-
-          {/* Bids Section */}
-          <motion.div variants={staggerItem}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Users className="h-5 w-5 mr-2 text-orange-600" />
-                  Received Bids
-                </CardTitle>
-                <CardDescription>
-                  View and manage bids from subcontractors
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
-                  <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </motion.div>
+        </div>
       </div>
-    </div>
+
+      <Dialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditDialogOpen(open)
+          if (!open) setEditError(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Job</DialogTitle>
+            <DialogDescription>
+              Update the job details and save your changes.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdateJob} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Job Name</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => handleEditChange('name', e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-location">Location</Label>
+              <Input
+                id="edit-location"
+                value={editForm.location}
+                onChange={(e) => handleEditChange('location', e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-budget_range">Budget</Label>
+              <Input
+                id="edit-budget_range"
+                placeholder="e.g. $40,000 with 10% contingency"
+                value={editForm.budget_range}
+                onChange={(e) => handleEditChange('budget_range', e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-project_type">Project Type</Label>
+              <Select
+                value={editForm.project_type || ''}
+                onValueChange={(value) => handleEditChange('project_type', value)}
+              >
+                <SelectTrigger id="edit-project_type">
+                  <SelectValue placeholder="Select project type (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Not specified</SelectItem>
+                  {PROJECT_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-status">Status</Label>
+              <Select
+                value={editForm.status}
+                onValueChange={(value) => handleEditChange('status', value as EditFormState['status'])}
+              >
+                <SelectTrigger id="edit-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {JOB_STATUSES.map((statusOption) => (
+                    <SelectItem key={statusOption} value={statusOption}>
+                      {statusOption.charAt(0).toUpperCase() + statusOption.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                rows={4}
+                value={editForm.description}
+                onChange={(e) => handleEditChange('description', e.target.value)}
+                placeholder="Describe the job scope, timeline, or other important details."
+              />
+            </div>
+
+            {editError && (
+              <p className="text-sm text-red-600">{editError}</p>
+            )}
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditDialogOpen(false)}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={saving || !editForm.name.trim() || !editForm.location.trim()}
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

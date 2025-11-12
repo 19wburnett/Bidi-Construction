@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
+import { getJobForUser } from '@/lib/job-access'
 import { useAuth } from '@/app/providers'
 import { 
   Package,
@@ -192,16 +193,18 @@ export default function BidPackageModal({
 
   async function loadData() {
     try {
-      // Load job details
-      const { data: jobData, error: jobError } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('id', jobId)
-        .eq('user_id', user?.id)
-        .single()
+      if (!user || !jobId) {
+        return
+      }
 
-      if (jobError) throw jobError
-      setJob(jobData)
+      // Load job details
+      const membership = await getJobForUser(supabase, jobId, user.id, '*')
+
+      if (!membership?.job) {
+        throw new Error('Job not found or access denied')
+      }
+
+      setJob(membership.job)
 
       // Load my contacts (gc_contacts)
       const [{ data: myData, error: myErr }, { data: bidiData, error: bidiErr }] = await Promise.all([

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { getJobForUser } from '@/lib/job-access'
 
 // POST /api/plan/share - Create a shareable link for a plan
 export async function POST(request: NextRequest) {
@@ -23,18 +24,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 })
     }
 
-    // Verify user owns this plan
+    // Verify user can access this plan via job membership or ownership
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('id, user_id')
+      .select('id, user_id, job_id')
       .eq('id', planId)
-      .single()
+      .maybeSingle()
 
     if (planError || !plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
-    if (plan.user_id !== user.id) {
+    if (plan.job_id) {
+      const membership = await getJobForUser(supabase, plan.job_id, user.id, 'role')
+      const isOwner = membership?.role === 'owner'
+      const isUploader = plan.user_id === user.id
+
+      if (!membership || (!isOwner && !isUploader)) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+      }
+    } else if (plan.user_id !== user.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 

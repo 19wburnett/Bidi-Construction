@@ -23,15 +23,6 @@ import {
 import Link from 'next/link'
 import { pageVariants, formField, successCheck } from '@/lib/animations'
 
-const BUDGET_RANGES = [
-  'Under $5,000',
-  '$5,000 - $10,000',
-  '$10,000 - $25,000',
-  '$25,000 - $50,000',
-  '$50,000 - $100,000',
-  'Over $100,000'
-]
-
 const PROJECT_TYPES = [
   'Residential',
   'Commercial',
@@ -234,21 +225,12 @@ export default function NewJobPage() {
                   <DollarSign className="h-4 w-4 mr-1" />
                   Budget Range
                 </Label>
-                <Select
+                <Input
+                  id="budget_range"
+                  placeholder="e.g. $40,000 with 10% contingency"
                   value={formData.budget_range}
-                  onValueChange={(value) => handleInputChange('budget_range', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select budget range" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BUDGET_RANGES.map((range) => (
-                      <SelectItem key={range} value={range}>
-                        {range}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={(e) => handleInputChange('budget_range', e.target.value)}
+                />
               </motion.div>
 
               {/* Description */}
