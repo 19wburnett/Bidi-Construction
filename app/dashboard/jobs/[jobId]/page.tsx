@@ -502,7 +502,7 @@ export default function JobDetailPage() {
                                     {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
                                   </div>
                                 </div>
-                              </div>
+                              </CardContent>
                             </Card>
                           </motion.div>
                         ))}
