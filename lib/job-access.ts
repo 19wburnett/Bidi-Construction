@@ -31,9 +31,9 @@ export async function userHasJobAccess(
  * Retrieve a job the user has access to, along with the membership role.
  * Returns null if the user is not a member.
  */
-type JobMemberWithJob<JobType = any> = {
+type JobWithRole = {
   role: 'owner' | 'collaborator'
-  job: JobType | null
+  job: Record<string, unknown> | null
 }
 
 export async function getJobForUser<T extends string = '*'>(
@@ -52,7 +52,7 @@ export async function getJobForUser<T extends string = '*'>(
     )
     .eq('job_id', jobId)
     .eq('user_id', userId)
-    .maybeSingle<JobMemberWithJob>()
+    .maybeSingle<JobWithRole>()
 
   if (error) {
     console.error('Failed to fetch job for user:', error)
@@ -86,7 +86,7 @@ export async function listJobsForUser<T extends string = '*'>(
       `
     )
     .eq('user_id', userId)
-    .returns<JobMemberWithJob[]>()
+    .returns<JobWithRole[]>()
 
   if (error) {
     console.error('Failed to list jobs for user:', error)
@@ -97,7 +97,7 @@ export async function listJobsForUser<T extends string = '*'>(
     .filter((row) => row.job)
     .map((row) => ({
       job: row.job,
-      role: row.role as 'owner' | 'collaborator'
+      role: row.role
     }))
 }
 

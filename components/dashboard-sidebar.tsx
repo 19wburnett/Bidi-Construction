@@ -202,6 +202,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
         { label: 'Test Multi Takeoff', href: '/admin/test-multi-takeoff' },
         { label: 'Crawler', href: '/admin/crawler' },
         { label: 'Subcontractors', href: '/admin/manage-subcontractors' },
+        { label: 'Team Invitations', href: '/admin/invitations' },
         { label: 'Manage Bids', href: '/admin/manage-bids' },
         { label: 'Workflow Demo', href: '/admin/workflow-demo' }
       ]
