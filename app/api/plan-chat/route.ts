@@ -319,7 +319,6 @@ Important rules:
   try {
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
-      temperature: 0.2,
       max_completion_tokens: 600,
       messages: [
         {
