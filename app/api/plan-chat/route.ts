@@ -336,7 +336,10 @@ Important rules:
     const reply = completion.choices[0]?.message?.content?.trim()
 
     if (!reply) {
-      throw new Error('Received empty response from OpenAI')
+      return NextResponse.json({
+        reply:
+          "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look.",
+      })
     }
 
     return NextResponse.json({ reply })
