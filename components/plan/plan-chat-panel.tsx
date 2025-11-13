@@ -199,7 +199,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
-              <Bot className="h-4 w-4 text-blue-500" />
+              <Bot className="h-4 w-4 text-orange-500" />
               <h4 className="text-sm font-semibold text-gray-900">Plan Chat</h4>
             </div>
             <p className="mt-1 text-xs text-gray-500">
@@ -244,7 +244,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                     <div
                       className={`max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-sm ${
                         message.role === 'user'
-                          ? 'bg-blue-600 text-white'
+                          ? 'bg-orange-600 text-white'
                           : 'bg-gray-100 text-gray-900'
                       }`}
                     >
@@ -252,7 +252,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                         {message.role === 'user' ? (
                           <UserIcon className="h-3.5 w-3.5" />
                         ) : (
-                          <Bot className="h-3.5 w-3.5" />
+                          <Bot className="h-3.5 w-3.5 text-orange-500" />
                         )}
                         <span>{message.role === 'user' ? 'You' : 'AI Estimator'}</span>
                       </div>
@@ -356,6 +356,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               <Button
                 onClick={handleSendMessage}
                 disabled={!canChat || !input.trim() || isSending}
+                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400"
               >
                 {isSending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
