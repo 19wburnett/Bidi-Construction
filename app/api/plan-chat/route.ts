@@ -12,21 +12,33 @@ type ChatHistoryMessage = {
 interface TakeoffSummaryCategory {
   category: string
   totalQuantity: number
-  unit?: string
+  unit?: string | null
 }
 
 interface NormalizedTakeoffItem {
   id?: string
-  category?: string
-  description?: string
-  name?: string
-  quantity?: number
-  unit?: string
-  unit_cost?: number
-  total_cost?: number
-  location?: string
-  location_reference?: string
-  page_number?: number
+  category?: string | null
+  category_key?: string | null
+  subcategory?: string | null
+  description?: string | null
+  name?: string | null
+  quantity?: number | null
+  unit?: string | null
+  unit_cost?: number | null
+  total_cost?: number | null
+  location?: string | null
+  page_number?: number | null
+  page_reference?: string | null
+  notes?: string | null
+}
+
+interface TakeoffCategoryBucket {
+  key: string
+  label: string
+  totalQuantity: number
+  totalCost: number
+  representativeUnit?: string | null
+  items: NormalizedTakeoffItem[]
 }
 
 const openaiClient =
@@ -34,31 +46,134 @@ const openaiClient =
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null
 
-function normalizeTakeoffItems(raw: any): NormalizedTakeoffItem[] {
+const coalesceString = (...values: any[]): string | null => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim()
+    }
+  }
+  return null
+}
+
+const coalesceNumber = (...values: any[]): number | null => {
+  for (const value of values) {
+    const num = typeof value === 'string' ? Number(value) : value
+    if (typeof num === 'number' && Number.isFinite(num)) {
+      return num
+    }
+  }
+  return null
+}
+
+const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
   if (!raw) return []
 
-  if (Array.isArray(raw)) {
-    return raw as NormalizedTakeoffItem[]
-  }
+  let sourceItems: any[] = []
 
-  if (typeof raw === 'string') {
+  if (Array.isArray(raw)) {
+    sourceItems = raw
+  } else if (typeof raw === 'string') {
     try {
-      return normalizeTakeoffItems(JSON.parse(raw))
+      const parsed = JSON.parse(raw)
+      return normalizeTakeoffItems(parsed)
     } catch (error) {
       console.error('Failed to parse takeoff items string', error)
       return []
     }
+  } else if (Array.isArray(raw?.takeoffs)) {
+    sourceItems = raw.takeoffs
+  } else if (Array.isArray(raw?.items)) {
+    sourceItems = raw.items
+  } else {
+    return []
   }
 
-  if (Array.isArray(raw?.takeoffs)) {
-    return raw.takeoffs as NormalizedTakeoffItem[]
-  }
+  return sourceItems.map((item, index) => {
+    const category = coalesceString(
+      item.category,
+      item.Category,
+      item.trade_category,
+      item.discipline,
+      item.scope,
+      item.segment,
+      item.group,
+      'Uncategorized'
+    )
 
-  if (Array.isArray(raw?.items)) {
-    return raw.items as NormalizedTakeoffItem[]
-  }
+    const subcategory = coalesceString(
+      item.subcategory,
+      item.sub_category,
+      item.Subcategory,
+      item.scope_detail
+    )
 
-  return []
+    const name = coalesceString(item.name, item.item_name, item.title, item.label, item.description)
+    const description = coalesceString(
+      item.description,
+      item.details,
+      item.notes,
+      item.item_description,
+      item.summary,
+      name
+    )
+
+    const location = coalesceString(
+      item.location,
+      item.location_reference,
+      item.location_ref,
+      item.area,
+      item.room,
+      item.zone,
+      item.sheet_reference,
+      item.sheet,
+      item.sheetTitle
+    )
+
+    const pageNumber = coalesceNumber(
+      item.page_number,
+      item.pageNumber,
+      item.page,
+      item.plan_page_number,
+      item.sheet_page,
+      item.sheetNumber,
+      item.bounding_box?.page
+    )
+
+    const pageReference = coalesceString(
+      item.page_reference,
+      item.sheet_reference,
+      item.sheet,
+      item.sheet_title,
+      item.sheetName,
+      item.page_label
+    )
+
+    const quantity = coalesceNumber(item.quantity, item.qty, item.amount)
+    const unit = coalesceString(item.unit, item.units, item.measure_unit)
+    const unitCost = coalesceNumber(item.unit_cost, item.unitCost, item.unit_price)
+    const totalCost = coalesceNumber(item.total_cost, item.totalCost, item.extended_price)
+
+    const notes = coalesceString(item.notes, item.assumptions, item.comments)
+
+    const categoryKey = category ? category.toLowerCase() : 'uncategorized'
+
+    return {
+      id: coalesceString(item.id, item.uuid, item.item_id) ?? `item-${index + 1}`,
+      category,
+      category_key: categoryKey,
+      subcategory,
+      name,
+      description,
+      quantity,
+      unit,
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      location,
+      page_number: pageNumber,
+      page_reference: pageReference,
+      notes,
+    }
+  })
 }
 
 function summarizeCategories(items: NormalizedTakeoffItem[]): TakeoffSummaryCategory[] {
@@ -72,7 +187,7 @@ function summarizeCategories(items: NormalizedTakeoffItem[]): TakeoffSummaryCate
       const current = totals.get(category) || { total: 0, unit: item.unit }
       totals.set(category, {
         total: current.total + quantityValue,
-        unit: current.unit || item.unit,
+        unit: current.unit || (item.unit ?? undefined),
       })
     }
   }
@@ -81,22 +196,79 @@ function summarizeCategories(items: NormalizedTakeoffItem[]): TakeoffSummaryCate
     .map(([category, value]) => ({
       category,
       totalQuantity: Number.isFinite(value.total) ? value.total : 0,
-      unit: value.unit,
+      unit: value.unit ?? null,
     }))
     .sort((a, b) => b.totalQuantity - a.totalQuantity)
 }
 
-function buildTakeoffContext(plan: any, items: NormalizedTakeoffItem[], summary: any) {
+function buildCategoryBuckets(items: NormalizedTakeoffItem[]): TakeoffCategoryBucket[] {
+  const map = new Map<string, TakeoffCategoryBucket>()
+
+  for (const item of items) {
+    const label = item.category ?? 'Uncategorized'
+    const key = (item.category_key ?? label.toLowerCase()) || 'uncategorized'
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        label,
+        totalQuantity: 0,
+        totalCost: 0,
+        representativeUnit: item.unit ?? null,
+        items: [],
+      })
+    }
+
+    const bucket = map.get(key)!
+    bucket.items.push(item)
+
+    if (typeof item.quantity === 'number') {
+      bucket.totalQuantity += item.quantity
+    }
+
+    if (typeof item.total_cost === 'number') {
+      bucket.totalCost += item.total_cost
+    }
+
+    if (!bucket.representativeUnit && item.unit) {
+      bucket.representativeUnit = item.unit
+    }
+  }
+
+  return Array.from(map.values())
+}
+
+const formatQuantity = (quantity: number | null | undefined, unit?: string | null) => {
+  if (quantity === null || quantity === undefined || Number.isNaN(quantity)) {
+    return unit ? `Unknown ${unit}` : 'Unknown quantity'
+  }
+  const formatted = quantity.toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number.isInteger(quantity) ? 0 : 2,
+  })
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+function buildTakeoffContext(
+  plan: any,
+  items: NormalizedTakeoffItem[],
+  summary: any,
+  categories: TakeoffCategoryBucket[]
+) {
   const sanitizedItems = items.map((item, index) => ({
     id: item.id ?? `item-${index + 1}`,
     category: item.category || 'Uncategorized',
+    subcategory: item.subcategory || null,
     description: item.description || item.name || 'No description provided',
+    name: item.name || null,
     quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : null,
     unit: item.unit || null,
     unit_cost: Number.isFinite(Number(item.unit_cost)) ? Number(item.unit_cost) : null,
     total_cost: Number.isFinite(Number(item.total_cost)) ? Number(item.total_cost) : null,
-    location: item.location || item.location_reference || null,
+    location: item.location || null,
     page_number: Number.isFinite(Number(item.page_number)) ? Number(item.page_number) : null,
+    page_reference: item.page_reference || null,
+    notes: item.notes || null,
   }))
 
   const derivedSummary = {
@@ -115,6 +287,23 @@ function buildTakeoffContext(plan: any, items: NormalizedTakeoffItem[], summary:
       takeoff: {
         summary: derivedSummary,
         items: sanitizedItems,
+        categories: categories.map((bucket) => ({
+          key: bucket.key,
+          label: bucket.label,
+          totalQuantity: bucket.totalQuantity,
+          totalCost: bucket.totalCost,
+          representativeUnit: bucket.representativeUnit,
+          items: bucket.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            quantity: item.quantity,
+            unit: item.unit,
+            location: item.location,
+            page_number: item.page_number,
+            page_reference: item.page_reference,
+          })),
+        })),
       },
     },
     null,
@@ -169,6 +358,7 @@ async function loadPlanContext(
   }
 
   const items = normalizeTakeoffItems(takeoffRow.items)
+  const categories = buildCategoryBuckets(items)
 
   return {
     job,
@@ -178,8 +368,115 @@ async function loadPlanContext(
       items,
       summary: takeoffRow.summary,
       lastUpdated: takeoffRow.updated_at || takeoffRow.created_at,
+      categories,
     },
   }
+}
+
+function findMatchingCategoryBucket(
+  message: string,
+  categories: TakeoffCategoryBucket[]
+): TakeoffCategoryBucket | null {
+  const lowerMessage = message.toLowerCase()
+  for (const bucket of categories) {
+    if (lowerMessage.includes(bucket.key) || lowerMessage.includes(bucket.label.toLowerCase())) {
+      return bucket
+    }
+  }
+  return null
+}
+
+const formatItemLine = (item: NormalizedTakeoffItem): string => {
+  const title = item.name || item.description || 'Item'
+  const quantityText =
+    item.quantity !== null && item.quantity !== undefined
+      ? formatQuantity(item.quantity, item.unit)
+      : item.unit
+      ? `Quantity not listed (${item.unit})`
+      : 'Quantity not listed'
+  const locationText = item.location ? ` @ ${item.location}` : ''
+  const pageText = item.page_number
+    ? ` (page ${item.page_number})`
+    : item.page_reference
+    ? ` (${item.page_reference})`
+    : ''
+  return `• ${title} — ${quantityText}${locationText}${pageText}`
+}
+
+function buildDeterministicAnswer(
+  latestUserMessage: ChatHistoryMessage | undefined,
+  takeoff: { items: NormalizedTakeoffItem[]; categories: TakeoffCategoryBucket[] }
+): string | null {
+  if (!latestUserMessage || latestUserMessage.role !== 'user') {
+    return null
+  }
+
+  const userText = latestUserMessage.content.trim()
+  if (!userText) {
+    return null
+  }
+
+  const lower = userText.toLowerCase()
+
+  const pageMatch = lower.match(/page\s*(\d+)/)
+  if (pageMatch) {
+    const pageNum = Number(pageMatch[1])
+    if (Number.isFinite(pageNum)) {
+      const pageItems = takeoff.items.filter(
+        (item) =>
+          item.page_number === pageNum ||
+          (item.page_reference && item.page_reference.toLowerCase().includes(`page ${pageNum}`))
+      )
+
+      if (pageItems.length > 0) {
+        const lines = pageItems.map(formatItemLine)
+        return [
+          `Items tagged to page ${pageNum}:`,
+          ...lines,
+          '',
+          'Let me know if you want more detail about any of these.',
+        ].join('\n')
+      }
+    }
+  }
+
+  const matchedCategory = findMatchingCategoryBucket(userText, takeoff.categories)
+  if (matchedCategory && matchedCategory.items.length > 0) {
+    const lines = matchedCategory.items.map(formatItemLine)
+    const quantityText =
+      matchedCategory.totalQuantity > 0
+        ? formatQuantity(matchedCategory.totalQuantity, matchedCategory.representativeUnit)
+        : null
+
+    return [
+      `I found ${matchedCategory.items.length} item${
+        matchedCategory.items.length === 1 ? '' : 's'
+      } in the ${matchedCategory.label} category${
+        quantityText ? ` (total quantity: ${quantityText})` : ''
+      }:`,
+      ...lines.slice(0, 30),
+      lines.length > 30 ? `…and ${lines.length - 30} more items.` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  if (lower.includes('top') && lower.includes('categor')) {
+    const sorted = [...takeoff.categories].sort((a, b) => b.totalQuantity - a.totalQuantity)
+    const topThree = sorted.filter((bucket) => bucket.totalQuantity > 0).slice(0, 3)
+    if (topThree.length > 0) {
+      const lines = topThree.map((bucket, index) => {
+        const quantityText = formatQuantity(bucket.totalQuantity, bucket.representativeUnit || undefined)
+        return `${index + 1}) ${bucket.label}: ${quantityText} (${bucket.items.length} items)`
+      })
+      return [
+        'Based on the available takeoff data, here are the leading categories by total quantity:',
+        ...lines,
+      ].join('\n')
+    }
+  }
+
+  return null
 }
 
 export async function GET(request: NextRequest) {
@@ -313,8 +610,13 @@ Important rules:
   const takeoffContext = buildTakeoffContext(
     context.plan,
     context.takeoff.items,
-    context.takeoff.summary
+    context.takeoff.summary,
+    context.takeoff.categories
   )
+
+  const latestUserMessage = [...sanitizedHistory]
+    .reverse()
+    .find((message) => message.role === 'user')
 
   try {
     const completion = await openaiClient.chat.completions.create({
@@ -336,6 +638,13 @@ Important rules:
     const reply = completion.choices[0]?.message?.content?.trim()
 
     if (!reply) {
+      const deterministic = buildDeterministicAnswer(latestUserMessage, {
+        items: context.takeoff.items,
+        categories: context.takeoff.categories,
+      })
+      if (deterministic) {
+        return NextResponse.json({ reply: deterministic })
+      }
       return NextResponse.json({
         reply:
           "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look.",
@@ -345,6 +654,13 @@ Important rules:
     return NextResponse.json({ reply })
   } catch (error) {
     console.error('Plan Chat completion failed', error)
+    const deterministic = buildDeterministicAnswer(latestUserMessage, {
+      items: context.takeoff.items,
+      categories: context.takeoff.categories,
+    })
+    if (deterministic) {
+      return NextResponse.json({ reply: deterministic })
+    }
     return NextResponse.json(
       {
         error:
