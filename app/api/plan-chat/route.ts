@@ -46,23 +46,79 @@ const openaiClient =
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null
 
+const sanitizeString = (value: any): string | null => {
+  if (value === null || value === undefined) return null
+  const stringified = typeof value === 'string' ? value : String(value)
+  const trimmed = stringified.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 const coalesceString = (...values: any[]): string | null => {
   for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim()
-    }
+    const sanitized = sanitizeString(value)
+    if (sanitized) return sanitized
   }
   return null
 }
 
-const coalesceNumber = (...values: any[]): number | null => {
-  for (const value of values) {
-    const num = typeof value === 'string' ? Number(value) : value
-    if (typeof num === 'number' && Number.isFinite(num)) {
-      return num
+const normalizeKey = (value: string | null | undefined): string | null => {
+  if (!value) return null
+  return value
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+const parseQuantityAndUnit = (
+  value: any
+): { quantity: number | null; detectedUnit: string | null } => {
+  if (value === null || value === undefined) {
+    return { quantity: null, detectedUnit: null }
+  }
+
+  if (typeof value === 'number') {
+    return { quantity: Number.isFinite(value) ? value : null, detectedUnit: null }
+  }
+
+  const raw = String(value).trim()
+  if (raw.length === 0) {
+    return { quantity: null, detectedUnit: null }
+  }
+
+  const match = raw.match(/-?\d[\d,]*(\.\d+)?/)
+  if (!match) {
+    return { quantity: null, detectedUnit: null }
+  }
+
+  const numeric = parseFloat(match[0].replace(/,/g, ''))
+  const before = raw.slice(0, match.index ?? 0).trim()
+  const after = raw.slice((match.index ?? 0) + match[0].length).trim()
+
+  let detectedUnit: string | null = null
+  const unitCandidate = after || before
+  if (unitCandidate) {
+    const cleaned = unitCandidate.replace(/^[\-\d,.\s]+/, '').trim()
+    if (cleaned.length > 0 && cleaned.length <= 25) {
+      detectedUnit = cleaned
     }
   }
-  return null
+
+  return {
+    quantity: Number.isFinite(numeric) ? numeric : null,
+    detectedUnit,
+  }
+}
+
+const parseCurrency = (value: any): number | null => {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  const raw = String(value).trim()
+  if (!raw) return null
+  const match = raw.match(/-?\d[\d,]*(\.\d+)?/)
+  if (!match) return null
+  const numeric = parseFloat(match[0].replace(/,/g, ''))
+  return Number.isFinite(numeric) ? numeric : null
 }
 
 const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
@@ -89,6 +145,9 @@ const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
   }
 
   return sourceItems.map((item, index) => {
+    const rawQuantityValue = item.quantity ?? item.qty ?? item.amount
+    const parsedQuantity = parseQuantityAndUnit(rawQuantityValue)
+
     const category = coalesceString(
       item.category,
       item.Category,
@@ -129,15 +188,9 @@ const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
       item.sheetTitle
     )
 
-    const pageNumber = coalesceNumber(
-      item.page_number,
-      item.pageNumber,
-      item.page,
-      item.plan_page_number,
-      item.sheet_page,
-      item.sheetNumber,
-      item.bounding_box?.page
-    )
+    const pageNumber = parseQuantityAndUnit(
+      item.page_number ?? item.pageNumber ?? item.page ?? item.plan_page_number ?? item.sheet_page ?? item.sheetNumber ?? item.bounding_box?.page
+    ).quantity
 
     const pageReference = coalesceString(
       item.page_reference,
@@ -148,14 +201,14 @@ const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
       item.page_label
     )
 
-    const quantity = coalesceNumber(item.quantity, item.qty, item.amount)
-    const unit = coalesceString(item.unit, item.units, item.measure_unit)
-    const unitCost = coalesceNumber(item.unit_cost, item.unitCost, item.unit_price)
-    const totalCost = coalesceNumber(item.total_cost, item.totalCost, item.extended_price)
+    const unit =
+      coalesceString(item.unit, item.units, item.measure_unit) || parsedQuantity.detectedUnit
+    const unitCost = parseCurrency(item.unit_cost ?? item.unitCost ?? item.unit_price)
+    const totalCost = parseCurrency(item.total_cost ?? item.totalCost ?? item.extended_price)
 
     const notes = coalesceString(item.notes, item.assumptions, item.comments)
 
-    const categoryKey = category ? category.toLowerCase() : 'uncategorized'
+    const categoryKey = normalizeKey(category) ?? 'uncategorized'
 
     return {
       id: coalesceString(item.id, item.uuid, item.item_id) ?? `item-${index + 1}`,
@@ -164,7 +217,7 @@ const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
       subcategory,
       name,
       description,
-      quantity,
+      quantity: parsedQuantity.quantity,
       unit,
       unit_cost: unitCost,
       total_cost: totalCost,
@@ -181,10 +234,10 @@ function summarizeCategories(items: NormalizedTakeoffItem[]): TakeoffSummaryCate
 
   for (const item of items) {
     const category = item.category || 'Uncategorized'
-    const quantityValue = Number(item.quantity)
+    const quantityValue = item.quantity ?? null
 
-    if (Number.isFinite(quantityValue)) {
-      const current = totals.get(category) || { total: 0, unit: item.unit }
+    if (quantityValue !== null && Number.isFinite(quantityValue)) {
+      const current = totals.get(category) || { total: 0, unit: item.unit || undefined }
       totals.set(category, {
         total: current.total + quantityValue,
         unit: current.unit || (item.unit ?? undefined),
@@ -206,7 +259,7 @@ function buildCategoryBuckets(items: NormalizedTakeoffItem[]): TakeoffCategoryBu
 
   for (const item of items) {
     const label = item.category ?? 'Uncategorized'
-    const key = (item.category_key ?? label.toLowerCase()) || 'uncategorized'
+    const key = normalizeKey(item.category_key ?? label) ?? 'uncategorized'
 
     if (!map.has(key)) {
       map.set(key, {
@@ -242,9 +295,10 @@ const formatQuantity = (quantity: number | null | undefined, unit?: string | nul
   if (quantity === null || quantity === undefined || Number.isNaN(quantity)) {
     return unit ? `Unknown ${unit}` : 'Unknown quantity'
   }
+  const isWhole = Math.abs(quantity - Math.round(quantity)) < 1e-6
   const formatted = quantity.toLocaleString('en-US', {
     maximumFractionDigits: 2,
-    minimumFractionDigits: Number.isInteger(quantity) ? 0 : 2,
+    minimumFractionDigits: isWhole ? 0 : 2,
   })
   return unit ? `${formatted} ${unit}` : formatted
 }
@@ -261,12 +315,12 @@ function buildTakeoffContext(
     subcategory: item.subcategory || null,
     description: item.description || item.name || 'No description provided',
     name: item.name || null,
-    quantity: Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : null,
+    quantity: item.quantity ?? null,
     unit: item.unit || null,
-    unit_cost: Number.isFinite(Number(item.unit_cost)) ? Number(item.unit_cost) : null,
-    total_cost: Number.isFinite(Number(item.total_cost)) ? Number(item.total_cost) : null,
+    unit_cost: item.unit_cost ?? null,
+    total_cost: item.total_cost ?? null,
     location: item.location || null,
-    page_number: Number.isFinite(Number(item.page_number)) ? Number(item.page_number) : null,
+    page_number: item.page_number ?? null,
     page_reference: item.page_reference || null,
     notes: item.notes || null,
   }))
@@ -377,12 +431,26 @@ function findMatchingCategoryBucket(
   message: string,
   categories: TakeoffCategoryBucket[]
 ): TakeoffCategoryBucket | null {
-  const lowerMessage = message.toLowerCase()
+  const messageKey = normalizeKey(message) ?? ''
+  if (!messageKey) return null
+
   for (const bucket of categories) {
-    if (lowerMessage.includes(bucket.key) || lowerMessage.includes(bucket.label.toLowerCase())) {
+    const bucketKey = bucket.key
+    const bucketLabel = normalizeKey(bucket.label) ?? bucketKey
+
+    if (messageKey.includes(bucketKey) || messageKey.includes(bucketLabel)) {
       return bucket
     }
+
+    // Handle pluralization like "doors and windows" vs "door & window"
+    if (bucketLabel.replace(/s\b/g, '').length > 0) {
+      const singularKey = bucketLabel.replace(/s\b/g, '')
+      if (messageKey.includes(singularKey)) {
+        return bucket
+      }
+    }
   }
+
   return null
 }
 
@@ -417,6 +485,7 @@ function buildDeterministicAnswer(
   }
 
   const lower = userText.toLowerCase()
+  const normalizedMessage = normalizeKey(userText) ?? ''
 
   const pageMatch = lower.match(/page\s*(\d+)/)
   if (pageMatch) {
@@ -461,10 +530,14 @@ function buildDeterministicAnswer(
       .join('\n')
   }
 
-  if (lower.includes('top') && lower.includes('categor')) {
+  if (normalizedMessage.includes('categor')) {
     const sorted = [...takeoff.categories].sort((a, b) => b.totalQuantity - a.totalQuantity)
-    const topThree = sorted.filter((bucket) => bucket.totalQuantity > 0).slice(0, 3)
-    if (topThree.length > 0) {
+    const meaningful = sorted.filter(
+      (bucket) => bucket.items.length > 0 || (bucket.totalQuantity ?? 0) > 0 || bucket.totalCost > 0
+    )
+
+    if (normalizedMessage.includes('top') && meaningful.length > 0) {
+      const topThree = meaningful.slice(0, 3)
       const lines = topThree.map((bucket, index) => {
         const quantityText = formatQuantity(bucket.totalQuantity, bucket.representativeUnit || undefined)
         return `${index + 1}) ${bucket.label}: ${quantityText} (${bucket.items.length} items)`
@@ -473,6 +546,30 @@ function buildDeterministicAnswer(
         'Based on the available takeoff data, here are the leading categories by total quantity:',
         ...lines,
       ].join('\n')
+    }
+
+    if (meaningful.length > 0) {
+      const lines = meaningful.slice(0, 8).map((bucket, index) => {
+        const quantityText =
+          bucket.totalQuantity > 0
+            ? formatQuantity(bucket.totalQuantity, bucket.representativeUnit || undefined)
+            : 'No quantity recorded'
+        const costText =
+          bucket.totalCost && bucket.totalCost > 0
+            ? ` · Cost: $${bucket.totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+            : ''
+        return `${index + 1}) ${bucket.label}: ${quantityText} (${bucket.items.length} items)${costText}`
+      })
+
+      return [
+        'Here is what I can tell you about the categories in this takeoff:',
+        ...lines,
+        meaningful.length > 8
+          ? `…and ${meaningful.length - 8} more categories. Ask about any specific one for details.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
     }
   }
 
@@ -614,9 +711,24 @@ Important rules:
     context.takeoff.categories
   )
 
-  const latestUserMessage = [...sanitizedHistory]
-    .reverse()
-    .find((message) => message.role === 'user')
+  const latestUserMessage = [...sanitizedHistory].reverse().find((message) => message.role === 'user')
+  const deterministicAnswer = buildDeterministicAnswer(latestUserMessage, {
+    items: context.takeoff.items,
+    categories: context.takeoff.categories,
+  })
+
+  const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
+  if (
+    deterministicAnswer &&
+    (latestMessageNormalized.includes('page') ||
+      latestMessageNormalized.includes('categor') ||
+      latestMessageNormalized.includes('door') ||
+      latestMessageNormalized.includes('window') ||
+      latestMessageNormalized.includes('item') ||
+      latestMessageNormalized.includes('summar'))
+  ) {
+    return NextResponse.json({ reply: deterministicAnswer })
+  }
 
   try {
     const completion = await openaiClient.chat.completions.create({
@@ -638,12 +750,8 @@ Important rules:
     const reply = completion.choices[0]?.message?.content?.trim()
 
     if (!reply) {
-      const deterministic = buildDeterministicAnswer(latestUserMessage, {
-        items: context.takeoff.items,
-        categories: context.takeoff.categories,
-      })
-      if (deterministic) {
-        return NextResponse.json({ reply: deterministic })
+      if (deterministicAnswer) {
+        return NextResponse.json({ reply: deterministicAnswer })
       }
       return NextResponse.json({
         reply:
@@ -654,12 +762,8 @@ Important rules:
     return NextResponse.json({ reply })
   } catch (error) {
     console.error('Plan Chat completion failed', error)
-    const deterministic = buildDeterministicAnswer(latestUserMessage, {
-      items: context.takeoff.items,
-      categories: context.takeoff.categories,
-    })
-    if (deterministic) {
-      return NextResponse.json({ reply: deterministic })
+    if (deterministicAnswer) {
+      return NextResponse.json({ reply: deterministicAnswer })
     }
     return NextResponse.json(
       {
