@@ -22,7 +22,8 @@ import {
   ChevronRight,
   ChevronLeft,
   FileText,
-  MessageSquare
+  MessageSquare,
+  Bot
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -39,6 +40,7 @@ import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
 import TakeoffAccordion from '@/components/takeoff-accordion'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
+import PlanChatPanel from '@/components/plan/plan-chat-panel'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 import { CheckCircle2 } from 'lucide-react'
@@ -47,7 +49,7 @@ import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-sc
 import { getJobForUser } from '@/lib/job-access'
 
 
-type AnalysisMode = 'takeoff' | 'quality' | 'comments'
+type AnalysisMode = 'takeoff' | 'quality' | 'chat' | 'comments'
 
 type TradeScopeStatus = 'complete' | 'partial' | 'missing'
 
@@ -1649,7 +1651,7 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1 flex-shrink-0">
+                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1 flex-shrink-0">
                       <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden sm:inline">Takeoff</span>
@@ -1657,6 +1659,10 @@ export default function EnhancedPlanViewer() {
                       <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-4">
                         <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden sm:inline">Quality</span>
+                      </TabsTrigger>
+                      <TabsTrigger value="chat" className="text-xs md:text-sm px-2 md:px-4">
+                        <Bot className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                        <span className="hidden sm:inline">Chat</span>
                       </TabsTrigger>
                       <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-4">
                         <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
@@ -1870,6 +1876,10 @@ export default function EnhancedPlanViewer() {
                             </div>
                           )}
                         </div>
+                      </TabsContent>
+
+                      <TabsContent value="chat" className="mt-0">
+                        <PlanChatPanel jobId={jobId} planId={planId} />
                       </TabsContent>
                       
                       <TabsContent value="comments" className="h-full">
