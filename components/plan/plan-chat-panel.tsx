@@ -40,10 +40,10 @@ interface ChatErrorState {
 }
 
 const examplePrompts = [
-  'How many linear feet of interior walls are measured on this plan?',
-  'What are the top three categories by total quantity?',
-  'List all items related to doors and windows with their counts.',
-  'Summarize the flooring quantities by level.'
+  'What notes are listed on the cover sheet about fire protection?',
+  'Summarize the footing quantities from the takeoff.',
+  'Which page mentions door hardware requirements and what does it say?',
+  'How many square feet of roofing are included and where?'
 ]
 
 export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
@@ -53,10 +53,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [status, setStatus] = useState<ChatStatusResponse | null>(null)
   const [error, setError] = useState<ChatErrorState | null>(null)
+  const [missingTakeoff, setMissingTakeoff] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   const hasActiveConversation = messages.length > 0
-  const canChat = status?.hasTakeoff && !error
+  const canChat = !error
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -67,6 +68,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     setInput('')
     setStatus(null)
     setError(null)
+    setMissingTakeoff(false)
     fetchStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, planId])
@@ -101,18 +103,12 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
       const data: ChatStatusResponse = await response.json()
       setStatus(data)
-
-      if (!data.hasTakeoff) {
-        setError({
-          type: 'missing-takeoff',
-          message: 'Plan Chat is available after a takeoff has been generated for this plan.',
-        })
-      } else {
-        setError(null)
-      }
+      setMissingTakeoff(!data.hasTakeoff)
+      setError(null)
     } catch (err) {
       console.error('Failed to fetch Plan Chat status', err)
       setStatus(null)
+      setMissingTakeoff(false)
       setError({
         type: 'request-failed',
         message: 'We could not load Plan Chat for this plan right now.',
@@ -157,13 +153,17 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
       if (response.status === 404) {
         const payload = await response.json().catch(() => ({}))
-        setError({
-          type: 'missing-takeoff',
-          message:
+        setMissingTakeoff(true)
+        setError(null)
+        const assistantMessage: PlanChatMessage = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content:
             payload?.error === 'TAKEOFF_NOT_FOUND'
-              ? 'We could not find takeoff data for this plan yet.'
-              : 'This plan does not have takeoff data yet.',
-        })
+              ? "I don't have takeoff or processed blueprint text for this plan yet. Run the ingestion or takeoff analysis and try again."
+              : 'This plan is not ready for chat yet. Please process the plan and try again.',
+        }
+        setMessages((prev) => [...prev, assistantMessage])
         return
       }
 
@@ -203,7 +203,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               <h4 className="text-sm font-semibold text-gray-900">Plan Chat</h4>
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              Ask questions about the takeoff for this plan. Answers use the latest takeoff data only.
+              Ask questions about this plan. Answers combine the latest takeoff data with text snippets
+              extracted from the blueprint.
             </p>
           </div>
           <Button
@@ -227,8 +228,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-gray-600">
                 <TriangleAlert className="h-8 w-8 text-amber-500" />
                 <p className="max-w-xs text-sm font-medium">
-                  {error?.message ||
-                    'Plan Chat is available once a takeoff has been generated for this plan.'}
+                  {error?.message || 'Plan Chat is temporarily unavailable. Try again in a moment.'}
                 </p>
                 {error?.details && (
                   <p className="max-w-sm text-xs text-gray-400">{error.details}</p>
@@ -236,6 +236,12 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               </div>
             ) : hasActiveConversation ? (
               <>
+                {missingTakeoff && (
+                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
+                    Takeoff results for this plan are still processing. I&rsquo;ll answer using the
+                    blueprint text snippets that have been ingested so far.
+                  </div>
+                )}
                 {messages.map((message) => (
                   <div
                     key={message.id}
@@ -278,14 +284,21 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               </>
             ) : (
               <div className="space-y-4">
+                {missingTakeoff && (
+                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
+                    Takeoff results aren&rsquo;t ready yet, but you can still ask about sheet notes,
+                    legends, and other text pulled from the blueprint. I&rsquo;ll let you know when I
+                    need more data.
+                  </div>
+                )}
                 <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
                   <p className="mb-2 font-medium text-gray-700">
-                    Ready to help with takeoff insights for this plan.
+                    Ready to help with takeoff insights and blueprint details for this plan.
                   </p>
                   <p>
-                    Ask about quantities, categories, or anything captured in the takeoff. The AI
-                    only uses the takeoff data for this plan and will let you know if something
-                    isn’t available.
+                    Ask about quantities, categories, or anything captured in the takeoff. When takeoff
+                    data is missing, I&rsquo;ll rely on the blueprint text that has been processed and
+                    tell you if something isn&rsquo;t available yet.
                   </p>
                 </div>
                 {summaryPreview && summaryPreview.length > 0 && (
@@ -334,8 +347,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
             <Textarea
               placeholder={
                 canChat
-                  ? 'Ask a question about this takeoff…'
-                  : 'Plan Chat is unavailable until the takeoff is ready.'
+                ? 'Ask a question about this plan…'
+                : 'Plan Chat is currently unavailable.'
               }
               value={input}
               onChange={(event) => setInput(event.target.value)}

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { retrievePlanTextChunks } from '@/lib/plan-text-chunks'
+import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
@@ -471,6 +473,31 @@ const formatItemLine = (item: NormalizedTakeoffItem): string => {
   return `• ${title} — ${quantityText}${locationText}${pageText}`
 }
 
+function buildPlanTextContext(chunks: PlanTextChunkRecord[]): string {
+  if (!chunks.length) {
+    return ''
+  }
+
+  return chunks
+    .map((chunk, index) => {
+      const metadata = chunk.metadata ?? {}
+      const labels: string[] = []
+      if (typeof chunk.page_number === 'number') {
+        labels.push(`Page ${chunk.page_number}`)
+      }
+      if (typeof metadata.sheet_id === 'string' && metadata.sheet_id.trim().length > 0) {
+        labels.push(metadata.sheet_id.trim())
+      }
+      if (typeof metadata.sheet_title === 'string' && metadata.sheet_title.trim().length > 0) {
+        labels.push(metadata.sheet_title.trim())
+      }
+
+      const header = labels.length > 0 ? ` [${labels.join(' • ')}]` : ''
+      return `Snippet ${index + 1}${header}:\n${chunk.snippet_text}`
+    })
+    .join('\n\n')
+}
+
 function buildDeterministicAnswer(
   latestUserMessage: ChatHistoryMessage | undefined,
   takeoff: { items: NormalizedTakeoffItem[]; categories: TakeoffCategoryBucket[] }
@@ -659,20 +686,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
   }
 
-  const context = await loadPlanContext(supabase, user.id, jobId, planId)
+  const contextResult = await loadPlanContext(supabase, user.id, jobId, planId)
 
-  if ('error' in context) {
-    if (context.error === 'JOB_NOT_FOUND') {
+  let planInfo: any = null
+  let takeoffData:
+    | {
+        id: string
+        items: NormalizedTakeoffItem[]
+        summary: any
+        lastUpdated: string | null
+        categories: TakeoffCategoryBucket[]
+      }
+    | null = null
+
+  if ('error' in contextResult) {
+    if (contextResult.error === 'JOB_NOT_FOUND') {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
-    if (context.error === 'PLAN_NOT_FOUND') {
+    if (contextResult.error === 'PLAN_NOT_FOUND') {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
-    if (context.error === 'TAKEOFF_NOT_FOUND') {
-      return NextResponse.json({ error: 'TAKEOFF_NOT_FOUND' }, { status: 404 })
+    if (contextResult.error === 'TAKEOFF_NOT_FOUND') {
+      planInfo = contextResult.plan
+      takeoffData = null
+    } else {
+      return NextResponse.json({ error: 'Failed to load takeoff analysis' }, { status: 500 })
     }
+  } else {
+    planInfo = contextResult.plan
+    takeoffData = contextResult.takeoff
+  }
 
-    return NextResponse.json({ error: 'Failed to load takeoff analysis' }, { status: 500 })
+  if (!planInfo) {
+    planInfo = {}
   }
 
   const sanitizedHistory = messages
@@ -692,59 +738,109 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No valid messages to process' }, { status: 400 })
   }
 
-  const systemPrompt = `
-You are Bidi's Plan Chat assistant, an experienced construction estimator.
-You are helping a user understand the takeoff results for a specific plan.
-Important rules:
-- Use only the provided takeoff data to answer questions.
-- Provide clear, concise responses with relevant quantities, units, categories, and locations when available.
-- If the question cannot be answered from the takeoff data, say so explicitly and suggest what information would be needed.
-- Emphasize data integrity: do not guess or fabricate any numbers.
-- When referencing takeoff items, mention their category or description so the user can identify them.
-- Be friendly, professional, and to the point.
-`.trim()
-
-  const takeoffContext = buildTakeoffContext(
-    context.plan,
-    context.takeoff.items,
-    context.takeoff.summary,
-    context.takeoff.categories
-  )
-
   const latestUserMessage = [...sanitizedHistory].reverse().find((message) => message.role === 'user')
-  const deterministicAnswer = buildDeterministicAnswer(latestUserMessage, {
-    items: context.takeoff.items,
-    categories: context.takeoff.categories,
-  })
 
-  const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
-  if (
-    deterministicAnswer &&
-    (latestMessageNormalized.includes('page') ||
-      latestMessageNormalized.includes('categor') ||
-      latestMessageNormalized.includes('door') ||
-      latestMessageNormalized.includes('window') ||
-      latestMessageNormalized.includes('item') ||
-      latestMessageNormalized.includes('summar'))
-  ) {
-    return NextResponse.json({ reply: deterministicAnswer })
+  const hasTakeoffData = Boolean(takeoffData && takeoffData.items.length > 0)
+
+  let planTextChunks: PlanTextChunkRecord[] = []
+  if (latestUserMessage?.content) {
+    try {
+      planTextChunks = await retrievePlanTextChunks(supabase, planId, latestUserMessage.content, 8)
+    } catch (error) {
+      console.error('Failed to retrieve plan text chunks:', error)
+    }
   }
+  const hasBlueprintText = planTextChunks.length > 0
+  const planTextContext = buildPlanTextContext(planTextChunks)
+
+  if (!hasTakeoffData && !hasBlueprintText) {
+    return NextResponse.json({
+      reply:
+        "I don't have takeoff results or processed blueprint text for this plan yet. Once the plan ingestion or takeoff analysis finishes, try again and I'll take another look.",
+    })
+  }
+
+  let takeoffContext: string | null = null
+  let deterministicAnswer: string | null = null
+  const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
+
+  if (takeoffData) {
+    takeoffContext = buildTakeoffContext(
+      planInfo,
+      takeoffData.items,
+      takeoffData.summary,
+      takeoffData.categories
+    )
+
+    deterministicAnswer = buildDeterministicAnswer(latestUserMessage, {
+      items: takeoffData.items,
+      categories: takeoffData.categories,
+    })
+
+    if (
+      deterministicAnswer &&
+      (latestMessageNormalized.includes('page') ||
+        latestMessageNormalized.includes('categor') ||
+        latestMessageNormalized.includes('door') ||
+        latestMessageNormalized.includes('window') ||
+        latestMessageNormalized.includes('item') ||
+        latestMessageNormalized.includes('summar'))
+    ) {
+      return NextResponse.json({ reply: deterministicAnswer })
+    }
+  }
+
+  const systemPromptLines: string[] = [
+    "You are Bidi's Plan Chat assistant, an experienced construction estimator.",
+    'Answer using only the information provided from the structured takeoff data and blueprint text snippets.',
+    'If the context does not clearly contain the answer, state that fact and describe what information would be required.',
+    'Never guess or fabricate quantities, dimensions, costs, or sheet references.',
+    'When you reference blueprint snippets, include the page number or sheet title when available.',
+  ]
+
+  if (!hasTakeoffData) {
+    systemPromptLines.push(
+      'Structured takeoff data is not available for this plan. Make it clear to the user that takeoff data is missing when relevant.'
+    )
+  }
+
+  if (!hasBlueprintText) {
+    systemPromptLines.push(
+      'Blueprint text snippets are not available, so rely entirely on the takeoff data. If the takeoff does not include the requested information, explain the gap.'
+    )
+  }
+
+  const systemPrompt = systemPromptLines.join('\n')
+  const planTitle = planInfo?.title || planInfo?.file_name || 'this plan'
+
+  const contextMessages = [
+    {
+      role: 'system' as const,
+      content: systemPrompt,
+    },
+    ...(takeoffContext
+      ? [
+          {
+            role: 'system' as const,
+            content: `Structured takeoff data for plan "${planTitle}":\n${takeoffContext}`,
+          },
+        ]
+      : []),
+    ...(hasBlueprintText
+      ? [
+          {
+            role: 'system' as const,
+            content: `Blueprint text snippets for plan "${planTitle}":\n${planTextContext}`,
+          },
+        ]
+      : []),
+  ]
 
   try {
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
       max_completion_tokens: 600,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'system',
-          content: `Takeoff data for plan "${context.plan.title || context.plan.file_name}":\n${takeoffContext}`,
-        },
-        ...sanitizedHistory,
-      ],
+      messages: [...contextMessages, ...sanitizedHistory],
     })
 
     const reply = completion.choices[0]?.message?.content?.trim()
@@ -754,8 +850,9 @@ Important rules:
         return NextResponse.json({ reply: deterministicAnswer })
       }
       return NextResponse.json({
-        reply:
-          "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look.",
+        reply: hasBlueprintText
+          ? "I reviewed the available blueprint snippets, but they don't contain enough detail to answer that. Try referencing a specific page, sheet title, or note, and I'll take another look."
+          : "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look.",
       })
     }
 
@@ -774,5 +871,3 @@ Important rules:
     )
   }
 }
-
-
