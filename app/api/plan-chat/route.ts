@@ -513,7 +513,9 @@ function extractPageNumbers(text: string): number[] {
   ]
 
   for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
+    pattern.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
       const value = parseInt(match[1], 10)
       if (Number.isFinite(value)) {
         results.add(value)
@@ -522,6 +524,42 @@ function extractPageNumbers(text: string): number[] {
   }
 
   return Array.from(results)
+}
+
+function buildSnippetSummary(chunks: PlanTextChunkRecord[], maxPages = 3): string {
+  if (!chunks.length) {
+    return "I couldn't locate any blueprint snippets for this plan yet."
+  }
+
+  const pages = new Map<number, PlanTextChunkRecord[]>()
+  for (const chunk of chunks) {
+    const pageNumber = typeof chunk.page_number === 'number' ? chunk.page_number : 0
+    if (!pages.has(pageNumber)) {
+      pages.set(pageNumber, [])
+    }
+    pages.get(pageNumber)!.push(chunk)
+  }
+
+  const orderedPages = Array.from(pages.entries())
+    .sort(([a], [b]) => a - b)
+    .slice(0, maxPages)
+
+  const lines: string[] = ['Here’s what the blueprint text highlights:']
+  for (const [page, pageChunks] of orderedPages) {
+    const preview = pageChunks
+      .slice(0, 2)
+      .map((chunk) => chunk.snippet_text.trim())
+      .filter(Boolean)
+      .map((text) => (text.length > 220 ? `${text.slice(0, 217)}…` : text))
+      .join(' ')
+    lines.push(`• Page ${page > 0 ? page : '?'}: ${preview || 'No readable text captured.'}`)
+  }
+
+  if (pages.size > maxPages) {
+    lines.push(`…plus ${pages.size - maxPages} more page${pages.size - maxPages === 1 ? '' : 's'} of text. Ask for a specific page to drill down.`)
+  }
+
+  return lines.join('\n')
 }
 
 function buildDeterministicAnswer(
@@ -920,6 +958,9 @@ export async function POST(request: NextRequest) {
     if (!reply) {
       if (deterministicAnswer) {
         return NextResponse.json({ reply: deterministicAnswer })
+      }
+      if (planTextChunks.length > 0) {
+        return NextResponse.json({ reply: buildSnippetSummary(planTextChunks) })
       }
       return NextResponse.json({
         reply: hasBlueprintText
