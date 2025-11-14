@@ -737,14 +737,14 @@ function buildStructuredStats(items: NormalizedTakeoffItem[], keywords: string[]
   const summaries: string[] = []
 
   const totalByCategory = (predicate: (item: NormalizedTakeoffItem) => boolean) => {
-    return items.reduce(
+    return items.reduce<{ total: number; unit: string | null }>(
       (acc, item) => {
         if (!predicate(item)) return acc
         const qty = typeof item.quantity === 'number' ? item.quantity : 0
         const unit = item.unit || acc.unit
         return {
           total: acc.total + qty,
-          unit: unit || acc.unit,
+          unit,
         }
       },
       { total: 0, unit: null as string | null }
@@ -1088,12 +1088,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const planTextChunks = Array.from(collectedChunks.values())
+  const basePlanTextChunks = Array.from(collectedChunks.values())
   const questionKeywords = extractQuestionKeywords(latestUserMessage?.content)
   const keywordFilteredChunks =
-    questionKeywords.length > 0 ? filterChunksByKeywords(planTextChunks, questionKeywords) : []
+    questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
-    keywordFilteredChunks.length > 0 ? keywordFilteredChunks : planTextChunks
+    keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
   const hasBlueprintText = planTextChunksForContext.length > 0
   const planTextContext = buildPlanTextContext(planTextChunksForContext)
 
