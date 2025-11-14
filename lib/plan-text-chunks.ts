@@ -219,6 +219,11 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   let storagePath = filePath
   let detectedBucket: string | null = null
 
+  const originalPath =
+    filePath.includes('/storage/v1/object/public/')
+      ? filePath.split('/storage/v1/object/public/')[1] ?? filePath
+      : filePath
+
   if (filePath.includes('/storage/v1/object/public/')) {
     const [, afterPublic] = filePath.split('/storage/v1/object/public/')
     if (afterPublic) {
@@ -239,6 +244,7 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   }
 
   const cleanPath = storagePath.split('?')[0]
+  const originalCleanPath = originalPath.split('?')[0]
   const bucketCandidates = Array.from(
     new Set(
       [detectedBucket, DEFAULT_STORAGE_BUCKET, 'plan-files', 'plans'].filter(
@@ -248,9 +254,11 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   )
 
   for (const bucket of bucketCandidates) {
-    const signedUrl = await tryCreateSignedUrl(supabase, bucket, cleanPath)
-    if (signedUrl) {
-      return fetchBuffer(signedUrl)
+    for (const candidatePath of [cleanPath, originalCleanPath]) {
+      const signedUrl = await tryCreateSignedUrl(supabase, bucket, candidatePath)
+      if (signedUrl) {
+        return fetchBuffer(signedUrl)
+      }
     }
   }
 
