@@ -184,6 +184,44 @@ export async function retrievePlanTextChunks(
   }))
 }
 
+export async function fetchPlanTextChunksByPage(
+  supabase: GenericSupabase,
+  planId: string,
+  pageNumbers: number[],
+  maxChunks?: number
+): Promise<PlanTextChunkRecord[]> {
+  if (pageNumbers.length === 0) {
+    return []
+  }
+
+  const uniquePages = Array.from(new Set(pageNumbers.filter((page) => Number.isFinite(page))))
+  if (uniquePages.length === 0) {
+    return []
+  }
+
+  const limit = maxChunks ?? Math.max(uniquePages.length * 12, 12)
+
+  const { data, error } = await supabase
+    .from('plan_text_chunks')
+    .select('id, page_number, snippet_text, metadata')
+    .eq('plan_id', planId)
+    .in('page_number', uniquePages)
+    .order('page_number', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(limit)
+
+  if (error) {
+    throw new Error(error.message || 'Failed to load plan text chunks by page')
+  }
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    page_number: row.page_number,
+    snippet_text: row.snippet_text,
+    metadata: row.metadata,
+  }))
+}
+
 async function loadSheetMetadataByPage(
   supabase: GenericSupabase,
   planId: string

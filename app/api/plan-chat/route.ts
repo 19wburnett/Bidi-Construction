@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { retrievePlanTextChunks } from '@/lib/plan-text-chunks'
+import { retrievePlanTextChunks, fetchPlanTextChunksByPage } from '@/lib/plan-text-chunks'
 import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
@@ -498,6 +498,28 @@ function buildPlanTextContext(chunks: PlanTextChunkRecord[]): string {
     .join('\n\n')
 }
 
+function extractPageNumbers(text: string): number[] {
+  if (!text) return []
+
+  const results = new Set<number>()
+  const patterns = [
+    /page\s*(\d{1,4})/gi,
+    /\bpg\.?\s*(\d{1,4})/gi,
+    /\bp\.?\s*(\d{1,4})/gi,
+  ]
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = parseInt(match[1], 10)
+      if (Number.isFinite(value)) {
+        results.add(value)
+      }
+    }
+  }
+
+  return Array.from(results)
+}
+
 function buildDeterministicAnswer(
   latestUserMessage: ChatHistoryMessage | undefined,
   takeoff: { items: NormalizedTakeoffItem[]; categories: TakeoffCategoryBucket[] }
@@ -742,14 +764,49 @@ export async function POST(request: NextRequest) {
 
   const hasTakeoffData = Boolean(takeoffData && takeoffData.items.length > 0)
 
-  let planTextChunks: PlanTextChunkRecord[] = []
+  const requestedPages = extractPageNumbers(latestUserMessage?.content ?? '')
+  const collectedChunks = new Map<string, PlanTextChunkRecord>()
+
+  if (requestedPages.length > 0) {
+    try {
+      const pageChunks = await fetchPlanTextChunksByPage(
+        supabase,
+        planId,
+        requestedPages,
+        Math.max(requestedPages.length * 12, 24)
+      )
+      for (const chunk of pageChunks) {
+        if (!collectedChunks.has(chunk.id)) {
+          collectedChunks.set(chunk.id, chunk)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load plan text chunks by page:', error)
+    }
+  }
+
   if (latestUserMessage?.content) {
     try {
-      planTextChunks = await retrievePlanTextChunks(supabase, planId, latestUserMessage.content, 8)
+      const remainingSlots = Math.max(0, 12 - collectedChunks.size)
+      if (remainingSlots > 0) {
+        const vectorChunks = await retrievePlanTextChunks(
+          supabase,
+          planId,
+          latestUserMessage.content,
+          remainingSlots
+        )
+        for (const chunk of vectorChunks) {
+          if (!collectedChunks.has(chunk.id)) {
+            collectedChunks.set(chunk.id, chunk)
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to retrieve plan text chunks:', error)
     }
   }
+
+  const planTextChunks = Array.from(collectedChunks.values())
   const hasBlueprintText = planTextChunks.length > 0
   const planTextContext = buildPlanTextContext(planTextChunks)
 
