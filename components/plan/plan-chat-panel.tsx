@@ -238,7 +238,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   }
 
   return (
-    <div className="flex h-full flex-col space-y-4">
+    <div className="flex h-full flex-col space-y-4 pb-24 relative">
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <div>
@@ -261,8 +261,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
           </Button>
         </div>
 
-        <div className="flex h-[320px] flex-col justify-between">
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 pb-36">
             {isLoading ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
                 <Loader2 className="h-6 w-6 animate-spin" />
@@ -387,7 +387,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
             <div ref={chatEndRef} />
           </div>
 
-          <div className="border-t border-gray-200 bg-white px-4 py-3">
+          <div className="border-t border-gray-200 bg-white px-4 py-3 sticky bottom-0">
             <Textarea
               placeholder={
                 canChat
