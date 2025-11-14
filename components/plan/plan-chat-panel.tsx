@@ -46,6 +46,8 @@ const examplePrompts = [
   'How many square feet of roofing are included and where?'
 ]
 
+const buildStorageKey = (planId: string) => `plan-chat:${planId}`
+
 export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [messages, setMessages] = useState<PlanChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -55,23 +57,65 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [error, setError] = useState<ChatErrorState | null>(null)
   const [missingTakeoff, setMissingTakeoff] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const hasHydratedMessagesRef = useRef(false)
 
   const hasActiveConversation = messages.length > 0
   const canChat = !error
+  const storageKey = useMemo(() => buildStorageKey(planId), [planId])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isSending])
 
   useEffect(() => {
+    hasHydratedMessagesRef.current = false
     setMessages([])
     setInput('')
     setStatus(null)
     setError(null)
     setMissingTakeoff(false)
+
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(storageKey)
+        if (stored) {
+          const parsed = JSON.parse(stored)
+          if (Array.isArray(parsed)) {
+            const hydratedMessages = parsed.filter(
+              (item: any): item is PlanChatMessage =>
+                item &&
+                (item.role === 'user' || item.role === 'assistant') &&
+                typeof item.content === 'string'
+            )
+            if (hydratedMessages.length > 0) {
+              setMessages(hydratedMessages)
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to hydrate Plan Chat history:', err)
+      }
+    }
+
+    hasHydratedMessagesRef.current = true
     fetchStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, planId])
+
+  useEffect(() => {
+    if (!hasHydratedMessagesRef.current) return
+    if (typeof window === 'undefined') return
+
+    try {
+      if (messages.length > 0) {
+        window.localStorage.setItem(storageKey, JSON.stringify(messages))
+      } else {
+        window.localStorage.removeItem(storageKey)
+      }
+    } catch (err) {
+      console.warn('Failed to persist Plan Chat history:', err)
+    }
+  }, [messages, storageKey])
 
   const summaryPreview = useMemo(() => {
     if (!status?.summaryCategories?.length) return null
