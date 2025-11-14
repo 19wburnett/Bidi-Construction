@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AlertCircle, CheckCircle2, Loader2, RefreshCcw } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, RefreshCcw, Sparkles } from 'lucide-react'
 
 interface IngestionResponse {
   planId: string
@@ -33,6 +33,22 @@ interface ResultEntry {
   status: 'success' | 'error'
   response?: IngestionResponse
   errorMessage?: string
+  planTitle?: string | null
+}
+
+interface BackfillPlanResult {
+  planId: string
+  planTitle: string | null
+  status: 'success' | 'error'
+  chunkCount?: number
+  pageCount?: number
+  warnings?: string[]
+  errorMessage?: string
+}
+
+interface BackfillResponse {
+  processed: BackfillPlanResult[]
+  hasMore: boolean
 }
 
 export default function PlanTextIngestionAdminPage() {
@@ -40,6 +56,9 @@ export default function PlanTextIngestionAdminPage() {
   const [jobId, setJobId] = useState('')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<ResultEntry[]>([])
+  const [backfillRunning, setBackfillRunning] = useState(false)
+  const [backfillSummary, setBackfillSummary] = useState<string | null>(null)
+  const [backfillError, setBackfillError] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const { user, loading: authLoading } = useAuth()
@@ -152,6 +171,101 @@ export default function PlanTextIngestionAdminPage() {
     }
   }
 
+  const handleBackfillAll = async () => {
+    if (backfillRunning) return
+    setBackfillRunning(true)
+    setBackfillSummary(null)
+    setBackfillError(null)
+
+    const aggregatedEntries: ResultEntry[] = []
+    let totalProcessed = 0
+    let totalErrors = 0
+    const MAX_BATCHES = 12
+    const BATCH_LIMIT = 2
+
+    try {
+      for (let batch = 0; batch < MAX_BATCHES; batch++) {
+        const response = await fetch('/api/plan-text-chunks/backfill', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ limit: BATCH_LIMIT }),
+        })
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.error || 'Backfill request failed')
+        }
+
+        const payload: BackfillResponse = await response.json()
+        if (!Array.isArray(payload.processed) || payload.processed.length === 0) {
+          if (totalProcessed === 0) {
+            setBackfillSummary('No remaining plans needed ingestion.')
+          }
+          break
+        }
+
+        payload.processed.forEach((planResult) => {
+          const entryTimestamp = Date.now() + aggregatedEntries.length + Math.random()
+          if (planResult.status === 'success') {
+            aggregatedEntries.push({
+              timestamp: entryTimestamp,
+              request: { planId: planResult.planId },
+              status: 'success',
+              response: {
+                planId: planResult.planId,
+                chunkCount: planResult.chunkCount ?? 0,
+                pageCount: planResult.pageCount ?? 0,
+                warnings: planResult.warnings,
+              },
+              planTitle: planResult.planTitle,
+            })
+          } else {
+            aggregatedEntries.push({
+              timestamp: entryTimestamp,
+              request: { planId: planResult.planId },
+              status: 'error',
+              errorMessage: planResult.errorMessage || 'Unknown ingestion error',
+              planTitle: planResult.planTitle,
+            })
+            totalErrors += 1
+          }
+        })
+
+        totalProcessed += payload.processed.length
+
+        if (!payload.hasMore) {
+          break
+        }
+      }
+
+      if (aggregatedEntries.length > 0) {
+        setResults((prev) => [...aggregatedEntries, ...prev])
+      }
+
+      const summaryPieces = []
+      if (totalProcessed > 0) {
+        summaryPieces.push(`${totalProcessed} plan${totalProcessed === 1 ? '' : 's'} processed`)
+      }
+      if (totalErrors > 0) {
+        summaryPieces.push(`${totalErrors} error${totalErrors === 1 ? '' : 's'}`)
+      }
+      if (summaryPieces.length > 0) {
+        setBackfillSummary(summaryPieces.join(' · '))
+      } else if (totalProcessed === 0) {
+        setBackfillSummary((prev) => prev ?? 'No remaining plans needed ingestion.')
+      } else {
+        setBackfillSummary('Backfill completed.')
+      }
+    } catch (error) {
+      console.error('Backfill request failed:', error)
+      setBackfillError(error instanceof Error ? error.message : 'Backfill failed')
+    } finally {
+      setBackfillRunning(false)
+    }
+  }
+
   const resetForm = () => {
     setPlanId('')
     setJobId('')
@@ -184,10 +298,44 @@ export default function PlanTextIngestionAdminPage() {
           <CardTitle>Ingestion Request</CardTitle>
           <CardDescription>
             Provide the plan and job identifiers. The job ID helps with access checks but is optional
-            if the plan already references a job.
+            if the plan already references a job. Or use the backfill action to ingest every plan
+            that is still missing snippets.
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="mb-6 rounded-lg border border-dashed border-blue-200 bg-blue-50/60 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">Backfill missing plans</p>
+                <p className="text-xs text-blue-800/80">
+                  Run ingestion automatically for every plan that does not yet have blueprint text.
+                  This may take several minutes depending on file sizes.
+                </p>
+              </div>
+              <Button
+                type="button"
+                className="gap-2"
+                onClick={handleBackfillAll}
+                disabled={backfillRunning}
+              >
+                {backfillRunning ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {backfillRunning ? 'Backfilling…' : 'Backfill all missing plans'}
+              </Button>
+            </div>
+            {(backfillSummary || backfillError) && (
+              <p
+                className={`mt-3 text-xs ${
+                  backfillError ? 'text-red-700' : 'text-blue-900'
+                }`}
+              >
+                {backfillError || backfillSummary}
+              </p>
+            )}
+          </div>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="plan-id">Plan ID</Label>
@@ -256,6 +404,12 @@ export default function PlanTextIngestionAdminPage() {
                   </div>
 
                   <div className="space-y-2 text-sm">
+                  {result.planTitle && (
+                    <p className="text-muted-foreground">
+                      <span className="font-medium text-foreground">Title:</span>{' '}
+                      <span>{result.planTitle}</span>
+                    </p>
+                  )}
                     {result.request.jobId && (
                       <p className="text-muted-foreground">
                         <span className="font-medium text-foreground">Job ID:</span>{' '}
