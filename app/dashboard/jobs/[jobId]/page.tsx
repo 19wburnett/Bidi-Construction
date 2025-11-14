@@ -233,7 +233,7 @@ export default function JobDetailPage() {
         if (insertError) throw insertError
 
         // Auto-trigger ingestion in the background (don't wait)
-        if (newPlan) {
+        if (newPlan?.id) {
           console.log(`Auto-triggering ingestion for plan ${newPlan.id}`)
           fetch('/api/ingest', {
             method: 'POST',
@@ -243,12 +243,22 @@ export default function JobDetailPage() {
               jobId: jobId,
               options: {
                 enable_image_extraction: true,
-                image_dpi: 300
-              }
-            })
-          }).catch(err => {
+                image_dpi: 300,
+              },
+            }),
+          }).catch((err) => {
             console.error('Background ingestion trigger failed:', err)
-            // Don't block the user - ingestion can be retried later
+          })
+
+          fetch('/api/plan-text-chunks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId: newPlan.id,
+              jobId,
+            }),
+          }).catch((err) => {
+            console.error('Background plan text ingestion trigger failed:', err)
           })
         }
       }
