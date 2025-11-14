@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { retrievePlanTextChunks, fetchPlanTextChunksByPage } from '@/lib/plan-text-chunks'
+import {
+  retrievePlanTextChunks,
+  fetchPlanTextChunksByPage,
+  fetchPlanTextChunksSample,
+} from '@/lib/plan-text-chunks'
 import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
@@ -803,6 +807,17 @@ export async function POST(request: NextRequest) {
       }
     } catch (error) {
       console.error('Failed to retrieve plan text chunks:', error)
+    }
+  }
+
+  if (collectedChunks.size === 0) {
+    try {
+      const sampleChunks = await fetchPlanTextChunksSample(supabase, planId, 12)
+      for (const chunk of sampleChunks) {
+        collectedChunks.set(chunk.id, chunk)
+      }
+    } catch (error) {
+      console.error('Failed to load sample plan text chunks:', error)
     }
   }
 

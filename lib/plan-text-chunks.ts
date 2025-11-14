@@ -222,6 +222,31 @@ export async function fetchPlanTextChunksByPage(
   }))
 }
 
+export async function fetchPlanTextChunksSample(
+  supabase: GenericSupabase,
+  planId: string,
+  limit = 12
+): Promise<PlanTextChunkRecord[]> {
+  const { data, error } = await supabase
+    .from('plan_text_chunks')
+    .select('id, page_number, snippet_text, metadata')
+    .eq('plan_id', planId)
+    .order('page_number', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(limit)
+
+  if (error) {
+    throw new Error(error.message || 'Failed to load sample plan text chunks')
+  }
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    page_number: row.page_number,
+    snippet_text: row.snippet_text,
+    metadata: row.metadata,
+  }))
+}
+
 async function loadSheetMetadataByPage(
   supabase: GenericSupabase,
   planId: string
