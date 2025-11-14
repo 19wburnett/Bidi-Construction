@@ -526,40 +526,145 @@ function extractPageNumbers(text: string): number[] {
   return Array.from(results)
 }
 
-function buildSnippetSummary(chunks: PlanTextChunkRecord[], maxPages = 3): string {
+function buildSnippetSummary(
+  question: string,
+  chunks: PlanTextChunkRecord[],
+  requestedPages: number[],
+  maxPages = 4
+): string {
   if (!chunks.length) {
     return "I couldn't locate any blueprint snippets for this plan yet."
   }
 
-  const pages = new Map<number, PlanTextChunkRecord[]>()
+  const buckets = new Map<number, PlanTextChunkRecord[]>()
   for (const chunk of chunks) {
-    const pageNumber = typeof chunk.page_number === 'number' ? chunk.page_number : 0
-    if (!pages.has(pageNumber)) {
-      pages.set(pageNumber, [])
+    const page =
+      typeof chunk.page_number === 'number' && Number.isFinite(chunk.page_number) ? chunk.page_number : 0
+    if (!buckets.has(page)) {
+      buckets.set(page, [])
     }
-    pages.get(pageNumber)!.push(chunk)
+    buckets.get(page)!.push(chunk)
   }
 
-  const orderedPages = Array.from(pages.entries())
-    .sort(([a], [b]) => a - b)
-    .slice(0, maxPages)
+  const prioritizedPages =
+    requestedPages.length > 0
+      ? requestedPages
+      : Array.from(buckets.keys())
+          .filter((page) => page > 0)
+          .sort((a, b) => a - b)
+          .slice(0, maxPages)
 
-  const lines: string[] = ['Here’s what the blueprint text highlights:']
-  for (const [page, pageChunks] of orderedPages) {
-    const preview = pageChunks
-      .slice(0, 2)
-      .map((chunk) => chunk.snippet_text.trim())
-      .filter(Boolean)
-      .map((text) => (text.length > 220 ? `${text.slice(0, 217)}…` : text))
-      .join(' ')
-    lines.push(`• Page ${page > 0 ? page : '?'}: ${preview || 'No readable text captured.'}`)
-  }
+  const selectedPages =
+    prioritizedPages.length > 0
+      ? prioritizedPages
+      : Array.from(buckets.keys())
+          .sort((a, b) => a - b)
+          .slice(0, maxPages)
 
-  if (pages.size > maxPages) {
-    lines.push(`…plus ${pages.size - maxPages} more page${pages.size - maxPages === 1 ? '' : 's'} of text. Ask for a specific page to drill down.`)
+  const heading =
+    requestedPages.length > 0
+      ? `Highlights from page${requestedPages.length > 1 ? 's' : ''} ${requestedPages.join(', ')}:`
+      : inferSummaryHeading(question)
+
+  const lines: string[] = [heading]
+
+  selectedPages.forEach((page) => {
+    const pageChunks = buckets.get(page) || []
+    const preview = formatChunkPreview(pageChunks)
+    const sheetLabel = inferSheetLabel(pageChunks)
+    const labelParts = [
+      page > 0 ? `Page ${page}` : 'Cover / unspecified page',
+      sheetLabel ? `(${sheetLabel})` : null,
+    ].filter(Boolean)
+    lines.push(`• ${labelParts.join(' ')}: ${preview}`)
+  })
+
+  const unseenPages = Math.max(buckets.size - selectedPages.length, 0)
+  if (unseenPages > 0) {
+    lines.push(
+      `…plus ${unseenPages} more page${unseenPages === 1 ? '' : 's'} of notes. Ask about a specific sheet to drill down.`
+    )
   }
 
   return lines.join('\n')
+}
+
+function inferSummaryHeading(question: string): string {
+  const normalized = question.toLowerCase()
+  if (
+    normalized.includes('summary') ||
+    normalized.includes('about this plan') ||
+    normalized.includes('overview') ||
+    normalized.includes('project')
+  ) {
+    return 'High-level blueprint highlights:'
+  }
+  if (normalized.includes('fire') || normalized.includes('note')) {
+    return 'Relevant notes found in the blueprint:'
+  }
+  if (normalized.includes('page')) {
+    return 'Blueprint notes pulled from the requested pages:'
+  }
+  return 'Here’s what the blueprint text highlights:'
+}
+
+function formatChunkPreview(chunks: PlanTextChunkRecord[], maxLength = 220): string {
+  if (!chunks.length) {
+    return 'No readable text captured.'
+  }
+
+  const combined = chunks
+    .map((chunk) => normalizeWhitespace(chunk.snippet_text))
+    .filter(Boolean)
+    .join(' ')
+
+  if (!combined) {
+    return 'No readable text captured.'
+  }
+
+  const sentences = combined.split(/(?<=[.?!])\s+/).filter(Boolean)
+  const builder: string[] = []
+  let total = 0
+  for (const sentence of sentences) {
+    if (total + sentence.length > maxLength && builder.length > 0) {
+      break
+    }
+    builder.push(sentence)
+    total += sentence.length
+    if (total >= maxLength) {
+      break
+    }
+  }
+
+  const preview = builder.join(' ').trim()
+  if (!preview) {
+    return combined.slice(0, maxLength > 10 ? maxLength - 1 : combined.length)
+  }
+  return preview.length > maxLength ? `${preview.slice(0, maxLength - 1)}…` : preview
+}
+
+function inferSheetLabel(chunks: PlanTextChunkRecord[]): string | null {
+  for (const chunk of chunks) {
+    const metadata = chunk.metadata ?? {}
+    const label =
+      (typeof metadata.sheet_title === 'string' && metadata.sheet_title.trim()) ||
+      (typeof metadata.sheet_id === 'string' && metadata.sheet_id.trim()) ||
+      null
+    if (label) {
+      return label
+    }
+  }
+
+  const combined = chunks
+    .map((chunk) => normalizeWhitespace(chunk.snippet_text))
+    .join(' ')
+    .toLowerCase()
+
+  if (combined.includes('cover sheet')) return 'Cover Sheet'
+  if (combined.includes('general note')) return 'General Notes'
+  if (combined.includes('site plan')) return 'Site Plan'
+
+  return null
 }
 
 function buildDeterministicAnswer(
@@ -960,7 +1065,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ reply: deterministicAnswer })
       }
       if (planTextChunks.length > 0) {
-        return NextResponse.json({ reply: buildSnippetSummary(planTextChunks) })
+        return NextResponse.json({
+          reply: buildSnippetSummary(latestUserMessage?.content ?? '', planTextChunks, requestedPages),
+        })
       }
       return NextResponse.json({
         reply: hasBlueprintText
