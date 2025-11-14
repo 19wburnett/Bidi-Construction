@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
 
-const STORAGE_BUCKET = process.env.NEXT_PUBLIC_PLAN_STORAGE_BUCKET || 'job-plans'
+const DEFAULT_STORAGE_BUCKET = process.env.NEXT_PUBLIC_PLAN_STORAGE_BUCKET || 'job-plans'
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small'
 const EMBEDDING_DIMENSION = 1536
 const MAX_CHUNK_CHAR_LENGTH = 900
@@ -217,26 +217,62 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   }
 
   let storagePath = filePath
-  if (filePath.startsWith(`${STORAGE_BUCKET}/`)) {
-    storagePath = filePath.slice(STORAGE_BUCKET.length + 1)
-  } else if (filePath.includes('/storage/v1/object/public/')) {
+  let bucket = DEFAULT_STORAGE_BUCKET
+
+  if (filePath.includes('/storage/v1/object/public/')) {
     const [, afterPublic] = filePath.split('/storage/v1/object/public/')
-    storagePath = afterPublic?.split('/').slice(1).join('/') || storagePath
+    if (afterPublic) {
+      const [bucketCandidate, ...rest] = afterPublic.split('/')
+      if (bucketCandidate && rest.length > 0) {
+        bucket = bucketCandidate
+        storagePath = rest.join('/')
+      } else {
+        storagePath = afterPublic
+      }
+    }
+  } else {
+    const [bucketCandidate, ...rest] = storagePath.split('/')
+    if (bucketCandidate && rest.length > 0) {
+      bucket = bucketCandidate
+      storagePath = rest.join('/')
+    }
   }
 
-  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(storagePath, 300)
-
-  if (signedUrlError) {
-    throw new Error(signedUrlError.message || 'Failed to create signed URL for plan file')
+  const signedUrl = await tryCreateSignedUrl(supabase, bucket, storagePath)
+  if (!signedUrl && bucket !== DEFAULT_STORAGE_BUCKET) {
+    const fallbackUrl = await tryCreateSignedUrl(supabase, DEFAULT_STORAGE_BUCKET, storagePath)
+    if (!fallbackUrl) {
+      throw new Error(
+        `Failed to create signed URL for plan file. Tried buckets "${bucket}" and "${DEFAULT_STORAGE_BUCKET}".`
+      )
+    }
+    return fetchBuffer(fallbackUrl)
   }
 
-  if (!signedUrlData?.signedUrl) {
-    throw new Error('Supabase did not return a signed URL for the plan file')
+  if (!signedUrl) {
+    throw new Error(`Failed to create signed URL for plan file in bucket "${bucket}".`)
   }
 
-  const response = await fetch(signedUrlData.signedUrl)
+  return fetchBuffer(signedUrl)
+}
+
+async function tryCreateSignedUrl(
+  supabase: GenericSupabase,
+  bucket: string,
+  storagePath: string
+): Promise<string | null> {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, 300)
+  if (error) {
+    if (error.message && error.message.toLowerCase().includes('object not found')) {
+      return null
+    }
+    throw new Error(error.message || `Failed to create signed URL in bucket "${bucket}"`)
+  }
+  return data?.signedUrl ?? null
+}
+
+async function fetchBuffer(url: string): Promise<Buffer> {
+  const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to download plan file (${response.status} ${response.statusText})`)
   }
