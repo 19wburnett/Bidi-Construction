@@ -217,14 +217,14 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   }
 
   let storagePath = filePath
-  let bucket = DEFAULT_STORAGE_BUCKET
+  let detectedBucket: string | null = null
 
   if (filePath.includes('/storage/v1/object/public/')) {
     const [, afterPublic] = filePath.split('/storage/v1/object/public/')
     if (afterPublic) {
       const [bucketCandidate, ...rest] = afterPublic.split('/')
       if (bucketCandidate && rest.length > 0) {
-        bucket = bucketCandidate
+        detectedBucket = bucketCandidate
         storagePath = rest.join('/')
       } else {
         storagePath = afterPublic
@@ -233,27 +233,30 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
   } else {
     const [bucketCandidate, ...rest] = storagePath.split('/')
     if (bucketCandidate && rest.length > 0) {
-      bucket = bucketCandidate
+      detectedBucket = bucketCandidate
       storagePath = rest.join('/')
     }
   }
 
-  const signedUrl = await tryCreateSignedUrl(supabase, bucket, storagePath)
-  if (!signedUrl && bucket !== DEFAULT_STORAGE_BUCKET) {
-    const fallbackUrl = await tryCreateSignedUrl(supabase, DEFAULT_STORAGE_BUCKET, storagePath)
-    if (!fallbackUrl) {
-      throw new Error(
-        `Failed to create signed URL for plan file. Tried buckets "${bucket}" and "${DEFAULT_STORAGE_BUCKET}".`
+  const cleanPath = storagePath.split('?')[0]
+  const bucketCandidates = Array.from(
+    new Set(
+      [detectedBucket, DEFAULT_STORAGE_BUCKET, 'plan-files', 'plans'].filter(
+        (bucket): bucket is string => typeof bucket === 'string' && bucket.trim().length > 0
       )
+    )
+  )
+
+  for (const bucket of bucketCandidates) {
+    const signedUrl = await tryCreateSignedUrl(supabase, bucket, cleanPath)
+    if (signedUrl) {
+      return fetchBuffer(signedUrl)
     }
-    return fetchBuffer(fallbackUrl)
   }
 
-  if (!signedUrl) {
-    throw new Error(`Failed to create signed URL for plan file in bucket "${bucket}".`)
-  }
-
-  return fetchBuffer(signedUrl)
+  throw new Error(
+    `Failed to create signed URL for plan file. Tried buckets: ${bucketCandidates.join(', ')}.`
+  )
 }
 
 async function tryCreateSignedUrl(
