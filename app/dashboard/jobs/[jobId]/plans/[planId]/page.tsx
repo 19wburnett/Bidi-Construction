@@ -115,7 +115,7 @@ export default function EnhancedPlanViewer() {
   const [showBidsModal, setShowBidsModal] = useState(false)
   
   // Sidebar resize state
-	const [sidebarWidth, setSidebarWidth] = useState(600) // Default 600px to match resize constraints
+	const [sidebarWidth, setSidebarWidth] = useState(480) // Default narrower sidebar to prioritize plan canvas
 	const [isResizing, setIsResizing] = useState(false)
 	const [startX, setStartX] = useState(0)
 	const [startWidth, setStartWidth] = useState(600)
@@ -286,8 +286,8 @@ export default function EnhancedPlanViewer() {
       const deltaX = e.clientX - startX
       const newWidth = startWidth - deltaX
       
-      // Clamp width between 600px and 800px
-      const clampedWidth = Math.max(600, Math.min(800, newWidth))
+      // Clamp width between 420px and 640px
+      const clampedWidth = Math.max(420, Math.min(640, newWidth))
       setSidebarWidth(clampedWidth)
     }
 
@@ -1626,7 +1626,7 @@ export default function EnhancedPlanViewer() {
                     width: isMobile
                       ? '100vw'
                       : isTablet
-                        ? 'min(90vw, 640px)'
+                        ? 'min(90vw, 520px)'
                         : `${sidebarWidth}px`,
                     ...(isMobile || isTablet 
                       ? { height: '100vh' }
@@ -1651,22 +1651,22 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-4 mt-2 md:mt-4 mb-0 gap-1 flex-shrink-0">
-                      <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
+                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
+                      <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-3">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden sm:inline">Takeoff</span>
+                        <span className="hidden xl:inline">Takeoff</span>
                       </TabsTrigger>
-                      <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-4">
+                      <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-3">
                         <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden sm:inline">Quality</span>
+                        <span className="hidden xl:inline">Quality</span>
                       </TabsTrigger>
-                      <TabsTrigger value="chat" className="text-xs md:text-sm px-2 md:px-4">
+                      <TabsTrigger value="chat" className="text-xs md:text-sm px-2 md:px-3">
                         <Bot className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden sm:inline">Chat</span>
+                        <span className="hidden xl:inline">Chat</span>
                       </TabsTrigger>
-                      <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-4">
+                      <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-3">
                         <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden sm:inline">Comments</span>
+                        <span className="hidden xl:inline">Comments</span>
                       </TabsTrigger>
                     </TabsList>
                     
