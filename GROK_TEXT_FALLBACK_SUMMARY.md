@@ -100,3 +100,4 @@ Expected output:
 - ✅ Claude Sonnet: Success (images)
 - ✅ Grok: Success (text, after auto-fallback)
 
+

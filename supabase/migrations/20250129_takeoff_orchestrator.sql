@@ -166,3 +166,4 @@ COMMENT ON TABLE provider_rate_limits IS 'Provider rate limit tracking for backp
 COMMENT ON FUNCTION claim_next_batch IS 'Atomically claims next pending batch to prevent race conditions';
 
 
+
