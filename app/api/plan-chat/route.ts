@@ -670,6 +670,127 @@ function inferSheetLabel(chunks: PlanTextChunkRecord[]): string | null {
   return null
 }
 
+const KEYWORD_SYNONYMS: Record<string, string[]> = {
+  roof: ['roof', 'roofing', 'roof area', 'shingle'],
+  concrete: ['concrete', 'footing', 'found', 'foundation', 'slab'],
+  door: ['door', 'doors'],
+  window: ['window', 'windows', 'glazing'],
+  fire: ['fire', 'sprinkler', 'smoke', 'alarm'],
+  floor: ['floor', 'flooring'],
+  area: ['square feet', 'sqft', 'sf', 'area'],
+  siding: ['siding', 'exterior finish'],
+  stair: ['stair', 'stairs'],
+}
+
+function extractQuestionKeywords(question?: string | null): string[] {
+  if (!question) return []
+  const normalized = question.toLowerCase()
+  const matches = new Set<string>()
+  Object.entries(KEYWORD_SYNONYMS).forEach(([keyword, synonyms]) => {
+    if (synonyms.some((term) => normalized.includes(term))) {
+      matches.add(keyword)
+    }
+  })
+  return Array.from(matches)
+}
+
+function textMatchesKeywords(text: string | null | undefined, keywords: string[]): boolean {
+  if (!text || keywords.length === 0) return false
+  const lower = text.toLowerCase()
+  return keywords.some((keyword) => {
+    const synonyms = KEYWORD_SYNONYMS[keyword] || [keyword]
+    return synonyms.some((term) => lower.includes(term))
+  })
+}
+
+function filterTakeoffItemsByKeywords(
+  items: NormalizedTakeoffItem[],
+  keywords: string[]
+): NormalizedTakeoffItem[] {
+  if (!keywords.length) return []
+  return items.filter((item) => {
+    return (
+      textMatchesKeywords(item.category, keywords) ||
+      textMatchesKeywords(item.description, keywords) ||
+      textMatchesKeywords(item.name, keywords) ||
+      textMatchesKeywords(item.notes, keywords)
+    )
+  })
+}
+
+function summarizeTakeoffItems(items: NormalizedTakeoffItem[], limit = 6): string {
+  if (!items.length) return ''
+  const lines = items.slice(0, limit).map((item) => {
+    const category = item.category ? `${item.category}: ` : ''
+    const quantity =
+      typeof item.quantity === 'number' ? formatQuantity(item.quantity, item.unit) : item.unit || 'N/A'
+    const location = item.location ? ` @ ${item.location}` : ''
+    return `• ${category}${item.description || item.name || 'Item'} — ${quantity}${location}`
+  })
+  if (items.length > limit) {
+    lines.push(`…plus ${items.length - limit} more related takeoff entries.`)
+  }
+  return lines.join('\n')
+}
+
+function buildStructuredStats(items: NormalizedTakeoffItem[], keywords: string[]): string | null {
+  const summaries: string[] = []
+
+  const totalByCategory = (predicate: (item: NormalizedTakeoffItem) => boolean) => {
+    return items.reduce(
+      (acc, item) => {
+        if (!predicate(item)) return acc
+        const qty = typeof item.quantity === 'number' ? item.quantity : 0
+        const unit = item.unit || acc.unit
+        return {
+          total: acc.total + qty,
+          unit: unit || acc.unit,
+        }
+      },
+      { total: 0, unit: null as string | null }
+    )
+  }
+
+  if (keywords.includes('roof')) {
+    const { total, unit } = totalByCategory((item) => textMatchesKeywords(item.description, ['roof']))
+    if (total > 0) {
+      summaries.push(`Roofing quantity: ${formatQuantity(total, unit)}.`)
+    }
+  }
+
+  if (keywords.includes('concrete')) {
+    const { total, unit } = totalByCategory((item) =>
+      textMatchesKeywords(item.description, ['concrete', 'footing', 'foundation'])
+    )
+    if (total > 0) {
+      summaries.push(`Concrete quantity: ${formatQuantity(total, unit)}.`)
+    }
+  }
+
+  if (keywords.includes('door')) {
+    const { total, unit } = totalByCategory((item) => textMatchesKeywords(item.description, ['door']))
+    if (total > 0) {
+      summaries.push(`Door count: ${formatQuantity(total, unit)}.`)
+    }
+  }
+
+  if (keywords.includes('window')) {
+    const { total, unit } = totalByCategory((item) =>
+      textMatchesKeywords(item.description, ['window', 'glazing'])
+    )
+    if (total > 0) {
+      summaries.push(`Window count: ${formatQuantity(total, unit)}.`)
+    }
+  }
+
+  return summaries.length > 0 ? summaries.join('\n') : null
+}
+
+function filterChunksByKeywords(chunks: PlanTextChunkRecord[], keywords: string[]): PlanTextChunkRecord[] {
+  if (!keywords.length) return []
+  return chunks.filter((chunk) => textMatchesKeywords(chunk.snippet_text, keywords))
+}
+
 function buildDeterministicAnswer(
   latestUserMessage: ChatHistoryMessage | undefined,
   takeoff: { items: NormalizedTakeoffItem[]; categories: TakeoffCategoryBucket[] }
@@ -968,8 +1089,24 @@ export async function POST(request: NextRequest) {
   }
 
   const planTextChunks = Array.from(collectedChunks.values())
-  const hasBlueprintText = planTextChunks.length > 0
-  const planTextContext = buildPlanTextContext(planTextChunks)
+  const questionKeywords = extractQuestionKeywords(latestUserMessage?.content)
+  const keywordFilteredChunks =
+    questionKeywords.length > 0 ? filterChunksByKeywords(planTextChunks, questionKeywords) : []
+  const planTextChunksForContext =
+    keywordFilteredChunks.length > 0 ? keywordFilteredChunks : planTextChunks
+  const hasBlueprintText = planTextChunksForContext.length > 0
+  const planTextContext = buildPlanTextContext(planTextChunksForContext)
+
+  const relevantTakeoffItems =
+    takeoffData && questionKeywords.length > 0
+      ? filterTakeoffItemsByKeywords(takeoffData.items, questionKeywords)
+      : []
+  const takeoffHighlights =
+    relevantTakeoffItems.length > 0 ? summarizeTakeoffItems(relevantTakeoffItems) : null
+  const structuredStats =
+    relevantTakeoffItems.length > 0
+      ? buildStructuredStats(relevantTakeoffItems, questionKeywords)
+      : null
 
   if (!hasTakeoffData && !hasBlueprintText) {
     return NextResponse.json({
@@ -1044,6 +1181,22 @@ export async function POST(request: NextRequest) {
           },
         ]
       : []),
+    ...(takeoffHighlights
+      ? [
+          {
+            role: 'system' as const,
+            content: `Relevant takeoff entries for this question:\n${takeoffHighlights}`,
+          },
+        ]
+      : []),
+    ...(structuredStats
+      ? [
+          {
+            role: 'system' as const,
+            content: `Computed takeoff stats:\n${structuredStats}`,
+          },
+        ]
+      : []),
     ...(hasBlueprintText
       ? [
           {
@@ -1067,9 +1220,13 @@ export async function POST(request: NextRequest) {
       if (deterministicAnswer) {
         return NextResponse.json({ reply: deterministicAnswer })
       }
-      if (planTextChunks.length > 0) {
+      if (planTextChunksForContext.length > 0) {
         return NextResponse.json({
-          reply: buildSnippetSummary(latestUserMessage?.content ?? '', planTextChunks, requestedPages),
+          reply: buildSnippetSummary(
+            latestUserMessage?.content ?? '',
+            planTextChunksForContext,
+            requestedPages
+          ),
         })
       }
       return NextResponse.json({
