@@ -1285,7 +1285,6 @@ export async function POST(request: NextRequest) {
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
       max_completion_tokens: 600,
-      temperature: 0.45,
       messages: [...contextMessages, ...sanitizedHistory],
     })
 
