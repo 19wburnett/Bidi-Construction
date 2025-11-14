@@ -73,16 +73,19 @@ interface TakeoffContextPayload {
   takeoff: {
     summary: {
       totalItems: number
-      categories: TakeoffSummaryCategory[]
-      providedSummary: any
+      lastUpdated?: string | null
     }
-    items: SanitizedTakeoffItem[]
-    categories: Array<{
+    topCategories: TakeoffSummaryCategory[]
+    representativeItems: Array<{
+      id: string
       key: string
       label: string
-      totalQuantity: number
-      totalCost: number
-      representativeUnit?: string | null
+      description: string
+      quantity: number | null
+      unit: string | null
+      location: string | null
+      page_number: number | null
+      page_reference: string | null
     }>
   }
 }
@@ -102,6 +105,11 @@ const openaiClient =
   typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null
+
+const REPRESENTATIVE_ITEM_LIMIT = 12
+const TOP_CATEGORY_LIMIT = 8
+const MAX_BLUEPRINT_SNIPPETS = 8
+const BLUEPRINT_SNIPPET_CHAR_LIMIT = 420
 
 const sanitizeString = (value: any): string | null => {
   if (value === null || value === undefined) return null
@@ -363,9 +371,8 @@ const formatQuantity = (quantity: number | null | undefined, unit?: string | nul
 function buildTakeoffContext(
   plan: any,
   items: NormalizedTakeoffItem[],
-  summary: any,
-  categories: TakeoffCategoryBucket[]
-) : TakeoffContextPayload {
+  lastUpdated: string | null
+): TakeoffContextPayload {
   const sanitizedItems: SanitizedTakeoffItem[] = items.map((item, index) => ({
     id: item.id ?? `item-${index + 1}`,
     category: item.category || 'Uncategorized',
@@ -382,10 +389,12 @@ function buildTakeoffContext(
     notes: item.notes || null,
   }))
 
+  const categorySummary = summarizeCategories(items).slice(0, TOP_CATEGORY_LIMIT)
+  const representativeItems = sanitizedItems.slice(0, REPRESENTATIVE_ITEM_LIMIT)
+
   const derivedSummary = {
     totalItems: sanitizedItems.length,
-    categories: summarizeCategories(items),
-    providedSummary: summary ?? null,
+    lastUpdated,
   }
 
   return {
@@ -396,13 +405,17 @@ function buildTakeoffContext(
     },
     takeoff: {
       summary: derivedSummary,
-      items: sanitizedItems,
-      categories: categories.map((bucket) => ({
-        key: bucket.key,
-        label: bucket.label,
-        totalQuantity: bucket.totalQuantity,
-        totalCost: bucket.totalCost,
-        representativeUnit: bucket.representativeUnit,
+      topCategories: categorySummary,
+      representativeItems: representativeItems.map((item) => ({
+        id: item.id,
+        key: normalizeKey(item.category) ?? 'uncategorized',
+        label: item.category,
+        description: item.description,
+        quantity: item.quantity,
+        unit: item.unit,
+        location: item.location,
+        page_number: item.page_number,
+        page_reference: item.page_reference,
       })),
     },
   }
@@ -542,6 +555,12 @@ function buildPlanTextSnippetPayloads(chunks: PlanTextChunkRecord[]): PlanTextSn
         ? chunk.page_number
         : null
 
+    const snippetNormalized = normalizeWhitespace(chunk.snippet_text || '')
+    const snippetText =
+      snippetNormalized.length > BLUEPRINT_SNIPPET_CHAR_LIMIT
+        ? `${snippetNormalized.slice(0, BLUEPRINT_SNIPPET_CHAR_LIMIT - 1).trimEnd()}…`
+        : snippetNormalized
+
     return {
       snippetId: chunk.id,
       snippetIndex: index + 1,
@@ -550,7 +569,7 @@ function buildPlanTextSnippetPayloads(chunks: PlanTextChunkRecord[]): PlanTextSn
       sheetId,
       sheetDiscipline: sheetDiscipline || undefined,
       roomLabel: roomLabel || undefined,
-      snippetText: chunk.snippet_text,
+      snippetText,
     }
   })
 }
@@ -1150,7 +1169,8 @@ export async function POST(request: NextRequest) {
     questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
     keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
-  const planTextSnippetPayloads = buildPlanTextSnippetPayloads(planTextChunksForContext)
+  const snippetChunksForMessages = planTextChunksForContext.slice(0, MAX_BLUEPRINT_SNIPPETS)
+  const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
 
   const relevantTakeoffItems =
@@ -1176,12 +1196,7 @@ export async function POST(request: NextRequest) {
   const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
 
   if (takeoffData) {
-    takeoffContext = buildTakeoffContext(
-      planInfo,
-      takeoffData.items,
-      takeoffData.summary,
-      takeoffData.categories
-    )
+    takeoffContext = buildTakeoffContext(planInfo, takeoffData.items, takeoffData.lastUpdated ?? null)
 
     deterministicAnswer = buildDeterministicAnswer(latestUserMessage, {
       items: takeoffData.items,
@@ -1222,12 +1237,14 @@ export async function POST(request: NextRequest) {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
+        .slice(0, 8)
     : null
   const structuredStatsList = structuredStats
     ? structuredStats
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
+        .slice(0, 6)
     : null
 
   const planContextPayload = {
@@ -1238,7 +1255,9 @@ export async function POST(request: NextRequest) {
       fileName: planInfo?.file_name ?? null,
       jobId: planInfo?.job_id ?? null,
     },
-    takeoff: takeoffContext?.takeoff ?? null,
+    takeoffSummary: takeoffContext?.takeoff.summary ?? null,
+    topTakeoffCategories: takeoffContext?.takeoff.topCategories ?? null,
+    sampleTakeoffItems: takeoffContext?.takeoff.representativeItems ?? null,
     takeoffHighlights: takeoffHighlightsList,
     computedStats: structuredStatsList,
     blueprintSnippets: planTextSnippetPayloads,
@@ -1265,7 +1284,7 @@ export async function POST(request: NextRequest) {
   try {
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
-      max_tokens: 600,
+      max_completion_tokens: 600,
       temperature: 0.45,
       messages: [...contextMessages, ...sanitizedHistory],
     })
