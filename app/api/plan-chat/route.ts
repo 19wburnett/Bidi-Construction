@@ -502,6 +502,9 @@ function buildPlanTextContext(chunks: PlanTextChunkRecord[]): string {
     .join('\n\n')
 }
 
+const normalizeWhitespace = (value: string | null | undefined): string =>
+  typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+
 function extractPageNumbers(text: string): number[] {
   if (!text) return []
 
