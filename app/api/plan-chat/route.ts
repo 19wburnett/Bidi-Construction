@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { PLAN_CHAT_SYSTEM_PROMPT, PLAN_CHAT_FEW_SHOTS } from '@/lib/ai/plan-chat-prompt'
 import {
   retrievePlanTextChunks,
   fetchPlanTextChunksByPage,
@@ -45,6 +46,56 @@ interface TakeoffCategoryBucket {
   totalCost: number
   representativeUnit?: string | null
   items: NormalizedTakeoffItem[]
+}
+
+interface SanitizedTakeoffItem {
+  id: string
+  category: string
+  subcategory: string | null
+  description: string
+  name: string | null
+  quantity: number | null
+  unit: string | null
+  unit_cost: number | null
+  total_cost: number | null
+  location: string | null
+  page_number: number | null
+  page_reference: string | null
+  notes: string | null
+}
+
+interface TakeoffContextPayload {
+  plan: {
+    id: string | undefined
+    title: string
+    jobId: string | undefined
+  }
+  takeoff: {
+    summary: {
+      totalItems: number
+      categories: TakeoffSummaryCategory[]
+      providedSummary: any
+    }
+    items: SanitizedTakeoffItem[]
+    categories: Array<{
+      key: string
+      label: string
+      totalQuantity: number
+      totalCost: number
+      representativeUnit?: string | null
+    }>
+  }
+}
+
+interface PlanTextSnippetPayload {
+  snippetId: string
+  snippetIndex: number
+  pageNumber: number | null
+  sheetName: string | null
+  sheetId: string | null
+  sheetDiscipline?: string | null
+  roomLabel?: string | null
+  snippetText: string
 }
 
 const openaiClient =
@@ -314,8 +365,8 @@ function buildTakeoffContext(
   items: NormalizedTakeoffItem[],
   summary: any,
   categories: TakeoffCategoryBucket[]
-) {
-  const sanitizedItems = items.map((item, index) => ({
+) : TakeoffContextPayload {
+  const sanitizedItems: SanitizedTakeoffItem[] = items.map((item, index) => ({
     id: item.id ?? `item-${index + 1}`,
     category: item.category || 'Uncategorized',
     subcategory: item.subcategory || null,
@@ -337,38 +388,24 @@ function buildTakeoffContext(
     providedSummary: summary ?? null,
   }
 
-  return JSON.stringify(
-    {
-      plan: {
-        id: plan?.id,
-        title: plan?.title || plan?.file_name || 'Untitled Plan',
-        jobId: plan?.job_id,
-      },
-      takeoff: {
-        summary: derivedSummary,
-        items: sanitizedItems,
-        categories: categories.map((bucket) => ({
-          key: bucket.key,
-          label: bucket.label,
-          totalQuantity: bucket.totalQuantity,
-          totalCost: bucket.totalCost,
-          representativeUnit: bucket.representativeUnit,
-          items: bucket.items.map((item) => ({
-            id: item.id,
-            name: item.name,
-            description: item.description,
-            quantity: item.quantity,
-            unit: item.unit,
-            location: item.location,
-            page_number: item.page_number,
-            page_reference: item.page_reference,
-          })),
-        })),
-      },
+  return {
+    plan: {
+      id: plan?.id,
+      title: plan?.title || plan?.file_name || 'Untitled Plan',
+      jobId: plan?.job_id,
     },
-    null,
-    2
-  )
+    takeoff: {
+      summary: derivedSummary,
+      items: sanitizedItems,
+      categories: categories.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        totalQuantity: bucket.totalQuantity,
+        totalCost: bucket.totalCost,
+        representativeUnit: bucket.representativeUnit,
+      })),
+    },
+  }
 }
 
 async function loadPlanContext(
@@ -477,29 +514,45 @@ const formatItemLine = (item: NormalizedTakeoffItem): string => {
   return `• ${title} — ${quantityText}${locationText}${pageText}`
 }
 
-function buildPlanTextContext(chunks: PlanTextChunkRecord[]): string {
+function buildPlanTextSnippetPayloads(chunks: PlanTextChunkRecord[]): PlanTextSnippetPayload[] {
   if (!chunks.length) {
-    return ''
+    return []
   }
 
-  return chunks
-    .map((chunk, index) => {
-      const metadata = chunk.metadata ?? {}
-      const labels: string[] = []
-      if (typeof chunk.page_number === 'number') {
-        labels.push(`Page ${chunk.page_number}`)
-      }
-      if (typeof metadata.sheet_id === 'string' && metadata.sheet_id.trim().length > 0) {
-        labels.push(metadata.sheet_id.trim())
-      }
-      if (typeof metadata.sheet_title === 'string' && metadata.sheet_title.trim().length > 0) {
-        labels.push(metadata.sheet_title.trim())
-      }
+  return chunks.map((chunk, index) => {
+    const metadata = chunk.metadata ?? {}
+    const sheetTitle =
+      typeof metadata.sheet_title === 'string' && metadata.sheet_title.trim().length > 0
+        ? metadata.sheet_title.trim()
+        : null
+    const sheetId =
+      typeof metadata.sheet_id === 'string' && metadata.sheet_id.trim().length > 0
+        ? metadata.sheet_id.trim()
+        : null
+    const sheetDiscipline =
+      typeof metadata.sheet_discipline === 'string' && metadata.sheet_discipline.trim().length > 0
+        ? metadata.sheet_discipline.trim()
+        : null
+    const roomLabel =
+      typeof metadata.room_label === 'string' && metadata.room_label.trim().length > 0
+        ? metadata.room_label.trim()
+        : null
+    const pageNumber =
+      typeof chunk.page_number === 'number' && Number.isFinite(chunk.page_number)
+        ? chunk.page_number
+        : null
 
-      const header = labels.length > 0 ? ` [${labels.join(' • ')}]` : ''
-      return `Snippet ${index + 1}${header}:\n${chunk.snippet_text}`
-    })
-    .join('\n\n')
+    return {
+      snippetId: chunk.id,
+      snippetIndex: index + 1,
+      pageNumber,
+      sheetName: sheetTitle || sheetId,
+      sheetId,
+      sheetDiscipline: sheetDiscipline || undefined,
+      roomLabel: roomLabel || undefined,
+      snippetText: chunk.snippet_text,
+    }
+  })
 }
 
 const normalizeWhitespace = (value: string | null | undefined): string =>
@@ -982,6 +1035,7 @@ export async function POST(request: NextRequest) {
   const contextResult = await loadPlanContext(supabase, user.id, jobId, planId)
 
   let planInfo: any = null
+  let jobInfo: { id: string; name: string } | null = null
   let takeoffData:
     | {
         id: string
@@ -1002,12 +1056,14 @@ export async function POST(request: NextRequest) {
     if (contextResult.error === 'TAKEOFF_NOT_FOUND') {
       planInfo = contextResult.plan
       takeoffData = null
+      jobInfo = contextResult.job ?? null
     } else {
       return NextResponse.json({ error: 'Failed to load takeoff analysis' }, { status: 500 })
     }
   } else {
     planInfo = contextResult.plan
     takeoffData = contextResult.takeoff
+    jobInfo = contextResult.job
   }
 
   if (!planInfo) {
@@ -1094,8 +1150,8 @@ export async function POST(request: NextRequest) {
     questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
     keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
-  const hasBlueprintText = planTextChunksForContext.length > 0
-  const planTextContext = buildPlanTextContext(planTextChunksForContext)
+  const planTextSnippetPayloads = buildPlanTextSnippetPayloads(planTextChunksForContext)
+  const hasBlueprintText = planTextSnippetPayloads.length > 0
 
   const relevantTakeoffItems =
     takeoffData && questionKeywords.length > 0
@@ -1115,7 +1171,7 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  let takeoffContext: string | null = null
+  let takeoffContext: TakeoffContextPayload | null = null
   let deterministicAnswer: string | null = null
   const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
 
@@ -1145,72 +1201,72 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const systemPromptLines: string[] = [
-    "You are Bidi's Plan Chat assistant, an experienced construction estimator.",
-    'Answer using only the information provided from the structured takeoff data and blueprint text snippets.',
-    'If the context does not clearly contain the answer, state that fact and describe what information would be required.',
-    'Never guess or fabricate quantities, dimensions, costs, or sheet references.',
-    'When you reference blueprint snippets, include the page number or sheet title when available.',
-  ]
+  const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
 
   if (!hasTakeoffData) {
-    systemPromptLines.push(
+    systemPromptSections.push(
       'Structured takeoff data is not available for this plan. Make it clear to the user that takeoff data is missing when relevant.'
     )
   }
 
   if (!hasBlueprintText) {
-    systemPromptLines.push(
+    systemPromptSections.push(
       'Blueprint text snippets are not available, so rely entirely on the takeoff data. If the takeoff does not include the requested information, explain the gap.'
     )
   }
 
-  const systemPrompt = systemPromptLines.join('\n')
+  const systemPrompt = systemPromptSections.join('\n\n')
   const planTitle = planInfo?.title || planInfo?.file_name || 'this plan'
+  const takeoffHighlightsList = takeoffHighlights
+    ? takeoffHighlights
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : null
+  const structuredStatsList = structuredStats
+    ? structuredStats
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : null
+
+  const planContextPayload = {
+    job: jobInfo ? { id: jobInfo.id, name: jobInfo.name } : null,
+    plan: {
+      id: planInfo?.id ?? null,
+      title: planTitle,
+      fileName: planInfo?.file_name ?? null,
+      jobId: planInfo?.job_id ?? null,
+    },
+    takeoff: takeoffContext?.takeoff ?? null,
+    takeoffHighlights: takeoffHighlightsList,
+    computedStats: structuredStatsList,
+    blueprintSnippets: planTextSnippetPayloads,
+    requestedPages,
+    keywordHints: questionKeywords,
+    hasTakeoffData,
+    hasBlueprintText,
+  }
+
+  const planContextMessage = {
+    role: 'system' as const,
+    content: `Plan context (JSON):\n${JSON.stringify(planContextPayload, null, 2)}`,
+  }
 
   const contextMessages = [
     {
       role: 'system' as const,
       content: systemPrompt,
     },
-    ...(takeoffContext
-      ? [
-          {
-            role: 'system' as const,
-            content: `Structured takeoff data for plan "${planTitle}":\n${takeoffContext}`,
-          },
-        ]
-      : []),
-    ...(takeoffHighlights
-      ? [
-          {
-            role: 'system' as const,
-            content: `Relevant takeoff entries for this question:\n${takeoffHighlights}`,
-          },
-        ]
-      : []),
-    ...(structuredStats
-      ? [
-          {
-            role: 'system' as const,
-            content: `Computed takeoff stats:\n${structuredStats}`,
-          },
-        ]
-      : []),
-    ...(hasBlueprintText
-      ? [
-          {
-            role: 'system' as const,
-            content: `Blueprint text snippets for plan "${planTitle}":\n${planTextContext}`,
-          },
-        ]
-      : []),
+    planContextMessage,
+    ...PLAN_CHAT_FEW_SHOTS,
   ]
 
   try {
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
-      max_completion_tokens: 600,
+      max_tokens: 600,
+      temperature: 0.45,
       messages: [...contextMessages, ...sanitizedHistory],
     })
 

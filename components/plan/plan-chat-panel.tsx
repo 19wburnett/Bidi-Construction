@@ -48,6 +48,27 @@ const examplePrompts = [
 
 const buildStorageKey = (planId: string) => `plan-chat:${planId}`
 
+function TypingIndicator() {
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600"
+      aria-live="polite"
+    >
+      <Bot className="h-3.5 w-3.5 text-orange-500" />
+      <span className="font-medium text-gray-700">Thinking</span>
+      <div className="flex items-center gap-1">
+        {[0, 1, 2].map((dot) => (
+          <span
+            key={dot}
+            className="h-2 w-2 rounded-full bg-gray-400 animate-bounce"
+            style={{ animationDelay: `${dot * 0.15}s` }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [messages, setMessages] = useState<PlanChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -238,8 +259,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   }
 
   return (
-    <div className="flex h-full flex-col space-y-4 pb-24 relative">
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <div>
             <div className="flex items-center gap-2">
@@ -261,8 +282,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
           </Button>
         </div>
 
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 pb-36">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {isLoading ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
                 <Loader2 className="h-6 w-6 animate-spin" />
@@ -318,10 +339,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                       exit={{ opacity: 0, y: 4 }}
                       className="flex justify-start"
                     >
-                      <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Thinking…
-                      </div>
+                      <TypingIndicator />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -387,12 +405,12 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
             <div ref={chatEndRef} />
           </div>
 
-          <div className="border-t border-gray-200 bg-white px-4 py-3 sticky bottom-0">
+          <div className="border-t border-gray-200 bg-white px-4 py-3">
             <Textarea
               placeholder={
                 canChat
-                ? 'Ask a question about this plan…'
-                : 'Plan Chat is currently unavailable.'
+                  ? 'Ask a question about this plan…'
+                  : 'Plan Chat is currently unavailable.'
               }
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -406,10 +424,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               rows={3}
               className="resize-none"
             />
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-xs text-gray-400">
-                Press Enter to send · Shift+Enter for a new line
-              </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+              <p>Press Enter to send · Shift+Enter for a new line</p>
               <Button
                 onClick={handleSendMessage}
                 disabled={!canChat || !input.trim() || isSending}
