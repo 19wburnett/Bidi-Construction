@@ -1274,41 +1274,52 @@ export async function POST(request: NextRequest) {
   ]
   const isCostQuestionEarly = costKeywords.some((keyword) => userTextLower.includes(keyword))
   
+  // Detect total/overall cost questions (use ALL items, not filtered)
+  const totalCostKeywords = ['whole thing', 'total cost', 'total price', 'overall cost', 'everything', 'entire', 'all of it', 'grand total']
+  const isTotalCostQuestion = totalCostKeywords.some((keyword) => userTextLower.includes(keyword))
+  
   const keywordFilteredChunks =
     questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
     keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
   // For cost questions, use fewer blueprint snippets to prioritize takeoff data
-  const maxSnippets = isCostQuestionEarly ? 3 : MAX_BLUEPRINT_SNIPPETS
+  // For total cost questions, use ZERO snippets - only takeoff data
+  const maxSnippets = isTotalCostQuestion ? 0 : (isCostQuestionEarly ? 3 : MAX_BLUEPRINT_SNIPPETS)
   const snippetChunksForMessages = planTextChunksForContext.slice(0, maxSnippets)
   const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
 
   // Filter takeoff items: first by page (if requested), then by keywords
+  // BUT: For total cost questions, use ALL items
   let relevantTakeoffItems: NormalizedTakeoffItem[] = []
   if (takeoffData) {
-    relevantTakeoffItems = takeoffData.items
+    if (isTotalCostQuestion) {
+      // For "whole thing cost" questions, use ALL items
+      relevantTakeoffItems = takeoffData.items
+    } else {
+      relevantTakeoffItems = takeoffData.items
 
-    // Apply page filter first if requested
-    if (requestedPages.length > 0) {
-      relevantTakeoffItems = relevantTakeoffItems.filter((item) => {
-        const pageNum = item.page_number
-        const hasMatchingPageNumber =
-          typeof pageNum === 'number' &&
-          Number.isFinite(pageNum) &&
-          requestedPages.includes(pageNum)
-        const hasMatchingPageReference =
-          item.page_reference &&
-          requestedPages.some((page) =>
-            item.page_reference?.toLowerCase().includes(`page ${page}`)
-          )
-        return hasMatchingPageNumber || hasMatchingPageReference
-      })
-    }
+      // Apply page filter first if requested
+      if (requestedPages.length > 0) {
+        relevantTakeoffItems = relevantTakeoffItems.filter((item) => {
+          const pageNum = item.page_number
+          const hasMatchingPageNumber =
+            typeof pageNum === 'number' &&
+            Number.isFinite(pageNum) &&
+            requestedPages.includes(pageNum)
+          const hasMatchingPageReference =
+            item.page_reference &&
+            requestedPages.some((page) =>
+              item.page_reference?.toLowerCase().includes(`page ${page}`)
+            )
+          return hasMatchingPageNumber || hasMatchingPageReference
+        })
+      }
 
-    // Then apply keyword filtering
-    if (questionKeywords.length > 0) {
-      relevantTakeoffItems = filterTakeoffItemsByKeywords(relevantTakeoffItems, questionKeywords)
+      // Then apply keyword filtering
+      if (questionKeywords.length > 0) {
+        relevantTakeoffItems = filterTakeoffItemsByKeywords(relevantTakeoffItems, questionKeywords)
+      }
     }
   }
 
@@ -1365,23 +1376,56 @@ export async function POST(request: NextRequest) {
     if (itemsWithCosts.length > 0) {
       // Items with costs - show full breakdown
       const totalCost = itemsWithCosts.reduce((sum, item) => sum + (item.total_cost || 0), 0)
-      const lines = itemsWithCosts.slice(0, 12).map((item) => {
-        const quantity = formatQuantity(item.quantity, item.unit)
-        const cost = item.total_cost || 0
-        const unitCost =
-          typeof item.quantity === 'number' && item.quantity > 0
-            ? ` ($${(cost / item.quantity).toLocaleString('en-US', { maximumFractionDigits: 2 })}/${item.unit || 'unit'})`
-            : ''
-        return `• ${item.description || item.name || 'Item'}: ${quantity} — $${cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}${unitCost}`
-      })
-      costBreakdown = [
-        `Cost breakdown (${itemsWithCosts.length} item${itemsWithCosts.length === 1 ? '' : 's'}):`,
-        ...lines,
-        itemsWithCosts.length > 12 ? `…and ${itemsWithCosts.length - 12} more items with costs.` : '',
-        `Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-      ]
-        .filter(Boolean)
-        .join('\n')
+      
+      // For total cost questions, group by category for better readability
+      if (isTotalCostQuestion && itemsWithCosts.length > 10) {
+        // Group by category
+        const byCategory = new Map<string, { items: typeof itemsWithCosts; total: number }>()
+        for (const item of itemsWithCosts) {
+          const cat = item.category || 'Other'
+          if (!byCategory.has(cat)) {
+            byCategory.set(cat, { items: [], total: 0 })
+          }
+          const group = byCategory.get(cat)!
+          group.items.push(item)
+          group.total += item.total_cost || 0
+        }
+        
+        const categoryLines = Array.from(byCategory.entries())
+          .sort((a, b) => b[1].total - a[1].total)
+          .slice(0, 10)
+          .map(([cat, { total, items }]) => {
+            return `• ${cat}: $${total.toLocaleString('en-US', { maximumFractionDigits: 2 })} (${items.length} item${items.length === 1 ? '' : 's'})`
+          })
+        
+        costBreakdown = [
+          `Total project cost breakdown by category:`,
+          ...categoryLines,
+          byCategory.size > 10 ? `…and ${byCategory.size - 10} more categories.` : '',
+          `\nGrand Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      } else {
+        // Show individual items (for specific cost questions or small totals)
+        const lines = itemsWithCosts.slice(0, 12).map((item) => {
+          const quantity = formatQuantity(item.quantity, item.unit)
+          const cost = item.total_cost || 0
+          const unitCost =
+            typeof item.quantity === 'number' && item.quantity > 0
+              ? ` ($${(cost / item.quantity).toLocaleString('en-US', { maximumFractionDigits: 2 })}/${item.unit || 'unit'})`
+              : ''
+          return `• ${item.description || item.name || 'Item'}: ${quantity} — $${cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}${unitCost}`
+        })
+        costBreakdown = [
+          `Cost breakdown (${itemsWithCosts.length} item${itemsWithCosts.length === 1 ? '' : 's'}):`,
+          ...lines,
+          itemsWithCosts.length > 12 ? `…and ${itemsWithCosts.length - 12} more items with costs.` : '',
+          `Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
     } else {
       // No costs, but show quantities so the model can still answer
       const lines = relevantTakeoffItems.slice(0, 15).map((item) => {
@@ -1445,17 +1489,30 @@ export async function POST(request: NextRequest) {
   const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
 
   if (isCostQuestion) {
-    systemPromptSections.push(
-      '🚨 CRITICAL INSTRUCTIONS FOR COST QUESTIONS:\n' +
-      '1. You will receive takeoff data in a separate system message marked "CRITICAL" or "TAKEOFF DATA".\n' +
-      '2. You MUST start your answer with that takeoff data - show line items, quantities, and costs.\n' +
-      '3. DO NOT start with blueprint snippets. Blueprint snippets are ONLY for additional context at the end.\n' +
-      '4. If takeoff data shows costs: explain HOW the cost was calculated (quantity × unit price = total).\n' +
-      '5. If takeoff data shows quantities but no costs: explain what quantities exist and note that costs need to be calculated.\n' +
-      '6. Blueprint snippets should ONLY be used to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
-      '7. Your answer structure: [Takeoff data first] → [Explanation of costs/quantities] → [Blueprint context if relevant].\n' +
-      '8. DO NOT just dump blueprint text. Synthesize everything into a coherent, human explanation.'
-    )
+    if (isTotalCostQuestion) {
+      systemPromptSections.push(
+        '🚨 CRITICAL: TOTAL COST QUESTION DETECTED\n' +
+        'The user is asking for the TOTAL/OVERALL cost of the entire project.\n' +
+        '1. You will receive a cost breakdown with a GRAND TOTAL in a separate system message marked "CRITICAL".\n' +
+        '2. Your answer MUST start with the total cost number, then show the breakdown.\n' +
+        '3. DO NOT mention blueprint snippets at all - this is purely a takeoff data question.\n' +
+        '4. Be conversational: "The total project cost is $X. Here\'s the breakdown by category..."\n' +
+        '5. If you see a "Grand Total" in the cost breakdown, that\'s your answer - use it directly.\n' +
+        '6. DO NOT start with "Here\'s what the blueprint..." or any blueprint references.'
+      )
+    } else {
+      systemPromptSections.push(
+        '🚨 CRITICAL INSTRUCTIONS FOR COST QUESTIONS:\n' +
+        '1. You will receive takeoff data in a separate system message marked "CRITICAL" or "TAKEOFF DATA".\n' +
+        '2. You MUST start your answer with that takeoff data - show line items, quantities, and costs.\n' +
+        '3. DO NOT start with blueprint snippets. Blueprint snippets are ONLY for additional context at the end.\n' +
+        '4. If takeoff data shows costs: explain HOW the cost was calculated (quantity × unit price = total).\n' +
+        '5. If takeoff data shows quantities but no costs: explain what quantities exist and note that costs need to be calculated.\n' +
+        '6. Blueprint snippets should ONLY be used to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
+        '7. Your answer structure: [Takeoff data first] → [Explanation of costs/quantities] → [Blueprint context if relevant].\n' +
+        '8. DO NOT just dump blueprint text. Synthesize everything into a coherent, human explanation.'
+      )
+    }
   }
 
   if (!hasTakeoffData) {
@@ -1552,17 +1609,33 @@ export async function POST(request: NextRequest) {
     // Post-process: If this is a cost question and the reply is just blueprint snippets, reject it
     if (reply && isCostQuestion && (costBreakdown || takeoffHighlights)) {
       const replyLower = reply.toLowerCase()
-      // Check if reply is just dumping blueprint snippets
-      if (
-        replyLower.includes("here's what the blueprint text highlights") ||
-        replyLower.includes('blueprint text highlights') ||
-        (replyLower.includes('page') && replyLower.includes('•') && !replyLower.includes('$') && !replyLower.includes('cost'))
-      ) {
+      const replyStartsWithBlueprint = replyLower.startsWith("here's what") || 
+                                       replyLower.startsWith("here is what") ||
+                                       replyLower.includes("blueprint text highlights")
+      
+      // Check if reply is just dumping blueprint snippets (more aggressive detection)
+      const isBlueprintDump = replyStartsWithBlueprint ||
+        (replyLower.includes('page') && 
+         replyLower.includes('•') && 
+         !replyLower.includes('$') && 
+         !replyLower.includes('cost') &&
+         !replyLower.includes('total') &&
+         replyLower.split('page').length > 2) // Multiple page references = snippet dump
+      
+      if (isBlueprintDump) {
         // Model ignored takeoff data - build a deterministic response from takeoff
         if (costBreakdown) {
-          reply = `Based on the takeoff data:\n\n${costBreakdown}\n\n${replyLower.includes('blueprint') ? 'The plans also mention: ' + reply.split('•').slice(1, 3).join('•').substring(0, 200) + '...' : 'For more details, check the specific line items in the takeoff.'}`
+          // For total cost questions, make it more conversational
+          if (isTotalCostQuestion) {
+            const totalMatch = costBreakdown.match(/Total:?\s*\$?([\d,]+\.?\d*)/i) || 
+                              costBreakdown.match(/Grand Total:?\s*\$?([\d,]+\.?\d*)/i)
+            const total = totalMatch ? totalMatch[1] : 'calculated'
+            reply = `The total project cost from the takeoff is $${total}.\n\n${costBreakdown}\n\nThis includes all line items with cost data. If you want a breakdown by category or specific items, let me know.`
+          } else {
+            reply = `Here's the cost breakdown from the takeoff:\n\n${costBreakdown}`
+          }
         } else if (takeoffHighlights) {
-          reply = `From the takeoff:\n\n${takeoffHighlights}\n\nCost data isn't available in the takeoff, but these are the quantities found. To get pricing, you'd need to apply current material and labor rates to these quantities.`
+          reply = `I don't have cost data in the takeoff, but here are the quantities:\n\n${takeoffHighlights}\n\nTo get pricing, you'd need to apply current material and labor rates to these quantities.`
         } else if (relevantTakeoffItems.length > 0) {
           const itemsList = relevantTakeoffItems.slice(0, 8).map((item) => {
             const qty = formatQuantity(item.quantity, item.unit)
