@@ -116,7 +116,7 @@ export default function PricingPage() {
                   Unlimited job requests - perfect for active contractors
                 </CardDescription>
                 <div className="text-center">
-                  <span className="text-4xl font-bold text-black dark:text-white">$100</span>
+                  <span className="text-4xl font-bold text-black dark:text-white">$300</span>
                   <span className="text-gray-600 dark:text-gray-400 ml-2 font-medium">per month</span>
                 </div>
                 <div className="mt-2">
