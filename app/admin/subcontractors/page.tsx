@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -95,6 +95,43 @@ const TRADE_CATEGORIES = [
   'Other'
 ]
 
+type EditableField =
+  | 'name'
+  | 'email'
+  | 'phone'
+  | 'trade_category'
+  | 'location'
+  | 'website_url'
+  | 'google_review_score'
+  | 'google_reviews_link'
+  | 'time_in_business'
+  | 'jobs_completed'
+  | 'licensed'
+  | 'bonded'
+  | 'notes'
+  | 'references'
+
+const editableFieldOrder: EditableField[] = [
+  'name',
+  'email',
+  'phone',
+  'trade_category',
+  'location',
+  'website_url',
+  'google_review_score',
+  'google_reviews_link',
+  'time_in_business',
+  'jobs_completed',
+  'licensed',
+  'bonded',
+  'notes',
+  'references'
+]
+
+const requiredInlineFields: EditableField[] = ['name', 'email', 'trade_category', 'location']
+
+const NEW_ROW_PREFIX = 'temp-'
+
 export default function AdminSubcontractorCRMPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -143,6 +180,11 @@ export default function AdminSubcontractorCRMPage() {
     bonded: 'unknown',
     notes: ''
   })
+
+  const inputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null>>({})
+  const [editingCell, setEditingCell] = useState<{ id: string; field: EditableField } | null>(null)
+  const [draftValues, setDraftValues] = useState<Record<string, Partial<Record<EditableField, string>>>>({})
+  const filteredSubcontractorsRef = useRef<Subcontractor[]>([])
 
   const initialFormState: FormState = {
     name: '',
@@ -259,14 +301,6 @@ export default function AdminSubcontractorCRMPage() {
   useEffect(() => {
     setSelectedIds((prev) => prev.filter((id) => subcontractors.some((sub) => sub.id === id)))
   }, [subcontractors])
-
-  const openCreateDialog = () => {
-    resetMessages()
-    setDialogMode('create')
-    setActiveSubcontractorId(null)
-    setFormState(initialFormState)
-    setIsDialogOpen(true)
-  }
 
   const openEditDialog = (record: Subcontractor) => {
     resetMessages()
@@ -488,11 +522,11 @@ export default function AdminSubcontractorCRMPage() {
     if (searchTerm) {
       const lowered = searchTerm.toLowerCase()
       data = data.filter((record) => {
-        return (
-          record.name.toLowerCase().includes(lowered) ||
-          record.email.toLowerCase().includes(lowered) ||
-          record.location.toLowerCase().includes(lowered)
-        )
+        const matchesName = record.name?.toLowerCase().includes(lowered) ?? false
+        const matchesEmail = record.email?.toLowerCase().includes(lowered) ?? false
+        const matchesLocation = record.location?.toLowerCase().includes(lowered) ?? false
+
+        return matchesName || matchesEmail || matchesLocation
       })
     }
 
@@ -502,7 +536,7 @@ export default function AdminSubcontractorCRMPage() {
 
     if (locationFilter) {
       const locationLower = locationFilter.toLowerCase()
-      data = data.filter((record) => record.location.toLowerCase().includes(locationLower))
+      data = data.filter((record) => (record.location ?? '').toLowerCase().includes(locationLower))
     }
 
     data.sort((a, b) => {
@@ -525,6 +559,10 @@ export default function AdminSubcontractorCRMPage() {
     () => filteredSubcontractors.map((record) => record.id),
     [filteredSubcontractors]
   )
+
+  useEffect(() => {
+    filteredSubcontractorsRef.current = filteredSubcontractors
+  }, [filteredSubcontractors])
 
   const allFilteredSelected =
     filteredSubcontractors.length > 0 && filteredSubcontractors.every((record) => selectedIdSet.has(record.id))
@@ -628,6 +666,552 @@ The Bidi Team`
     )}&body=${encodeURIComponent(emailBody)}`
     window.location.href = mailtoUrl
   }
+
+  const getCellKey = (id: string, field: EditableField) => `${id}-${field}`
+
+  const setCellInputRef = (
+    id: string,
+    field: EditableField,
+    node: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null
+  ) => {
+    const key = getCellKey(id, field)
+    if (node) {
+      inputRefs.current[key] = node
+    } else {
+      delete inputRefs.current[key]
+    }
+  }
+
+  const convertValueToDraftString = (field: EditableField, value: unknown): string => {
+    switch (field) {
+      case 'google_review_score':
+        return typeof value === 'number' && !Number.isNaN(value) ? String(value) : ''
+      case 'jobs_completed':
+        return typeof value === 'number' && !Number.isNaN(value) ? String(value) : ''
+      case 'licensed':
+      case 'bonded':
+        if (value === true) return 'true'
+        if (value === false) return 'false'
+        return 'unknown'
+      case 'notes':
+      case 'name':
+      case 'email':
+      case 'phone':
+      case 'trade_category':
+      case 'location':
+      case 'website_url':
+      case 'google_reviews_link':
+      case 'time_in_business':
+        return typeof value === 'string' ? value : ''
+      case 'references':
+        if (!value) return ''
+        if (typeof value === 'string') return value
+        try {
+          return JSON.stringify(value, null, 2)
+        } catch {
+          return ''
+        }
+      default:
+        return ''
+    }
+  }
+
+  const convertRecordToDraft = (record: Subcontractor) => {
+    return editableFieldOrder.reduce<Record<EditableField, string>>((acc, field) => {
+      const value = record[field as keyof Subcontractor]
+      acc[field] = convertValueToDraftString(field, value)
+      return acc
+    }, {} as Record<EditableField, string>)
+  }
+
+  const ensureDraftForRow = (record: Subcontractor) => {
+    setDraftValues((prev) => {
+      if (prev[record.id]) {
+        return prev
+      }
+      return {
+        ...prev,
+        [record.id]: convertRecordToDraft(record)
+      }
+    })
+  }
+
+  const getDraftValue = (record: Subcontractor, field: EditableField) => {
+    const draft = draftValues[record.id]
+    if (draft && field in draft) {
+      return draft[field] ?? ''
+    }
+    return convertValueToDraftString(field, record[field as keyof Subcontractor])
+  }
+
+  const updateDraftValue = (rowId: string, field: EditableField, value: string) => {
+    setDraftValues((prev) => ({
+      ...prev,
+      [rowId]: {
+        ...(prev[rowId] ?? {}),
+        [field]: value
+      }
+    }))
+  }
+
+  const isTempRow = (rowId: string) => rowId.startsWith(NEW_ROW_PREFIX)
+
+  const createEmptyRow = (id: string): Subcontractor => ({
+    id,
+    name: '',
+    email: '',
+    trade_category: '',
+    location: '',
+    created_at: new Date().toISOString(),
+    phone: '',
+    website_url: '',
+    google_review_score: null,
+    google_reviews_link: '',
+    time_in_business: '',
+    jobs_completed: null,
+    references: null,
+    licensed: null,
+    bonded: null,
+    notes: ''
+  })
+
+  const validateEmail = (value: string) => {
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailPattern.test(value)
+  }
+
+  const parseFieldValue = (field: EditableField, rawValue: string) => {
+    const trimmed = rawValue?.trim?.() ?? ''
+
+    switch (field) {
+      case 'name':
+        if (!trimmed) {
+          return { value: '', error: 'Name is required.' }
+        }
+        return { value: trimmed }
+      case 'email':
+        if (!trimmed) {
+          return { value: '', error: 'Email is required.' }
+        }
+        if (!validateEmail(trimmed)) {
+          return { value: '', error: 'Enter a valid email address.' }
+        }
+        return { value: trimmed.toLowerCase() }
+      case 'trade_category':
+        if (!trimmed) {
+          return { value: '', error: 'Trade is required.' }
+        }
+        return { value: trimmed }
+      case 'location':
+        if (!trimmed) {
+          return { value: '', error: 'Location is required.' }
+        }
+        return { value: trimmed }
+      case 'phone':
+        return { value: trimmed || null }
+      case 'website_url':
+        return { value: trimmed || null }
+      case 'google_review_score':
+        if (!trimmed) {
+          return { value: null }
+        }
+        const score = Number(trimmed)
+        if (Number.isNaN(score)) {
+          return { value: null, error: 'Google review score must be a number.' }
+        }
+        if (score < 0 || score > 5) {
+          return { value: null, error: 'Google review score must be between 0 and 5.' }
+        }
+        return { value: Number(score.toFixed(2)) }
+      case 'google_reviews_link':
+        return { value: trimmed || null }
+      case 'time_in_business':
+        return { value: trimmed || null }
+      case 'jobs_completed':
+        if (!trimmed) {
+          return { value: null }
+        }
+        const jobs = Number.parseInt(trimmed, 10)
+        if (Number.isNaN(jobs)) {
+          return { value: null, error: 'Jobs completed must be a number.' }
+        }
+        if (jobs < 0) {
+          return { value: null, error: 'Jobs completed must be zero or greater.' }
+        }
+        return { value: jobs }
+      case 'licensed':
+      case 'bonded':
+        if (!trimmed || trimmed === 'unknown') {
+          return { value: null }
+        }
+        if (trimmed === 'true') {
+          return { value: true }
+        }
+        if (trimmed === 'false') {
+          return { value: false }
+        }
+        return { value: null, error: 'Please choose Yes, No, or Unknown.' }
+      case 'notes':
+        return { value: trimmed || null }
+      case 'references':
+        if (!trimmed) {
+          return { value: null }
+        }
+        try {
+          return { value: JSON.parse(trimmed) }
+        } catch {
+          return { value: null, error: 'References must be valid JSON.' }
+        }
+      default:
+        return { value: trimmed }
+    }
+  }
+
+  const areValuesEqual = (current: unknown, next: unknown) => {
+    if (current === next) return true
+    if (current == null && next == null) return true
+
+    if (typeof current === 'number' && typeof next === 'number') {
+      return Number.isNaN(current) && Number.isNaN(next) ? true : current === next
+    }
+
+    if (typeof current === 'object' && typeof next === 'object') {
+      try {
+        return JSON.stringify(current) === JSON.stringify(next)
+      } catch {
+        return false
+      }
+    }
+
+    return false
+  }
+
+  const updateLocalRowValue = (rowId: string, field: EditableField, value: unknown) => {
+    setSubcontractors((prev) =>
+      prev.map((record) => {
+        if (record.id !== rowId) {
+          return record
+        }
+
+        return {
+          ...record,
+          [field]: value
+        } as Subcontractor
+      })
+    )
+
+    setDraftValues((prev) => {
+      const existing = prev[rowId]
+      if (!existing) return prev
+      return {
+        ...prev,
+        [rowId]: {
+          ...existing,
+          [field]: convertValueToDraftString(field, value)
+        }
+      }
+    })
+  }
+
+  const buildInsertPayload = (rowId: string) => {
+    const draft = draftValues[rowId]
+    const errors: string[] = []
+    const payload: Record<string, unknown> = {}
+
+    editableFieldOrder.forEach((field) => {
+      const raw = draft?.[field] ?? ''
+      const { value, error } = parseFieldValue(field, raw)
+      if (error) {
+        if (requiredInlineFields.includes(field) || raw.trim() !== '') {
+          errors.push(error)
+        }
+      }
+      if (value !== undefined) {
+        payload[field] = value
+      }
+    })
+
+    if (errors.length > 0) {
+      return { payload: null, error: errors[0] }
+    }
+
+    return { payload, error: null }
+  }
+
+  const startEditingCell = (record: Subcontractor, field: EditableField) => {
+    resetMessages()
+    ensureDraftForRow(record)
+    setEditingCell({ id: record.id, field })
+  }
+
+  const handleCellCommit = async (
+    rowId: string,
+    field: EditableField,
+    overrideRawValue?: string
+  ): Promise<{ success: boolean; resolvedRowId: string }> => {
+    const record = subcontractors.find((sub) => sub.id === rowId)
+    if (!record) {
+      setError('Unable to locate row for editing.')
+      return { success: false, resolvedRowId: rowId }
+    }
+
+    const rawValueFromState =
+      draftValues[rowId]?.[field] ?? convertValueToDraftString(field, record[field as keyof Subcontractor])
+    const rawValue = overrideRawValue ?? rawValueFromState
+    const { value, error: parseError } = parseFieldValue(field, rawValue)
+
+    if (parseError) {
+      setError(parseError)
+      return { success: false, resolvedRowId: rowId }
+    }
+
+    const currentValue = record[field as keyof Subcontractor]
+
+    if (areValuesEqual(currentValue, value)) {
+      return { success: true, resolvedRowId: rowId }
+    }
+
+    updateLocalRowValue(rowId, field, value)
+
+    if (isTempRow(rowId)) {
+      const draft = draftValues[rowId] ?? convertRecordToDraft(record)
+      const updatedDraft = {
+        ...draft,
+        [field]: convertValueToDraftString(field, value)
+      }
+      setDraftValues((prev) => ({
+        ...prev,
+        [rowId]: updatedDraft
+      }))
+
+      const isRowComplete = requiredInlineFields.every((requiredField) => {
+        const draftValue = updatedDraft[requiredField]?.trim?.() ?? ''
+        return draftValue.length > 0
+      })
+
+      if (!isRowComplete) {
+        return { success: true, resolvedRowId: rowId }
+      }
+
+      const { payload, error: payloadError } = buildInsertPayload(rowId)
+
+      if (payloadError || !payload) {
+        setError(payloadError ?? 'Unable to save new row.')
+        return { success: false, resolvedRowId: rowId }
+      }
+
+      try {
+        const { data, error: insertError } = await supabase
+          .from('subcontractors')
+          .insert(payload)
+          .select()
+          .single()
+
+        if (insertError) {
+          console.error('Failed to insert subcontractor inline:', insertError)
+          setError('Failed to save new subcontractor.')
+          return { success: false, resolvedRowId: rowId }
+        }
+
+        if (data) {
+          const nextRowId = (data as Subcontractor).id
+          setSubcontractors((prev) =>
+            prev.map((item) => (item.id === rowId ? (data as Subcontractor) : item))
+          )
+
+          setDraftValues((prev) => {
+            const next = { ...prev }
+            delete next[rowId]
+            return {
+              ...next,
+              [data.id]: convertRecordToDraft(data as Subcontractor)
+            }
+          })
+
+          setEditingCell((prev) => {
+            if (prev && prev.id === rowId) {
+              return { id: nextRowId, field: prev.field }
+            }
+            return prev
+          })
+
+          return { success: true, resolvedRowId: nextRowId }
+        }
+      } catch (insertErr) {
+        console.error('Unexpected error inserting subcontractor inline:', insertErr)
+        setError('Unexpected error saving subcontractor.')
+        return { success: false, resolvedRowId: rowId }
+      }
+
+      return { success: true, resolvedRowId: rowId }
+    }
+
+    try {
+      const { error: updateError } = await supabase
+        .from('subcontractors')
+        .update({ [field]: value })
+        .eq('id', rowId)
+
+      if (updateError) {
+        console.error('Failed to update subcontractor inline:', updateError)
+        setError('Failed to save changes.')
+        return { success: false, resolvedRowId: rowId }
+      }
+    } catch (updateErr) {
+      console.error('Unexpected error updating subcontractor inline:', updateErr)
+      setError('Unexpected error saving changes.')
+      return { success: false, resolvedRowId: rowId }
+    }
+
+    return { success: true, resolvedRowId: rowId }
+  }
+
+  const handleCancelInlineEdit = (rowId: string, field: EditableField) => {
+    const record = subcontractors.find((sub) => sub.id === rowId)
+    if (!record) return
+
+    setDraftValues((prev) => {
+      const existing = prev[rowId]
+      if (!existing) return prev
+      return {
+        ...prev,
+        [rowId]: {
+          ...existing,
+          [field]: convertValueToDraftString(field, record[field as keyof Subcontractor])
+        }
+      }
+    })
+
+    setEditingCell(null)
+  }
+
+  const moveToAdjacentCell = (
+    currentRowId: string,
+    field: EditableField,
+    direction: 'next' | 'prev'
+  ) => {
+    const rowOrder = filteredSubcontractorsRef.current
+    const currentRowIndex = rowOrder.findIndex((row) => row.id === currentRowId)
+    const fieldIndex = editableFieldOrder.indexOf(field)
+
+    if (fieldIndex === -1 || currentRowIndex === -1) {
+      setEditingCell(null)
+      return
+    }
+
+    if (direction === 'next') {
+      if (fieldIndex < editableFieldOrder.length - 1) {
+        const nextField = editableFieldOrder[fieldIndex + 1]
+        const row = rowOrder[currentRowIndex]
+        startEditingCell(row, nextField)
+        return
+      }
+
+      if (currentRowIndex < rowOrder.length - 1) {
+        const nextRow = rowOrder[currentRowIndex + 1]
+        const nextField = editableFieldOrder[0]
+        startEditingCell(nextRow, nextField)
+        return
+      }
+    } else {
+      if (fieldIndex > 0) {
+        const prevField = editableFieldOrder[fieldIndex - 1]
+        const row = rowOrder[currentRowIndex]
+        startEditingCell(row, prevField)
+        return
+      }
+
+      if (currentRowIndex > 0) {
+        const prevRow = rowOrder[currentRowIndex - 1]
+        const prevField = editableFieldOrder[editableFieldOrder.length - 1]
+        startEditingCell(prevRow, prevField)
+        return
+      }
+    }
+
+    setEditingCell(null)
+  }
+
+  const handleInputKeyDown = async (
+    event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+    rowId: string,
+    field: EditableField
+  ) => {
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const { success, resolvedRowId } = await handleCellCommit(
+        rowId,
+        field,
+        event.currentTarget.value
+      )
+      if (success) {
+        setTimeout(() => {
+          moveToAdjacentCell(resolvedRowId, field, event.shiftKey ? 'prev' : 'next')
+        }, 0)
+      }
+      return
+    }
+
+    if (event.key === 'Enter' && !(event.shiftKey && field === 'notes')) {
+      if (field === 'notes' || field === 'references') {
+        if (event.shiftKey) {
+          return
+        }
+      }
+      event.preventDefault()
+      const { success } = await handleCellCommit(rowId, field, event.currentTarget.value)
+      if (success) {
+        setEditingCell(null)
+      }
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      handleCancelInlineEdit(rowId, field)
+    }
+  }
+
+  const handleAddInlineRow = () => {
+    resetMessages()
+    if (subcontractors.some((row) => isTempRow(row.id))) {
+      setError('Finish filling in the pending row before adding another.')
+      return
+    }
+
+    const tempId = `${NEW_ROW_PREFIX}${
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2)
+    }`
+    const newRow = createEmptyRow(tempId)
+    setSubcontractors((prev) => [newRow, ...prev])
+    setDraftValues((prev) => ({
+      ...prev,
+      [tempId]: convertRecordToDraft(newRow)
+    }))
+    setEditingCell({ id: tempId, field: 'name' })
+  }
+
+  useEffect(() => {
+    if (!editingCell) return
+
+    const key = getCellKey(editingCell.id, editingCell.field)
+    const node = inputRefs.current[key]
+
+    if (node) {
+      requestAnimationFrame(() => {
+        node.focus()
+        if ('select' in node && typeof node.select === 'function') {
+          try {
+            node.select()
+          } catch {
+            // ignore
+          }
+        }
+      })
+    }
+  }, [editingCell])
 
   if (authLoading || isCheckingAdmin) {
     return (
@@ -765,7 +1349,7 @@ The Bidi Team`
                 <RefreshCcw className="h-4 w-4 mr-2" />
                 Refresh
               </Button>
-              <Button onClick={openCreateDialog} size="sm">
+              <Button onClick={handleAddInlineRow} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Subcontractor
               </Button>
@@ -904,17 +1488,93 @@ The Bidi Team`
                               aria-label={`Select ${record.name}`}
                             />
                           </td>
-                          <td className="py-3 px-4">
-                            <div className="font-medium text-foreground">{record.name}</div>
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'name')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'name' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'name', node)}
+                                value={getDraftValue(record, 'name')}
+                                onChange={(event) => updateDraftValue(record.id, 'name', event.target.value)}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'name')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'name') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'name',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                              />
+                            ) : (
+                              <div className="font-medium text-foreground">
+                                {record.name || (
+                                  <span className="text-muted-foreground">Double-click to edit</span>
+                                )}
+                              </div>
+                            )}
                           </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center text-muted-foreground">
-                              <Mail className="h-4 w-4 mr-2" />
-                              <span className="truncate">{record.email}</span>
-                            </div>
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'email')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'email' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'email', node)}
+                                type="email"
+                                value={getDraftValue(record, 'email')}
+                                onChange={(event) => updateDraftValue(record.id, 'email', event.target.value)}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'email')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'email') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'email',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                              />
+                            ) : (
+                              <div className="flex items-center text-muted-foreground">
+                                <Mail className="h-4 w-4 mr-2" />
+                                <span className="truncate">{record.email}</span>
+                              </div>
+                            )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">
-                            {record.phone ? (
+                          <td
+                            className="py-3 px-4 text-muted-foreground"
+                            onDoubleClick={() => startEditingCell(record, 'phone')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'phone' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'phone', node)}
+                                type="tel"
+                                value={getDraftValue(record, 'phone')}
+                                onChange={(event) => updateDraftValue(record.id, 'phone', event.target.value)}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'phone')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'phone') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'phone',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                              />
+                            ) : record.phone ? (
                               <div className="flex items-center">
                                 <Phone className="h-4 w-4 mr-2" />
                                 <span className="truncate">{record.phone}</span>
@@ -923,24 +1583,112 @@ The Bidi Team`
                               '—'
                             )}
                           </td>
-                          <td className="py-3 px-4">
-                            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-medium">
-                              {record.trade_category}
-                            </span>
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'trade_category')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'trade_category' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'trade_category', node)}
+                                value={getDraftValue(record, 'trade_category')}
+                                onChange={(event) =>
+                                  updateDraftValue(record.id, 'trade_category', event.target.value)
+                                }
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'trade_category')}
+                                onBlur={async (event) => {
+                                  if (
+                                    editingCell?.id !== record.id ||
+                                    editingCell.field !== 'trade_category'
+                                  )
+                                    return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'trade_category',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                                placeholder="Trade"
+                              />
+                            ) : record.trade_category ? (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-medium">
+                                {record.trade_category}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center text-muted-foreground">
-                              <MapPin className="h-4 w-4 mr-2" />
-                              <span className="truncate">{record.location}</span>
-                            </div>
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'location')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'location' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'location', node)}
+                                value={getDraftValue(record, 'location')}
+                                onChange={(event) => updateDraftValue(record.id, 'location', event.target.value)}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'location')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'location') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'location',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                              />
+                            ) : (
+                              <div className="flex items-center text-muted-foreground">
+                                <MapPin className="h-4 w-4 mr-2" />
+                                <span className="truncate">{record.location}</span>
+                              </div>
+                            )}
                           </td>
-                          <td className="py-3 px-4">
-                            {record.website_url ? (
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'website_url')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'website_url' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'website_url', node)}
+                                type="url"
+                                value={getDraftValue(record, 'website_url')}
+                                onChange={(event) =>
+                                  updateDraftValue(record.id, 'website_url', event.target.value)
+                                }
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'website_url')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'website_url') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'website_url',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                                placeholder="https://"
+                              />
+                            ) : record.website_url ? (
                               <a
                                 href={record.website_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-blue-600 hover:underline truncate max-w-[160px] inline-block"
+                                onDoubleClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  startEditingCell(record, 'website_url')
+                                }}
                               >
                                 {record.website_url}
                               </a>
@@ -948,33 +1696,207 @@ The Bidi Team`
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">
-                            <div className="space-y-1">
-                              <div>
-                                {typeof record.google_review_score === 'number'
-                                  ? `${record.google_review_score.toFixed(1)} ★`
-                                  : '—'}
+                          <td
+                            className="py-3 px-4 text-muted-foreground"
+                            onDoubleClick={() => startEditingCell(record, 'google_review_score')}
+                          >
+                            {editingCell?.id === record.id &&
+                            (editingCell.field === 'google_review_score' ||
+                              editingCell.field === 'google_reviews_link') ? (
+                              <div className="space-y-2">
+                                <Input
+                                  ref={(node) => setCellInputRef(record.id, 'google_review_score', node)}
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  max="5"
+                                  value={getDraftValue(record, 'google_review_score')}
+                                  onChange={(event) =>
+                                    updateDraftValue(record.id, 'google_review_score', event.target.value)
+                                  }
+                                  onKeyDown={(event) =>
+                                    handleInputKeyDown(event, record.id, 'google_review_score')
+                                  }
+                                  onBlur={async (event) => {
+                                    if (
+                                      editingCell?.id !== record.id ||
+                                      editingCell.field !== 'google_review_score'
+                                    ) {
+                                      return
+                                    }
+                                    const { success } = await handleCellCommit(
+                                      record.id,
+                                      'google_review_score',
+                                      event.currentTarget.value
+                                    )
+                                    if (success) {
+                                      setEditingCell(null)
+                                    }
+                                  }}
+                                  className="h-8"
+                                  placeholder="Score (0-5)"
+                                />
+                                <Input
+                                  ref={(node) => setCellInputRef(record.id, 'google_reviews_link', node)}
+                                  type="url"
+                                  value={getDraftValue(record, 'google_reviews_link')}
+                                  onChange={(event) =>
+                                    updateDraftValue(record.id, 'google_reviews_link', event.target.value)
+                                  }
+                                  onKeyDown={(event) =>
+                                    handleInputKeyDown(event, record.id, 'google_reviews_link')
+                                  }
+                                  onBlur={async (event) => {
+                                    if (
+                                      editingCell?.id !== record.id ||
+                                      editingCell.field !== 'google_reviews_link'
+                                    ) {
+                                      return
+                                    }
+                                    const { success } = await handleCellCommit(
+                                      record.id,
+                                      'google_reviews_link',
+                                      event.currentTarget.value
+                                    )
+                                    if (success) {
+                                      setEditingCell(null)
+                                    }
+                                  }}
+                                  className="h-8"
+                                  placeholder="Google reviews link"
+                                />
                               </div>
-                              {record.google_reviews_link && (
-                                <a
-                                  href={record.google_reviews_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline block truncate max-w-[160px]"
-                                >
-                                  View reviews
-                                </a>
-                              )}
-                            </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <div>
+                                  {typeof record.google_review_score === 'number'
+                                    ? `${record.google_review_score.toFixed(1)} ★`
+                                    : '—'}
+                                </div>
+                                {record.google_reviews_link && (
+                                  <a
+                                    href={record.google_reviews_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline block truncate max-w-[160px]"
+                                    onDoubleClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      startEditingCell(record, 'google_reviews_link')
+                                    }}
+                                  >
+                                    View reviews
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">
-                            {record.time_in_business || '—'}
+                          <td
+                            className="py-3 px-4 text-muted-foreground"
+                            onDoubleClick={() => startEditingCell(record, 'time_in_business')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'time_in_business' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'time_in_business', node)}
+                                value={getDraftValue(record, 'time_in_business')}
+                                onChange={(event) =>
+                                  updateDraftValue(record.id, 'time_in_business', event.target.value)
+                                }
+                                onKeyDown={(event) =>
+                                  handleInputKeyDown(event, record.id, 'time_in_business')
+                                }
+                                onBlur={async (event) => {
+                                  if (
+                                    editingCell?.id !== record.id ||
+                                    editingCell.field !== 'time_in_business'
+                                  )
+                                    return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'time_in_business',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                                placeholder="e.g., 10 years"
+                              />
+                            ) : (
+                              record.time_in_business || '—'
+                            )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">
-                            {typeof record.jobs_completed === 'number' ? record.jobs_completed : '—'}
+                          <td
+                            className="py-3 px-4 text-muted-foreground"
+                            onDoubleClick={() => startEditingCell(record, 'jobs_completed')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'jobs_completed' ? (
+                              <Input
+                                ref={(node) => setCellInputRef(record.id, 'jobs_completed', node)}
+                                type="number"
+                                inputMode="numeric"
+                                value={getDraftValue(record, 'jobs_completed')}
+                                onChange={(event) =>
+                                  updateDraftValue(record.id, 'jobs_completed', event.target.value)
+                                }
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'jobs_completed')}
+                                onBlur={async (event) => {
+                                  if (
+                                    editingCell?.id !== record.id ||
+                                    editingCell.field !== 'jobs_completed'
+                                  )
+                                    return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'jobs_completed',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="h-8"
+                                placeholder="0"
+                              />
+                            ) : typeof record.jobs_completed === 'number' ? (
+                              record.jobs_completed
+                            ) : (
+                              '—'
+                            )}
                           </td>
-                          <td className="py-3 px-4">
-                            {record.licensed === null || record.licensed === undefined ? (
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'licensed')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'licensed' ? (
+                              <select
+                                ref={(node) => setCellInputRef(record.id, 'licensed', node)}
+                                value={getDraftValue(record, 'licensed')}
+                                onChange={async (event) => {
+                                  const value = event.currentTarget.value
+                                  updateDraftValue(record.id, 'licensed', value)
+                                  await handleCellCommit(record.id, 'licensed', value)
+                                }}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'licensed')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'licensed') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'licensed',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <option value="unknown">Unknown</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                              </select>
+                            ) : record.licensed === null || record.licensed === undefined ? (
                               <span className="text-muted-foreground">—</span>
                             ) : record.licensed ? (
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
@@ -986,8 +1908,38 @@ The Bidi Team`
                               </span>
                             )}
                           </td>
-                          <td className="py-3 px-4">
-                            {record.bonded === null || record.bonded === undefined ? (
+                          <td
+                            className="py-3 px-4"
+                            onDoubleClick={() => startEditingCell(record, 'bonded')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'bonded' ? (
+                              <select
+                                ref={(node) => setCellInputRef(record.id, 'bonded', node)}
+                                value={getDraftValue(record, 'bonded')}
+                                onChange={async (event) => {
+                                  const value = event.currentTarget.value
+                                  updateDraftValue(record.id, 'bonded', value)
+                                  await handleCellCommit(record.id, 'bonded', value)
+                                }}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'bonded')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'bonded') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'bonded',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <option value="unknown">Unknown</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                              </select>
+                            ) : record.bonded === null || record.bonded === undefined ? (
                               <span className="text-muted-foreground">—</span>
                             ) : record.bonded ? (
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
@@ -999,11 +1951,65 @@ The Bidi Team`
                               </span>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground max-w-[220px]">
-                            <span className="truncate block">{record.notes ?? '—'}</span>
+                          <td
+                            className="py-3 px-4 text-muted-foreground max-w-[220px]"
+                            onDoubleClick={() => startEditingCell(record, 'notes')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'notes' ? (
+                              <Textarea
+                                ref={(node) => setCellInputRef(record.id, 'notes', node)}
+                                value={getDraftValue(record, 'notes')}
+                                onChange={(event) => updateDraftValue(record.id, 'notes', event.target.value)}
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'notes')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'notes') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'notes',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                rows={3}
+                                className="min-h-[72px]"
+                                placeholder="Add notes"
+                              />
+                            ) : (
+                              <span className="truncate block">{record.notes ?? '—'}</span>
+                            )}
                           </td>
-                          <td className="py-3 px-4 text-muted-foreground">
-                            {referencesSummary}
+                          <td
+                            className="py-3 px-4 text-muted-foreground"
+                            onDoubleClick={() => startEditingCell(record, 'references')}
+                          >
+                            {editingCell?.id === record.id && editingCell.field === 'references' ? (
+                              <Textarea
+                                ref={(node) => setCellInputRef(record.id, 'references', node)}
+                                value={getDraftValue(record, 'references')}
+                                onChange={(event) =>
+                                  updateDraftValue(record.id, 'references', event.target.value)
+                                }
+                                onKeyDown={(event) => handleInputKeyDown(event, record.id, 'references')}
+                                onBlur={async (event) => {
+                                  if (editingCell?.id !== record.id || editingCell.field !== 'references') return
+                                  const { success } = await handleCellCommit(
+                                    record.id,
+                                    'references',
+                                    event.currentTarget.value
+                                  )
+                                  if (success) {
+                                    setEditingCell(null)
+                                  }
+                                }}
+                                rows={3}
+                                className="min-h-[72px]"
+                                placeholder='[{"name":"Project","contact":"Jane Doe"}]'
+                              />
+                            ) : (
+                              referencesSummary
+                            )}
                           </td>
                           <td className="py-3 px-4 text-muted-foreground">
                             {new Date(record.created_at).toLocaleDateString()}
@@ -1016,7 +2022,7 @@ The Bidi Team`
                                 onClick={() => openEditDialog(record)}
                               >
                                 <Pencil className="h-4 w-4 mr-1.5" />
-                                Edit
+                              
                               </Button>
                               <Button
                                 variant="destructive"
@@ -1024,7 +2030,7 @@ The Bidi Team`
                                 onClick={() => handleDelete(record)}
                               >
                                 <Trash2 className="h-4 w-4 mr-1.5" />
-                                Delete
+                    
                               </Button>
                             </div>
                           </td>

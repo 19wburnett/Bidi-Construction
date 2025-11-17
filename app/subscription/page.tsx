@@ -116,7 +116,7 @@ export default function SubscriptionPage() {
                   </span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
-                <div className="text-3xl font-bold text-orange mb-2">$100<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
+                <div className="text-3xl font-bold text-orange mb-2">$300<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
                 <p className="text-gray-600 dark:text-gray-300">Complete AI-powered estimating solution</p>
               </div>
               

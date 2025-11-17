@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
   Building2, 
@@ -45,7 +44,6 @@ export default function NewJobPage() {
   const [success, setSuccess] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
-  const supabase = createClient()
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -60,24 +58,29 @@ export default function NewJobPage() {
     setError('')
 
     try {
-      // Create job with optimistic UI
-      const { data, error: insertError } = await supabase
-        .from('jobs')
-        .insert({
-          user_id: user.id,
+      // Use API route to create job (ensures proper server-side authentication)
+      const response = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           name: formData.name,
           description: formData.description || null,
           location: formData.location,
           budget_range: formData.budget_range || null,
           project_type: formData.project_type || null,
           status: 'draft'
-        })
-        .select()
-        .single()
+        }),
+      })
 
-      if (insertError) {
-        throw insertError
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create job')
       }
+
+      const data = result.data
 
       // Show success animation
       setSuccess(true)
