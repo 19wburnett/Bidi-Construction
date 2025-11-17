@@ -753,6 +753,7 @@ const KEYWORD_SYNONYMS: Record<string, string[]> = {
   area: ['square feet', 'sqft', 'sf', 'area'],
   siding: ['siding', 'exterior finish'],
   stair: ['stair', 'stairs'],
+  exterior: ['exterior', 'exteriors', 'exterior wall', 'exterior finish'],
 }
 
 function extractQuestionKeywords(question?: string | null): string[] {
@@ -1321,10 +1322,17 @@ export async function POST(request: NextRequest) {
     
     // Fallback: Extract potential item names from the question
     if (relevantTakeoffItems.length === 0) {
-      const questionWords = userTextLower.split(/\s+/).filter((word) => word.length > 3)
+      // Handle plural/singular forms (e.g., "exteriors" -> "exterior")
+      const normalizedQuestion = userTextLower.replace(/s\b/g, ' ').replace(/\s+/g, ' ')
+      const questionWords = normalizedQuestion.split(/\s+/).filter((word) => word.length > 3)
+      
       const potentialMatches = takeoffData.items.filter((item) => {
         const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''} ${item.subcategory || ''}`.toLowerCase()
-        return questionWords.some((word) => itemText.includes(word))
+        const itemTextNormalized = itemText.replace(/s\b/g, ' ')
+        // Match if any question word is found in item text (normalized for plurals)
+        return questionWords.some((word) => 
+          itemText.includes(word) || itemTextNormalized.includes(word)
+        )
       })
       if (potentialMatches.length > 0) {
         relevantTakeoffItems = potentialMatches
@@ -1525,7 +1533,31 @@ export async function POST(request: NextRequest) {
       messages: [...contextMessages, ...sanitizedHistory],
     })
 
-    const reply = completion.choices[0]?.message?.content?.trim()
+    let reply = completion.choices[0]?.message?.content?.trim()
+
+    // Post-process: If this is a cost question and the reply is just blueprint snippets, reject it
+    if (reply && isCostQuestion && (costBreakdown || takeoffHighlights)) {
+      const replyLower = reply.toLowerCase()
+      // Check if reply is just dumping blueprint snippets
+      if (
+        replyLower.includes("here's what the blueprint text highlights") ||
+        replyLower.includes('blueprint text highlights') ||
+        (replyLower.includes('page') && replyLower.includes('•') && !replyLower.includes('$') && !replyLower.includes('cost'))
+      ) {
+        // Model ignored takeoff data - build a deterministic response from takeoff
+        if (costBreakdown) {
+          reply = `Based on the takeoff data:\n\n${costBreakdown}\n\n${replyLower.includes('blueprint') ? 'The plans also mention: ' + reply.split('•').slice(1, 3).join('•').substring(0, 200) + '...' : 'For more details, check the specific line items in the takeoff.'}`
+        } else if (takeoffHighlights) {
+          reply = `From the takeoff:\n\n${takeoffHighlights}\n\nCost data isn't available in the takeoff, but these are the quantities found. To get pricing, you'd need to apply current material and labor rates to these quantities.`
+        } else if (relevantTakeoffItems.length > 0) {
+          const itemsList = relevantTakeoffItems.slice(0, 8).map((item) => {
+            const qty = formatQuantity(item.quantity, item.unit)
+            return `• ${item.description || item.name || 'Item'}: ${qty}`
+          }).join('\n')
+          reply = `I found ${relevantTakeoffItems.length} takeoff item${relevantTakeoffItems.length === 1 ? '' : 's'}:\n\n${itemsList}\n\nCost data isn't available in the takeoff for these items. The quantities are shown above - you'd need to apply current rates to calculate costs.`
+        }
+      }
+    }
 
     if (!reply) {
       if (deterministicAnswer) {
