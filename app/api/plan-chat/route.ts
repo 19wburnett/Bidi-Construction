@@ -1284,17 +1284,25 @@ export async function POST(request: NextRequest) {
     keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
   // For cost questions, use fewer blueprint snippets to prioritize takeoff data
   // For total cost questions, use ZERO snippets - only takeoff data
-  const maxSnippets = isTotalCostQuestion ? 0 : (isCostQuestionEarly ? 3 : MAX_BLUEPRINT_SNIPPETS)
+  // For general project questions when takeoff data exists, use fewer snippets
+  const isGeneralProjectQuestion = userTextLower.includes('what') && 
+                                   (userTextLower.includes('project') || 
+                                    userTextLower.includes('cover') || 
+                                    userTextLower.includes('include') ||
+                                    userTextLower.includes('major'))
+  const maxSnippets = isTotalCostQuestion ? 0 : 
+                      (isCostQuestionEarly ? 3 : 
+                       (isGeneralProjectQuestion && hasTakeoffData ? 2 : MAX_BLUEPRINT_SNIPPETS))
   const snippetChunksForMessages = planTextChunksForContext.slice(0, maxSnippets)
   const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
 
   // Filter takeoff items: first by page (if requested), then by keywords
-  // BUT: For total cost questions, use ALL items
+  // BUT: For total cost questions OR general project questions, use ALL items
   let relevantTakeoffItems: NormalizedTakeoffItem[] = []
   if (takeoffData) {
-    if (isTotalCostQuestion) {
-      // For "whole thing cost" questions, use ALL items
+    if (isTotalCostQuestion || isGeneralProjectQuestion) {
+      // For "whole thing cost" or "what does this project cover" questions, use ALL items
       relevantTakeoffItems = takeoffData.items
     } else {
       relevantTakeoffItems = takeoffData.items
@@ -1488,6 +1496,19 @@ export async function POST(request: NextRequest) {
 
   const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
 
+  if (isGeneralProjectQuestion && hasTakeoffData) {
+    systemPromptSections.push(
+      '🚨 IMPORTANT: PROJECT OVERVIEW QUESTION\n' +
+      'The user is asking what the project covers/includes. This is a general overview question.\n' +
+      '1. You MUST use the takeoff data (categories, quantities, items) as your PRIMARY source.\n' +
+      '2. Start with a conversational summary of what\'s in the project based on takeoff categories.\n' +
+      '3. DO NOT start with "Here\'s what the blueprint..." or list page numbers.\n' +
+      '4. Be human and conversational: "This project includes X items across Y categories. The major components are..."\n' +
+      '5. Blueprint snippets are ONLY for additional context if the takeoff doesn\'t answer the question.\n' +
+      '6. If takeoff data shows categories and quantities, use those - that\'s what the user wants to know.'
+    )
+  }
+
   if (isCostQuestion) {
     if (isTotalCostQuestion) {
       systemPromptSections.push(
@@ -1585,6 +1606,20 @@ export async function POST(request: NextRequest) {
       role: 'system',
       content: `⚠️ CRITICAL: The user is asking about cost/price. Use the takeoff items below. DO NOT just list blueprint snippets.\n\nTAKEOFF ITEMS:\n${takeoffHighlights}\n\nYour answer MUST start with this takeoff data.`,
     })
+  } else if (isGeneralProjectQuestion && hasTakeoffData && (takeoffHighlights || takeoffContext?.takeoff?.summary)) {
+    // For general project questions, prioritize takeoff data
+    const summaryObj = takeoffContext?.takeoff?.summary
+    const categories = takeoffContext?.takeoff?.topCategories || []
+    const takeoffDataToShow = takeoffHighlights || 
+                              (summaryObj && categories.length > 0 ? 
+                                `Summary: ${summaryObj.totalItems} items across ${categories.length} categories\n\nTop categories:\n${categories.slice(0, 8).map((c: any) => `• ${c.category}: ${formatQuantity(c.totalQuantity, c.unit)}`).join('\n')}` : 
+                                '')
+    if (takeoffDataToShow) {
+      contextMessages.push({
+        role: 'system',
+        content: `⚠️ IMPORTANT: The user is asking what the project covers/includes. You MUST use the takeoff data below to answer. DO NOT just list blueprint page numbers.\n\nTAKEOFF DATA (USE THIS):\n${takeoffDataToShow}\n\nYour answer should explain what the project includes based on the takeoff categories and quantities. Blueprint snippets are ONLY for additional context if needed.`,
+      })
+    }
   }
 
   // Then add the full plan context
@@ -1606,12 +1641,14 @@ export async function POST(request: NextRequest) {
 
     let reply = completion.choices[0]?.message?.content?.trim()
 
-    // Post-process: If this is a cost question and the reply is just blueprint snippets, reject it
-    if (reply && isCostQuestion && (costBreakdown || takeoffHighlights)) {
+    // Post-process: Catch blueprint dumps for ANY question when takeoff data is available
+    if (reply && hasTakeoffData) {
       const replyLower = reply.toLowerCase()
       const replyStartsWithBlueprint = replyLower.startsWith("here's what") || 
                                        replyLower.startsWith("here is what") ||
-                                       replyLower.includes("blueprint text highlights")
+                                       replyLower.startsWith("high-level blueprint") ||
+                                       replyLower.includes("blueprint text highlights") ||
+                                       replyLower.includes("blueprint highlights")
       
       // Check if reply is just dumping blueprint snippets (more aggressive detection)
       const isBlueprintDump = replyStartsWithBlueprint ||
@@ -1620,11 +1657,14 @@ export async function POST(request: NextRequest) {
          !replyLower.includes('$') && 
          !replyLower.includes('cost') &&
          !replyLower.includes('total') &&
+         !replyLower.includes('sf') &&
+         !replyLower.includes('lf') &&
+         !replyLower.includes('ea') &&
          replyLower.split('page').length > 2) // Multiple page references = snippet dump
       
       if (isBlueprintDump) {
-        // Model ignored takeoff data - build a deterministic response from takeoff
-        if (costBreakdown) {
+        // Model ignored takeoff data - build a response from takeoff
+        if (isCostQuestion && costBreakdown) {
           // For total cost questions, make it more conversational
           if (isTotalCostQuestion) {
             const totalMatch = costBreakdown.match(/Total:?\s*\$?([\d,]+\.?\d*)/i) || 
@@ -1634,14 +1674,98 @@ export async function POST(request: NextRequest) {
           } else {
             reply = `Here's the cost breakdown from the takeoff:\n\n${costBreakdown}`
           }
+        } else if (isGeneralProjectQuestion && takeoffContext?.takeoff) {
+          // For general project questions, build a human response from takeoff data
+          const summaryObj = takeoffContext.takeoff.summary
+          const categories = takeoffContext.takeoff.topCategories || []
+          
+          if (categories.length > 0) {
+            // Group categories and make it conversational
+            const majorCategories = categories.slice(0, 8).map((cat: any) => {
+              const qty = formatQuantity(cat.totalQuantity, cat.unit)
+              return `${cat.category} (${qty})`
+            }).join(', ')
+            
+            const totalItems = summaryObj?.totalItems || relevantTakeoffItems.length
+            reply = `This project includes ${totalItems} item${totalItems === 1 ? '' : 's'} across ${categories.length} categories. The major components are: ${majorCategories}.`
+            
+            if (categories.length > 8) {
+              reply += ` Plus ${categories.length - 8} more categories.`
+            }
+            
+            reply += ` Want details on any specific area?`
+          } else if (relevantTakeoffItems.length > 0) {
+            // Group by category for readability
+            const byCategory = new Map<string, typeof relevantTakeoffItems>()
+            for (const item of relevantTakeoffItems.slice(0, 30)) {
+              const cat = item.category || 'Other'
+              if (!byCategory.has(cat)) {
+                byCategory.set(cat, [])
+              }
+              byCategory.get(cat)!.push(item)
+            }
+            
+            const categoryLines = Array.from(byCategory.entries())
+              .sort((a, b) => b[1].length - a[1].length)
+              .slice(0, 8)
+              .map(([cat, items]) => {
+                const totalQty = items.reduce((sum, item) => {
+                  const qty = typeof item.quantity === 'number' ? item.quantity : 0
+                  return sum + qty
+                }, 0)
+                const unit = items[0]?.unit || ''
+                return `${cat} (${formatQuantity(totalQty, unit)}, ${items.length} item${items.length === 1 ? '' : 's'})`
+              })
+            
+            reply = `This project covers: ${categoryLines.join(', ')}.`
+            if (byCategory.size > 8) {
+              reply += ` Plus ${byCategory.size - 8} more categories.`
+            }
+            reply += ` Want details on any specific area?`
+          } else if (takeoffHighlights) {
+            reply = takeoffHighlights
+          } else {
+            reply = `The takeoff shows ${summaryObj?.totalItems || 0} item${(summaryObj?.totalItems || 0) === 1 ? '' : 's'}. Want details on any specific category?`
+          }
         } else if (takeoffHighlights) {
-          reply = `I don't have cost data in the takeoff, but here are the quantities:\n\n${takeoffHighlights}\n\nTo get pricing, you'd need to apply current material and labor rates to these quantities.`
+          // For other questions, use takeoff highlights
+          reply = takeoffHighlights
+        } else if (takeoffContext?.takeoff?.summary) {
+          // Use takeoff summary as fallback
+          const summaryObj = takeoffContext.takeoff.summary
+          const categories = takeoffContext.takeoff.topCategories || []
+          
+          if (categories.length > 0) {
+            const categoryList = categories.slice(0, 8).map((cat: any) => {
+              const qty = formatQuantity(cat.totalQuantity, cat.unit)
+              return `• ${cat.category}: ${qty}`
+            }).join('\n')
+            const summaryText = `The takeoff includes ${summaryObj.totalItems} item${summaryObj.totalItems === 1 ? '' : 's'} across these categories.`
+            reply = `This project includes:\n\n${categoryList}\n\n${summaryText}`
+          } else {
+            reply = `The takeoff shows ${summaryObj.totalItems} item${summaryObj.totalItems === 1 ? '' : 's'}. Want details on any specific category?`
+          }
         } else if (relevantTakeoffItems.length > 0) {
-          const itemsList = relevantTakeoffItems.slice(0, 8).map((item) => {
-            const qty = formatQuantity(item.quantity, item.unit)
-            return `• ${item.description || item.name || 'Item'}: ${qty}`
-          }).join('\n')
-          reply = `I found ${relevantTakeoffItems.length} takeoff item${relevantTakeoffItems.length === 1 ? '' : 's'}:\n\n${itemsList}\n\nCost data isn't available in the takeoff for these items. The quantities are shown above - you'd need to apply current rates to calculate costs.`
+          // Group by category for readability
+          const byCategory = new Map<string, typeof relevantTakeoffItems>()
+          for (const item of relevantTakeoffItems.slice(0, 20)) {
+            const cat = item.category || 'Other'
+            if (!byCategory.has(cat)) {
+              byCategory.set(cat, [])
+            }
+            byCategory.get(cat)!.push(item)
+          }
+          
+          const categoryLines = Array.from(byCategory.entries()).map(([cat, items]) => {
+            const totalQty = items.reduce((sum, item) => {
+              const qty = typeof item.quantity === 'number' ? item.quantity : 0
+              return sum + qty
+            }, 0)
+            const unit = items[0]?.unit || ''
+            return `• ${cat}: ${formatQuantity(totalQty, unit)} (${items.length} item${items.length === 1 ? '' : 's'})`
+          })
+          
+          reply = `This project covers:\n\n${categoryLines.join('\n')}\n\nThese are the major components from the takeoff. Want details on any specific category?`
         }
       }
     }
