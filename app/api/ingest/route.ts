@@ -45,14 +45,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify plan ownership
+    // Verify plan ownership or admin access
     const supabase = await createServerSupabaseClient()
-    const { data: plan, error: planError } = await supabase
+    
+    // Check if user is admin - admins have access to all plans
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('is_admin, role')
+      .eq('id', user.id)
+      .single()
+
+    const isAdmin = userData && (userData.role === 'admin' || userData.is_admin === true)
+
+    // Query plan - if admin, don't filter by user_id
+    const planQuery = supabase
       .from('plans')
       .select('*')
       .eq('id', planId)
-      .eq('user_id', user.id)
-      .single()
+
+    const { data: plan, error: planError } = isAdmin
+      ? await planQuery.single()
+      : await planQuery.eq('user_id', user.id).single()
 
     if (planError || !plan) {
       return NextResponse.json(

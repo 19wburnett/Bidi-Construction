@@ -39,7 +39,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
   }
 
-  if (plan.user_id !== user.id) {
+  // Check if user is admin - admins have access to all plans
+  const { data: userData, error: userError } = await supabase
+    .from('users')
+    .select('is_admin, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin = userData && (userData.role === 'admin' || userData.is_admin === true)
+
+  // If not admin, check plan ownership or job access
+  if (!isAdmin && plan.user_id !== user.id) {
     const targetJobId = plan.job_id || jobId
     if (!targetJobId) {
       return NextResponse.json({ error: 'You do not have access to this plan.' }, { status: 403 })
