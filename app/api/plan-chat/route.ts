@@ -1085,11 +1085,25 @@ export async function GET(request: NextRequest) {
 
   const categories = summarizeCategories(context.takeoff.items).slice(0, 5)
 
+  // Load chat history from database
+  const { data: chatMessages, error: chatError } = await supabase
+    .from('plan_chat_messages')
+    .select('id, role, content, created_at')
+    .eq('plan_id', planId)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+
+  if (chatError) {
+    console.error('Failed to load chat history:', chatError)
+    // Continue without chat history - don't fail the request
+  }
+
   return NextResponse.json({
     hasTakeoff: context.takeoff.items.length > 0,
     lastUpdated: context.takeoff.lastUpdated,
     itemCount: context.takeoff.items.length,
     summaryCategories: categories,
+    chatHistory: chatMessages || [],
   })
 }
 
@@ -1561,22 +1575,54 @@ export async function POST(request: NextRequest) {
 
     if (!reply) {
       if (deterministicAnswer) {
-        return NextResponse.json({ reply: deterministicAnswer })
-      }
-      if (planTextChunksForContext.length > 0) {
-        return NextResponse.json({
-          reply: buildSnippetSummary(
-            latestUserMessage?.content ?? '',
-            planTextChunksForContext,
-            requestedPages
-          ),
-        })
-      }
-      return NextResponse.json({
-        reply: hasBlueprintText
+        reply = deterministicAnswer
+      } else if (planTextChunksForContext.length > 0) {
+        reply = buildSnippetSummary(
+          latestUserMessage?.content ?? '',
+          planTextChunksForContext,
+          requestedPages
+        )
+      } else {
+        reply = hasBlueprintText
           ? "I reviewed the available blueprint snippets, but they don't contain enough detail to answer that. Try referencing a specific page, sheet title, or note, and I'll take another look."
-          : "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look.",
-      })
+          : "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look."
+      }
+    }
+
+    // Save messages to database
+    try {
+      // Save user message
+      const { error: userMsgError } = await supabase
+        .from('plan_chat_messages')
+        .insert({
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'user',
+          content: latestUserMessage?.content || '',
+        })
+
+      if (userMsgError) {
+        console.error('Failed to save user message:', userMsgError)
+      }
+
+      // Save assistant reply
+      const { error: assistantMsgError } = await supabase
+        .from('plan_chat_messages')
+        .insert({
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'assistant',
+          content: reply,
+        })
+
+      if (assistantMsgError) {
+        console.error('Failed to save assistant message:', assistantMsgError)
+      }
+    } catch (dbError) {
+      console.error('Failed to save chat messages to database:', dbError)
+      // Don't fail the request if DB save fails
     }
 
     return NextResponse.json({ reply })

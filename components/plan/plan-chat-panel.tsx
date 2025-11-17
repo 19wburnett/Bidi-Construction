@@ -31,6 +31,7 @@ interface ChatStatusResponse {
   lastUpdated?: string | null
   itemCount?: number
   summaryCategories?: Array<{ category: string; totalQuantity: number; unit?: string }>
+  chatHistory?: Array<{ id: string; role: 'user' | 'assistant'; content: string; created_at: string }>
 }
 
 interface ChatErrorState {
@@ -46,7 +47,6 @@ const examplePrompts = [
   'How many square feet of roofing are included and where?'
 ]
 
-const buildStorageKey = (planId: string) => `plan-chat:${planId}`
 
 function TypingIndicator() {
   return (
@@ -82,7 +82,6 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
   const hasActiveConversation = messages.length > 0
   const canChat = !error
-  const storageKey = useMemo(() => buildStorageKey(planId), [planId])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -96,47 +95,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     setError(null)
     setMissingTakeoff(false)
 
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = window.localStorage.getItem(storageKey)
-        if (stored) {
-          const parsed = JSON.parse(stored)
-          if (Array.isArray(parsed)) {
-            const hydratedMessages = parsed.filter(
-              (item: any): item is PlanChatMessage =>
-                item &&
-                (item.role === 'user' || item.role === 'assistant') &&
-                typeof item.content === 'string'
-            )
-            if (hydratedMessages.length > 0) {
-              setMessages(hydratedMessages)
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to hydrate Plan Chat history:', err)
-      }
-    }
-
     hasHydratedMessagesRef.current = true
     fetchStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, planId])
 
-  useEffect(() => {
-    if (!hasHydratedMessagesRef.current) return
-    if (typeof window === 'undefined') return
-
-    try {
-      if (messages.length > 0) {
-        window.localStorage.setItem(storageKey, JSON.stringify(messages))
-      } else {
-        window.localStorage.removeItem(storageKey)
-      }
-    } catch (err) {
-      console.warn('Failed to persist Plan Chat history:', err)
-    }
-  }, [messages, storageKey])
 
   const summaryPreview = useMemo(() => {
     if (!status?.summaryCategories?.length) return null
@@ -170,6 +133,16 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
       setStatus(data)
       setMissingTakeoff(!data.hasTakeoff)
       setError(null)
+
+      // Load chat history from database
+      if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+        const dbMessages: PlanChatMessage[] = data.chatHistory.map((msg) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+        }))
+        setMessages(dbMessages)
+      }
     } catch (err) {
       console.error('Failed to fetch Plan Chat status', err)
       setStatus(null)
@@ -409,8 +382,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
             <Textarea
               placeholder={
                 canChat
-                  ? 'Ask a question about this plan…'
-                  : 'Plan Chat is currently unavailable.'
+                ? 'Ask a question about this plan…'
+                : 'Plan Chat is currently unavailable.'
               }
               value={input}
               onChange={(event) => setInput(event.target.value)}
