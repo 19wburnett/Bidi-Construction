@@ -1277,19 +1277,50 @@ export async function POST(request: NextRequest) {
 
   // Detect cost-related questions (do this before creating highlights so we can include costs)
   const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
-  const costKeywords = ['expensive', 'cost', 'price', 'pricing', 'budget', 'why is', 'how much does']
+  const costKeywords = [
+    'expensive',
+    'cost',
+    'price',
+    'pricing',
+    'budget',
+    'why is',
+    'how much does',
+    'how did you get',
+    'how did you calculate',
+    'how was this calculated',
+    'cost estimate',
+  ]
   const isCostQuestion = costKeywords.some((keyword) => userTextLower.includes(keyword))
 
   // For cost questions, if we didn't find items via keywords, try to find items mentioned in the question
   if (isCostQuestion && relevantTakeoffItems.length === 0 && takeoffData) {
-    // Extract potential item names from the question (e.g., "roof" from "Why is the roof so expensive?")
-    const questionWords = userTextLower.split(/\s+/).filter((word) => word.length > 3)
-    const potentialMatches = takeoffData.items.filter((item) => {
-      const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''}`.toLowerCase()
-      return questionWords.some((word) => itemText.includes(word))
-    })
-    if (potentialMatches.length > 0) {
-      relevantTakeoffItems = potentialMatches
+    // Handle category paths like "exterior > roofing > asphalt shingles"
+    const categoryPathMatch = userTextLower.match(/(?:for|about|estimate for)\s+([^?]+)/)
+    if (categoryPathMatch) {
+      const pathText = categoryPathMatch[1].trim()
+      const pathParts = pathText.split(/>|and/).map((p) => p.trim().toLowerCase())
+      
+      const potentialMatches = takeoffData.items.filter((item) => {
+        const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''} ${item.subcategory || ''}`.toLowerCase()
+        // Match if all path parts are found in the item text
+        return pathParts.every((part) => part.length > 2 && itemText.includes(part))
+      })
+      
+      if (potentialMatches.length > 0) {
+        relevantTakeoffItems = potentialMatches
+      }
+    }
+    
+    // Fallback: Extract potential item names from the question
+    if (relevantTakeoffItems.length === 0) {
+      const questionWords = userTextLower.split(/\s+/).filter((word) => word.length > 3)
+      const potentialMatches = takeoffData.items.filter((item) => {
+        const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''} ${item.subcategory || ''}`.toLowerCase()
+        return questionWords.some((word) => itemText.includes(word))
+      })
+      if (potentialMatches.length > 0) {
+        relevantTakeoffItems = potentialMatches
+      }
     }
   }
 
@@ -1367,7 +1398,12 @@ export async function POST(request: NextRequest) {
 
   if (isCostQuestion) {
     systemPromptSections.push(
-      'IMPORTANT: The user is asking about cost/price. You MUST prioritize the costBreakdown data in the plan context - it contains detailed line items with quantities, unit costs, and total costs. Start your answer by explaining the cost breakdown from the takeoff data. Then use blueprint snippets to add context about why something might be expensive (e.g., special materials, complex details, premium specifications). If costBreakdown is provided, reference it directly in your response.'
+      'IMPORTANT: The user is asking about cost/price. You MUST:\n' +
+      '1. Start with the costBreakdown data from the takeoff - show actual line items with quantities, unit costs, and totals.\n' +
+      '2. Explain HOW the cost was calculated (quantity × unit price = total).\n' +
+      '3. Use blueprint snippets ONLY to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
+      '4. DO NOT just list blueprint text snippets - synthesize the information into a coherent explanation.\n' +
+      '5. If costBreakdown is empty but takeoffHighlights or sampleTakeoffItems exist, use those to show the cost data.'
     )
   }
 
