@@ -65,7 +65,7 @@ export const PLAN_CHAT_FEW_SHOTS: ChatCompletionMessageParam[] = [
   {
     role: 'assistant',
     content:
-      'Level 2 interior partitions add up to about 1,240 LF total. That's mostly the classroom block (≈760 LF) plus corridors (≈480 LF). Let me know if you only want rated walls and I can filter for those specifically.',
+      "Level 2 interior partitions add up to about 1,240 LF total. That's mostly the classroom block (≈760 LF) plus corridors (≈480 LF). Let me know if you only want rated walls and I can filter for those specifically.",
   },
   {
     role: 'user',
