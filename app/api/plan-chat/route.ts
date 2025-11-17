@@ -1420,19 +1420,31 @@ export async function POST(request: NextRequest) {
     hasBlueprintText,
   }
 
+  // Build context messages - prioritize cost data when present
+  const contextMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    {
+      role: 'system',
+      content: systemPrompt,
+    },
+  ]
+
+  // For cost questions, put cost breakdown FIRST and prominently
+  if (isCostQuestion && costBreakdown) {
+    contextMessages.push({
+      role: 'system',
+      content: `COST BREAKDOWN (use this data to answer the cost question):\n${costBreakdown}`,
+    })
+  }
+
+  // Then add the full plan context
   const planContextMessage = {
     role: 'system' as const,
     content: `Plan context (JSON):\n${JSON.stringify(planContextPayload, null, 2)}`,
   }
+  contextMessages.push(planContextMessage)
 
-  const contextMessages = [
-    {
-      role: 'system' as const,
-      content: systemPrompt,
-    },
-    planContextMessage,
-    ...PLAN_CHAT_FEW_SHOTS,
-  ]
+  // Add few-shot examples
+  contextMessages.push(...PLAN_CHAT_FEW_SHOTS)
 
   try {
     const completion = await openaiClient.chat.completions.create({

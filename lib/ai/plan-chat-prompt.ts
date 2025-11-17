@@ -65,7 +65,7 @@ export const PLAN_CHAT_FEW_SHOTS: ChatCompletionMessageParam[] = [
   {
     role: 'assistant',
     content:
-      'Level 2 interior partitions add up to about 1,240 LF total. That’s mostly the classroom block (≈760 LF) plus corridors (≈480 LF). Let me know if you only want rated walls and I can filter for those specifically.',
+      'Level 2 interior partitions add up to about 1,240 LF total. That's mostly the classroom block (≈760 LF) plus corridors (≈480 LF). Let me know if you only want rated walls and I can filter for those specifically.',
   },
   {
     role: 'user',
@@ -83,7 +83,16 @@ export const PLAN_CHAT_FEW_SHOTS: ChatCompletionMessageParam[] = [
   {
     role: 'assistant',
     content:
-      "I see 5,980 SF of flooring in the takeoff, but it’s logged as one lump sum for “Level 1 finish”. There aren’t room tags in the data yet, so I can’t split it by room unless the takeoff gets updated with those locations.",
+      "I see 5,980 SF of flooring in the takeoff, but it's logged as one lump sum for "Level 1 finish". There aren't room tags in the data yet, so I can't split it by room unless the takeoff gets updated with those locations.",
+  },
+  {
+    role: 'user',
+    content: 'Why is the roof so expensive?',
+  },
+  {
+    role: 'assistant',
+    content:
+      'The roofing comes in at $42,500 total. Breaking it down: TPO membrane is $18,200 (1,820 SF @ $10/SF), tapered insulation adds $12,600 (1,400 SF @ $9/SF), and the 30# underlayment plus flashing details account for the rest. The plans call for premium materials—4-mil vapor retarder, heavy underlayment between shingle courses, and extensive flashing at parapets and penetrations (page 11). That complexity drives up the cost compared to a basic shingle roof.',
   },
 ]
 
