@@ -805,53 +805,90 @@ function summarizeTakeoffItems(items: NormalizedTakeoffItem[], limit = 6): strin
   return lines.join('\n')
 }
 
-function buildStructuredStats(items: NormalizedTakeoffItem[], keywords: string[]): string | null {
+function buildStructuredStats(
+  items: NormalizedTakeoffItem[],
+  keywords: string[],
+  isCostQuestion = false
+): string | null {
   const summaries: string[] = []
 
-  const totalByCategory = (predicate: (item: NormalizedTakeoffItem) => boolean) => {
-    return items.reduce<{ total: number; unit: string | null }>(
+  const totalByCategory = (
+    predicate: (item: NormalizedTakeoffItem) => boolean,
+    includeCost = false
+  ) => {
+    return items.reduce<{ total: number; unit: string | null; totalCost: number }>(
       (acc, item) => {
         if (!predicate(item)) return acc
         const qty = typeof item.quantity === 'number' ? item.quantity : 0
         const unit = item.unit || acc.unit
+        const cost = typeof item.total_cost === 'number' ? item.total_cost : 0
         return {
           total: acc.total + qty,
           unit,
+          totalCost: acc.totalCost + cost,
         }
       },
-      { total: 0, unit: null as string | null }
+      { total: 0, unit: null as string | null, totalCost: 0 }
     )
   }
 
   if (keywords.includes('roof')) {
-    const { total, unit } = totalByCategory((item) => textMatchesKeywords(item.description, ['roof']))
+    const { total, unit, totalCost } = totalByCategory((item) =>
+      textMatchesKeywords(item.description, ['roof']),
+      isCostQuestion
+    )
     if (total > 0) {
-      summaries.push(`Roofing quantity: ${formatQuantity(total, unit)}.`)
+      let summary = `Roofing quantity: ${formatQuantity(total, unit)}.`
+      if (isCostQuestion && totalCost > 0) {
+        summary += ` Total cost: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`
+        if (total > 0) {
+          const unitCost = totalCost / total
+          summary += ` Unit cost: $${unitCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}/${unit || 'unit'}.`
+        }
+      }
+      summaries.push(summary)
     }
   }
 
   if (keywords.includes('concrete')) {
-    const { total, unit } = totalByCategory((item) =>
-      textMatchesKeywords(item.description, ['concrete', 'footing', 'foundation'])
+    const { total, unit, totalCost } = totalByCategory(
+      (item) => textMatchesKeywords(item.description, ['concrete', 'footing', 'foundation']),
+      isCostQuestion
     )
     if (total > 0) {
-      summaries.push(`Concrete quantity: ${formatQuantity(total, unit)}.`)
+      let summary = `Concrete quantity: ${formatQuantity(total, unit)}.`
+      if (isCostQuestion && totalCost > 0) {
+        summary += ` Total cost: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`
+      }
+      summaries.push(summary)
     }
   }
 
   if (keywords.includes('door')) {
-    const { total, unit } = totalByCategory((item) => textMatchesKeywords(item.description, ['door']))
+    const { total, unit, totalCost } = totalByCategory(
+      (item) => textMatchesKeywords(item.description, ['door']),
+      isCostQuestion
+    )
     if (total > 0) {
-      summaries.push(`Door count: ${formatQuantity(total, unit)}.`)
+      let summary = `Door count: ${formatQuantity(total, unit)}.`
+      if (isCostQuestion && totalCost > 0) {
+        summary += ` Total cost: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`
+      }
+      summaries.push(summary)
     }
   }
 
   if (keywords.includes('window')) {
-    const { total, unit } = totalByCategory((item) =>
-      textMatchesKeywords(item.description, ['window', 'glazing'])
+    const { total, unit, totalCost } = totalByCategory(
+      (item) => textMatchesKeywords(item.description, ['window', 'glazing']),
+      isCostQuestion
     )
     if (total > 0) {
-      summaries.push(`Window count: ${formatQuantity(total, unit)}.`)
+      let summary = `Window count: ${formatQuantity(total, unit)}.`
+      if (isCostQuestion && totalCost > 0) {
+        summary += ` Total cost: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`
+      }
+      summaries.push(summary)
     }
   }
 
@@ -879,30 +916,50 @@ function buildDeterministicAnswer(
   const lower = userText.toLowerCase()
   const normalizedMessage = normalizeKey(userText) ?? ''
 
+  // Extract page number if present
   const pageMatch = lower.match(/page\s*(\d+)/)
-  if (pageMatch) {
-    const pageNum = Number(pageMatch[1])
-    if (Number.isFinite(pageNum)) {
-      const pageItems = takeoff.items.filter(
-        (item) =>
-          item.page_number === pageNum ||
-          (item.page_reference && item.page_reference.toLowerCase().includes(`page ${pageNum}`))
-      )
+  const requestedPage = pageMatch ? Number(pageMatch[1]) : null
+  const hasPageFilter = requestedPage !== null && Number.isFinite(requestedPage)
 
-      if (pageItems.length > 0) {
-        const lines = pageItems.map(formatItemLine)
-        return [
-          `Items tagged to page ${pageNum}:`,
-          ...lines,
-          '',
-          'Let me know if you want more detail about any of these.',
-        ].join('\n')
-      }
-    }
+  // Check for cost-related questions - these need LLM to synthesize takeoff + blueprint
+  const costKeywords = ['expensive', 'cost', 'price', 'pricing', 'budget', 'why is', 'how much does']
+  const isCostQuestion = costKeywords.some((keyword) => lower.includes(keyword))
+  if (isCostQuestion) {
+    // Let LLM handle cost questions - it needs to combine takeoff cost data with blueprint context
+    return null
   }
 
+  // If query has both page filter AND category/keyword, let LLM handle it for better synthesis
+  const hasCategoryKeyword = normalizedMessage.includes('categor') || normalizedMessage.includes('item')
+  if (hasPageFilter && hasCategoryKeyword) {
+    // Complex query - let LLM combine page-filtered takeoff + blueprint snippets
+    return null
+  }
+
+  // Simple page-only query
+  if (hasPageFilter && !hasCategoryKeyword) {
+    const pageItems = takeoff.items.filter(
+      (item) =>
+        item.page_number === requestedPage ||
+        (item.page_reference && item.page_reference.toLowerCase().includes(`page ${requestedPage}`))
+    )
+
+    if (pageItems.length > 0) {
+      const lines = pageItems.map(formatItemLine)
+      return [
+        `Items tagged to page ${requestedPage}:`,
+        ...lines,
+        '',
+        'Let me know if you want more detail about any of these.',
+      ].join('\n')
+    }
+    // If no items found for page, let LLM handle it (might need blueprint snippets)
+    return null
+  }
+
+  // Simple category match (no page filter)
   const matchedCategory = findMatchingCategoryBucket(userText, takeoff.categories)
-  if (matchedCategory && matchedCategory.items.length > 0) {
+  if (matchedCategory && matchedCategory.items.length > 0 && !hasPageFilter) {
     const lines = matchedCategory.items.map(formatItemLine)
     const quantityText =
       matchedCategory.totalQuantity > 0
@@ -922,7 +979,8 @@ function buildDeterministicAnswer(
       .join('\n')
   }
 
-  if (normalizedMessage.includes('categor')) {
+  // Simple "categories" query (no page filter, no specific category)
+  if (normalizedMessage.includes('categor') && !hasPageFilter) {
     const sorted = [...takeoff.categories].sort((a, b) => b.totalQuantity - a.totalQuantity)
     const meaningful = sorted.filter(
       (bucket) => bucket.items.length > 0 || (bucket.totalQuantity ?? 0) > 0 || bucket.totalCost > 0
@@ -1173,15 +1231,40 @@ export async function POST(request: NextRequest) {
   const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
 
-  const relevantTakeoffItems =
-    takeoffData && questionKeywords.length > 0
-      ? filterTakeoffItemsByKeywords(takeoffData.items, questionKeywords)
-      : []
+  // Filter takeoff items: first by page (if requested), then by keywords
+  let relevantTakeoffItems: NormalizedTakeoffItem[] = []
+  if (takeoffData) {
+    relevantTakeoffItems = takeoffData.items
+
+    // Apply page filter first if requested
+    if (requestedPages.length > 0) {
+      relevantTakeoffItems = relevantTakeoffItems.filter(
+        (item) =>
+          (item.page_number !== null && requestedPages.includes(item.page_number)) ||
+          (item.page_reference &&
+            requestedPages.some((page) =>
+              item.page_reference?.toLowerCase().includes(`page ${page}`)
+            ))
+      )
+    }
+
+    // Then apply keyword filtering
+    if (questionKeywords.length > 0) {
+      relevantTakeoffItems = filterTakeoffItemsByKeywords(relevantTakeoffItems, questionKeywords)
+    }
+  }
+
   const takeoffHighlights =
     relevantTakeoffItems.length > 0 ? summarizeTakeoffItems(relevantTakeoffItems) : null
+
+  // Detect cost-related questions
+  const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
+  const costKeywords = ['expensive', 'cost', 'price', 'pricing', 'budget', 'why is', 'how much does']
+  const isCostQuestion = costKeywords.some((keyword) => userTextLower.includes(keyword))
+
   const structuredStats =
     relevantTakeoffItems.length > 0
-      ? buildStructuredStats(relevantTakeoffItems, questionKeywords)
+      ? buildStructuredStats(relevantTakeoffItems, questionKeywords, isCostQuestion)
       : null
 
   if (!hasTakeoffData && !hasBlueprintText) {
