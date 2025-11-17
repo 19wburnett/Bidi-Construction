@@ -1239,11 +1239,33 @@ export async function POST(request: NextRequest) {
 
   const basePlanTextChunks = Array.from(collectedChunks.values())
   const questionKeywords = extractQuestionKeywords(latestUserMessage?.content)
+  
+  // Detect cost questions early to reduce blueprint snippets
+  const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
+  const costKeywords = [
+    'expensive',
+    'cost',
+    'price',
+    'pricing',
+    'budget',
+    'why is',
+    'how much does',
+    'how did you get',
+    'how did you calculate',
+    'how was this calculated',
+    'cost estimate',
+    'current price',
+    'current cost',
+  ]
+  const isCostQuestionEarly = costKeywords.some((keyword) => userTextLower.includes(keyword))
+  
   const keywordFilteredChunks =
     questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
     keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
-  const snippetChunksForMessages = planTextChunksForContext.slice(0, MAX_BLUEPRINT_SNIPPETS)
+  // For cost questions, use fewer blueprint snippets to prioritize takeoff data
+  const maxSnippets = isCostQuestionEarly ? 3 : MAX_BLUEPRINT_SNIPPETS
+  const snippetChunksForMessages = planTextChunksForContext.slice(0, maxSnippets)
   const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
 
@@ -1275,22 +1297,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Detect cost-related questions (do this before creating highlights so we can include costs)
-  const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
-  const costKeywords = [
-    'expensive',
-    'cost',
-    'price',
-    'pricing',
-    'budget',
-    'why is',
-    'how much does',
-    'how did you get',
-    'how did you calculate',
-    'how was this calculated',
-    'cost estimate',
-  ]
-  const isCostQuestion = costKeywords.some((keyword) => userTextLower.includes(keyword))
+  // Use the early cost question detection
+  const isCostQuestion = isCostQuestionEarly
 
   // For cost questions, if we didn't find items via keywords, try to find items mentioned in the question
   if (isCostQuestion && relevantTakeoffItems.length === 0 && takeoffData) {
@@ -1325,12 +1333,15 @@ export async function POST(request: NextRequest) {
   }
 
   // For cost questions, build a detailed cost breakdown
+  // ALWAYS show takeoff items for cost questions, even if they don't have costs
   let costBreakdown: string | null = null
   if (isCostQuestion && relevantTakeoffItems.length > 0) {
     const itemsWithCosts = relevantTakeoffItems.filter(
       (item) => typeof item.total_cost === 'number' && item.total_cost > 0
     )
+    
     if (itemsWithCosts.length > 0) {
+      // Items with costs - show full breakdown
       const totalCost = itemsWithCosts.reduce((sum, item) => sum + (item.total_cost || 0), 0)
       const lines = itemsWithCosts.slice(0, 12).map((item) => {
         const quantity = formatQuantity(item.quantity, item.unit)
@@ -1346,6 +1357,21 @@ export async function POST(request: NextRequest) {
         ...lines,
         itemsWithCosts.length > 12 ? `…and ${itemsWithCosts.length - 12} more items with costs.` : '',
         `Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    } else {
+      // No costs, but show quantities so the model can still answer
+      const lines = relevantTakeoffItems.slice(0, 15).map((item) => {
+        const quantity = formatQuantity(item.quantity, item.unit)
+        const category = item.category ? `${item.category}: ` : ''
+        return `• ${category}${item.description || item.name || 'Item'}: ${quantity}`
+      })
+      costBreakdown = [
+        `Takeoff items found (${relevantTakeoffItems.length} item${relevantTakeoffItems.length === 1 ? '' : 's'}, no cost data available):`,
+        ...lines,
+        relevantTakeoffItems.length > 15 ? `…and ${relevantTakeoffItems.length - 15} more items.` : '',
+        'Note: Cost data is not available in the takeoff. Use these quantities and explain that costs would need to be calculated based on current material/labor rates.',
       ]
         .filter(Boolean)
         .join('\n')
@@ -1398,12 +1424,15 @@ export async function POST(request: NextRequest) {
 
   if (isCostQuestion) {
     systemPromptSections.push(
-      'IMPORTANT: The user is asking about cost/price. You MUST:\n' +
-      '1. Start with the costBreakdown data from the takeoff - show actual line items with quantities, unit costs, and totals.\n' +
-      '2. Explain HOW the cost was calculated (quantity × unit price = total).\n' +
-      '3. Use blueprint snippets ONLY to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
-      '4. DO NOT just list blueprint text snippets - synthesize the information into a coherent explanation.\n' +
-      '5. If costBreakdown is empty but takeoffHighlights or sampleTakeoffItems exist, use those to show the cost data.'
+      '🚨 CRITICAL INSTRUCTIONS FOR COST QUESTIONS:\n' +
+      '1. You will receive takeoff data in a separate system message marked "CRITICAL" or "TAKEOFF DATA".\n' +
+      '2. You MUST start your answer with that takeoff data - show line items, quantities, and costs.\n' +
+      '3. DO NOT start with blueprint snippets. Blueprint snippets are ONLY for additional context at the end.\n' +
+      '4. If takeoff data shows costs: explain HOW the cost was calculated (quantity × unit price = total).\n' +
+      '5. If takeoff data shows quantities but no costs: explain what quantities exist and note that costs need to be calculated.\n' +
+      '6. Blueprint snippets should ONLY be used to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
+      '7. Your answer structure: [Takeoff data first] → [Explanation of costs/quantities] → [Blueprint context if relevant].\n' +
+      '8. DO NOT just dump blueprint text. Synthesize everything into a coherent, human explanation.'
     )
   }
 
@@ -1469,7 +1498,13 @@ export async function POST(request: NextRequest) {
   if (isCostQuestion && costBreakdown) {
     contextMessages.push({
       role: 'system',
-      content: `COST BREAKDOWN (use this data to answer the cost question):\n${costBreakdown}`,
+      content: `⚠️ CRITICAL: The user is asking about cost/price. You MUST use the takeoff data below to answer. DO NOT just list blueprint snippets.\n\nTAKEOFF DATA (USE THIS):\n${costBreakdown}\n\nYour answer MUST start with this takeoff data. Blueprint snippets are ONLY for additional context to explain why something might be expensive.`,
+    })
+  } else if (isCostQuestion && !costBreakdown && takeoffHighlights) {
+    // Fallback: if no cost breakdown but we have highlights, use those
+    contextMessages.push({
+      role: 'system',
+      content: `⚠️ CRITICAL: The user is asking about cost/price. Use the takeoff items below. DO NOT just list blueprint snippets.\n\nTAKEOFF ITEMS:\n${takeoffHighlights}\n\nYour answer MUST start with this takeoff data.`,
     })
   }
 
