@@ -790,14 +790,29 @@ function filterTakeoffItemsByKeywords(
   })
 }
 
-function summarizeTakeoffItems(items: NormalizedTakeoffItem[], limit = 6): string {
+function summarizeTakeoffItems(
+  items: NormalizedTakeoffItem[],
+  limit = 6,
+  includeCosts = false
+): string {
   if (!items.length) return ''
   const lines = items.slice(0, limit).map((item) => {
     const category = item.category ? `${item.category}: ` : ''
     const quantity =
       typeof item.quantity === 'number' ? formatQuantity(item.quantity, item.unit) : item.unit || 'N/A'
     const location = item.location ? ` @ ${item.location}` : ''
-    return `• ${category}${item.description || item.name || 'Item'} — ${quantity}${location}`
+    let line = `• ${category}${item.description || item.name || 'Item'} — ${quantity}${location}`
+    
+    if (includeCosts) {
+      if (typeof item.total_cost === 'number' && item.total_cost > 0) {
+        line += ` — Total: $${item.total_cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+      }
+      if (typeof item.unit_cost === 'number' && item.unit_cost > 0) {
+        line += ` ($${item.unit_cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}/${item.unit || 'unit'})`
+      }
+    }
+    
+    return line
   })
   if (items.length > limit) {
     lines.push(`…plus ${items.length - limit} more related takeoff entries.`)
@@ -1259,13 +1274,56 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const takeoffHighlights =
-    relevantTakeoffItems.length > 0 ? summarizeTakeoffItems(relevantTakeoffItems) : null
-
-  // Detect cost-related questions
+  // Detect cost-related questions (do this before creating highlights so we can include costs)
   const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
   const costKeywords = ['expensive', 'cost', 'price', 'pricing', 'budget', 'why is', 'how much does']
   const isCostQuestion = costKeywords.some((keyword) => userTextLower.includes(keyword))
+
+  // For cost questions, if we didn't find items via keywords, try to find items mentioned in the question
+  if (isCostQuestion && relevantTakeoffItems.length === 0 && takeoffData) {
+    // Extract potential item names from the question (e.g., "roof" from "Why is the roof so expensive?")
+    const questionWords = userTextLower.split(/\s+/).filter((word) => word.length > 3)
+    const potentialMatches = takeoffData.items.filter((item) => {
+      const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''}`.toLowerCase()
+      return questionWords.some((word) => itemText.includes(word))
+    })
+    if (potentialMatches.length > 0) {
+      relevantTakeoffItems = potentialMatches
+    }
+  }
+
+  // For cost questions, build a detailed cost breakdown
+  let costBreakdown: string | null = null
+  if (isCostQuestion && relevantTakeoffItems.length > 0) {
+    const itemsWithCosts = relevantTakeoffItems.filter(
+      (item) => typeof item.total_cost === 'number' && item.total_cost > 0
+    )
+    if (itemsWithCosts.length > 0) {
+      const totalCost = itemsWithCosts.reduce((sum, item) => sum + (item.total_cost || 0), 0)
+      const lines = itemsWithCosts.slice(0, 12).map((item) => {
+        const quantity = formatQuantity(item.quantity, item.unit)
+        const cost = item.total_cost || 0
+        const unitCost =
+          typeof item.quantity === 'number' && item.quantity > 0
+            ? ` ($${(cost / item.quantity).toLocaleString('en-US', { maximumFractionDigits: 2 })}/${item.unit || 'unit'})`
+            : ''
+        return `• ${item.description || item.name || 'Item'}: ${quantity} — $${cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}${unitCost}`
+      })
+      costBreakdown = [
+        `Cost breakdown (${itemsWithCosts.length} item${itemsWithCosts.length === 1 ? '' : 's'}):`,
+        ...lines,
+        itemsWithCosts.length > 12 ? `…and ${itemsWithCosts.length - 12} more items with costs.` : '',
+        `Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    }
+  }
+
+  const takeoffHighlights =
+    relevantTakeoffItems.length > 0
+      ? summarizeTakeoffItems(relevantTakeoffItems, 8, isCostQuestion)
+      : null
 
   const structuredStats =
     relevantTakeoffItems.length > 0
@@ -1305,6 +1363,12 @@ export async function POST(request: NextRequest) {
   }
 
   const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
+
+  if (isCostQuestion) {
+    systemPromptSections.push(
+      'IMPORTANT: The user is asking about cost/price. You MUST prioritize the costBreakdown data in the plan context - it contains detailed line items with quantities, unit costs, and total costs. Start your answer by explaining the cost breakdown from the takeoff data. Then use blueprint snippets to add context about why something might be expensive (e.g., special materials, complex details, premium specifications). If costBreakdown is provided, reference it directly in your response.'
+    )
+  }
 
   if (!hasTakeoffData) {
     systemPromptSections.push(
@@ -1348,6 +1412,7 @@ export async function POST(request: NextRequest) {
     sampleTakeoffItems: takeoffContext?.takeoff.representativeItems ?? null,
     takeoffHighlights: takeoffHighlightsList,
     computedStats: structuredStatsList,
+    costBreakdown: costBreakdown, // Prominent cost data for cost questions
     blueprintSnippets: planTextSnippetPayloads,
     requestedPages,
     keywordHints: questionKeywords,
