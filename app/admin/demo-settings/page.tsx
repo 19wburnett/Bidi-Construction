@@ -23,7 +23,8 @@ import {
   ArrowRight,
   ArrowLeft,
   PlayCircle,
-  User
+  User,
+  Layers
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
@@ -388,6 +389,39 @@ export default function AdminDashboardPage() {
                   <Button className="w-full">
                     <Users className="h-4 w-4 mr-2" />
                     Launch Interactive Demo
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Plan Text Ingestion */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Layers className="h-5 w-5 text-emerald-600" />
+                <span>Plan Text Ingestion</span>
+              </CardTitle>
+              <CardDescription>
+                Run the blueprint text extraction pipeline so Plan Chat can reference sheet notes and
+                legends.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4 text-sm text-gray-600">
+                <p>
+                  Provide a plan ID (and optional job ID) to regenerate the text chunks and embeddings used
+                  by Plan Chat. Useful after uploading new plan files or running the vector migration.
+                </p>
+                <ul className="space-y-1 ml-4">
+                  <li>• Runs PDF text extraction and chunking</li>
+                  <li>• Refreshes embeddings stored in `plan_text_chunks`</li>
+                  <li>• Reports chunk counts and warnings</li>
+                </ul>
+                <Link href="/admin/plan-text-ingestion">
+                  <Button className="w-full" variant="secondary">
+                    <Layers className="h-4 w-4 mr-2" />
+                    Launch Plan Text Ingestion
                   </Button>
                 </Link>
               </div>

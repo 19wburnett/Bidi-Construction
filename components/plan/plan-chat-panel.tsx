@@ -1,0 +1,426 @@
+'use client'
+
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+  Bot,
+  Loader2,
+  MessageCircleQuestion,
+  Send,
+  TriangleAlert,
+  User as UserIcon
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+
+type PlanChatRole = 'user' | 'assistant'
+
+export interface PlanChatMessage {
+  id: string
+  role: PlanChatRole
+  content: string
+}
+
+interface PlanChatPanelProps {
+  jobId: string
+  planId: string
+}
+
+interface ChatStatusResponse {
+  hasTakeoff: boolean
+  lastUpdated?: string | null
+  itemCount?: number
+  summaryCategories?: Array<{ category: string; totalQuantity: number; unit?: string }>
+  chatHistory?: Array<{ id: string; role: 'user' | 'assistant'; content: string; created_at: string }>
+}
+
+interface ChatErrorState {
+  type: 'missing-takeoff' | 'request-failed' | 'unauthorized' | 'unknown'
+  message: string
+  details?: string
+}
+
+const examplePrompts = [
+  'What notes are listed on the cover sheet about fire protection?',
+  'Summarize the footing quantities from the takeoff.',
+  'Which page mentions door hardware requirements and what does it say?',
+  'How many square feet of roofing are included and where?'
+]
+
+
+function TypingIndicator() {
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600"
+      aria-live="polite"
+    >
+      <Bot className="h-3.5 w-3.5 text-orange-500" />
+      <span className="font-medium text-gray-700">Thinking</span>
+      <div className="flex items-center gap-1">
+        {[0, 1, 2].map((dot) => (
+          <span
+            key={dot}
+            className="h-2 w-2 rounded-full bg-gray-400 animate-bounce"
+            style={{ animationDelay: `${dot * 0.15}s` }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
+  const [messages, setMessages] = useState<PlanChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [status, setStatus] = useState<ChatStatusResponse | null>(null)
+  const [error, setError] = useState<ChatErrorState | null>(null)
+  const [missingTakeoff, setMissingTakeoff] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const hasHydratedMessagesRef = useRef(false)
+
+  const hasActiveConversation = messages.length > 0
+  const canChat = !error
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isSending])
+
+  useEffect(() => {
+    hasHydratedMessagesRef.current = false
+    setMessages([])
+    setInput('')
+    setStatus(null)
+    setError(null)
+    setMissingTakeoff(false)
+
+    hasHydratedMessagesRef.current = true
+    fetchStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, planId])
+
+
+  const summaryPreview = useMemo(() => {
+    if (!status?.summaryCategories?.length) return null
+    return status.summaryCategories.slice(0, 3)
+  }, [status])
+
+  async function fetchStatus() {
+    if (!jobId || !planId) return
+
+    setIsLoading(true)
+    try {
+      const response = await fetch(
+        `/api/plan-chat?jobId=${encodeURIComponent(jobId)}&planId=${encodeURIComponent(planId)}`
+      )
+
+      if (response.status === 401) {
+        setError({
+          type: 'unauthorized',
+          message: 'You need to be signed in to use Plan Chat.',
+        })
+        setStatus(null)
+        return
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to load plan chat status')
+      }
+
+      const data: ChatStatusResponse = await response.json()
+      setStatus(data)
+      setMissingTakeoff(!data.hasTakeoff)
+      setError(null)
+
+      // Load chat history from database
+      if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+        const dbMessages: PlanChatMessage[] = data.chatHistory.map((msg) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+        }))
+        setMessages(dbMessages)
+      }
+    } catch (err) {
+      console.error('Failed to fetch Plan Chat status', err)
+      setStatus(null)
+      setMissingTakeoff(false)
+      setError({
+        type: 'request-failed',
+        message: 'We could not load Plan Chat for this plan right now.',
+        details: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function handleSendMessage() {
+    const trimmed = input.trim()
+    if (!trimmed || isSending || !canChat) return
+
+    setError(null)
+    setIsSending(true)
+    setInput('')
+
+    const newMessage: PlanChatMessage = {
+      id: `local-${Date.now()}`,
+      role: 'user',
+      content: trimmed,
+    }
+
+    setMessages((prev) => [...prev, newMessage])
+
+    try {
+      const response = await fetch('/api/plan-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jobId,
+          planId,
+          messages: [...messages, newMessage].map(({ role, content }) => ({
+            role,
+            content,
+          })),
+        }),
+      })
+
+      if (response.status === 404) {
+        const payload = await response.json().catch(() => ({}))
+        setMissingTakeoff(true)
+        setError(null)
+        const assistantMessage: PlanChatMessage = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content:
+            payload?.error === 'TAKEOFF_NOT_FOUND'
+              ? "I don't have takeoff or processed blueprint text for this plan yet. Run the ingestion or takeoff analysis and try again."
+              : 'This plan is not ready for chat yet. Please process the plan and try again.',
+        }
+        setMessages((prev) => [...prev, assistantMessage])
+        return
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to get a response from Plan Chat')
+      }
+
+      const payload: { reply: string } = await response.json()
+      const assistantMessage: PlanChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: payload.reply.trim(),
+      }
+      setMessages((prev) => [...prev, assistantMessage])
+    } catch (err) {
+      console.error('Plan Chat request failed', err)
+      setError({
+        type: 'request-failed',
+        message: 'Plan Chat ran into an issue. Try again in a moment.',
+        details: err instanceof Error ? err.message : String(err),
+      })
+      setMessages((prev) => prev.filter((message) => message.id !== newMessage.id))
+      setInput(trimmed)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-orange-500" />
+              <h4 className="text-sm font-semibold text-gray-900">Plan Chat</h4>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Ask questions about this plan. Answers combine the latest takeoff data with text snippets
+              extracted from the blueprint.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchStatus}
+            disabled={isLoading || isSending}
+          >
+            {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
+          </Button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+            {isLoading ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="text-sm font-medium">Preparing Plan Chat…</span>
+              </div>
+            ) : !canChat ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-gray-600">
+                <TriangleAlert className="h-8 w-8 text-amber-500" />
+                <p className="max-w-xs text-sm font-medium">
+                  {error?.message || 'Plan Chat is temporarily unavailable. Try again in a moment.'}
+                </p>
+                {error?.details && (
+                  <p className="max-w-sm text-xs text-gray-400">{error.details}</p>
+                )}
+              </div>
+            ) : hasActiveConversation ? (
+              <>
+                {missingTakeoff && (
+                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
+                    Takeoff results for this plan are still processing. I&rsquo;ll answer using the
+                    blueprint text snippets that have been ingested so far.
+                  </div>
+                )}
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-sm ${
+                        message.role === 'user'
+                          ? 'bg-orange-600 text-white'
+                          : 'bg-gray-100 text-gray-900'
+                      }`}
+                    >
+                      <div className="mb-1 flex items-center gap-1 text-xs opacity-75">
+                        {message.role === 'user' ? (
+                          <UserIcon className="h-3.5 w-3.5" />
+                        ) : (
+                          <Bot className="h-3.5 w-3.5 text-orange-500" />
+                        )}
+                        <span>{message.role === 'user' ? 'You' : 'AI Estimator'}</span>
+                      </div>
+                      <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    </div>
+                  </div>
+                ))}
+                <AnimatePresence>
+                  {isSending && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      className="flex justify-start"
+                    >
+                      <TypingIndicator />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            ) : (
+              <div className="space-y-4">
+                {missingTakeoff && (
+                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
+                    Takeoff results aren&rsquo;t ready yet, but you can still ask about sheet notes,
+                    legends, and other text pulled from the blueprint. I&rsquo;ll let you know when I
+                    need more data.
+                  </div>
+                )}
+                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
+                  <p className="mb-2 font-medium text-gray-700">
+                    Ready to help with takeoff insights and blueprint details for this plan.
+                  </p>
+                  <p>
+                    Ask about quantities, categories, or anything captured in the takeoff. When takeoff
+                    data is missing, I&rsquo;ll rely on the blueprint text that has been processed and
+                    tell you if something isn&rsquo;t available yet.
+                  </p>
+                </div>
+                {summaryPreview && summaryPreview.length > 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Category Highlights
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-gray-700">
+                      {summaryPreview.map((category) => (
+                        <li key={category.category} className="flex items-center justify-between">
+                          <span>{category.category}</span>
+                          <span className="text-gray-500">
+                            {category.totalQuantity.toLocaleString()}
+                            {category.unit ? ` ${category.unit}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    <MessageCircleQuestion className="h-3.5 w-3.5" />
+                    Try asking
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {examplePrompts.map((prompt) => (
+                      <Button
+                        key={prompt}
+                        variant="outline"
+                        size="sm"
+                        className="justify-start text-left text-xs"
+                        onClick={() => setInput(prompt)}
+                      >
+                        {prompt}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          <div className="border-t border-gray-200 bg-white px-4 py-3">
+            <Textarea
+              placeholder={
+                canChat
+                ? 'Ask a question about this plan…'
+                : 'Plan Chat is currently unavailable.'
+              }
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  handleSendMessage()
+                }
+              }}
+              disabled={!canChat || isSending}
+              rows={3}
+              className="resize-none"
+            />
+            <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+              <p>Press Enter to send · Shift+Enter for a new line</p>
+              <Button
+                onClick={handleSendMessage}
+                disabled={!canChat || !input.trim() || isSending}
+                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400"
+              >
+                {isSending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Send
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default PlanChatPanel
+
+

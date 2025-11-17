@@ -1,0 +1,77 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { ingestPlanTextChunks } from '@/lib/plan-text-chunks'
+import { userHasJobAccess } from '@/lib/job-access'
+
+export async function POST(request: NextRequest) {
+  const supabase = await createServerSupabaseClient()
+  const { data } = await supabase.auth.getUser()
+  const user = data?.user
+
+  if (!user) {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  }
+
+  let payload: { planId?: string; jobId?: string } = {}
+  try {
+    payload = await request.json()
+  } catch (error) {
+    return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 })
+  }
+
+  const { planId, jobId } = payload
+  if (!planId || typeof planId !== 'string') {
+    return NextResponse.json({ error: 'planId is required' }, { status: 400 })
+  }
+
+  const { data: plan, error: planError } = await supabase
+    .from('plans')
+    .select('id, user_id, job_id')
+    .eq('id', planId)
+    .maybeSingle()
+
+  if (planError) {
+    console.error('Failed to load plan for ingestion:', planError)
+    return NextResponse.json({ error: 'Failed to load plan' }, { status: 500 })
+  }
+
+  if (!plan) {
+    return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
+  }
+
+  // Check if user is admin - admins have access to all plans
+  const { data: userData, error: userError } = await supabase
+    .from('users')
+    .select('is_admin, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin = userData && (userData.role === 'admin' || userData.is_admin === true)
+
+  // If not admin, check plan ownership or job access
+  if (!isAdmin && plan.user_id !== user.id) {
+    const targetJobId = plan.job_id || jobId
+    if (!targetJobId) {
+      return NextResponse.json({ error: 'You do not have access to this plan.' }, { status: 403 })
+    }
+
+    const hasAccess = await userHasJobAccess(supabase, targetJobId, user.id)
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'You do not have access to this plan.' }, { status: 403 })
+    }
+  }
+
+  try {
+    const result = await ingestPlanTextChunks(supabase, planId)
+    return NextResponse.json(result, { status: 200 })
+  } catch (error) {
+    console.error('Plan text ingestion failed:', error)
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Failed to ingest plan text',
+      },
+      { status: 500 }
+    )
+  }
+}
+

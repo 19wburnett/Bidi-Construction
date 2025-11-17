@@ -106,23 +106,35 @@ export default function UploadPlanPage() {
         throw new Error(`Database error: ${dbError.message}`)
       }
 
-      // Auto-trigger ingestion in the background (don't wait)
-      console.log(`Auto-triggering ingestion for plan ${plan.id}`)
-      fetch('/api/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planId: plan.id,
-          jobId: null,
-          options: {
-            enable_image_extraction: true,
-            image_dpi: 300
-          }
+      if (plan?.id) {
+        // Auto-trigger ingestion in the background (don't wait)
+        console.log(`Auto-triggering ingestion for plan ${plan.id}`)
+        fetch('/api/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: plan.id,
+            jobId: null,
+            options: {
+              enable_image_extraction: true,
+              image_dpi: 300,
+            },
+          }),
+        }).catch((err) => {
+          console.error('Background ingestion trigger failed:', err)
         })
-      }).catch(err => {
-        console.error('Background ingestion trigger failed:', err)
-        // Don't block the user - ingestion can be retried later
-      })
+
+        // Trigger plan text chunk ingestion for RAG context
+        fetch('/api/plan-text-chunks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: plan.id,
+          }),
+        }).catch((err) => {
+          console.error('Background plan text ingestion trigger failed:', err)
+        })
+      }
 
       // Redirect to plan editor (ingestion will happen in background)
       router.push(`/dashboard/plans/${plan.id}`)

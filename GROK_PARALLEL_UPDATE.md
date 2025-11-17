@@ -88,3 +88,5 @@ Expected output:
 - ✅ All findings combined
 - ⚠️ Grok skipped (vision model not available, but handled gracefully)
 
+
+
