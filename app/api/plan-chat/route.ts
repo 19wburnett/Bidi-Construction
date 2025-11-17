@@ -1238,14 +1238,19 @@ export async function POST(request: NextRequest) {
 
     // Apply page filter first if requested
     if (requestedPages.length > 0) {
-      relevantTakeoffItems = relevantTakeoffItems.filter(
-        (item) =>
-          (item.page_number !== null && requestedPages.includes(item.page_number)) ||
-          (item.page_reference &&
-            requestedPages.some((page) =>
-              item.page_reference?.toLowerCase().includes(`page ${page}`)
-            ))
-      )
+      relevantTakeoffItems = relevantTakeoffItems.filter((item) => {
+        const pageNum = item.page_number
+        const hasMatchingPageNumber =
+          typeof pageNum === 'number' &&
+          Number.isFinite(pageNum) &&
+          requestedPages.includes(pageNum)
+        const hasMatchingPageReference =
+          item.page_reference &&
+          requestedPages.some((page) =>
+            item.page_reference?.toLowerCase().includes(`page ${page}`)
+          )
+        return hasMatchingPageNumber || hasMatchingPageReference
+      })
     }
 
     // Then apply keyword filtering
