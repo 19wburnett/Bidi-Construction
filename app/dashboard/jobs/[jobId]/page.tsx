@@ -481,39 +481,55 @@ export default function JobDetailPage() {
                             whileHover="hover"
                             whileTap="tap"
                           >
-                            <Card className="cursor-pointer">
-                              <CardContent className="p-4">
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center space-x-2 min-w-0 flex-1">
-                                    <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
-                                    <span className="font-medium text-sm truncate min-w-0">
-                                      {plan.title || plan.file_name}
-                                    </span>
+                            <Link href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}>
+                              <Card className="cursor-pointer">
+                                <CardContent className="p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                      <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
+                                      <span className="font-medium text-sm truncate min-w-0">
+                                        {plan.title || plan.file_name}
+                                      </span>
+                                    </div>
+                                    <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
+                                      {plan.status}
+                                    </Badge>
                                   </div>
-                                  <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
-                                    {plan.status}
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex space-x-1">
-                                    <Link href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex space-x-1">
                                       <Button variant="ghost" size="sm">
                                         <Eye className="h-4 w-4" />
                                       </Button>
-                                    </Link>
-                                    <Button variant="ghost" size="sm">
-                                      <Download className="h-4 w-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="sm">
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          // TODO: Add download functionality
+                                        }}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          // TODO: Add delete functionality
+                                        }}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
+                                    </div>
                                   </div>
-                                  <div className="text-xs text-gray-500">
-                                    {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
+                                </CardContent>
+                              </Card>
+                            </Link>
                           </motion.div>
                         ))}
                       </motion.div>
