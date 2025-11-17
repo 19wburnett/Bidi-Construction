@@ -1278,6 +1278,10 @@ export async function POST(request: NextRequest) {
   const totalCostKeywords = ['whole thing', 'total cost', 'total price', 'overall cost', 'everything', 'entire', 'all of it', 'grand total']
   const isTotalCostQuestion = totalCostKeywords.some((keyword) => userTextLower.includes(keyword))
   
+  // Detect quantity questions (should use takeoff data, not blueprint snippets)
+  const quantityKeywords = ['quantities', 'quantity', 'how much', 'how many', 'dig into', 'breakdown', 'break down']
+  const isQuantityQuestion = quantityKeywords.some((keyword) => userTextLower.includes(keyword))
+  
   const keywordFilteredChunks =
     questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
   const planTextChunksForContext =
@@ -1285,6 +1289,7 @@ export async function POST(request: NextRequest) {
   // For cost questions, use fewer blueprint snippets to prioritize takeoff data
   // For total cost questions, use ZERO snippets - only takeoff data
   // For general project questions when takeoff data exists, use fewer snippets
+  // For quantity questions, use fewer snippets to prioritize takeoff data
   const isGeneralProjectQuestion = userTextLower.includes('what') && 
                                    (userTextLower.includes('project') || 
                                     userTextLower.includes('cover') || 
@@ -1292,7 +1297,8 @@ export async function POST(request: NextRequest) {
                                     userTextLower.includes('major'))
   const maxSnippets = isTotalCostQuestion ? 0 : 
                       (isCostQuestionEarly ? 3 : 
-                       (isGeneralProjectQuestion && hasTakeoffData ? 2 : MAX_BLUEPRINT_SNIPPETS))
+                       (isQuantityQuestion && hasTakeoffData ? 2 :
+                       (isGeneralProjectQuestion && hasTakeoffData ? 2 : MAX_BLUEPRINT_SNIPPETS)))
   const snippetChunksForMessages = planTextChunksForContext.slice(0, maxSnippets)
   const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
   const hasBlueprintText = planTextSnippetPayloads.length > 0
@@ -1496,6 +1502,19 @@ export async function POST(request: NextRequest) {
 
   const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
 
+  if (isQuantityQuestion && hasTakeoffData) {
+    systemPromptSections.push(
+      '🚨 IMPORTANT: QUANTITY QUESTION\n' +
+      'The user is asking about quantities (e.g., "wall quantities", "how much", "breakdown").\n' +
+      '1. You MUST use the takeoff data (quantities, units, line items) as your PRIMARY source.\n' +
+      '2. Show actual quantities from the takeoff: "X LF of walls", "Y SF of flooring", etc.\n' +
+      '3. DO NOT start with "Here\'s what the blueprint..." or list page numbers.\n' +
+      '4. Be conversational and direct: "The takeoff shows..." or "I see..."\n' +
+      '5. Blueprint snippets are ONLY for additional context if the takeoff doesn\'t have the info.\n' +
+      '6. If the question mentions a specific item (like "walls"), filter the takeoff items by that keyword.'
+    )
+  }
+
   if (isGeneralProjectQuestion && hasTakeoffData) {
     systemPromptSections.push(
       '🚨 IMPORTANT: PROJECT OVERVIEW QUESTION\n' +
@@ -1606,6 +1625,12 @@ export async function POST(request: NextRequest) {
       role: 'system',
       content: `⚠️ CRITICAL: The user is asking about cost/price. Use the takeoff items below. DO NOT just list blueprint snippets.\n\nTAKEOFF ITEMS:\n${takeoffHighlights}\n\nYour answer MUST start with this takeoff data.`,
     })
+  } else if (isQuantityQuestion && takeoffHighlights) {
+    // For quantity questions, prioritize takeoff highlights
+    contextMessages.push({
+      role: 'system',
+      content: `⚠️ IMPORTANT: The user is asking about quantities. You MUST use the takeoff data below to answer. DO NOT just list blueprint snippets.\n\nTAKEOFF QUANTITIES (USE THIS):\n${takeoffHighlights}\n\nYour answer MUST start with these quantities from the takeoff. Blueprint snippets are ONLY for additional context if needed.`,
+    })
   } else if (isGeneralProjectQuestion && hasTakeoffData && (takeoffHighlights || takeoffContext?.takeoff?.summary)) {
     // For general project questions, prioritize takeoff data
     const summaryObj = takeoffContext?.takeoff?.summary
@@ -1648,19 +1673,18 @@ export async function POST(request: NextRequest) {
                                        replyLower.startsWith("here is what") ||
                                        replyLower.startsWith("high-level blueprint") ||
                                        replyLower.includes("blueprint text highlights") ||
-                                       replyLower.includes("blueprint highlights")
+                                       replyLower.includes("blueprint highlights") ||
+                                       (replyLower.includes("here's") && replyLower.includes("blueprint"))
       
       // Check if reply is just dumping blueprint snippets (more aggressive detection)
+      // Also check if it has multiple page references with bullets but no quantities
+      const hasMultiplePages = replyLower.split('page').length > 2
+      const hasBullets = replyLower.includes('•') || replyLower.includes('-')
+      const hasQuantities = replyLower.includes('sf') || replyLower.includes('lf') || replyLower.includes('ea') || 
+                           replyLower.includes('sq') || /\d+\s*(ft|in|yd|m)/.test(replyLower)
+      
       const isBlueprintDump = replyStartsWithBlueprint ||
-        (replyLower.includes('page') && 
-         replyLower.includes('•') && 
-         !replyLower.includes('$') && 
-         !replyLower.includes('cost') &&
-         !replyLower.includes('total') &&
-         !replyLower.includes('sf') &&
-         !replyLower.includes('lf') &&
-         !replyLower.includes('ea') &&
-         replyLower.split('page').length > 2) // Multiple page references = snippet dump
+        (hasMultiplePages && hasBullets && !hasQuantities && !replyLower.includes('$'))
       
       if (isBlueprintDump) {
         // Model ignored takeoff data - build a response from takeoff
@@ -1674,7 +1698,10 @@ export async function POST(request: NextRequest) {
           } else {
             reply = `Here's the cost breakdown from the takeoff:\n\n${costBreakdown}`
           }
-        } else if (isGeneralProjectQuestion && takeoffContext?.takeoff) {
+        } else if (isQuantityQuestion && takeoffHighlights) {
+          // For quantity questions, use takeoff highlights directly
+          reply = takeoffHighlights
+        } else if ((isQuantityQuestion || isGeneralProjectQuestion) && takeoffContext?.takeoff) {
           // For general project questions, build a human response from takeoff data
           const summaryObj = takeoffContext.takeoff.summary
           const categories = takeoffContext.takeoff.topCategories || []
