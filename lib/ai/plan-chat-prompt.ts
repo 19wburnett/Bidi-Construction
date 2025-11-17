@@ -83,7 +83,7 @@ export const PLAN_CHAT_FEW_SHOTS: ChatCompletionMessageParam[] = [
   {
     role: 'assistant',
     content:
-      "I see 5,980 SF of flooring in the takeoff, but it's logged as one lump sum for "Level 1 finish". There aren't room tags in the data yet, so I can't split it by room unless the takeoff gets updated with those locations.",
+      "I see 5,980 SF of flooring in the takeoff, but it's logged as one lump sum for \"Level 1 finish\". There aren't room tags in the data yet, so I can't split it by room unless the takeoff gets updated with those locations.",
   },
   {
     role: 'user',

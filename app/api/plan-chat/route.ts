@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { PLAN_CHAT_SYSTEM_PROMPT, PLAN_CHAT_FEW_SHOTS } from '@/lib/ai/plan-chat-prompt'
 import {
@@ -1421,7 +1422,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Build context messages - prioritize cost data when present
-  const contextMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+  const contextMessages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
       content: systemPrompt,
