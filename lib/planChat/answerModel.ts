@@ -132,7 +132,7 @@ export async function generatePlanChatAnswer(
       model: OPENAI_MODEL,
       messages: messages as any,
       temperature: 0.7,
-      max_tokens: 600,
+      max_completion_tokens: 600,
     })
 
     const answer = completion.choices[0]?.message?.content?.trim()
