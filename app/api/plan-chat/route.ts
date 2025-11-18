@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { PLAN_CHAT_SYSTEM_PROMPT, PLAN_CHAT_FEW_SHOTS } from '@/lib/ai/plan-chat-prompt'
-import {
-  retrievePlanTextChunks,
-  fetchPlanTextChunksByPage,
-  fetchPlanTextChunksSample,
-} from '@/lib/plan-text-chunks'
+import { classifyPlanChatQuestion } from '@/lib/planChat/classifier'
+import { buildDeterministicResult } from '@/lib/planChat/deterministicEngine'
+import { generatePlanChatAnswer } from '@/lib/planChat/answerModel'
 import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
-
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 type ChatHistoryMessage = {
   role: 'user' | 'assistant'
@@ -102,14 +95,8 @@ interface PlanTextSnippetPayload {
   snippetText: string
 }
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
-
 const REPRESENTATIVE_ITEM_LIMIT = 12
 const TOP_CATEGORY_LIMIT = 8
-const MAX_BLUEPRINT_SNIPPETS = 8
 const BLUEPRINT_SNIPPET_CHAR_LIMIT = 420
 
 const sanitizeString = (value: any): string | null => {
@@ -1108,13 +1095,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!openaiClient) {
-    return NextResponse.json(
-      { error: 'OpenAI client is not configured. Please add an API key.' },
-      { status: 500 }
-    )
-  }
-
   let payload: { jobId?: string; planId?: string; messages?: ChatHistoryMessage[] } = {}
 
   try {
@@ -1140,44 +1120,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
   }
 
-  const contextResult = await loadPlanContext(supabase, user.id, jobId, planId)
+  // Verify plan exists and user has access
+  const { data: plan, error: planError } = await supabase
+    .from('plans')
+    .select('id, job_id')
+    .eq('id', planId)
+    .eq('job_id', jobId)
+    .single()
 
-  let planInfo: any = null
-  let jobInfo: { id: string; name: string } | null = null
-  let takeoffData:
-    | {
-        id: string
-        items: NormalizedTakeoffItem[]
-        summary: any
-        lastUpdated: string | null
-        categories: TakeoffCategoryBucket[]
-      }
-    | null = null
-
-  if ('error' in contextResult) {
-    if (contextResult.error === 'JOB_NOT_FOUND') {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-    }
-    if (contextResult.error === 'PLAN_NOT_FOUND') {
-      return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
-    }
-    if (contextResult.error === 'TAKEOFF_NOT_FOUND') {
-      planInfo = contextResult.plan
-      takeoffData = null
-      jobInfo = contextResult.job ?? null
-    } else {
-      return NextResponse.json({ error: 'Failed to load takeoff analysis' }, { status: 500 })
-    }
-  } else {
-    planInfo = contextResult.plan
-    takeoffData = contextResult.takeoff
-    jobInfo = contextResult.job
+  if (planError || !plan) {
+    return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
   }
 
-  if (!planInfo) {
-    planInfo = {}
-  }
-
+  // Sanitize messages
   const sanitizedHistory = messages
     .filter((message): message is ChatHistoryMessage => {
       return (
@@ -1197,664 +1152,56 @@ export async function POST(request: NextRequest) {
 
   const latestUserMessage = [...sanitizedHistory].reverse().find((message) => message.role === 'user')
 
-  const hasTakeoffData = Boolean(takeoffData && takeoffData.items.length > 0)
-
-  const requestedPages = extractPageNumbers(latestUserMessage?.content ?? '')
-  const collectedChunks = new Map<string, PlanTextChunkRecord>()
-
-  if (requestedPages.length > 0) {
-    try {
-      const pageChunks = await fetchPlanTextChunksByPage(
-        supabase,
-        planId,
-        requestedPages,
-        Math.max(requestedPages.length * 12, 24)
-      )
-      for (const chunk of pageChunks) {
-        if (!collectedChunks.has(chunk.id)) {
-          collectedChunks.set(chunk.id, chunk)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load plan text chunks by page:', error)
-    }
+  if (!latestUserMessage) {
+    return NextResponse.json({ error: 'No user message found' }, { status: 400 })
   }
-
-  if (latestUserMessage?.content) {
-    try {
-      const remainingSlots = Math.max(0, 12 - collectedChunks.size)
-      if (remainingSlots > 0) {
-        const vectorChunks = await retrievePlanTextChunks(
-          supabase,
-          planId,
-          latestUserMessage.content,
-          remainingSlots
-        )
-        for (const chunk of vectorChunks) {
-          if (!collectedChunks.has(chunk.id)) {
-            collectedChunks.set(chunk.id, chunk)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to retrieve plan text chunks:', error)
-    }
-  }
-
-  if (collectedChunks.size === 0) {
-    try {
-      const sampleChunks = await fetchPlanTextChunksSample(supabase, planId, 12)
-      for (const chunk of sampleChunks) {
-        collectedChunks.set(chunk.id, chunk)
-      }
-    } catch (error) {
-      console.error('Failed to load sample plan text chunks:', error)
-    }
-  }
-
-  const basePlanTextChunks = Array.from(collectedChunks.values())
-  const questionKeywords = extractQuestionKeywords(latestUserMessage?.content)
-  
-  // Detect cost questions early to reduce blueprint snippets
-  const userTextLower = latestUserMessage?.content.toLowerCase() ?? ''
-  const costKeywords = [
-    'expensive',
-    'cost',
-    'price',
-    'pricing',
-    'budget',
-    'why is',
-    'how much does',
-    'how did you get',
-    'how did you calculate',
-    'how was this calculated',
-    'cost estimate',
-    'current price',
-    'current cost',
-  ]
-  const isCostQuestionEarly = costKeywords.some((keyword) => userTextLower.includes(keyword))
-  
-  // Detect total/overall cost questions (use ALL items, not filtered)
-  const totalCostKeywords = ['whole thing', 'total cost', 'total price', 'overall cost', 'everything', 'entire', 'all of it', 'grand total']
-  const isTotalCostQuestion = totalCostKeywords.some((keyword) => userTextLower.includes(keyword))
-  
-  // Detect quantity questions (should use takeoff data, not blueprint snippets)
-  const quantityKeywords = ['quantities', 'quantity', 'how much', 'how many', 'dig into', 'breakdown', 'break down']
-  const isQuantityQuestion = quantityKeywords.some((keyword) => userTextLower.includes(keyword))
-  
-  const keywordFilteredChunks =
-    questionKeywords.length > 0 ? filterChunksByKeywords(basePlanTextChunks, questionKeywords) : []
-  const planTextChunksForContext =
-    keywordFilteredChunks.length > 0 ? keywordFilteredChunks : basePlanTextChunks
-  // For cost questions, use fewer blueprint snippets to prioritize takeoff data
-  // For total cost questions, use ZERO snippets - only takeoff data
-  // For general project questions when takeoff data exists, use fewer snippets
-  // For quantity questions, use fewer snippets to prioritize takeoff data
-  const isGeneralProjectQuestion = userTextLower.includes('what') && 
-                                   (userTextLower.includes('project') || 
-                                    userTextLower.includes('cover') || 
-                                    userTextLower.includes('include') ||
-                                    userTextLower.includes('major'))
-  const maxSnippets = isTotalCostQuestion ? 0 : 
-                      (isCostQuestionEarly ? 3 : 
-                       (isQuantityQuestion && hasTakeoffData ? 2 :
-                       (isGeneralProjectQuestion && hasTakeoffData ? 2 : MAX_BLUEPRINT_SNIPPETS)))
-  const snippetChunksForMessages = planTextChunksForContext.slice(0, maxSnippets)
-  const planTextSnippetPayloads = buildPlanTextSnippetPayloads(snippetChunksForMessages)
-  const hasBlueprintText = planTextSnippetPayloads.length > 0
-
-  // Filter takeoff items: first by page (if requested), then by keywords
-  // BUT: For total cost questions OR general project questions, use ALL items
-  let relevantTakeoffItems: NormalizedTakeoffItem[] = []
-  if (takeoffData) {
-    if (isTotalCostQuestion || isGeneralProjectQuestion) {
-      // For "whole thing cost" or "what does this project cover" questions, use ALL items
-      relevantTakeoffItems = takeoffData.items
-    } else {
-      relevantTakeoffItems = takeoffData.items
-
-      // Apply page filter first if requested
-      if (requestedPages.length > 0) {
-        relevantTakeoffItems = relevantTakeoffItems.filter((item) => {
-          const pageNum = item.page_number
-          const hasMatchingPageNumber =
-            typeof pageNum === 'number' &&
-            Number.isFinite(pageNum) &&
-            requestedPages.includes(pageNum)
-          const hasMatchingPageReference =
-            item.page_reference &&
-            requestedPages.some((page) =>
-              item.page_reference?.toLowerCase().includes(`page ${page}`)
-            )
-          return hasMatchingPageNumber || hasMatchingPageReference
-        })
-      }
-
-      // Then apply keyword filtering
-      if (questionKeywords.length > 0) {
-        relevantTakeoffItems = filterTakeoffItemsByKeywords(relevantTakeoffItems, questionKeywords)
-      }
-    }
-  }
-
-  // Use the early cost question detection
-  const isCostQuestion = isCostQuestionEarly
-
-  // For cost questions, if we didn't find items via keywords, try to find items mentioned in the question
-  if (isCostQuestion && relevantTakeoffItems.length === 0 && takeoffData) {
-    // Handle category paths like "exterior > roofing > asphalt shingles"
-    const categoryPathMatch = userTextLower.match(/(?:for|about|estimate for)\s+([^?]+)/)
-    if (categoryPathMatch) {
-      const pathText = categoryPathMatch[1].trim()
-      const pathParts = pathText.split(/>|and/).map((p) => p.trim().toLowerCase())
-      
-      const potentialMatches = takeoffData.items.filter((item) => {
-        const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''} ${item.subcategory || ''}`.toLowerCase()
-        // Match if all path parts are found in the item text
-        return pathParts.every((part) => part.length > 2 && itemText.includes(part))
-      })
-      
-      if (potentialMatches.length > 0) {
-        relevantTakeoffItems = potentialMatches
-      }
-    }
-    
-    // Fallback: Extract potential item names from the question
-    if (relevantTakeoffItems.length === 0) {
-      // Handle plural/singular forms (e.g., "exteriors" -> "exterior")
-      const normalizedQuestion = userTextLower.replace(/s\b/g, ' ').replace(/\s+/g, ' ')
-      const questionWords = normalizedQuestion.split(/\s+/).filter((word) => word.length > 3)
-      
-      const potentialMatches = takeoffData.items.filter((item) => {
-        const itemText = `${item.description || ''} ${item.name || ''} ${item.category || ''} ${item.subcategory || ''}`.toLowerCase()
-        const itemTextNormalized = itemText.replace(/s\b/g, ' ')
-        // Match if any question word is found in item text (normalized for plurals)
-        return questionWords.some((word) => 
-          itemText.includes(word) || itemTextNormalized.includes(word)
-        )
-      })
-      if (potentialMatches.length > 0) {
-        relevantTakeoffItems = potentialMatches
-      }
-    }
-  }
-
-  // For cost questions, build a detailed cost breakdown
-  // ALWAYS show takeoff items for cost questions, even if they don't have costs
-  let costBreakdown: string | null = null
-  if (isCostQuestion && relevantTakeoffItems.length > 0) {
-    const itemsWithCosts = relevantTakeoffItems.filter(
-      (item) => typeof item.total_cost === 'number' && item.total_cost > 0
-    )
-    
-    if (itemsWithCosts.length > 0) {
-      // Items with costs - show full breakdown
-      const totalCost = itemsWithCosts.reduce((sum, item) => sum + (item.total_cost || 0), 0)
-      
-      // For total cost questions, group by category for better readability
-      if (isTotalCostQuestion && itemsWithCosts.length > 10) {
-        // Group by category
-        const byCategory = new Map<string, { items: typeof itemsWithCosts; total: number }>()
-        for (const item of itemsWithCosts) {
-          const cat = item.category || 'Other'
-          if (!byCategory.has(cat)) {
-            byCategory.set(cat, { items: [], total: 0 })
-          }
-          const group = byCategory.get(cat)!
-          group.items.push(item)
-          group.total += item.total_cost || 0
-        }
-        
-        const categoryLines = Array.from(byCategory.entries())
-          .sort((a, b) => b[1].total - a[1].total)
-          .slice(0, 10)
-          .map(([cat, { total, items }]) => {
-            return `• ${cat}: $${total.toLocaleString('en-US', { maximumFractionDigits: 2 })} (${items.length} item${items.length === 1 ? '' : 's'})`
-          })
-        
-        costBreakdown = [
-          `Total project cost breakdown by category:`,
-          ...categoryLines,
-          byCategory.size > 10 ? `…and ${byCategory.size - 10} more categories.` : '',
-          `\nGrand Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-        ]
-          .filter(Boolean)
-          .join('\n')
-      } else {
-        // Show individual items (for specific cost questions or small totals)
-        const lines = itemsWithCosts.slice(0, 12).map((item) => {
-          const quantity = formatQuantity(item.quantity, item.unit)
-          const cost = item.total_cost || 0
-          const unitCost =
-            typeof item.quantity === 'number' && item.quantity > 0
-              ? ` ($${(cost / item.quantity).toLocaleString('en-US', { maximumFractionDigits: 2 })}/${item.unit || 'unit'})`
-              : ''
-          return `• ${item.description || item.name || 'Item'}: ${quantity} — $${cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}${unitCost}`
-        })
-        costBreakdown = [
-          `Cost breakdown (${itemsWithCosts.length} item${itemsWithCosts.length === 1 ? '' : 's'}):`,
-          ...lines,
-          itemsWithCosts.length > 12 ? `…and ${itemsWithCosts.length - 12} more items with costs.` : '',
-          `Total: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`,
-        ]
-          .filter(Boolean)
-          .join('\n')
-      }
-    } else {
-      // No costs, but show quantities so the model can still answer
-      const lines = relevantTakeoffItems.slice(0, 15).map((item) => {
-        const quantity = formatQuantity(item.quantity, item.unit)
-        const category = item.category ? `${item.category}: ` : ''
-        return `• ${category}${item.description || item.name || 'Item'}: ${quantity}`
-      })
-      costBreakdown = [
-        `Takeoff items found (${relevantTakeoffItems.length} item${relevantTakeoffItems.length === 1 ? '' : 's'}, no cost data available):`,
-        ...lines,
-        relevantTakeoffItems.length > 15 ? `…and ${relevantTakeoffItems.length - 15} more items.` : '',
-        'Note: Cost data is not available in the takeoff. Use these quantities and explain that costs would need to be calculated based on current material/labor rates.',
-      ]
-        .filter(Boolean)
-        .join('\n')
-    }
-  }
-
-  const takeoffHighlights =
-    relevantTakeoffItems.length > 0
-      ? summarizeTakeoffItems(relevantTakeoffItems, 8, isCostQuestion)
-      : null
-
-  const structuredStats =
-    relevantTakeoffItems.length > 0
-      ? buildStructuredStats(relevantTakeoffItems, questionKeywords, isCostQuestion)
-      : null
-
-  if (!hasTakeoffData && !hasBlueprintText) {
-    return NextResponse.json({
-      reply:
-        "I don't have takeoff results or processed blueprint text for this plan yet. Once the plan ingestion or takeoff analysis finishes, try again and I'll take another look.",
-    })
-  }
-
-  let takeoffContext: TakeoffContextPayload | null = null
-  let deterministicAnswer: string | null = null
-  const latestMessageNormalized = normalizeKey(latestUserMessage?.content ?? '') ?? ''
-
-  if (takeoffData) {
-    takeoffContext = buildTakeoffContext(planInfo, takeoffData.items, takeoffData.lastUpdated ?? null)
-
-    deterministicAnswer = buildDeterministicAnswer(latestUserMessage, {
-      items: takeoffData.items,
-      categories: takeoffData.categories,
-    })
-
-    if (
-      deterministicAnswer &&
-      (latestMessageNormalized.includes('page') ||
-        latestMessageNormalized.includes('categor') ||
-        latestMessageNormalized.includes('door') ||
-        latestMessageNormalized.includes('window') ||
-        latestMessageNormalized.includes('item') ||
-        latestMessageNormalized.includes('summar'))
-    ) {
-      return NextResponse.json({ reply: deterministicAnswer })
-    }
-  }
-
-  const systemPromptSections = [PLAN_CHAT_SYSTEM_PROMPT.trim()]
-
-  if (isQuantityQuestion && hasTakeoffData) {
-    systemPromptSections.push(
-      '🚨 IMPORTANT: QUANTITY QUESTION\n' +
-      'The user is asking about quantities (e.g., "wall quantities", "how much", "breakdown").\n' +
-      '1. You MUST use the takeoff data (quantities, units, line items) as your PRIMARY source.\n' +
-      '2. Show actual quantities from the takeoff: "X LF of walls", "Y SF of flooring", etc.\n' +
-      '3. DO NOT start with "Here\'s what the blueprint..." or list page numbers.\n' +
-      '4. Be conversational and direct: "The takeoff shows..." or "I see..."\n' +
-      '5. Blueprint snippets are ONLY for additional context if the takeoff doesn\'t have the info.\n' +
-      '6. If the question mentions a specific item (like "walls"), filter the takeoff items by that keyword.'
-    )
-  }
-
-  if (isGeneralProjectQuestion && hasTakeoffData) {
-    systemPromptSections.push(
-      '🚨 IMPORTANT: PROJECT OVERVIEW QUESTION\n' +
-      'The user is asking what the project covers/includes. This is a general overview question.\n' +
-      '1. You MUST use the takeoff data (categories, quantities, items) as your PRIMARY source.\n' +
-      '2. Start with a conversational summary of what\'s in the project based on takeoff categories.\n' +
-      '3. DO NOT start with "Here\'s what the blueprint..." or list page numbers.\n' +
-      '4. Be human and conversational: "This project includes X items across Y categories. The major components are..."\n' +
-      '5. Blueprint snippets are ONLY for additional context if the takeoff doesn\'t answer the question.\n' +
-      '6. If takeoff data shows categories and quantities, use those - that\'s what the user wants to know.'
-    )
-  }
-
-  if (isCostQuestion) {
-    if (isTotalCostQuestion) {
-      systemPromptSections.push(
-        '🚨 CRITICAL: TOTAL COST QUESTION DETECTED\n' +
-        'The user is asking for the TOTAL/OVERALL cost of the entire project.\n' +
-        '1. You will receive a cost breakdown with a GRAND TOTAL in a separate system message marked "CRITICAL".\n' +
-        '2. Your answer MUST start with the total cost number, then show the breakdown.\n' +
-        '3. DO NOT mention blueprint snippets at all - this is purely a takeoff data question.\n' +
-        '4. Be conversational: "The total project cost is $X. Here\'s the breakdown by category..."\n' +
-        '5. If you see a "Grand Total" in the cost breakdown, that\'s your answer - use it directly.\n' +
-        '6. DO NOT start with "Here\'s what the blueprint..." or any blueprint references.'
-      )
-    } else {
-      systemPromptSections.push(
-        '🚨 CRITICAL INSTRUCTIONS FOR COST QUESTIONS:\n' +
-        '1. You will receive takeoff data in a separate system message marked "CRITICAL" or "TAKEOFF DATA".\n' +
-        '2. You MUST start your answer with that takeoff data - show line items, quantities, and costs.\n' +
-        '3. DO NOT start with blueprint snippets. Blueprint snippets are ONLY for additional context at the end.\n' +
-        '4. If takeoff data shows costs: explain HOW the cost was calculated (quantity × unit price = total).\n' +
-        '5. If takeoff data shows quantities but no costs: explain what quantities exist and note that costs need to be calculated.\n' +
-        '6. Blueprint snippets should ONLY be used to explain WHY something might be expensive (special materials, complexity, etc.).\n' +
-        '7. Your answer structure: [Takeoff data first] → [Explanation of costs/quantities] → [Blueprint context if relevant].\n' +
-        '8. DO NOT just dump blueprint text. Synthesize everything into a coherent, human explanation.'
-      )
-    }
-  }
-
-  if (!hasTakeoffData) {
-    systemPromptSections.push(
-      'Structured takeoff data is not available for this plan. Make it clear to the user that takeoff data is missing when relevant.'
-    )
-  }
-
-  if (!hasBlueprintText) {
-    systemPromptSections.push(
-      'Blueprint text snippets are not available, so rely entirely on the takeoff data. If the takeoff does not include the requested information, explain the gap.'
-    )
-  }
-
-  const systemPrompt = systemPromptSections.join('\n\n')
-  const planTitle = planInfo?.title || planInfo?.file_name || 'this plan'
-  const takeoffHighlightsList = takeoffHighlights
-    ? takeoffHighlights
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 8)
-    : null
-  const structuredStatsList = structuredStats
-    ? structuredStats
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 6)
-    : null
-
-  const planContextPayload = {
-    job: jobInfo ? { id: jobInfo.id, name: jobInfo.name } : null,
-    plan: {
-      id: planInfo?.id ?? null,
-      title: planTitle,
-      fileName: planInfo?.file_name ?? null,
-      jobId: planInfo?.job_id ?? null,
-    },
-    takeoffSummary: takeoffContext?.takeoff.summary ?? null,
-    topTakeoffCategories: takeoffContext?.takeoff.topCategories ?? null,
-    sampleTakeoffItems: takeoffContext?.takeoff.representativeItems ?? null,
-    takeoffHighlights: takeoffHighlightsList,
-    computedStats: structuredStatsList,
-    costBreakdown: costBreakdown, // Prominent cost data for cost questions
-    blueprintSnippets: planTextSnippetPayloads,
-    requestedPages,
-    keywordHints: questionKeywords,
-    hasTakeoffData,
-    hasBlueprintText,
-  }
-
-  // Build context messages - prioritize cost data when present
-  const contextMessages: ChatCompletionMessageParam[] = [
-    {
-      role: 'system',
-      content: systemPrompt,
-    },
-  ]
-
-  // For cost questions, put cost breakdown FIRST and prominently
-  if (isCostQuestion && costBreakdown) {
-    contextMessages.push({
-      role: 'system',
-      content: `⚠️ CRITICAL: The user is asking about cost/price. You MUST use the takeoff data below to answer. DO NOT just list blueprint snippets.\n\nTAKEOFF DATA (USE THIS):\n${costBreakdown}\n\nYour answer MUST start with this takeoff data. Blueprint snippets are ONLY for additional context to explain why something might be expensive.`,
-    })
-  } else if (isCostQuestion && !costBreakdown && takeoffHighlights) {
-    // Fallback: if no cost breakdown but we have highlights, use those
-    contextMessages.push({
-      role: 'system',
-      content: `⚠️ CRITICAL: The user is asking about cost/price. Use the takeoff items below. DO NOT just list blueprint snippets.\n\nTAKEOFF ITEMS:\n${takeoffHighlights}\n\nYour answer MUST start with this takeoff data.`,
-    })
-  } else if (isQuantityQuestion && takeoffHighlights) {
-    // For quantity questions, prioritize takeoff highlights
-    contextMessages.push({
-      role: 'system',
-      content: `⚠️ IMPORTANT: The user is asking about quantities. You MUST use the takeoff data below to answer. DO NOT just list blueprint snippets.\n\nTAKEOFF QUANTITIES (USE THIS):\n${takeoffHighlights}\n\nYour answer MUST start with these quantities from the takeoff. Blueprint snippets are ONLY for additional context if needed.`,
-    })
-  } else if (isGeneralProjectQuestion && hasTakeoffData && (takeoffHighlights || takeoffContext?.takeoff?.summary)) {
-    // For general project questions, prioritize takeoff data
-    const summaryObj = takeoffContext?.takeoff?.summary
-    const categories = takeoffContext?.takeoff?.topCategories || []
-    const takeoffDataToShow = takeoffHighlights || 
-                              (summaryObj && categories.length > 0 ? 
-                                `Summary: ${summaryObj.totalItems} items across ${categories.length} categories\n\nTop categories:\n${categories.slice(0, 8).map((c: any) => `• ${c.category}: ${formatQuantity(c.totalQuantity, c.unit)}`).join('\n')}` : 
-                                '')
-    if (takeoffDataToShow) {
-      contextMessages.push({
-        role: 'system',
-        content: `⚠️ IMPORTANT: The user is asking what the project covers/includes. You MUST use the takeoff data below to answer. DO NOT just list blueprint page numbers.\n\nTAKEOFF DATA (USE THIS):\n${takeoffDataToShow}\n\nYour answer should explain what the project includes based on the takeoff categories and quantities. Blueprint snippets are ONLY for additional context if needed.`,
-      })
-    }
-  }
-
-  // Then add the full plan context
-  const planContextMessage = {
-    role: 'system' as const,
-    content: `Plan context (JSON):\n${JSON.stringify(planContextPayload, null, 2)}`,
-  }
-  contextMessages.push(planContextMessage)
-
-  // Add few-shot examples
-  contextMessages.push(...PLAN_CHAT_FEW_SHOTS)
 
   try {
-    const completion = await openaiClient.chat.completions.create({
-      model: OPENAI_MODEL,
-      max_completion_tokens: 600,
-      messages: [...contextMessages, ...sanitizedHistory],
+    // Stage 1: Classify the question
+    const classification = await classifyPlanChatQuestion(latestUserMessage.content)
+
+    // Stage 2: Build deterministic result
+    const deterministicResult = await buildDeterministicResult({
+      supabase,
+      jobId,
+      planId,
+      userId: user.id,
+      question: latestUserMessage.content,
+      classification,
     })
 
-    let reply = completion.choices[0]?.message?.content?.trim()
-
-    // Post-process: Catch blueprint dumps for ANY question when takeoff data is available
-    if (reply && hasTakeoffData) {
-      const replyLower = reply.toLowerCase()
-      const replyStartsWithBlueprint = replyLower.startsWith("here's what") || 
-                                       replyLower.startsWith("here is what") ||
-                                       replyLower.startsWith("high-level blueprint") ||
-                                       replyLower.includes("blueprint text highlights") ||
-                                       replyLower.includes("blueprint highlights") ||
-                                       (replyLower.includes("here's") && replyLower.includes("blueprint"))
-      
-      // Check if reply is just dumping blueprint snippets (more aggressive detection)
-      // Also check if it has multiple page references with bullets but no quantities
-      const hasMultiplePages = replyLower.split('page').length > 2
-      const hasBullets = replyLower.includes('•') || replyLower.includes('-')
-      const hasQuantities = replyLower.includes('sf') || replyLower.includes('lf') || replyLower.includes('ea') || 
-                           replyLower.includes('sq') || /\d+\s*(ft|in|yd|m)/.test(replyLower)
-      
-      const isBlueprintDump = replyStartsWithBlueprint ||
-        (hasMultiplePages && hasBullets && !hasQuantities && !replyLower.includes('$'))
-      
-      if (isBlueprintDump) {
-        // Model ignored takeoff data - build a response from takeoff
-        if (isCostQuestion && costBreakdown) {
-          // For total cost questions, make it more conversational
-          if (isTotalCostQuestion) {
-            const totalMatch = costBreakdown.match(/Total:?\s*\$?([\d,]+\.?\d*)/i) || 
-                              costBreakdown.match(/Grand Total:?\s*\$?([\d,]+\.?\d*)/i)
-            const total = totalMatch ? totalMatch[1] : 'calculated'
-            reply = `The total project cost from the takeoff is $${total}.\n\n${costBreakdown}\n\nThis includes all line items with cost data. If you want a breakdown by category or specific items, let me know.`
-          } else {
-            reply = `Here's the cost breakdown from the takeoff:\n\n${costBreakdown}`
-          }
-        } else if (isQuantityQuestion && takeoffHighlights) {
-          // For quantity questions, use takeoff highlights directly
-          reply = takeoffHighlights
-        } else if ((isQuantityQuestion || isGeneralProjectQuestion) && takeoffContext?.takeoff) {
-          // For general project questions, build a human response from takeoff data
-          const summaryObj = takeoffContext.takeoff.summary
-          const categories = takeoffContext.takeoff.topCategories || []
-          
-          if (categories.length > 0) {
-            // Group categories and make it conversational
-            const majorCategories = categories.slice(0, 8).map((cat: any) => {
-              const qty = formatQuantity(cat.totalQuantity, cat.unit)
-              return `${cat.category} (${qty})`
-            }).join(', ')
-            
-            const totalItems = summaryObj?.totalItems || relevantTakeoffItems.length
-            reply = `This project includes ${totalItems} item${totalItems === 1 ? '' : 's'} across ${categories.length} categories. The major components are: ${majorCategories}.`
-            
-            if (categories.length > 8) {
-              reply += ` Plus ${categories.length - 8} more categories.`
-            }
-            
-            reply += ` Want details on any specific area?`
-          } else if (relevantTakeoffItems.length > 0) {
-            // Group by category for readability
-            const byCategory = new Map<string, typeof relevantTakeoffItems>()
-            for (const item of relevantTakeoffItems.slice(0, 30)) {
-              const cat = item.category || 'Other'
-              if (!byCategory.has(cat)) {
-                byCategory.set(cat, [])
-              }
-              byCategory.get(cat)!.push(item)
-            }
-            
-            const categoryLines = Array.from(byCategory.entries())
-              .sort((a, b) => b[1].length - a[1].length)
-              .slice(0, 8)
-              .map(([cat, items]) => {
-                const totalQty = items.reduce((sum, item) => {
-                  const qty = typeof item.quantity === 'number' ? item.quantity : 0
-                  return sum + qty
-                }, 0)
-                const unit = items[0]?.unit || ''
-                return `${cat} (${formatQuantity(totalQty, unit)}, ${items.length} item${items.length === 1 ? '' : 's'})`
-              })
-            
-            reply = `This project covers: ${categoryLines.join(', ')}.`
-            if (byCategory.size > 8) {
-              reply += ` Plus ${byCategory.size - 8} more categories.`
-            }
-            reply += ` Want details on any specific area?`
-          } else if (takeoffHighlights) {
-            reply = takeoffHighlights
-          } else {
-            reply = `The takeoff shows ${summaryObj?.totalItems || 0} item${(summaryObj?.totalItems || 0) === 1 ? '' : 's'}. Want details on any specific category?`
-          }
-        } else if (takeoffHighlights) {
-          // For other questions, use takeoff highlights
-          reply = takeoffHighlights
-        } else if (takeoffContext?.takeoff?.summary) {
-          // Use takeoff summary as fallback
-          const summaryObj = takeoffContext.takeoff.summary
-          const categories = takeoffContext.takeoff.topCategories || []
-          
-          if (categories.length > 0) {
-            const categoryList = categories.slice(0, 8).map((cat: any) => {
-              const qty = formatQuantity(cat.totalQuantity, cat.unit)
-              return `• ${cat.category}: ${qty}`
-            }).join('\n')
-            const summaryText = `The takeoff includes ${summaryObj.totalItems} item${summaryObj.totalItems === 1 ? '' : 's'} across these categories.`
-            reply = `This project includes:\n\n${categoryList}\n\n${summaryText}`
-          } else {
-            reply = `The takeoff shows ${summaryObj.totalItems} item${summaryObj.totalItems === 1 ? '' : 's'}. Want details on any specific category?`
-          }
-        } else if (relevantTakeoffItems.length > 0) {
-          // Group by category for readability
-          const byCategory = new Map<string, typeof relevantTakeoffItems>()
-          for (const item of relevantTakeoffItems.slice(0, 20)) {
-            const cat = item.category || 'Other'
-            if (!byCategory.has(cat)) {
-              byCategory.set(cat, [])
-            }
-            byCategory.get(cat)!.push(item)
-          }
-          
-          const categoryLines = Array.from(byCategory.entries()).map(([cat, items]) => {
-            const totalQty = items.reduce((sum, item) => {
-              const qty = typeof item.quantity === 'number' ? item.quantity : 0
-              return sum + qty
-            }, 0)
-            const unit = items[0]?.unit || ''
-            return `• ${cat}: ${formatQuantity(totalQty, unit)} (${items.length} item${items.length === 1 ? '' : 's'})`
-          })
-          
-          reply = `This project covers:\n\n${categoryLines.join('\n')}\n\nThese are the major components from the takeoff. Want details on any specific category?`
-        }
-      }
-    }
-
-    if (!reply) {
-      if (deterministicAnswer) {
-        reply = deterministicAnswer
-      } else if (planTextChunksForContext.length > 0) {
-        reply = buildSnippetSummary(
-          latestUserMessage?.content ?? '',
-          planTextChunksForContext,
-          requestedPages
-        )
-      } else {
-        reply = hasBlueprintText
-          ? "I reviewed the available blueprint snippets, but they don't contain enough detail to answer that. Try referencing a specific page, sheet title, or note, and I'll take another look."
-          : "I reviewed the takeoff for this plan, but I couldn't find enough detail to answer that. Try asking about specific categories, quantities, or sheet locations from the takeoff, and I'll take another look."
-      }
-    }
+    // Stage 3: Generate answer
+    // Get last 3 messages for context
+    const recentMessages = sanitizedHistory.slice(-3)
+    const answer = await generatePlanChatAnswer(deterministicResult, recentMessages)
 
     // Save messages to database
     try {
       // Save user message
-      const { error: userMsgError } = await supabase
-        .from('plan_chat_messages')
-        .insert({
-          plan_id: planId,
-          user_id: user.id,
-          job_id: jobId,
-          role: 'user',
-          content: latestUserMessage?.content || '',
-        })
-
-      if (userMsgError) {
-        console.error('Failed to save user message:', userMsgError)
-      }
+      await supabase.from('plan_chat_messages').insert({
+        plan_id: planId,
+        user_id: user.id,
+        job_id: jobId,
+        role: 'user',
+        content: latestUserMessage.content,
+      })
 
       // Save assistant reply
-      const { error: assistantMsgError } = await supabase
-        .from('plan_chat_messages')
-        .insert({
-          plan_id: planId,
-          user_id: user.id,
-          job_id: jobId,
-          role: 'assistant',
-          content: reply,
-        })
-
-      if (assistantMsgError) {
-        console.error('Failed to save assistant message:', assistantMsgError)
-      }
+      await supabase.from('plan_chat_messages').insert({
+        plan_id: planId,
+        user_id: user.id,
+        job_id: jobId,
+        role: 'assistant',
+        content: answer,
+      })
     } catch (dbError) {
-      console.error('Failed to save chat messages to database:', dbError)
+      console.error('[PlanChat] Failed to save chat messages to database:', dbError)
       // Don't fail the request if DB save fails
     }
 
-    return NextResponse.json({ reply })
+    return NextResponse.json({ reply: answer })
   } catch (error) {
-    console.error('Plan Chat completion failed', error)
-    if (deterministicAnswer) {
-      return NextResponse.json({ reply: deterministicAnswer })
-    }
+    console.error('[PlanChat] Plan Chat completion failed:', error)
     return NextResponse.json(
       {
         error:
