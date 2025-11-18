@@ -131,7 +131,6 @@ export async function generatePlanChatAnswer(
     const completion = await openaiClient.chat.completions.create({
       model: OPENAI_MODEL,
       messages: messages as any,
-      temperature: 0.7,
       max_completion_tokens: 600,
     })
 

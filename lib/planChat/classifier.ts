@@ -65,7 +65,6 @@ export async function classifyPlanChatQuestion(
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.1, // Low temperature for consistent classification
       max_completion_tokens: 200,
     })
 
