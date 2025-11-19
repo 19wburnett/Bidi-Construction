@@ -359,7 +359,12 @@ export async function buildDeterministicResult({
   const isTakeoffQuestion =
     classification.question_type === 'TAKEOFF_QUANTITY' ||
     classification.question_type === 'TAKEOFF_COST' ||
-    classification.question_type === 'COMBINED'
+    classification.question_type === 'COMBINED' ||
+    // Also process takeoff for OTHER questions if they seem general/project-related
+    (classification.question_type === 'OTHER' && 
+     (question.toLowerCase().includes('project') || 
+      question.toLowerCase().includes('what kind') ||
+      question.toLowerCase().includes('tell me about')))
 
   // Process takeoff data if needed
   if (isTakeoffQuestion && allItems.length > 0) {

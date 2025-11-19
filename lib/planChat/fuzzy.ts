@@ -66,6 +66,34 @@ export function similarityScore(str1: string, str2: string): number {
   return 1 - distance / maxLen
 }
 
+// Common construction term synonyms
+const TERM_SYNONYMS: Record<string, string[]> = {
+  'roof': ['roof', 'roofing', 'shingle', 'shingles', 'asphalt', 'tile', 'membrane', 'covering'],
+  'window': ['window', 'windows', 'glazing', 'fenestration'],
+  'door': ['door', 'doors', 'entry', 'entries'],
+  'wall': ['wall', 'walls', 'partition', 'partitions'],
+  'floor': ['floor', 'flooring', 'slab', 'concrete floor'],
+  'foundation': ['foundation', 'footing', 'footings', 'concrete foundation'],
+}
+
+/**
+ * Expands targets with synonyms
+ */
+function expandTargets(targets: string[]): string[] {
+  const expanded = new Set<string>()
+  for (const target of targets) {
+    expanded.add(target.toLowerCase())
+    // Check for synonyms
+    for (const [key, synonyms] of Object.entries(TERM_SYNONYMS)) {
+      if (target.toLowerCase().includes(key) || synonyms.some(s => target.toLowerCase().includes(s))) {
+        synonyms.forEach(s => expanded.add(s))
+        expanded.add(key)
+      }
+    }
+  }
+  return Array.from(expanded)
+}
+
 /**
  * Checks if a string includes any of the target keywords (with fuzzy matching)
  */
@@ -76,10 +104,11 @@ export function matchesTargets(
 ): boolean {
   if (!text || targets.length === 0) return false
 
+  const expandedTargets = expandTargets(targets)
   const normalizedText = normalizeString(text)
   const textWords = normalizedText.split(/\s+/).filter((w) => w.length > 2)
 
-  for (const target of targets) {
+  for (const target of expandedTargets) {
     const normalizedTarget = normalizeString(target)
     const targetWords = normalizedTarget.split(/\s+/).filter((w) => w.length > 2)
 
@@ -117,11 +146,12 @@ export function scoreMatch(
 ): number {
   if (!itemText || targets.length === 0) return 0
 
+  const expandedTargets = expandTargets(targets)
   const normalizedText = normalizeString(itemText)
   const textWords = normalizedText.split(/\s+/).filter((w) => w.length > 2)
   let maxScore = 0
 
-  for (const target of targets) {
+  for (const target of expandedTargets) {
     const normalizedTarget = normalizeString(target)
     const targetWords = normalizedTarget.split(/\s+/).filter((w) => w.length > 2)
 

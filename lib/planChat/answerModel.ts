@@ -187,9 +187,14 @@ export async function generatePlanChatAnswer(
           }
         }
       } else if (result.blueprint_snippets && result.blueprint_snippets.length > 0) {
-        answer = `I found ${result.blueprint_snippets.length} relevant blueprint snippet${
-          result.blueprint_snippets.length === 1 ? '' : 's'
-        }. ${result.scope_description}`
+        // Don't duplicate scope_description if it's already about blueprint snippets
+        if (result.scope_description.includes('blueprint')) {
+          answer = result.scope_description
+        } else {
+          answer = `I found ${result.blueprint_snippets.length} relevant blueprint snippet${
+            result.blueprint_snippets.length === 1 ? '' : 's'
+          }. ${result.scope_description}`
+        }
       } else {
         answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
       }
