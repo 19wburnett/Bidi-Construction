@@ -1129,8 +1129,8 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (planError || !plan) {
-    return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
-  }
+      return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
+    }
 
   // Sanitize messages
   const sanitizedHistory = messages
@@ -1162,9 +1162,9 @@ export async function POST(request: NextRequest) {
 
     // Stage 2: Build deterministic result
     const deterministicResult = await buildDeterministicResult({
-      supabase,
+          supabase,
       jobId,
-      planId,
+          planId,
       userId: user.id,
       question: latestUserMessage.content,
       classification,
@@ -1179,21 +1179,21 @@ export async function POST(request: NextRequest) {
     try {
       // Save user message
       await supabase.from('plan_chat_messages').insert({
-        plan_id: planId,
-        user_id: user.id,
-        job_id: jobId,
-        role: 'user',
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'user',
         content: latestUserMessage.content,
-      })
+        })
 
       // Save assistant reply
       await supabase.from('plan_chat_messages').insert({
-        plan_id: planId,
-        user_id: user.id,
-        job_id: jobId,
-        role: 'assistant',
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'assistant',
         content: answer,
-      })
+        })
     } catch (dbError) {
       console.error('[PlanChat] Failed to save chat messages to database:', dbError)
       // Don't fail the request if DB save fails

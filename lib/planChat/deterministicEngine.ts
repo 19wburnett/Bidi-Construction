@@ -229,6 +229,28 @@ function filterTakeoffItems(
   items: NormalizedTakeoffItem[],
   classification: PlanChatQuestionClassification
 ): NormalizedTakeoffItem[] {
+  // If no targets specified and it's a general question, return all items
+  if (classification.targets.length === 0 && !classification.strict_takeoff_only) {
+    let filtered = items
+    
+    // Still apply page filter if specified
+    if (classification.pages && classification.pages.length > 0) {
+      filtered = filtered.filter((item) => {
+        if (item.page_number && classification.pages!.includes(item.page_number)) {
+          return true
+        }
+        if (item.page_reference) {
+          return classification.pages!.some((page) =>
+            item.page_reference?.toLowerCase().includes(`page ${page}`)
+          )
+        }
+        return false
+      })
+    }
+    
+    return filtered
+  }
+
   let filtered = items
 
   // Filter by page numbers if specified
@@ -246,7 +268,7 @@ function filterTakeoffItems(
     })
   }
 
-  // Filter by targets (fuzzy matching)
+  // Filter by targets (fuzzy matching) - only if targets are specified
   if (classification.targets.length > 0) {
     // Score all items and keep those above threshold
     const scored = filtered.map((item) => {
@@ -260,15 +282,40 @@ function filterTakeoffItems(
         .filter(Boolean)
         .join(' ')
 
-      const score = scoreMatch(searchText, classification.targets, 0.5)
+      const score = scoreMatch(searchText, classification.targets, 0.4) // Lowered threshold from 0.5 to 0.4
       return { item, score }
     })
 
-    // Keep items with score > 0.5 or exact matches
+    // Keep items with score > 0.4 (lowered from 0.5)
     filtered = scored
-      .filter(({ score }) => score > 0.5)
+      .filter(({ score }) => score > 0.4)
       .sort((a, b) => b.score - a.score)
       .map(({ item }) => item)
+    
+    // If we filtered out everything but had targets, maybe the matching is too strict
+    // Try a more lenient match
+    if (filtered.length === 0 && items.length > 0) {
+      const lenientScored = items.map((item) => {
+        const searchText = [
+          item.category,
+          item.subcategory,
+          item.name,
+          item.description,
+          item.location,
+        ]
+          .filter(Boolean)
+          .join(' ')
+
+        const score = scoreMatch(searchText, classification.targets, 0.3) // Even more lenient
+        return { item, score }
+      })
+
+      filtered = lenientScored
+        .filter(({ score }) => score > 0.3)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20) // Limit to top 20 matches
+        .map(({ item }) => item)
+    }
   }
 
   // Filter by levels if specified

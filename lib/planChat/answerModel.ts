@@ -134,21 +134,70 @@ export async function generatePlanChatAnswer(
       max_completion_tokens: 600,
     })
 
-    const answer = completion.choices[0]?.message?.content?.trim()
+    let answer = completion.choices[0]?.message?.content?.trim()
 
-    if (!answer) {
-      // Fallback answer
+    // If answer is empty or just repeats the scope description, build a better fallback
+    if (!answer || answer.length < 10) {
+      // Build a helpful answer from the data we have
       if (result.related_items.length > 0) {
-        return `I found ${result.related_items.length} matching item${
-          result.related_items.length === 1 ? '' : 's'
-        } in the takeoff. ${result.scope_description}`
+        const isCostQuestion = result.classification.question_type === 'TAKEOFF_COST'
+        const isQuantityQuestion = result.classification.question_type === 'TAKEOFF_QUANTITY'
+        
+        if (isCostQuestion && result.totals?.cost) {
+          // Cost question with cost data
+          const itemsWithCost = result.related_items.filter(item => item.cost_total && item.cost_total > 0)
+          if (itemsWithCost.length > 0) {
+            const totalCost = result.totals.cost.value
+            const topItems = itemsWithCost.slice(0, 5).map(item => {
+              const qty = item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : ''
+              return `• ${item.name}: ${qty}${qty ? ' — ' : ''}$${item.cost_total?.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+            }).join('\n')
+            
+            answer = `The total cost for ${result.classification.targets.join(', ') || 'these items'} is $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.\n\nBreakdown:\n${topItems}`
+            if (itemsWithCost.length > 5) {
+              answer += `\n...and ${itemsWithCost.length - 5} more items.`
+            }
+          }
+        } else if (isQuantityQuestion && result.totals?.quantity) {
+          // Quantity question with quantity data
+          const qty = result.totals.quantity.value
+          const unit = result.totals.quantity.unit
+          answer = `I found ${qty.toLocaleString('en-US')} ${unit} of ${result.classification.targets.join(', ') || 'matching items'} in the takeoff.`
+          
+          if (result.breakdowns?.by_category && result.breakdowns.by_category.length > 0) {
+            const breakdown = result.breakdowns.by_category.slice(0, 5).map(cat => 
+              `• ${cat.category}: ${cat.quantity.toLocaleString('en-US')} ${cat.unit}`
+            ).join('\n')
+            answer += `\n\nBy category:\n${breakdown}`
+          }
+        } else {
+          // General fallback
+          answer = `I found ${result.related_items.length} matching item${
+            result.related_items.length === 1 ? '' : 's'
+          } in the takeoff. ${result.scope_description}`
+          
+          if (result.related_items.length > 0 && result.related_items.length <= 10) {
+            const itemsList = result.related_items.map(item => {
+              const parts = [item.name || item.category]
+              if (item.quantity) parts.push(`${item.quantity} ${item.unit || ''}`.trim())
+              if (item.cost_total) parts.push(`$${item.cost_total.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+              return `• ${parts.join(' — ')}`
+            }).join('\n')
+            answer += `\n\nItems:\n${itemsList}`
+          }
+        }
       } else if (result.blueprint_snippets && result.blueprint_snippets.length > 0) {
-        return `I found ${result.blueprint_snippets.length} relevant blueprint snippet${
+        answer = `I found ${result.blueprint_snippets.length} relevant blueprint snippet${
           result.blueprint_snippets.length === 1 ? '' : 's'
         }. ${result.scope_description}`
       } else {
-        return "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
+        answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
       }
+    }
+
+    // Ensure answer is always a string
+    if (!answer || answer.length < 10) {
+      answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
     }
 
     return answer
