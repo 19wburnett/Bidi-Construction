@@ -1,0 +1,36 @@
+# Cursor Rules for Bidi Construction Project
+
+## Critical: Build Before Pushing
+- **ALWAYS run `npm run build` before pushing changes to git**
+- If the user asks to push, commit, or make changes that will be pushed, remind them to run build first
+- If build fails, do not proceed with pushing until build errors are resolved
+
+## Early Testing Rules
+- **Run tests before pushing**: Always run relevant tests before committing/pushing changes
+- **Type checking**: Ensure TypeScript compiles without errors (`npm run build` includes this)
+- **Linting**: Run `npm run lint` and fix any linting errors before pushing
+- **Test new features**: When adding new functionality, create or update tests:
+  - New API routes → Add E2E tests in `tests/` directory
+  - New components → Test manually in development, consider adding component tests
+  - New utilities → Add unit tests or integration tests
+- **Test existing features**: Before modifying existing code, run existing tests to ensure they still pass
+- **API testing**: For API route changes, test with:
+  - Manual requests (Postman/curl)
+  - E2E test scripts (e.g., `tsx tests/analyze.single.e2e.ts`)
+  - Verify error handling and edge cases
+- **Database changes**: Test Supabase queries and migrations in development before deploying
+- **Environment variables**: Verify required env vars are documented and available in test environments
+
+## Project Context
+- Next.js 16 with TypeScript
+- Uses Supabase for database and authentication
+- API routes in `app/api/`
+- Components in `components/` directory
+- Uses feature flags - check existing patterns before creating new ones
+
+## General Guidelines
+- Never commit API keys - always use environment variables from `.env`
+- Follow existing code patterns and conventions
+- Use TypeScript strict mode
+- Prefer functional components
+

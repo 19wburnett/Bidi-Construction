@@ -351,3 +351,4 @@ Potential improvements:
 4. **Cost Code Validation**: Validate against standard cost code libraries
 5. **Custom Industries**: Allow user-defined industry segments
 
+

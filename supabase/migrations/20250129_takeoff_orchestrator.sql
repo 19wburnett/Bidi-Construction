@@ -168,3 +168,4 @@ COMMENT ON FUNCTION claim_next_batch IS 'Atomically claims next pending batch to
 
 
 
+
