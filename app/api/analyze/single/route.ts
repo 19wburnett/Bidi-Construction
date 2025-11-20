@@ -39,17 +39,37 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Verify plan ownership
+    // Verify plan access via job membership
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('*, jobs!inner(project_type)')
+      .select('*, jobs!inner(project_type, id)')
       .eq('id', planId)
-      .eq('user_id', userId)
       .single()
     
     if (planError || !plan) {
       return NextResponse.json(
         { error: 'Plan not found' },
+        { status: 404 }
+      )
+    }
+    
+    // Verify user has access to the job
+    const { data: jobMember } = await supabase
+      .from('job_members')
+      .select('job_id')
+      .eq('job_id', plan.job_id)
+      .eq('user_id', userId)
+      .single()
+    
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('user_id')
+      .eq('id', plan.job_id)
+      .single()
+    
+    if (!jobMember && job?.user_id !== userId) {
+      return NextResponse.json(
+        { error: 'Plan not found or access denied' },
         { status: 404 }
       )
     }
@@ -134,6 +154,7 @@ export async function POST(request: NextRequest) {
           return await saveAndReturnResults(
             supabase,
             planId,
+            plan.job_id,
             userId,
             extracted.items,
             extracted.quality_analysis,
@@ -202,6 +223,7 @@ Please extract MORE comprehensively:
       return await saveAndReturnResults(
         supabase,
         planId,
+        plan.job_id,
         userId,
         bestResult.items,
         bestResult.quality_analysis,
@@ -249,6 +271,7 @@ Please extract MORE comprehensively:
 async function saveAndReturnResults(
   supabase: any,
   planId: string,
+  jobId: string,
   userId: string,
   items: any[],
   qualityAnalysis: any,
@@ -311,8 +334,7 @@ async function saveAndReturnResults(
   const { data: takeoffAnalysis, error: takeoffError } = await supabase
     .from('plan_takeoff_analysis')
     .insert({
-      plan_id: planId,
-      user_id: userId,
+      job_id: jobId,
       items: itemsWithIds,
       summary: {
         total_items: itemsWithIds.length,
@@ -347,7 +369,6 @@ async function saveAndReturnResults(
         has_takeoff_analysis: true
       })
       .eq('id', planId)
-      .eq('user_id', userId)
   }
   
   // Transform quality_analysis.risk_flags to issues format for quality_analysis table

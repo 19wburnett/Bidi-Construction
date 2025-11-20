@@ -50,11 +50,11 @@ export async function POST(request: NextRequest) {
     
     let user
     if (isServiceRole) {
-      // Service role call - get user from plan
-      // First check if plan exists
+      // Service role call - get user from plan's job
+      // First check if plan exists and get its job_id
       const { data: planCheck, error: planCheckError } = await supabase
         .from('plans')
-        .select('user_id, id')
+        .select('id, job_id')
         .eq('id', plan_id)
         .maybeSingle() // Use maybeSingle() instead of single() to avoid errors
       
@@ -67,21 +67,36 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      if (!planCheck) {
+      if (!planCheck || !planCheck.job_id) {
         // Try to find any plan to debug
         const { data: anyPlan } = await supabase
           .from('plans')
           .select('id, file_name')
           .limit(1)
         
-        console.error(`Plan ${plan_id} not found. Sample plan IDs:`, anyPlan?.map(p => p.id))
+        console.error(`Plan ${plan_id} not found or has no job_id. Sample plan IDs:`, anyPlan?.map(p => p.id))
         return NextResponse.json(
-          { error: `Plan not found: ${plan_id}` },
+          { error: `Plan not found or not associated with a job: ${plan_id}` },
           { status: 404 }
         )
       }
       
-      user = { id: planCheck.user_id }
+      // Get user_id from the job
+      const { data: jobCheck, error: jobError } = await supabase
+        .from('jobs')
+        .select('user_id')
+        .eq('id', planCheck.job_id)
+        .single()
+      
+      if (jobError || !jobCheck) {
+        console.error('Job lookup error:', jobError)
+        return NextResponse.json(
+          { error: `Job not found for plan: ${plan_id}` },
+          { status: 404 }
+        )
+      }
+      
+      user = { id: jobCheck.user_id }
     } else {
       // Regular user call - verify auth
       const { data: { user: userData }, error: authError } = await supabase.auth.getUser()

@@ -239,7 +239,6 @@ export interface Database {
         Row: {
           id: string
           job_id: string | null
-          job_request_id: string | null
           subcontractor_id: string | null
           bid_amount: number | null
           timeline: string | null
@@ -253,11 +252,11 @@ export interface Database {
           decline_reason: string | null
           bid_package_id: string | null
           seen: boolean | null
+          updated_at: string
         }
         Insert: {
           id?: string
           job_id?: string | null
-          job_request_id?: string | null
           subcontractor_id?: string | null
           bid_amount?: number | null
           timeline?: string | null
@@ -271,11 +270,11 @@ export interface Database {
           decline_reason?: string | null
           bid_package_id?: string | null
           seen?: boolean | null
+          updated_at?: string
         }
         Update: {
           id?: string
           job_id?: string | null
-          job_request_id?: string | null
           subcontractor_id?: string | null
           bid_amount?: number | null
           timeline?: string | null
@@ -289,6 +288,7 @@ export interface Database {
           decline_reason?: string | null
           bid_package_id?: string | null
           seen?: boolean | null
+          updated_at?: string
         }
       }
       subcontractors: {
@@ -649,7 +649,8 @@ export interface Database {
       plans: {
         Row: {
           id: string
-          user_id: string
+          job_id: string
+          created_by: string | null
           file_name: string
           file_path: string
           file_size: number
@@ -663,13 +664,18 @@ export interface Database {
           processing_status: any
           has_takeoff_analysis: boolean
           has_quality_analysis: boolean
+          takeoff_analysis_status: string | null
+          takeoff_requested_at: string | null
+          quality_analysis_status: string | null
+          quality_requested_at: string | null
           created_at: string
           updated_at: string
           last_accessed_at: string
         }
         Insert: {
           id?: string
-          user_id: string
+          job_id: string
+          created_by?: string | null
           file_name: string
           file_path: string
           file_size: number
@@ -683,13 +689,18 @@ export interface Database {
           processing_status?: any
           has_takeoff_analysis?: boolean
           has_quality_analysis?: boolean
+          takeoff_analysis_status?: string | null
+          takeoff_requested_at?: string | null
+          quality_analysis_status?: string | null
+          quality_requested_at?: string | null
           created_at?: string
           updated_at?: string
           last_accessed_at?: string
         }
         Update: {
           id?: string
-          user_id?: string
+          job_id?: string
+          created_by?: string | null
           file_name?: string
           file_path?: string
           file_size?: number
@@ -703,6 +714,10 @@ export interface Database {
           processing_status?: any
           has_takeoff_analysis?: boolean
           has_quality_analysis?: boolean
+          takeoff_analysis_status?: string | null
+          takeoff_requested_at?: string | null
+          quality_analysis_status?: string | null
+          quality_requested_at?: string | null
           created_at?: string
           updated_at?: string
           last_accessed_at?: string
@@ -711,8 +726,7 @@ export interface Database {
       plan_takeoff_analysis: {
         Row: {
           id: string
-          plan_id: string
-          user_id: string
+          job_id: string
           items: any
           summary: any
           ai_model: string | null
@@ -724,11 +738,15 @@ export interface Database {
           parent_version_id: string | null
           created_at: string
           updated_at: string
+          status: string | null
+          started_at: string | null
+          completed_at: string | null
+          error_message: string | null
+          job_type: string | null
         }
         Insert: {
           id?: string
-          plan_id: string
-          user_id: string
+          job_id: string
           items?: any
           summary?: any
           ai_model?: string | null
@@ -740,11 +758,15 @@ export interface Database {
           parent_version_id?: string | null
           created_at?: string
           updated_at?: string
+          status?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          error_message?: string | null
+          job_type?: string | null
         }
         Update: {
           id?: string
-          plan_id?: string
-          user_id?: string
+          job_id?: string
           items?: any
           summary?: any
           ai_model?: string | null
@@ -756,6 +778,11 @@ export interface Database {
           parent_version_id?: string | null
           created_at?: string
           updated_at?: string
+          status?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          error_message?: string | null
+          job_type?: string | null
         }
       }
       plan_quality_analysis: {

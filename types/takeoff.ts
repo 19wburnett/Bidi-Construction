@@ -52,6 +52,8 @@ export interface PlanShare {
 
 export interface Plan {
   id: string
+  job_id: string // Required - all plans must belong to a job
+  created_by: string | null // User who created the plan (for tracking)
   title: string | null
   file_name: string
   file_path: string
@@ -63,7 +65,11 @@ export interface Plan {
   takeoff_requested_at?: string | null
   quality_analysis_status?: string | null
   quality_requested_at?: string | null
-  job_id?: string | null // New field linking to jobs
+  has_takeoff_analysis?: boolean
+  has_quality_analysis?: boolean
+  created_at?: string
+  updated_at?: string
+  last_accessed_at?: string
 }
 
 export interface Takeoff {

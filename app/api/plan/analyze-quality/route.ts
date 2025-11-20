@@ -29,16 +29,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: planId and images' }, { status: 400 })
     }
 
-    // Verify plan ownership
+    // Verify plan access via job membership
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('*')
+      .select('*, job_id')
       .eq('id', planId)
-      .eq('user_id', userId)
       .single()
 
     if (planError || !plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
+    }
+    
+    // Verify user has access to the job
+    const { data: jobMember } = await supabase
+      .from('job_members')
+      .select('job_id')
+      .eq('job_id', plan.job_id)
+      .eq('user_id', userId)
+      .single()
+    
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('user_id')
+      .eq('id', plan.job_id)
+      .single()
+    
+    if (!jobMember && job?.user_id !== userId) {
+      return NextResponse.json({ error: 'Plan not found or access denied' }, { status: 404 })
     }
 
     // Build content array with all images

@@ -39,35 +39,52 @@ export async function POST(request: NextRequest) {
     
     userId = user.id
 
+    // Fetch plan and job info to get job_id and verify access
+    const { data: plan, error: planError } = await supabase
+      .from('plans')
+      .select(`
+        job_id,
+        jobs!inner(project_type, user_id)
+      `)
+      .eq('id', planId)
+      .single()
+
+    if (planError || !plan) {
+      return NextResponse.json(
+        { error: 'Plan not found' },
+        { status: 404 }
+      )
+    }
+
+    // Verify user has access to the job
+    const { data: jobMember } = await supabase
+      .from('job_members')
+      .select('job_id')
+      .eq('job_id', plan.job_id)
+      .eq('user_id', userId)
+      .single()
+    
+    const jobs = plan.jobs as any
+    const jobUserId = Array.isArray(jobs) ? jobs[0]?.user_id : jobs?.user_id
+    
+    if (!jobMember && jobUserId !== userId) {
+      return NextResponse.json(
+        { error: 'Plan not found or access denied' },
+        { status: 404 }
+      )
+    }
+
     // Determine job type - fetch from plan -> job relationship if not provided
     let finalJobType = jobType
     if (!finalJobType) {
-      const { data: plan, error: planError } = await supabase
-        .from('plans')
-        .select(`
-          job_id,
-          jobs!inner(project_type)
-        `)
-        .eq('id', planId)
-        .eq('user_id', userId)
-        .single()
-
-      if (planError || !plan) {
-        return NextResponse.json(
-          { error: 'Plan not found' },
-          { status: 404 }
-        )
-      }
-
-      // Map project_type to job type: Commercial -> commercial, all others -> residential (fixed TypeScript)
-      const projectType = (plan as any).jobs?.project_type
+      // Map project_type to job type: Commercial -> commercial, all others -> residential
+      const projectType = Array.isArray(jobs) ? jobs[0]?.project_type : jobs?.project_type
       finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
     }
 
     // Create pending analysis record
     const analysisData = {
-      plan_id: planId,
-      user_id: userId,
+      job_id: plan.job_id,
       status: 'pending',
       job_type: finalJobType,
       started_at: new Date().toISOString()

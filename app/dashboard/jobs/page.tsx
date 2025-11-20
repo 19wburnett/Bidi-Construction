@@ -125,7 +125,7 @@ export default function JobsPage() {
 
   const filteredJobs = jobs.filter(job =>
     job.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    job.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (job.location && job.location.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (job.description && job.description.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
@@ -299,10 +299,12 @@ export default function JobsPage() {
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <CardTitle className="text-lg mb-1">{job.name}</CardTitle>
-                              <CardDescription className="flex items-center">
-                                <MapPin className="h-4 w-4 mr-1" />
-                                {job.location}
-                              </CardDescription>
+                              {job.location && (
+                                <CardDescription className="flex items-center">
+                                  <MapPin className="h-4 w-4 mr-1" />
+                                  {job.location}
+                                </CardDescription>
+                              )}
                             </div>
                             <Badge className={getStatusColor(job.status)}>
                               {job.status}

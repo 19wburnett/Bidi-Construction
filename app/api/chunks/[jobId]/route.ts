@@ -40,15 +40,24 @@ export async function GET(
 
     const supabase = await createServerSupabaseClient()
 
-    // First verify job ownership
+    // First verify job membership
+    const { data: jobMember } = await supabase
+      .from('job_members')
+      .select('job_id, role')
+      .eq('job_id', jobId)
+      .eq('user_id', user.id)
+      .single()
+
+    // Also check if user is the job owner
     const { data: job, error: jobError } = await supabase
       .from('jobs')
       .select('id, user_id')
       .eq('id', jobId)
-      .eq('user_id', user.id)
       .single()
 
-    if (jobError || !job) {
+    const hasAccess = jobMember || (job && job.user_id === user.id)
+
+    if (!hasAccess) {
       return NextResponse.json(
         { error: 'Job not found or access denied' },
         { status: 404 }
@@ -62,12 +71,10 @@ export async function GET(
         *,
         plans!inner(
           id,
-          job_id,
-          user_id
+          job_id
         )
       `, { count: 'exact' })
       .eq('plans.job_id', jobId)
-      .eq('plans.user_id', user.id)
 
     if (planId) {
       query = query.eq('plan_id', planId)
@@ -130,7 +137,6 @@ export async function GET(
         .from('plans')
         .select('num_pages')
         .eq('job_id', jobId)
-        .eq('user_id', user.id)
       totalPages = plans?.reduce((sum, p) => sum + (p.num_pages || 0), 0) || 0
     }
 

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import DashboardSidebar from './dashboard-sidebar'
 import { Button } from './ui/button'
-import { Menu } from 'lucide-react'
+import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -12,6 +13,24 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children, className }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const pathname = usePathname()
+
+  // Check if we are in the plan viewer (immersive mode)
+  // Path pattern: /dashboard/jobs/[jobId]/plans/[planId]
+  const isPlanViewer = /^\/dashboard\/jobs\/[^/]+\/plans\/[^/]+$/.test(pathname || '')
+  
+  // State for desktop sidebar visibility in immersive mode
+  // In immersive mode, default to closed. In normal mode, always open.
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(!isPlanViewer)
+
+  // Update desktop sidebar state when entering/leaving immersive mode
+  useEffect(() => {
+    if (isPlanViewer) {
+      setDesktopSidebarOpen(false)
+    } else {
+      setDesktopSidebarOpen(true)
+    }
+  }, [isPlanViewer])
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-black transition-colors duration-300">
@@ -25,13 +44,21 @@ export default function DashboardLayout({ children, className }: DashboardLayout
         )}
 
         {/* Sidebar - Desktop */}
-        <aside className="hidden lg:block flex-shrink-0">
-          <DashboardSidebar />
+        <aside 
+          className={`hidden lg:block flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+            isPlanViewer 
+              ? (desktopSidebarOpen ? 'w-64' : 'w-0') 
+              : 'w-64'
+          }`}
+        >
+          <div className="w-64 h-full border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-black">
+             <DashboardSidebar />
+          </div>
         </aside>
 
         {/* Sidebar - Mobile */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:hidden ${
+          className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:hidden w-64 bg-white dark:bg-black border-r border-gray-200 dark:border-gray-800 ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -39,22 +66,41 @@ export default function DashboardLayout({ children, className }: DashboardLayout
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-hidden flex flex-col relative">
           {/* Mobile Menu Button */}
-          <div className="lg:hidden sticky top-0 z-30 bg-white dark:bg-black border-b border-gray-200 dark:border-gray-800 px-4 py-3 transition-colors duration-300">
+          <div className={`lg:hidden sticky top-0 z-30 bg-white dark:bg-black border-b border-gray-200 dark:border-gray-800 px-4 py-3 transition-colors duration-300 flex items-center`}>
             <Button
-              variant="default"
-              size="default"
+              variant="ghost"
+              size="icon"
               onClick={() => setSidebarOpen(true)}
-              className="shadow-sm"
+              className="mr-2"
             >
-              <Menu className="h-5 w-5 mr-2" />
-              Menu
+              <Menu className="h-5 w-5" />
             </Button>
+            <span className="font-semibold">Menu</span>
           </div>
 
+          {/* Desktop Immersive Toggle Button - Only visible in Plan Viewer */}
+          {isPlanViewer && (
+            <div className="hidden lg:block absolute bottom-6 left-6 z-40">
+              <Button
+                variant="secondary"
+                size="icon"
+                className="rounded-full shadow-md bg-white/90 hover:bg-white dark:bg-black/90 dark:hover:bg-black border border-gray-200 dark:border-gray-800 h-10 w-10"
+                onClick={() => setDesktopSidebarOpen(!desktopSidebarOpen)}
+                title={desktopSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+              >
+                {desktopSidebarOpen ? (
+                  <PanelLeftClose className="h-5 w-5" />
+                ) : (
+                  <PanelLeftOpen className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
+          )}
+
           {/* Page Content */}
-          <div className={className}>
+          <div className={`flex-1 overflow-auto ${className || ''}`}>
             {children}
           </div>
         </main>
@@ -62,4 +108,3 @@ export default function DashboardLayout({ children, className }: DashboardLayout
     </div>
   )
 }
-

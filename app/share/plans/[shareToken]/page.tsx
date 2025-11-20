@@ -142,16 +142,18 @@ export default function GuestPlanViewer() {
         .eq('id', shareData.id)
       
       // Load takeoff analysis if available
-      const { data: takeoffAnalysis } = await supabase
-        .from('plan_takeoff_analysis')
-        .select('*')
-        .eq('plan_id', planData.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-      
-      if (takeoffAnalysis) {
-        setTakeoffData(takeoffAnalysis)
+      if (planData.job_id) {
+        const { data: takeoffAnalysis } = await supabase
+          .from('plan_takeoff_analysis')
+          .select('*')
+          .eq('job_id', planData.job_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        if (takeoffAnalysis) {
+          setTakeoffData(takeoffAnalysis)
+        }
       }
       
       // Load quality analysis if available

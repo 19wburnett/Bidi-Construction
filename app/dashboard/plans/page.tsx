@@ -87,10 +87,11 @@ export default function PlansPage() {
         .order('created_at', { ascending: false })
 
       if (jobIds.length > 0) {
-        const filters = [`user_id.eq.${user.id}`, `job_id.in.(${jobIds.join(',')})`]
-        query = query.or(filters.join(','))
+        // Query plans by job_id (all plans must have a job_id now)
+        query = query.in('job_id', jobIds)
       } else {
-        query = query.eq('user_id', user.id)
+        // No jobs found, return empty array
+        query = query.eq('job_id', '00000000-0000-0000-0000-000000000000') // Will return no results
       }
 
       const { data, error } = await query

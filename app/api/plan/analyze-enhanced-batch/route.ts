@@ -188,12 +188,32 @@ export async function POST(request: NextRequest) {
         .from('plans')
         .select('id, job_id, title, file_name')
         .eq('id', planId)
-        .eq('user_id', userId)
         .single()
 
       if (planError || !plan) {
         return NextResponse.json(
           { error: 'Plan not found' },
+          { status: 404 }
+        )
+      }
+      
+      // Verify user has access to the job
+      const { data: jobMember } = await supabase
+        .from('job_members')
+        .select('job_id')
+        .eq('job_id', plan.job_id)
+        .eq('user_id', userId)
+        .single()
+      
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('user_id')
+        .eq('id', plan.job_id)
+        .single()
+      
+      if (!jobMember && job?.user_id !== userId) {
+        return NextResponse.json(
+          { error: 'Plan not found or access denied' },
           { status: 404 }
         )
       }
@@ -441,12 +461,26 @@ export async function POST(request: NextRequest) {
     // Save analysis results to database
     
     if (taskType === 'takeoff') {
+      // Get plan's job_id
+      const { data: planForJob, error: planJobError } = await supabase
+        .from('plans')
+        .select('job_id')
+        .eq('id', planId)
+        .single()
+      
+      if (planJobError || !planForJob) {
+        console.error('Error getting plan job_id:', planJobError)
+        return NextResponse.json(
+          { error: 'Plan not found' },
+          { status: 404 }
+        )
+      }
+
       // Save takeoff analysis
       const { data: takeoffAnalysis, error: takeoffError } = await supabase
         .from('plan_takeoff_analysis')
         .insert({
-          plan_id: planId,
-          user_id: userId,
+          job_id: planForJob.job_id,
           items: mergedResult.items || [],
           summary: {
             total_items: mergedResult.items?.length || 0,
@@ -479,7 +513,6 @@ export async function POST(request: NextRequest) {
           has_takeoff_analysis: true
         })
         .eq('id', planId)
-        .eq('user_id', userId)
 
     } else if (taskType === 'quality') {
       // Save quality analysis
@@ -515,7 +548,6 @@ export async function POST(request: NextRequest) {
           has_quality_analysis: true
         })
         .eq('id', planId)
-        .eq('user_id', userId)
     }
 
     return NextResponse.json(response)

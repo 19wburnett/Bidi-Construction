@@ -39,7 +39,6 @@ export async function GET(
         .from('plan_takeoff_analysis')
         .select('*')
         .eq('id', analysisId)
-        .eq('user_id', userId)
         .single(),
       supabase
         .from('plan_quality_analysis')

@@ -453,8 +453,7 @@ async function loadPlanContext(
   const { data: takeoffRow, error: takeoffError } = await supabase
     .from('plan_takeoff_analysis')
     .select('id, items, summary, updated_at, created_at')
-    .eq('plan_id', planId)
-    .eq('user_id', userId)
+    .eq('job_id', plan.job_id)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

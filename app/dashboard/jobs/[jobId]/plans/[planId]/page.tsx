@@ -23,7 +23,9 @@ import {
   ChevronLeft,
   FileText,
   MessageSquare,
-  Bot
+  Bot,
+  Maximize2,
+  Minimize2
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -38,7 +40,7 @@ import { CommentPersistence } from '@/lib/comment-persistence'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
-import TakeoffAccordion from '@/components/takeoff-accordion'
+import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 import PlanChatPanel from '@/components/plan/plan-chat-panel'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
@@ -70,6 +72,7 @@ export default function EnhancedPlanViewer() {
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [activeTab, setActiveTab] = useState<AnalysisMode>('takeoff')
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+  const [sidebarMaximized, setSidebarMaximized] = useState(false)
   const [planUrl, setPlanUrl] = useState<string>('')
   const [commentFormOpen, setCommentFormOpen] = useState(false)
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
@@ -267,9 +270,15 @@ export default function EnhancedPlanViewer() {
   useEffect(() => {
     if (user && jobId && planId) {
       loadData()
-      loadExistingAnalysis()
     }
   }, [user, jobId, planId])
+
+  // Load existing analysis after plan is loaded
+  useEffect(() => {
+    if (user && planId && plan?.job_id) {
+      loadExistingAnalysis()
+    }
+  }, [user, planId, plan?.job_id])
 
   // Handle sidebar resize
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -461,11 +470,15 @@ export default function EnhancedPlanViewer() {
 
     try {
       // Load takeoff analysis
+      if (!plan?.job_id) {
+        console.error('Plan job_id not found')
+        return
+      }
+
       const { data: takeoffAnalysis } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
-        .eq('plan_id', planId)
-        .eq('user_id', user.id)
+        .eq('job_id', plan.job_id)
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
@@ -655,11 +668,15 @@ export default function EnhancedPlanViewer() {
     try {
       let rowId = takeoffAnalysisRowId
       if (!rowId) {
+        if (!plan?.job_id) {
+          console.error('Plan job_id not found')
+          return
+        }
+
         const { data } = await supabase
           .from('plan_takeoff_analysis')
           .select('id')
-          .eq('plan_id', planId)
-          .eq('user_id', user.id)
+          .eq('job_id', plan.job_id)
           .order('created_at', { ascending: false })
           .limit(1)
           .single()
@@ -689,7 +706,8 @@ export default function EnhancedPlanViewer() {
       description: it.description || it.item_description || it.name || 'Line item',
       quantity: typeof it.quantity === 'number' ? it.quantity : Number(it.quantity) || 1,
       unit: it.unit || 'unit',
-      unit_cost: typeof it.unit_cost === 'number' ? it.unit_cost : Number(it.unit_cost) || undefined
+      unit_cost: typeof it.unit_cost === 'number' ? it.unit_cost : Number(it.unit_cost) || undefined,
+      subcontractor: it.subcontractor || undefined
     }))
     setModalTakeoffItems(items)
   }, [persistTakeoffItems])
@@ -916,6 +934,11 @@ export default function EnhancedPlanViewer() {
     setAnalysisProgress({ step: `Converting ${pagesToConvert} page${pagesToConvert > 1 ? 's' : ''} to images...`, percent: 30 })
     
     for (let i = 0; i < pagesToProcess.length; i++) {
+      // Yield to main thread every 5 pages to keep UI responsive
+      if (i > 0 && i % 5 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+
       const pageNum = pagesToProcess[i]
       const progress = 30 + ((i + 1) / pagesToProcess.length) * 30
       setAnalysisProgress({ step: `Processing page ${pageNum} of ${totalPages} (${i + 1}/${pagesToProcess.length} selected)...`, percent: progress })
@@ -1544,9 +1567,11 @@ export default function EnhancedPlanViewer() {
           <div 
             className="flex-1 min-w-0"
             style={{ 
-              width: rightSidebarOpen && !isMobile && !isTablet 
+              width: rightSidebarOpen && !isMobile && !isTablet && !sidebarMaximized
                 ? `calc(100% - ${sidebarWidth}px - 1px)` 
-                : '100%' 
+                : sidebarMaximized
+                  ? '0%'
+                  : '100%' 
             }}
           >
             {planUrl ? (
@@ -1588,8 +1613,8 @@ export default function EnhancedPlanViewer() {
             )}
           </div>
 
-          {/* Resize Handle - Hidden on mobile/tablet */}
-          {rightSidebarOpen && !isMobile && !isTablet && (
+          {/* Resize Handle - Hidden on mobile/tablet and when maximized */}
+          {rightSidebarOpen && !isMobile && !isTablet && !sidebarMaximized && (
             <div
               className="w-1 bg-gray-200 hover:bg-gray-300 cursor-ew-resize transition-colors z-30 hidden lg:block"
               onMouseDown={handleMouseDown}
@@ -1600,14 +1625,20 @@ export default function EnhancedPlanViewer() {
           <AnimatePresence>
             {rightSidebarOpen && (
               <>
-                {/* Mobile/Tablet Overlay */}
-                {(isMobile || isTablet) && (
+                {/* Mobile/Tablet Overlay or Maximized Overlay */}
+                {(isMobile || isTablet || sidebarMaximized) && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="fixed inset-0 bg-black bg-opacity-50 z-40 md:z-30"
-                    onClick={() => setRightSidebarOpen(false)}
+                    onClick={() => {
+                      if (sidebarMaximized) {
+                        setSidebarMaximized(false)
+                      } else {
+                        setRightSidebarOpen(false)
+                      }
+                    }}
                   />
                 )}
                 
@@ -1618,7 +1649,7 @@ export default function EnhancedPlanViewer() {
                   animate="animate"
                   exit="exit"
                   className={`bg-white border-l border-gray-200 flex flex-col overflow-y-auto ${
-                    isMobile || isTablet 
+                    isMobile || isTablet || sidebarMaximized
                       ? 'fixed right-0 top-0 bottom-0 w-full z-50 shadow-xl h-screen' 
                       : 'relative'
                   }`}
@@ -1627,8 +1658,10 @@ export default function EnhancedPlanViewer() {
                       ? '100vw'
                       : isTablet
                         ? 'min(90vw, 520px)'
-                        : `${sidebarWidth}px`,
-                    ...(isMobile || isTablet 
+                        : sidebarMaximized
+                          ? '100vw'
+                          : `${sidebarWidth}px`,
+                    ...(isMobile || isTablet || sidebarMaximized
                       ? { height: '100vh' }
                       : { height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)' }
                     )
@@ -1638,14 +1671,31 @@ export default function EnhancedPlanViewer() {
                 <div className="p-3 md:p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-gray-900 text-base md:text-lg">Analysis</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setRightSidebarOpen(false)}
-                      className="h-9 w-9"
-                    >
-                      <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {!isMobile && !isTablet && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSidebarMaximized(!sidebarMaximized)}
+                          className="h-9 w-9"
+                          title={sidebarMaximized ? "Minimize sidebar" : "Maximize sidebar"}
+                        >
+                          {sidebarMaximized ? (
+                            <Minimize2 className="h-4 w-4 md:h-5 md:w-5" />
+                          ) : (
+                            <Maximize2 className="h-4 w-4 md:h-5 md:w-5" />
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setRightSidebarOpen(false)}
+                        className="h-9 w-9"
+                      >
+                        <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 
@@ -1730,7 +1780,7 @@ export default function EnhancedPlanViewer() {
                                   }
                                 </Badge>
                               </div>
-                              <TakeoffAccordion
+                              <TakeoffSpreadsheet
                                 items={takeoffResults.results?.items || []}
                                 summary={takeoffResults.results?.summary}
                                 onPageNavigate={handlePageNavigate}

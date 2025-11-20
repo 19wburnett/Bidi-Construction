@@ -23,7 +23,9 @@ import {
   Square,
   Hand,
   Move,
-  Trash2
+  Trash2,
+  PanelRightOpen,
+  PanelRightClose
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
@@ -647,13 +649,13 @@ export default function FastPlanCanvas({
   const renderDrawings = useCallback(() => {
     const canvas = drawingCanvasRef.current
     if (!canvas) {
-      console.warn('Canvas ref is null, cannot render drawings')
+      // console.warn('Canvas ref is null, cannot render drawings')
       return
     }
 
     const ctx = canvas.getContext('2d', { alpha: true })
     if (!ctx) {
-      console.warn('Could not get 2d context from canvas')
+      // console.warn('Could not get 2d context from canvas')
       return
     }
 
@@ -661,7 +663,7 @@ export default function FastPlanCanvas({
     try {
       // Test if canvas is accessible
       if (canvas.width === 0 || canvas.height === 0) {
-        console.warn('Canvas has zero dimensions:', { width: canvas.width, height: canvas.height })
+        // console.warn('Canvas has zero dimensions:', { width: canvas.width, height: canvas.height })
         return
       }
       
@@ -980,7 +982,7 @@ export default function FastPlanCanvas({
     }
 
     // Comments are now rendered as HTML elements, not on canvas
-  }, [drawings, selectedComment, currentMeasurement, viewport, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool])
+  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
@@ -1020,13 +1022,6 @@ export default function FastPlanCanvas({
       // Force re-render of drawings after canvas resize
       setTimeout(() => {
         renderDrawings()
-        console.log('Canvas resized and drawings rendered:', { 
-          width: canvas.width, 
-          height: canvas.height, 
-          styleWidth: canvas.style.width,
-          styleHeight: canvas.style.height,
-          comments: drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage).length
-        })
       }, 0)
     }
 
@@ -1086,11 +1081,6 @@ export default function FastPlanCanvas({
     renderDrawings()
   }, [drawings, renderDrawings])
   
-  // Re-render drawings when zoom changes to ensure alignment with PDF
-  useEffect(() => {
-    renderDrawings()
-  }, [viewport.zoom, renderDrawings])
-
 
   // Convert screen coordinates to world coordinates (for centered page view)
   // Note: Zoom is applied via CSS transform, so coordinates are stored at base scale
@@ -1804,215 +1794,11 @@ export default function FastPlanCanvas({
   // The Document component will handle its own loading state
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Top Toolbar */}
-      <div className="flex items-center justify-between p-2 md:p-4 bg-white border-b border-gray-200 flex-wrap gap-2">
-        <div className="flex items-center space-x-1 md:space-x-2 flex-wrap min-w-0 flex-1">
-          {/* PDF Error Warning */}
-          {pdfError && (
-            <div className="flex items-center space-x-1 md:space-x-2 px-2 md:px-3 py-1 bg-yellow-100 border border-yellow-300 rounded-md text-xs md:text-sm">
-              <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 text-yellow-600 flex-shrink-0" />
-              <span className="text-yellow-700 truncate">{pdfError}</span>
-            </div>
-          )}
-
-          {/* Pan Tool - Always Visible */}
-          <div className="flex items-center space-x-1 border-r border-gray-200 pr-2 md:pr-4">
-            <Button
-              variant={selectedTool === 'none' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => {
-                if (isDrawingMeasurement) {
-                  finalizeMeasurement()
-                }
-                setSelectedTool('none')
-              }}
-              title="Pan view"
-              className="h-8 md:h-9"
-            >
-              <Hand className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
-              <span className="text-xs md:text-sm hidden sm:inline">Pan</span>
-            </Button>
-          </div>
-
-          {/* Comment Tool */}
-          <div className="flex items-center space-x-1 border-r border-gray-200 pr-2 md:pr-4">
-            <Button
-              variant={selectedTool === 'comment' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setSelectedTool('comment')}
-              title="Add comment"
-              className="h-8 md:h-9"
-            >
-              <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
-              <span className="text-xs md:text-sm hidden sm:inline">Add Comment</span>
-            </Button>
-          </div>
-
-          {/* Measurement Tools */}
-          <div className="flex items-center space-x-1 border-r border-gray-200 pr-2 md:pr-4">
-            <Button
-              variant={selectedTool === 'measurement_line' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => {
-                if (isDrawingMeasurement) {
-                  finalizeMeasurement()
-                }
-                setSelectedTool('measurement_line')
-              }}
-              title="Measurement Line (M)"
-              className="h-8 md:h-9"
-            >
-              <Ruler className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
-              <span className="text-xs md:text-sm hidden sm:inline">Measure Line</span>
-            </Button>
-            <Button
-              variant={selectedTool === 'measurement_area' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => {
-                if (isDrawingMeasurement) {
-                  finalizeMeasurement()
-                }
-                setSelectedTool('measurement_area')
-              }}
-              title="Measurement Area (A)"
-              className="h-8 md:h-9"
-            >
-              <Square className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
-              <span className="text-xs md:text-sm hidden sm:inline">Measure Area</span>
-            </Button>
-            <Button
-              variant={selectedTool === 'measurement_edit' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => {
-                if (isDrawingMeasurement) {
-                  finalizeMeasurement()
-                }
-                setCurrentMeasurement(null)
-                setIsDrawingMeasurement(false)
-                setSelectedTool('measurement_edit')
-              }}
-              title="Adjust Measurements (E)"
-              className="h-8 md:h-9"
-            >
-              <Move className="h-3 w-3 md:h-4 md:w-4 md:mr-2" />
-              <span className="text-xs md:text-sm hidden sm:inline">Adjust Lines</span>
-            </Button>
-          </div>
-
-          {/* Zoom Controls */}
-          <div className="flex items-center space-x-1 md:space-x-2">
-            <Button variant="ghost" size="sm" onClick={handleZoomOut} className="h-8 md:h-9">
-              <ZoomOut className="h-3 w-3 md:h-4 md:w-4" />
-            </Button>
-            <span className="text-xs md:text-sm text-gray-600 min-w-[50px] md:min-w-[60px] text-center">
-              {Math.round(viewport.zoom * 100)}%
-            </span>
-            <Button variant="ghost" size="sm" onClick={handleZoomIn} className="h-8 md:h-9">
-              <ZoomIn className="h-3 w-3 md:h-4 md:w-4" />
-            </Button>
-            {onOpenScaleSettings && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={onOpenScaleSettings}
-                title="Scale Settings"
-                className="h-8 md:h-9"
-              >
-                <Settings className="h-3 w-3 md:h-4 md:w-4" />
-              </Button>
-            )}
-            <div className="group relative hidden md:block">
-              <Button variant="ghost" size="sm" className="px-2 h-8 md:h-9">
-                <Info className="h-3 w-3 md:h-4 md:w-4 text-gray-400" />
-              </Button>
-              <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block z-50">
-                <div className="bg-gray-900 text-white text-xs rounded-lg p-2 w-48 shadow-lg">
-                  <div className="font-semibold mb-1">Navigation Tips:</div>
-                  <div>• Scroll to pan</div>
-                  <div>• Ctrl/Cmd + Scroll to zoom</div>
-                  <div>• Click comment tool to add notes</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Page Navigation Controls */}
-          {numPages > 1 && (
-            <div className="flex items-center space-x-1 md:space-x-2 border-r border-gray-200 pr-2 md:pr-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (currentPage > 1) {
-                    setCurrentPage(currentPage - 1)
-                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 })) // Reset pan when changing pages
-                  }
-                }}
-                disabled={currentPage <= 1}
-                className="h-8 md:h-9"
-              >
-                <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
-              </Button>
-              <form
-                onSubmit={handlePageInputFormSubmit}
-                className="flex items-center space-x-1 md:space-x-2"
-                noValidate
-              >
-                <span className="text-xs md:text-sm text-gray-600 hidden sm:inline">Page</span>
-                <Input
-                  value={pageInputValue}
-                  onChange={handlePageInputChange}
-                  onBlur={handlePageInputBlur}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  aria-label="Go to page"
-                  className="h-8 md:h-9 w-16 text-center text-xs md:text-sm"
-                />
-              </form>
-              <span className="text-xs md:text-sm text-gray-600 hidden sm:inline">
-                of {numPages}
-              </span>
-              <span className="text-xs text-gray-600 sm:hidden">/ {numPages}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (currentPage < numPages) {
-                    setCurrentPage(currentPage + 1)
-                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 })) // Reset pan when changing pages
-                  }
-                }}
-                disabled={currentPage >= numPages}
-                className="h-8 md:h-9"
-              >
-                <ChevronRight className="h-3 w-3 md:h-4 md:w-4" />
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {/* Right Sidebar Toggle - Hidden on mobile since sidebar is a drawer */}
-        <div className="flex items-center space-x-2 hidden md:flex">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onRightSidebarToggle}
-            className="h-8 md:h-9"
-          >
-            {rightSidebarOpen ? (
-              <ChevronRight className="h-3 w-3 md:h-4 md:w-4" />
-            ) : (
-              <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      {/* Canvas Container */}
+    <div className="relative h-full w-full bg-gray-100 overflow-hidden">
+      {/* Canvas Container - Now fills the whole space */}
       <div 
         ref={containerRef}
-        className="flex-1 relative overflow-hidden bg-gray-100"
+        className="absolute inset-0 overflow-hidden"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -2026,7 +1812,7 @@ export default function FastPlanCanvas({
                  (selectedTool === 'comment' || selectedTool === 'measurement_line' || selectedTool === 'measurement_area') ? 'crosshair' : 'default'
         }}
       >
-        {/* Scale Indicator */}
+        {/* Scale Indicator - Floating Top Left */}
         {(() => {
           const scaleSetting = getScaleSetting(currentPage)
           if (!scaleSetting) {
@@ -2041,7 +1827,7 @@ export default function FastPlanCanvas({
           }
           return scaleSetting
         })() ? (
-          <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-md shadow-lg border border-gray-200 z-20">
+          <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-md shadow-lg border border-gray-200 z-20 pointer-events-none">
             <div className="text-xs font-semibold text-gray-700">
               Scale: {getScaleSetting(currentPage)?.ratio}
             </div>
@@ -2050,7 +1836,7 @@ export default function FastPlanCanvas({
             </div>
           </div>
         ) : (
-          <div className="absolute top-4 left-4 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded-md shadow-lg z-20">
+          <div className="absolute top-4 left-4 bg-yellow-50 border border-yellow-200 px-3 py-2 rounded-md shadow-lg z-20 pointer-events-auto">
             <div className="text-xs font-semibold text-yellow-700 flex items-center gap-2">
               <AlertTriangle className="h-3 w-3" />
               Scale not set
@@ -2063,6 +1849,7 @@ export default function FastPlanCanvas({
             </button>
           </div>
         )}
+
         {/* PDF Page - Paginated view (single page) */}
         {!pdfError && pdfUrl && documentReady && numPages > 0 && workerReady ? (
           <div
@@ -2267,11 +2054,7 @@ export default function FastPlanCanvas({
             alignItems: 'center',
             justifyContent: 'center'
           }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onDoubleClick={handleDoubleClick}
+          // Events already attached to container, removed here to avoid duplication/bubbling issues
         >
           <canvas
             ref={drawingCanvasRef}
@@ -2363,29 +2146,206 @@ export default function FastPlanCanvas({
           />
         )}
       </div>
+
+      {/* Floating UI Elements */}
+
+      {/* Top Right: Right Sidebar Toggle & Error */}
+      <div className="absolute top-4 right-4 z-50 flex flex-col gap-2 items-end pointer-events-none">
+        {/* PDF Error */}
+        {pdfError && (
+          <div className="pointer-events-auto flex items-center space-x-2 px-3 py-2 bg-red-100 border border-red-200 text-red-700 rounded-md shadow-sm text-sm mb-2">
+            <AlertTriangle className="h-4 w-4" />
+            <span>{pdfError}</span>
+          </div>
+        )}
+        
+        {/* Right Sidebar Toggle */}
+        <div className="pointer-events-auto">
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={onRightSidebarToggle}
+            className="h-10 w-10 rounded-full shadow-md bg-white/90 hover:bg-white backdrop-blur-sm border border-gray-200"
+            title="Toggle Details Panel"
+          >
+            {rightSidebarOpen ? (
+              <PanelRightClose className="h-5 w-5" />
+            ) : (
+              <PanelRightOpen className="h-5 w-5" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Bottom Center: Tools Dock */}
+      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50 pointer-events-auto">
+        <div className="flex items-center gap-1 p-2 bg-white/90 backdrop-blur-md border border-gray-200 shadow-xl rounded-full">
+          {/* Pan */}
+           <Button 
+             variant={selectedTool === 'none' ? 'default' : 'ghost'} 
+             size="icon" 
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('none')
+             }}
+             title="Pan (P)"
+             className="rounded-full h-10 w-10"
+           >
+             <Hand className="h-5 w-5" />
+           </Button>
+           
+           <div className="w-px h-6 bg-gray-200 mx-1" />
+           
+           {/* Comment */}
+           <Button 
+             variant={selectedTool === 'comment' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => setSelectedTool('comment')}
+             title="Add Comment (C)"
+             className="rounded-full h-10 w-10"
+           >
+             <MessageSquare className="h-5 w-5" />
+           </Button>
+           
+           <div className="w-px h-6 bg-gray-200 mx-1" />
+           
+           {/* Measurements */}
+           <Button 
+             variant={selectedTool === 'measurement_line' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('measurement_line')
+             }}
+             title="Measure Line (M)"
+             className="rounded-full h-10 w-10"
+           >
+             <Ruler className="h-5 w-5" />
+           </Button>
+           <Button 
+             variant={selectedTool === 'measurement_area' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('measurement_area')
+             }}
+             title="Measure Area (A)"
+             className="rounded-full h-10 w-10"
+           >
+             <Square className="h-5 w-5" />
+           </Button>
+           <Button 
+             variant={selectedTool === 'measurement_edit' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setCurrentMeasurement(null)
+                setIsDrawingMeasurement(false)
+                setSelectedTool('measurement_edit')
+             }}
+             title="Edit Measurements (E)"
+             className="rounded-full h-10 w-10"
+           >
+             <Move className="h-5 w-5" />
+           </Button>
+        </div>
+      </div>
+
+      {/* Bottom Right: Navigation & Zoom */}
+      <div className="absolute bottom-8 right-8 z-50 flex flex-col items-end gap-3 pointer-events-none">
+         {/* Zoom Controls */}
+         <div className="pointer-events-auto flex items-center gap-1 bg-white/90 backdrop-blur-md border border-gray-200 shadow-lg rounded-full p-1.5">
+            <Button variant="ghost" size="icon" onClick={handleZoomOut} className="h-8 w-8 rounded-full hover:bg-gray-100" title="Zoom Out"><ZoomOut className="h-4 w-4" /></Button>
+            <span className="text-xs font-medium w-12 text-center select-none">{Math.round(viewport.zoom * 100)}%</span>
+            <Button variant="ghost" size="icon" onClick={handleZoomIn} className="h-8 w-8 rounded-full hover:bg-gray-100" title="Zoom In"><ZoomIn className="h-4 w-4" /></Button>
+            
+            {/* Scale Settings Button */}
+             <div className="w-px h-4 bg-gray-200 mx-1" />
+             <Button variant="ghost" size="icon" onClick={onOpenScaleSettings} className="h-8 w-8 rounded-full hover:bg-gray-100" title="Scale Settings"><Settings className="h-4 w-4" /></Button>
+         </div>
+
+         {/* Page Nav */}
+         {numPages > 1 && (
+           <div className="pointer-events-auto flex items-center gap-1 bg-white/90 backdrop-blur-md border border-gray-200 shadow-lg rounded-full p-1.5">
+             <Button 
+               variant="ghost" 
+               size="icon" 
+               onClick={() => {
+                  if (currentPage > 1) {
+                    setCurrentPage(currentPage - 1)
+                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 }))
+                  }
+               }}
+               disabled={currentPage <= 1}
+               className="h-8 w-8 rounded-full hover:bg-gray-100"
+             >
+               <ChevronLeft className="h-4 w-4" />
+             </Button>
+             <form
+                onSubmit={handlePageInputFormSubmit}
+                className="flex items-center justify-center"
+                noValidate
+              >
+                <Input
+                  value={pageInputValue}
+                  onChange={handlePageInputChange}
+                  onBlur={handlePageInputBlur}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label="Go to page"
+                  className="h-7 w-12 text-center p-0 border-none bg-transparent focus-visible:ring-0 text-sm font-medium"
+                />
+                <span className="text-xs text-gray-500 mr-2 select-none">/ {numPages}</span>
+              </form>
+             <Button 
+               variant="ghost" 
+               size="icon" 
+               onClick={() => {
+                  if (currentPage < numPages) {
+                    setCurrentPage(currentPage + 1)
+                    setViewport(prev => ({ ...prev, panX: 0, panY: 0 }))
+                  }
+               }}
+               disabled={currentPage >= numPages}
+               className="h-8 w-8 rounded-full hover:bg-gray-100"
+             >
+               <ChevronRight className="h-4 w-4" />
+             </Button>
+           </div>
+         )}
+      </div>
+      
+      {/* Measurement Edit Overlay (Floating Bottom Left, pushed up slightly) */}
       {selectedTool === 'measurement_edit' && editingMeasurement && (
-        <div className="fixed bottom-4 left-4 z-[60]">
-          <div className="pointer-events-auto rounded-md border border-gray-200 bg-white/95 shadow-lg backdrop-blur px-4 py-3 w-72 space-y-3">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Measurement editing</p>
-              <p className="text-xs text-gray-600 mt-1">
-                Drag the highlighted handles to adjust points. Press Delete/Backspace or use the button below to remove the line.
-              </p>
+        <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-[60] pointer-events-auto">
+          <div className="rounded-full border border-gray-200 bg-white/95 shadow-lg backdrop-blur px-4 py-2 flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="font-medium">Editing</span>
+              <span className="text-gray-400">|</span>
+              <span className="text-xs">Drag points to adjust</span>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <Button
                 variant="destructive"
                 size="sm"
-                className="h-8"
+                className="h-7 text-xs rounded-full px-3"
                 onClick={() => deleteMeasurement(editingMeasurement.id)}
               >
-                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                Remove line
+                <Trash2 className="h-3 w-3 mr-1.5" />
+                Delete
               </Button>
               <Button
-                variant="ghost"
+                variant="default"
                 size="sm"
-                className="h-8"
+                className="h-7 text-xs rounded-full px-3"
                 onClick={() => {
                   setEditingMeasurement(null)
                   setIsAdjustingMeasurement(false)

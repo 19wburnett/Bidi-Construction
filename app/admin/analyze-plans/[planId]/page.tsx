@@ -261,11 +261,23 @@ export default function AdminAnalyzePlanPage() {
     try {
       const supabase = createClient()
 
+      // Load plan first to get job_id
+      const { data: planData } = await supabase
+        .from('plans')
+        .select('job_id')
+        .eq('id', planId)
+        .single()
+
+      if (!planData) {
+        console.error('Plan not found')
+        return
+      }
+
       // Load takeoff analysis
       const { data: takeoffData } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
-        .eq('plan_id', planId)
+        .eq('job_id', planData.job_id)
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
@@ -553,14 +565,18 @@ export default function AdminAnalyzePlanPage() {
           total_cost: takeoffItems.reduce((sum, i) => sum + (i.quantity * (i.unit_cost || 0)), 0)
         }
 
+        if (!plan?.job_id) {
+          console.error('Plan job_id not found')
+          throw new Error('Plan job_id not found')
+        }
+
         const { error: takeoffError } = await supabase
           .from('plan_takeoff_analysis')
           .upsert({
-            plan_id: planId,
-            user_id: user.id,
+            job_id: plan.job_id,
             items: takeoffItems,
             summary
-          }, { onConflict: 'plan_id' })
+          }, { onConflict: 'job_id' })
 
         if (takeoffError) {
           console.error('Error saving takeoff analysis:', takeoffError)

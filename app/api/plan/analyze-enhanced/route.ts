@@ -187,10 +187,32 @@ export async function POST(request: NextRequest) {
           jobs!inner(project_type)
         `)
         .eq('id', planId)
-        .eq('user_id', userId)
         .single()
 
       if (!planError && planForJobType) {
+        // Verify access for non-admins
+        if (!isAdmin) {
+          const { data: jobMember } = await supabase
+            .from('job_members')
+            .select('job_id')
+            .eq('job_id', planForJobType.job_id)
+            .eq('user_id', userId)
+            .single()
+          
+          const { data: job } = await supabase
+            .from('jobs')
+            .select('user_id')
+            .eq('id', planForJobType.job_id)
+            .single()
+          
+          if (!jobMember && job?.user_id !== userId) {
+            return NextResponse.json(
+              { error: 'Plan not found or access denied' },
+              { status: 404 }
+            )
+          }
+        }
+        
         const projectType = (planForJobType as any).jobs?.project_type
         finalJobType = projectType === 'Commercial' ? 'commercial' : 'residential'
       }
@@ -203,8 +225,30 @@ export async function POST(request: NextRequest) {
         .from('plans')
         .select('id, job_id, title, file_name')
         .eq('id', planId)
-        .eq('user_id', userId)
         .single()
+      
+      // Verify access
+      if (plan) {
+        const { data: jobMember } = await supabase
+          .from('job_members')
+          .select('job_id')
+          .eq('job_id', plan.job_id)
+          .eq('user_id', userId)
+          .single()
+        
+        const { data: job } = await supabase
+          .from('jobs')
+          .select('user_id')
+          .eq('id', plan.job_id)
+          .single()
+        
+        if (!jobMember && job?.user_id !== userId) {
+          return NextResponse.json(
+            { error: 'Plan not found or access denied' },
+            { status: 404 }
+          )
+        }
+      }
 
       if (planError || !plan) {
         return NextResponse.json(
@@ -326,12 +370,35 @@ export async function POST(request: NextRequest) {
     // Attempt to fetch plan file and extract text for hybrid analysis
     let extractedText = ''
     try {
-      const { data: planRow, error: planLoadError } = await supabase
+      let planRow: any = null
+      const { data: planData, error: planLoadError } = await supabase
         .from('plans')
-        .select('*')
+        .select('*, job_id')
         .eq('id', planId)
-        .eq('user_id', userId)
         .single()
+      
+      // Verify access for non-admins
+      if (!isAdmin && planData) {
+        const { data: jobMember } = await supabase
+          .from('job_members')
+          .select('job_id')
+          .eq('job_id', planData.job_id)
+          .eq('user_id', userId)
+          .single()
+        
+        const { data: job } = await supabase
+          .from('jobs')
+          .select('user_id')
+          .eq('id', planData.job_id)
+          .single()
+        
+        if (jobMember || job?.user_id === userId) {
+          planRow = planData
+        }
+        // If access denied, planRow stays null and we skip text extraction
+      } else if (isAdmin) {
+        planRow = planData
+      }
 
       if (!planLoadError && planRow && planRow.file_path) {
         let fileUrl: string = planRow.file_path
@@ -521,11 +588,25 @@ export async function POST(request: NextRequest) {
 
     // Save takeoff analysis (always, if items exist or if taskType is takeoff)
     if (taskType === 'takeoff' || (consensusResult.items && consensusResult.items.length > 0)) {
+      // Get plan's job_id
+      const { data: planForJob, error: planJobError } = await supabase
+        .from('plans')
+        .select('job_id')
+        .eq('id', planId)
+        .single()
+      
+      if (planJobError || !planForJob) {
+        console.error('Error getting plan job_id:', planJobError)
+        return NextResponse.json(
+          { error: 'Plan not found' },
+          { status: 404 }
+        )
+      }
+
       const { data: takeoffAnalysis, error: takeoffError } = await supabase
         .from('plan_takeoff_analysis')
         .insert({
-          plan_id: planId,
-          user_id: userId,
+          job_id: planForJob.job_id,
           items: consensusResult.items || [],
           summary: {
             total_items: consensusResult.items?.length || 0,
@@ -558,7 +639,6 @@ export async function POST(request: NextRequest) {
             has_takeoff_analysis: true
           })
           .eq('id', planId)
-          .eq('user_id', userId)
       }
     }
 
@@ -608,10 +688,9 @@ export async function POST(request: NextRequest) {
           .from('plans')
           .update({ 
             quality_analysis_status: 'completed',
-            has_quality_analysis: true
-          })
-          .eq('id', planId)
-          .eq('user_id', userId)
+          has_quality_analysis: true
+        })
+        .eq('id', planId)
       }
     }
 
@@ -1187,8 +1266,27 @@ async function runOrchestratorAnalysis(
       .from('plans')
       .select('*')
       .eq('id', planId)
-      .eq('user_id', userId)
       .single()
+    
+    // Verify access for non-admins
+    if (!isAdmin && plan) {
+      const { data: jobMember } = await supabase
+        .from('job_members')
+        .select('job_id')
+        .eq('job_id', plan.job_id)
+        .eq('user_id', userId)
+        .single()
+      
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('user_id')
+        .eq('id', plan.job_id)
+        .single()
+      
+      if (!jobMember && job?.user_id !== userId) {
+        return null
+      }
+    }
 
     if (planError || !plan) {
       console.warn('Plan not found for orchestrator')
@@ -1269,8 +1367,7 @@ async function runOrchestratorAnalysis(
 
     // Save results
     const takeoffAnalysisData = {
-      plan_id: planId,
-      user_id: userId,
+      job_id: plan.job_id,
       items: result.final_json.items,
       summary: {
         total_items: result.final_json.items.length,
@@ -1308,7 +1405,6 @@ async function runOrchestratorAnalysis(
           has_takeoff_analysis: true
         })
         .eq('id', planId)
-        .eq('user_id', userId)
     }
 
     // Save quality analysis
@@ -1352,7 +1448,6 @@ async function runOrchestratorAnalysis(
           has_quality_analysis: true
         })
         .eq('id', planId)
-        .eq('user_id', userId)
     }
 
     // Build response with detailed orchestrator info

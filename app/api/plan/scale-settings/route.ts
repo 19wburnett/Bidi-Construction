@@ -18,10 +18,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 })
     }
 
-    // Verify user has access to this plan
+    // Verify user has access to this plan (RLS policies will handle access control)
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('id, user_id')
+      .select('id')
       .eq('id', planId)
       .single()
 
@@ -96,10 +96,10 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Verify user has access to this plan
+    // Verify user has access to this plan (RLS policies will handle access control)
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('id, user_id')
+      .select('id')
       .eq('id', planId)
       .single()
 

@@ -57,15 +57,43 @@ export async function POST(request: NextRequest) {
 
     const isAdmin = userData && (userData.role === 'admin' || userData.is_admin === true)
 
-    // Query plan - if admin, don't filter by user_id
+    // Query plan - if admin, don't filter by job membership
     const planQuery = supabase
       .from('plans')
-      .select('*')
+      .select('*, jobs!inner(id, user_id)')
       .eq('id', planId)
 
-    const { data: plan, error: planError } = isAdmin
-      ? await planQuery.single()
-      : await planQuery.eq('user_id', user.id).single()
+    let plan
+    let planError
+    
+    if (isAdmin) {
+      const result = await planQuery.single()
+      plan = result.data
+      planError = result.error
+    } else {
+      // For non-admins, check job membership via job_id
+      const result = await planQuery.single()
+      if (result.data) {
+        // Verify user has access to the job
+        const { data: jobMember } = await supabase
+          .from('job_members')
+          .select('role')
+          .eq('job_id', result.data.job_id)
+          .eq('user_id', user.id)
+          .single()
+        
+        if (!jobMember && result.data.jobs?.user_id !== user.id) {
+          planError = { message: 'Access denied' }
+          plan = null
+        } else {
+          plan = result.data
+          planError = result.error
+        }
+      } else {
+        plan = result.data
+        planError = result.error
+      }
+    }
 
     if (planError || !plan) {
       return NextResponse.json(

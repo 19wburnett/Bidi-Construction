@@ -33,6 +33,7 @@ export interface TakeoffItem {
   total_cost?: number
   category: string
   subcategory?: string
+  subcontractor?: string
   cost_code?: string
   cost_code_description?: string
   location?: string
@@ -86,7 +87,7 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
   // Ensure items is always an array
   const safeItems = Array.isArray(items) ? items : []
 
-  // Organize items into 3-level hierarchy
+  // Organize items into 3-level hierarchy: Category → Subcontractor → Items
   // Note: Items with parent_id are excluded from main hierarchy - they only appear as sub-items
   const { hierarchy, categoryDisplayName } = useMemo(() => {
     const organized: Record<string, Record<string, TakeoffItem[]>> = {}
@@ -100,21 +101,22 @@ export default function TakeoffAccordion({ items, summary, onItemHighlight, onPa
 
       const rawCategory = (item.category || 'Other').trim()
       const categoryKey = rawCategory.toLowerCase()
-      const subcategory = item.subcategory || 'Uncategorized'
+      // Use subcontractor as the subcategory level, default to "Unassigned"
+      const subcontractor = item.subcontractor || 'Unassigned'
 
       if (!organized[categoryKey]) {
         organized[categoryKey] = {}
       }
 
-      if (!organized[categoryKey][subcategory]) {
-        organized[categoryKey][subcategory] = []
+      if (!organized[categoryKey][subcontractor]) {
+        organized[categoryKey][subcontractor] = []
       }
 
       if (!displayName[categoryKey]) {
         displayName[categoryKey] = rawCategory
       }
 
-      organized[categoryKey][subcategory].push(item)
+      organized[categoryKey][subcontractor].push(item)
     })
 
     return { hierarchy: organized, categoryDisplayName: displayName }
