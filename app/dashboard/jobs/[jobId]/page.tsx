@@ -1021,8 +1021,8 @@ export default function JobDetailPage() {
                       <div className="space-y-2 max-w-md mx-auto">
                         {plans.map((plan) => {
                           const hasTakeoff = plan.takeoff_analysis_status === 'completed' || plan.has_takeoff_analysis === true
-                          const takeoffDate = plan.latest_takeoff_analysis?.created_at 
-                            ? new Date(plan.latest_takeoff_analysis.created_at).toLocaleDateString()
+                          const takeoffDate = (plan as any).latest_takeoff_analysis?.created_at 
+                            ? new Date((plan as any).latest_takeoff_analysis.created_at).toLocaleDateString()
                             : null
                           return (
                             <div key={plan.id} className="flex items-center justify-between p-3 border rounded-lg text-left">
