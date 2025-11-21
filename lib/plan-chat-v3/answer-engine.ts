@@ -160,10 +160,18 @@ export async function generateAnswer(
 
     let answer = completion.choices[0]?.message?.content?.trim()
 
-    // Fallback if answer is empty
-    if (!answer || answer.length < 10) {
+    // Fallback if answer is empty or too short (but be less aggressive)
+    // Only trigger fallback if answer is truly empty or just whitespace/punctuation
+    const isEmptyAnswer = !answer || answer.trim().length < 5 || answer.trim().match(/^[.,!?\s]+$/)
+
+    if (isEmptyAnswer) {
+      // Check if we have any context to work with
+      const hasTakeoffData = context.takeoff_context.items.length > 0
+      const hasBlueprintData = context.blueprint_context.chunks.length > 0
+      const hasProjectMetadata = context.project_metadata !== null
+
       if (mode === 'TAKEOFF') {
-        if (context.takeoff_context.items.length > 0) {
+        if (hasTakeoffData) {
           const totalQty = context.takeoff_context.summary.total_quantity
           const totalCost = context.takeoff_context.summary.total_cost
           if (totalQty) {
@@ -176,12 +184,34 @@ export async function generateAnswer(
             } in the takeoff.`
           }
         } else {
-          answer = "I don't see any matching items in the takeoff data for that question."
+          answer = "I don't see any matching items in the takeoff data for that question. Make sure takeoff analysis has been run for this plan."
         }
       } else {
-        answer =
-          "I couldn't find enough information to answer that question. Could you rephrase or provide more context?"
+        // COPILOT mode - provide more helpful fallback
+        if (hasTakeoffData || hasBlueprintData || hasProjectMetadata) {
+          // We have context but LLM didn't generate answer - try to provide something useful
+          const contextParts: string[] = []
+          
+          if (hasTakeoffData) {
+            contextParts.push(`${context.takeoff_context.items.length} takeoff item${context.takeoff_context.items.length === 1 ? '' : 's'}`)
+          }
+          if (hasBlueprintData) {
+            contextParts.push(`${context.blueprint_context.chunks.length} blueprint snippet${context.blueprint_context.chunks.length === 1 ? '' : 's'}`)
+          }
+          if (hasProjectMetadata && context.project_metadata?.plan_title) {
+            contextParts.push(`project "${context.project_metadata.plan_title}"`)
+          }
+
+          answer = `I found ${contextParts.join(' and ')}, but I'm having trouble generating a specific answer. Could you rephrase your question or ask about something more specific?`
+        } else {
+          answer = "I don't have takeoff or blueprint data for this plan yet. Please run the takeoff analysis or plan ingestion first, then try again."
+        }
       }
+    }
+
+    // Ensure answer is always a string
+    if (!answer) {
+      answer = "I'm sorry, I couldn't generate a response. Please try again."
     }
 
     // Step 6: Persist to memory (async, don't wait)
