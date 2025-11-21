@@ -147,7 +147,7 @@ export async function generateAnswer(
     const requestConfig: any = {
       model: OPENAI_MODEL,
       messages: messages as any,
-      max_completion_tokens: mode === 'TAKEOFF' ? 400 : 800, // Shorter for takeoff mode
+      max_completion_tokens: mode === 'TAKEOFF' ? 400 : 1200, // Increased for copilot mode to allow longer answers
     }
 
     // Only add temperature for models that support custom values

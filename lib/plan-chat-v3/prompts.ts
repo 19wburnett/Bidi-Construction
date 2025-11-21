@@ -102,13 +102,19 @@ CONVERSATION MEMORY:
 
 CONTEXT USAGE:
 - Use ALL available context: conversation history, project metadata, takeoff items, blueprint snippets, related sheets
+- You MUST synthesize the provided context into a helpful answer - don't just say you can't find information
+- If blueprint snippets are provided, USE THEM to answer questions about the project, materials, scope, etc.
+- If takeoff items are provided, USE THEM to provide specific quantities, costs, and item details
 - Explain WHY you're including certain information: "Because you asked about waterproofing, I also checked the general notes on page G5."
 - Be transparent about what you know and what you don't: "I can see the quantities, but I don't have visibility into the unit costs for this category."
 
 UNCERTAINTY HANDLING:
-- If unsure, explain what additional info is needed
+- If context is provided but doesn't directly answer the question, synthesize what IS available and provide related insights
+- Don't say "I couldn't find information" if context is provided - use what's available
 - Don't hallucinate inaccessible architectural details
 - Be clear about confidence levels: "This seems likely based on the specs, but you should verify with the architect."
+
+CRITICAL: When context is provided in the user message, you MUST use it to answer. Do not return empty or generic responses.
 
 Remember: You're a teammate, not a calculator. Think, reason, and help the user understand their project better.`
 
@@ -182,14 +188,35 @@ export function buildUserPrompt(
 
   parts.push(JSON.stringify(contextObj, null, 2))
 
+  // Add explicit instructions about what data is available
+  const availableData: string[] = []
+  if (context.takeoff_context && context.takeoff_context.items.length > 0) {
+    availableData.push(`${context.takeoff_context.items.length} takeoff items`)
+  }
+  if (context.blueprint_context && context.blueprint_context.chunks.length > 0) {
+    availableData.push(`${context.blueprint_context.chunks.length} blueprint text snippets`)
+  }
+  if (context.project_metadata) {
+    availableData.push('project metadata')
+  }
+  if (context.related_sheets && context.related_sheets.length > 0) {
+    availableData.push(`${context.related_sheets.length} related sheet references`)
+  }
+
   parts.push(`
-Instructions:
-- Answer the user's question conversationally.
-- Use the provided context.
-- If unsure, explain what additional info is needed.
-- Do not hallucinate inaccessible architectural details.
-- Provide reasoning + suggestions when helpful (copilot mode).
-- Reference previous conversation turns naturally when relevant.`)
+CRITICAL INSTRUCTIONS:
+- You MUST answer the user's question using the context provided above.
+- Available data: ${availableData.length > 0 ? availableData.join(', ') : 'limited context'}
+- If you have blueprint snippets, USE THEM to answer the question. Summarize and synthesize the information.
+- If you have takeoff items, USE THEM to provide specific quantities, costs, or item details.
+- If you have project metadata, USE IT to provide context about the project.
+- DO NOT say "I couldn't find enough information" if context is provided above.
+- Synthesize the available information into a helpful answer.
+- Be conversational and helpful - act like an expert estimator teammate.
+- If the context doesn't directly answer the question, use it to provide related insights or ask clarifying questions.
+- Reference specific pages, sheets, or items when relevant.
+
+Answer the user's question now:`)
 
   return parts.join('\n\n')
 }
