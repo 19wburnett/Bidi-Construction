@@ -139,12 +139,24 @@ export async function generateAnswer(
   messages.push({ role: 'user', content: userPrompt })
 
   try {
-    const completion = await openaiClient.chat.completions.create({
+    // Some OpenAI models don't support custom temperature - only default (1) is allowed
+    // Models that require default temperature: gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini
+    const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
+    const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(OPENAI_MODEL)
+
+    const requestConfig: any = {
       model: OPENAI_MODEL,
       messages: messages as any,
       max_completion_tokens: mode === 'TAKEOFF' ? 400 : 800, // Shorter for takeoff mode
-      temperature: mode === 'TAKEOFF' ? 0.1 : 0.7, // Lower temperature for deterministic mode
-    })
+    }
+
+    // Only add temperature for models that support custom values
+    if (supportsCustomTemperature) {
+      requestConfig.temperature = mode === 'TAKEOFF' ? 0.1 : 0.7 // Lower temperature for deterministic mode
+    }
+    // Models without custom temperature support will use default (1.0)
+
+    const completion = await openaiClient.chat.completions.create(requestConfig)
 
     let answer = completion.choices[0]?.message?.content?.trim()
 
