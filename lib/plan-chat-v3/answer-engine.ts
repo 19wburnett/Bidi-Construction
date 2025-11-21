@@ -160,9 +160,19 @@ export async function generateAnswer(
 
     let answer = completion.choices[0]?.message?.content?.trim()
 
+    // Log what we got from LLM for debugging
+    if (process.env.NODE_ENV === 'development' || process.env.PLAN_CHAT_V3_DEBUG === 'true') {
+      console.log('[PlanChatV3] LLM response:', {
+        answerLength: answer?.length || 0,
+        answerPreview: answer?.substring(0, 100) || 'empty',
+        hasBlueprint: context.blueprint_context.chunks.length > 0,
+        hasTakeoff: context.takeoff_context.items.length > 0,
+      })
+    }
+
     // Fallback if answer is empty or too short (but be less aggressive)
     // Only trigger fallback if answer is truly empty or just whitespace/punctuation
-    const isEmptyAnswer = !answer || answer.trim().length < 5 || answer.trim().match(/^[.,!?\s]+$/)
+    const isEmptyAnswer = !answer || answer.trim().length < 10 || answer.trim().match(/^[.,!?\s]+$/)
 
     if (isEmptyAnswer) {
       // Check if we have any context to work with

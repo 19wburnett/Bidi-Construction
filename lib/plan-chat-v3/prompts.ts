@@ -186,37 +186,91 @@ export function buildUserPrompt(
     contextObj.notes = context.notes
   }
 
-  parts.push(JSON.stringify(contextObj, null, 2))
+  // Format context more naturally instead of raw JSON
+  const contextParts: string[] = []
 
-  // Add explicit instructions about what data is available
-  const availableData: string[] = []
-  if (context.takeoff_context && context.takeoff_context.items.length > 0) {
-    availableData.push(`${context.takeoff_context.items.length} takeoff items`)
-  }
-  if (context.blueprint_context && context.blueprint_context.chunks.length > 0) {
-    availableData.push(`${context.blueprint_context.chunks.length} blueprint text snippets`)
-  }
+  // Project metadata
   if (context.project_metadata) {
-    availableData.push('project metadata')
+    const meta = context.project_metadata
+    contextParts.push(`PROJECT INFORMATION:`)
+    if (meta.job_name) contextParts.push(`- Job: ${meta.job_name}`)
+    if (meta.plan_title) contextParts.push(`- Plan: ${meta.plan_title}`)
+    if (meta.address) contextParts.push(`- Location: ${meta.address}`)
+    if (meta.disciplines && meta.disciplines.length > 0) {
+      contextParts.push(`- Disciplines: ${meta.disciplines.join(', ')}`)
+    }
+    contextParts.push('')
   }
+
+  // Blueprint snippets - format as readable text
+  if (context.blueprint_context && context.blueprint_context.chunks.length > 0) {
+    contextParts.push(`BLUEPRINT TEXT SNIPPETS (${context.blueprint_context.chunks.length} snippets):`)
+    context.blueprint_context.chunks.forEach((chunk: any, idx: number) => {
+      const pageInfo = chunk.page_number ? ` (Page ${chunk.page_number})` : ''
+      const sheetInfo = chunk.sheet_name ? ` [Sheet: ${chunk.sheet_name}]` : ''
+      contextParts.push(`\nSnippet ${idx + 1}${pageInfo}${sheetInfo}:`)
+      contextParts.push(chunk.text)
+    })
+    contextParts.push('')
+  }
+
+  // Takeoff items
+  if (context.takeoff_context && context.takeoff_context.items.length > 0) {
+    contextParts.push(`TAKEOFF ITEMS (${context.takeoff_context.items.length} items):`)
+    context.takeoff_context.items.slice(0, 20).forEach((item: any) => {
+      const parts = [`- ${item.name || item.category}`]
+      if (item.quantity !== null && item.quantity !== undefined) {
+        parts.push(`${item.quantity} ${item.unit || ''}`.trim())
+      }
+      if (item.cost_total !== null && item.cost_total !== undefined) {
+        parts.push(`$${item.cost_total.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+      }
+      if (item.location) parts.push(`@ ${item.location}`)
+      if (item.page_number) parts.push(`(Page ${item.page_number})`)
+      contextParts.push(parts.join(' — '))
+    })
+    if (context.takeoff_context.items.length > 20) {
+      contextParts.push(`...and ${context.takeoff_context.items.length - 20} more items`)
+    }
+    if (context.takeoff_context.summary.total_quantity) {
+      contextParts.push(`\nTotal quantity: ${context.takeoff_context.summary.total_quantity.toLocaleString('en-US')}`)
+    }
+    if (context.takeoff_context.summary.total_cost) {
+      contextParts.push(`Total cost: $${context.takeoff_context.summary.total_cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+    }
+    contextParts.push('')
+  }
+
+  // Related sheets
   if (context.related_sheets && context.related_sheets.length > 0) {
-    availableData.push(`${context.related_sheets.length} related sheet references`)
+    contextParts.push(`RELATED SHEETS:`)
+    context.related_sheets.forEach((sheet: any) => {
+      const parts = [`- Page ${sheet.page_number}`]
+      if (sheet.title) parts.push(`"${sheet.title}"`)
+      if (sheet.discipline) parts.push(`(${sheet.discipline})`)
+      contextParts.push(parts.join(' '))
+    })
+    contextParts.push('')
+  }
+
+  // Add formatted context
+  if (contextParts.length > 0) {
+    parts.push(contextParts.join('\n'))
+  } else {
+    // Fallback to JSON if no formatted context
+    parts.push(JSON.stringify(contextObj, null, 2))
   }
 
   parts.push(`
-CRITICAL INSTRUCTIONS:
-- You MUST answer the user's question using the context provided above.
-- Available data: ${availableData.length > 0 ? availableData.join(', ') : 'limited context'}
-- If you have blueprint snippets, USE THEM to answer the question. Summarize and synthesize the information.
-- If you have takeoff items, USE THEM to provide specific quantities, costs, or item details.
-- If you have project metadata, USE IT to provide context about the project.
-- DO NOT say "I couldn't find enough information" if context is provided above.
-- Synthesize the available information into a helpful answer.
+INSTRUCTIONS:
+- Answer the user's question using the context above.
+- Synthesize the blueprint snippets to answer questions about the project, materials, scope, etc.
+- Use takeoff items to provide specific quantities and costs when relevant.
 - Be conversational and helpful - act like an expert estimator teammate.
-- If the context doesn't directly answer the question, use it to provide related insights or ask clarifying questions.
-- Reference specific pages, sheets, or items when relevant.
+- Reference specific pages or sheets when mentioning information from the blueprints.
+- If the question asks for a summary, synthesize information from all available sources.
 
-Answer the user's question now:`)
+Now answer: ${userQuestion}`)
 
   return parts.join('\n\n')
 }
