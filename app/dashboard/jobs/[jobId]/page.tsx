@@ -133,15 +133,44 @@ export default function JobDetailPage() {
       setJob(membership.job)
       setJobRole(membership.role)
 
-      // Load plans for this job
+      // Load plans for this job with takeoff analysis status
       const { data: plansData, error: plansError } = await supabase
         .from('plans')
-        .select('*')
+        .select(`
+          *,
+          plan_takeoff_analysis (
+            id,
+            created_at,
+            updated_at,
+            status,
+            is_finalized
+          )
+        `)
         .eq('job_id', jobId)
         .order('created_at', { ascending: false })
 
       if (plansError) throw plansError
-      setPlans(plansData || [])
+      
+      // Enrich plans with takeoff status from plan_takeoff_analysis
+      const enrichedPlans = (plansData || []).map((plan: any) => {
+        const takeoffAnalyses = plan.plan_takeoff_analysis || []
+        const hasTakeoffAnalysis = takeoffAnalyses.length > 0
+        const latestTakeoff = takeoffAnalyses.length > 0 
+          ? takeoffAnalyses.sort((a: any, b: any) => 
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            )[0]
+          : null
+        
+        return {
+          ...plan,
+          plan_takeoff_analysis: undefined, // Remove nested data
+          has_takeoff_analysis: hasTakeoffAnalysis || plan.has_takeoff_analysis,
+          takeoff_analysis_status: latestTakeoff?.status || plan.takeoff_analysis_status || (hasTakeoffAnalysis ? 'completed' : null),
+          latest_takeoff_analysis: latestTakeoff
+        }
+      })
+      
+      setPlans(enrichedPlans)
 
       // Load bid packages for this job
       const { data: packagesData, error: packagesError } = await supabase
@@ -189,7 +218,7 @@ export default function JobDetailPage() {
         const { data: takeoffAnalysis, error: takeoffError } = await supabase
           .from('plan_takeoff_analysis')
           .select('id, items')
-          .eq('job_id', plan.job_id)
+          .eq('plan_id', plan.id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
@@ -992,13 +1021,21 @@ export default function JobDetailPage() {
                       <div className="space-y-2 max-w-md mx-auto">
                         {plans.map((plan) => {
                           const hasTakeoff = plan.takeoff_analysis_status === 'completed' || plan.has_takeoff_analysis === true
+                          const takeoffDate = plan.latest_takeoff_analysis?.created_at 
+                            ? new Date(plan.latest_takeoff_analysis.created_at).toLocaleDateString()
+                            : null
                           return (
                             <div key={plan.id} className="flex items-center justify-between p-3 border rounded-lg text-left">
-                              <div className="flex items-center space-x-3">
-                                <FileText className="h-4 w-4 text-gray-400" />
-                                <span className="text-sm font-medium">{plan.title || plan.file_name}</span>
+                              <div className="flex items-center space-x-3 flex-1">
+                                <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium block truncate">{plan.title || plan.file_name}</span>
+                                  {takeoffDate && (
+                                    <span className="text-xs text-gray-500">Takeoff: {takeoffDate}</span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center space-x-2 flex-shrink-0">
                                 {hasTakeoff ? (
                                   <Badge className="bg-green-100 text-green-800">Takeoff Complete</Badge>
                                 ) : (

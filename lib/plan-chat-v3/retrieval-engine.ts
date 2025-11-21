@@ -234,16 +234,11 @@ export async function findTakeoffItemsByTarget(
   targets: string[],
   jobId: string | null
 ): Promise<NormalizedTakeoffItem[]> {
-  // Load takeoff items - plan_takeoff_analysis now only has job_id (plan_id and user_id were removed)
-  if (!jobId) {
-    console.log('[RetrievalEngine] No jobId provided, cannot query takeoff data')
-    return []
-  }
-
+  // Load takeoff items for this specific plan
   const { data: takeoffRow, error } = await supabase
     .from('plan_takeoff_analysis')
     .select('id, items')
-    .eq('job_id', jobId)
+    .eq('plan_id', planId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -382,20 +377,18 @@ export async function getProjectMetadata(
     const plan = planResult.data
     const job = jobResult?.data || null
 
-    // Load takeoff items for category summaries - plan_takeoff_analysis only has job_id
+    // Load takeoff items for category summaries for this specific plan
     let takeoffRow: any = null
-    if (jobId) {
-      const result = await supabase
-        .from('plan_takeoff_analysis')
-        .select('items')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      
-      if (!result.error && result.data) {
-        takeoffRow = result.data
-      }
+    const result = await supabase
+      .from('plan_takeoff_analysis')
+      .select('items')
+      .eq('plan_id', planId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    
+    if (!result.error && result.data) {
+      takeoffRow = result.data
     }
 
     const items = takeoffRow ? normalizeTakeoffItems(takeoffRow.items) : []

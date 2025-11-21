@@ -357,6 +357,7 @@ Use the JSON structure specified in the system prompt. Start your response with 
       .from('plan_takeoff_analysis')
       .insert({
         job_id: plan.job_id,
+        plan_id: planId,
         items: takeoffData.items || [],
         summary: takeoffData.summary || takeoffData,
         ai_model: 'gpt-4o',

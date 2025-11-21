@@ -210,7 +210,6 @@ async function loadTakeoffItems(
     .from('plan_takeoff_analysis')
     .select('id, items')
     .eq('plan_id', planId)
-    .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

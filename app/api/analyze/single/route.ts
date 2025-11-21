@@ -157,7 +157,6 @@ export async function POST(request: NextRequest) {
             plan.job_id,
             userId,
             extracted.items,
-            extracted.quality_analysis,
             llmResponse.provider,
             extracted.repaired,
             extracted.notes,
@@ -226,7 +225,6 @@ Please extract MORE comprehensively:
         plan.job_id,
         userId,
         bestResult.items,
-        bestResult.quality_analysis,
         bestResult.provider,
         bestResult.repaired,
         bestResult.notes + `; Attempted ${attempts} times, best result below threshold`,
@@ -274,7 +272,6 @@ async function saveAndReturnResults(
   jobId: string,
   userId: string,
   items: any[],
-  qualityAnalysis: any,
   provider: string,
   repaired: boolean,
   notes: string | undefined,
@@ -288,53 +285,12 @@ async function saveAndReturnResults(
     id: item.id || `item-${Date.now()}-${idx}`
   }))
 
-  const baseQualityAnalysis = qualityAnalysis
-    ? { ...qualityAnalysis }
-    : {
-        completeness: {
-          overall_score: itemsWithIds.length > 0 ? 0.8 : 0.6,
-          missing_sheets: [],
-          missing_dimensions: [],
-          missing_details: [],
-          incomplete_sections: [],
-          notes: 'Quality analysis generated from single-model takeoff.'
-        },
-        consistency: {
-          scale_mismatches: [],
-          unit_conflicts: [],
-          dimension_contradictions: [],
-          schedule_vs_elevation_conflicts: [],
-          notes: 'No consistency conflicts detected in single-model analysis.'
-        },
-        risk_flags: [],
-        audit_trail: {
-          pages_analyzed: [],
-          chunks_processed: 1,
-          coverage_percentage: 100,
-          assumptions_made: []
-        }
-      }
-
-  if (!baseQualityAnalysis.risk_flags) {
-    baseQualityAnalysis.risk_flags = []
-  }
-
-  const tradeScopeReview = normalizeTradeScopeReview(
-    baseQualityAnalysis.trade_scope_review,
-    baseQualityAnalysis.risk_flags,
-    { defaultNotes: 'Trade scope review generated from single-model analysis.' }
-  )
-
-  const enhancedQualityAnalysis = {
-    ...baseQualityAnalysis,
-    trade_scope_review: tradeScopeReview
-  }
-  
   // Save takeoff analysis
   const { data: takeoffAnalysis, error: takeoffError } = await supabase
     .from('plan_takeoff_analysis')
     .insert({
       job_id: jobId,
+      plan_id: planId,
       items: itemsWithIds,
       summary: {
         total_items: itemsWithIds.length,
@@ -343,7 +299,6 @@ async function saveAndReturnResults(
           : 0,
         consensus_count: 1,
         model_agreements: [provider],
-        quality_analysis: enhancedQualityAnalysis
       },
       ai_model: `single-${provider}`,
       confidence_scores: {
@@ -371,64 +326,10 @@ async function saveAndReturnResults(
       .eq('id', planId)
   }
   
-  // Transform quality_analysis.risk_flags to issues format for quality_analysis table
-  const issues = (enhancedQualityAnalysis.risk_flags || []).map((flag: any) => ({
-    severity: flag.severity || 'info',
-    category: flag.category || 'general',
-    description: flag.description || flag.impact || '',
-    location: flag.location || '',
-    impact: flag.impact || '',
-    recommendation: flag.recommendation || '',
-    pageNumber: flag.bounding_box?.page,
-    bounding_box: flag.bounding_box,
-    confidence: flag.confidence || 0.8
-  }))
-  
-  // Save quality analysis
-  const { data: qualityAnalysisRow, error: qualityError } = await supabase
-    .from('plan_quality_analysis')
-    .insert({
-      plan_id: planId,
-      user_id: userId,
-      overall_score: enhancedQualityAnalysis?.completeness?.overall_score || 
-                     (itemsWithIds.length > 0 ? 0.8 : 0.5),
-      issues: issues,
-      recommendations: (enhancedQualityAnalysis?.risk_flags || [])
-        .filter((f: any) => f.recommendation)
-        .map((f: any) => f.recommendation),
-      missing_details: enhancedQualityAnalysis?.completeness?.missing_details || [],
-      findings_by_category: {},
-      findings_by_severity: {
-        critical: issues.filter((i: any) => i.severity === 'critical'),
-        warning: issues.filter((i: any) => i.severity === 'warning'),
-        info: issues.filter((i: any) => i.severity === 'info')
-      },
-      trade_scope_review: tradeScopeReview,
-      ai_model: `single-${provider}`,
-      processing_time_ms: 0,
-      job_type: jobType
-    })
-    .select()
-    .single()
-  
-  if (qualityError) {
-    console.error('Error saving quality analysis:', qualityError)
-  } else {
-    await supabase
-      .from('plans')
-      .update({
-        quality_analysis_status: 'completed',
-        has_quality_analysis: true
-      })
-      .eq('id', planId)
-      .eq('user_id', userId)
-  }
-  
   // Return response
   return NextResponse.json({
     success: true,
     items: itemsWithIds,
-    quality_analysis: enhancedQualityAnalysis,
     meta: {
       provider,
       attempts: attempts || 1,
@@ -436,9 +337,7 @@ async function saveAndReturnResults(
       notes,
       reason,
       items_count: itemsWithIds.length,
-      quality_analysis_keys: Object.keys(enhancedQualityAnalysis || {}),
-      takeoff_analysis_id: takeoffAnalysis?.id,
-      quality_analysis_id: qualityAnalysisRow?.id
+      takeoff_analysis_id: takeoffAnalysis?.id
     }
   })
 }

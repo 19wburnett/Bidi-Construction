@@ -481,6 +481,7 @@ export async function POST(request: NextRequest) {
         .from('plan_takeoff_analysis')
         .insert({
           job_id: planForJob.job_id,
+          plan_id: planId,
           items: mergedResult.items || [],
           summary: {
             total_items: mergedResult.items?.length || 0,
@@ -511,41 +512,6 @@ export async function POST(request: NextRequest) {
         .update({ 
           takeoff_analysis_status: 'completed',
           has_takeoff_analysis: true
-        })
-        .eq('id', planId)
-
-    } else if (taskType === 'quality') {
-      // Save quality analysis
-      const { data: qualityAnalysis, error: qualityError } = await supabase
-        .from('plan_quality_analysis')
-        .insert({
-          plan_id: planId,
-          user_id: userId,
-          overall_score: mergedResult.confidence,
-          issues: mergedResult.issues || [],
-          recommendations: mergedResult.recommendations || [],
-          findings_by_category: {},
-          findings_by_severity: {
-            critical: [],
-            warning: mergedResult.issues || [],
-            info: []
-          },
-          ai_model: 'enhanced-consensus-batch',
-          processing_time_ms: totalProcessingTime
-        })
-        .select()
-        .single()
-
-      if (qualityError) {
-        console.error('Error saving batch quality analysis:', qualityError)
-      }
-
-      // Update plan status
-      await supabase
-        .from('plans')
-        .update({ 
-          quality_analysis_status: 'completed',
-          has_quality_analysis: true
         })
         .eq('id', planId)
     }

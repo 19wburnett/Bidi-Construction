@@ -50,7 +50,7 @@ async function sendAdminQueueNotification(
   
   console.log(`Sending queue notification to ${adminEmails.length} email(s):`, adminEmails)
 
-  const taskTypeDisplay = taskType === 'takeoff' ? 'AI Takeoff' : taskType === 'quality' ? 'Quality Analysis' : 'Bid Analysis'
+  const taskTypeDisplay = taskType === 'takeoff' ? 'AI Takeoff' : 'Bid Analysis'
 
   try {
     const { data, error } = await resend.emails.send({
@@ -519,72 +519,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Save analysis results to database
-    // Always save BOTH takeoff and quality analysis regardless of taskType
-    
-    // Extract quality_analysis from consensusResult if it exists, or construct from issues
-    // The consensus engine now extracts and merges quality_analysis from all models
-    // This will be reused in the response, so construct once here
-    const overallConfidence = consensusResult.confidence || 0.8
-    const confidenceWarning = overallConfidence < 0.6 
-      ? `⚠️ LOW CONFIDENCE ANALYSIS (${(overallConfidence * 100).toFixed(0)}%) - Some items may need manual verification.`
-      : ''
-
-    const tradeScopeReview = normalizeTradeScopeReview(
-      consensusResult.quality_analysis?.trade_scope_review ?? consensusResult.trade_scope_review,
-      consensusResult.issues || [],
-      { defaultNotes: confidenceWarning || 'Trade scope review generated from consensus analysis' }
-    )
-
-    let qualityAnalysisData = consensusResult.quality_analysis
-      ? {
-          ...consensusResult.quality_analysis,
-          trade_scope_review: tradeScopeReview
-        }
-      : {
-          completeness: {
-            overall_score: overallConfidence,
-            missing_sheets: [],
-            missing_dimensions: [],
-            missing_details: [],
-            incomplete_sections: [],
-            notes: confidenceWarning || 'Quality analysis included with takeoff'
-          },
-          consistency: {
-            scale_mismatches: [],
-            unit_conflicts: [],
-            dimension_contradictions: [],
-            schedule_vs_elevation_conflicts: [],
-            notes: 'No consistency issues detected'
-          },
-          risk_flags: [],
-          audit_trail: {
-            pages_analyzed: Array.from({ length: images.length }, (_, i) => i + 1),
-            chunks_processed: 1,
-            coverage_percentage: 100,
-            assumptions_made: []
-          },
-          trade_scope_review: tradeScopeReview
-        }
-
-    if ((!qualityAnalysisData.risk_flags || qualityAnalysisData.risk_flags.length === 0) && (consensusResult.issues && consensusResult.issues.length > 0)) {
-      qualityAnalysisData = {
-        ...qualityAnalysisData,
-        risk_flags: consensusResult.issues.map((issue: any) => ({
-          level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
-          category: issue.category || 'general',
-          description: issue.description || issue.detail || issue.message || '',
-          location: issue.location || '',
-          recommendation: issue.recommendation || ''
-        }))
-      }
-    }
-
-    if (!qualityAnalysisData.trade_scope_review) {
-      qualityAnalysisData = {
-        ...qualityAnalysisData,
-        trade_scope_review: tradeScopeReview
-      }
-    }
 
     // Save takeoff analysis (always, if items exist or if taskType is takeoff)
     if (taskType === 'takeoff' || (consensusResult.items && consensusResult.items.length > 0)) {
@@ -607,6 +541,7 @@ export async function POST(request: NextRequest) {
         .from('plan_takeoff_analysis')
         .insert({
           job_id: planForJob.job_id,
+          plan_id: planId,
           items: consensusResult.items || [],
           summary: {
             total_items: consensusResult.items?.length || 0,
@@ -615,7 +550,6 @@ export async function POST(request: NextRequest) {
             model_agreements: consensusResult.modelAgreements,
             specialized_insights: consensusResult.specializedInsights,
             recommendations: consensusResult.recommendations,
-            quality_analysis: qualityAnalysisData // Include quality analysis in takeoff summary
           },
           ai_model: 'enhanced-consensus',
           confidence_scores: {
@@ -642,60 +576,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save quality analysis (ALWAYS - both takeoff and quality analysis should be saved)
-    // Even if there are no issues, we save the completeness/consistency/audit data
-    const shouldSaveQuality = taskType === 'quality' || 
-        taskType === 'takeoff' || // ALWAYS save quality analysis when doing takeoff
-        (consensusResult.issues && consensusResult.issues.length > 0) || 
-        qualityAnalysisData
-    
-    if (shouldSaveQuality) {
-      
-      // Organize issues by severity
-      const issues = consensusResult.issues || []
-      const criticalIssues = issues.filter((i: any) => i.severity === 'critical')
-      const warningIssues = issues.filter((i: any) => i.severity === 'warning')
-      const infoIssues = issues.filter((i: any) => i.severity === 'info')
 
-      const { data: qualityAnalysis, error: qualityError } = await supabase
-        .from('plan_quality_analysis')
-        .insert({
-          plan_id: planId,
-          user_id: userId,
-          overall_score: qualityAnalysisData.completeness?.overall_score || consensusResult.confidence || 0.8,
-          issues: issues,
-          recommendations: consensusResult.recommendations || [],
-          missing_details: qualityAnalysisData.completeness?.missing_details || [],
-          findings_by_category: {}, // Can be populated from issues by category
-          findings_by_severity: {
-            critical: criticalIssues,
-            warning: warningIssues,
-            info: infoIssues
-          },
-          trade_scope_review: qualityAnalysisData.trade_scope_review,
-          ai_model: 'enhanced-consensus',
-          processing_time_ms: processingTime,
-          job_type: finalJobType
-        })
-        .select()
-        .single()
-
-      if (qualityError) {
-        console.error('Error saving quality analysis:', qualityError)
-      } else {
-        // Update plan status
-        await supabase
-          .from('plans')
-          .update({ 
-            quality_analysis_status: 'completed',
-          has_quality_analysis: true
-        })
-        .eq('id', planId)
-      }
-    }
-
-    // Build response with enhanced metadata - ALWAYS include both takeoff and quality
-    // qualityAnalysisData is already defined above and reused here
+    // Build response with enhanced metadata
     const response = {
       success: true,
       planId,
@@ -710,10 +592,6 @@ export async function POST(request: NextRequest) {
       results: {
         // Always include takeoff items (even if empty)
         items: consensusResult.items || [],
-        // Always include quality analysis issues
-        issues: consensusResult.issues || [],
-        // Always include quality_analysis object
-        quality_analysis: qualityAnalysisData,
         // Additional metadata
         specializedInsights: consensusResult.specializedInsights || [],
         recommendations: consensusResult.recommendations || []
@@ -755,10 +633,8 @@ CRITICAL INSTRUCTIONS:
 - Assign appropriate Procore cost codes
 - Identify potential issues and code violations
 - Provide professional recommendations
-- ALWAYS return BOTH takeoff data AND quality analysis, even if one section has limited data
-
-RESPONSE FORMAT - YOU MUST RETURN BOTH SECTIONS:
-Return ONLY a valid JSON object with this EXACT structure. Both "items" and "quality_analysis" are REQUIRED:
+RESPONSE FORMAT:
+Return ONLY a valid JSON object with this EXACT structure:
 {
   "items": [
     {
@@ -803,80 +679,6 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
       "confidence": 0.90
     }
   ],
-  "quality_analysis": {
-    "completeness": {
-      "overall_score": 0.85,
-      "missing_sheets": [],
-      "missing_dimensions": [],
-      "missing_details": [],
-      "incomplete_sections": [],
-      "notes": "Assessment of plan completeness"
-    },
-    "consistency": {
-      "scale_mismatches": [],
-      "unit_conflicts": [],
-      "dimension_contradictions": [],
-      "schedule_vs_elevation_conflicts": [],
-      "notes": "Assessment of consistency across sheets"
-    },
-    "risk_flags": [
-      {
-        "level": "high|medium|low",
-        "category": "Risk category",
-        "description": "Risk description",
-        "location": "Where this risk appears",
-        "recommendation": "How to mitigate"
-      }
-    ],
-    "audit_trail": {
-      "pages_analyzed": [1, 2, 3],
-      "chunks_processed": 1,
-      "coverage_percentage": 100,
-      "assumptions_made": [
-        {
-          "item": "Item or measurement",
-          "assumption": "What was assumed",
-          "reason": "Why assumption was needed"
-        }
-      ]
-    },
-    "trade_scope_review": {
-      "items": [
-        {
-          "category": "Structural & Sitework",
-          "trade": "Surveying",
-          "status": "complete|partial|missing",
-          "status_icon": "✅|⚠️|❌",
-          "notes": "Summary of what is missing or complete for this trade",
-          "page_refs": ["P-1"]
-        }
-      ],
-      "summary": {
-        "complete": 0,
-        "partial": 0,
-        "missing": 0,
-        "notes": "High-level summary of trade coverage and missing details"
-      },
-      "raw": [
-        {
-          "category": "Structural & Sitework",
-          "trade": "Surveying",
-          "status": "missing",
-          "status_icon": "❌",
-          "notes": "Example entry mirroring the trade scope list",
-          "page_refs": ["P-1"]
-        },
-        {
-          "summary": {
-            "complete": 0,
-            "partial": 0,
-            "missing": 1,
-            "notes": "Summary entry must always be included"
-          }
-        }
-      ]
-    }
-  },
   "summary": {
     "total_items": 0,
     "categories": {},
@@ -890,9 +692,7 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
 
 MANDATORY REQUIREMENTS:
 1. "items" array: MUST contain all measurable quantities, even if empty array with note in summary
-2. "quality_analysis" object: MUST be fully populated with all sub-objects (completeness, consistency, risk_flags, audit_trail)
-3. If information is missing, explicitly mark it in the appropriate quality_analysis field (e.g., missing_sheets, missing_dimensions)
-4. Never return partial structures - always include all top-level fields`
+2. Never return partial structures - always include all top-level fields`
 
   // Add job type specific instructions
   const jobTypePrompt = jobType === 'commercial' ? `
@@ -985,97 +785,8 @@ EXTRACT COMPREHENSIVELY:
 - List ALL finishes: paint, flooring, cabinets, countertops, appliances
 - Calculate areas, volumes, lengths for EVERY measurable element
 
-DO NOT SKIP: Even if an item appears simple or small, include it. Better to over-extract than under-extract.
+DO NOT SKIP: Even if an item appears simple or small, include it. Better to over-extract than under-extract.`
 
-QUALITY ANALYSIS FOCUS (REQUIRED SECTION):
-You MUST also provide a complete quality_analysis object with:
-1. COMPLETENESS: Assess what's missing, incomplete, or unclear
-   - missing_sheets: List any sheet numbers not found or referenced but missing
-   - missing_dimensions: List items that need dimensions but don't have them
-   - missing_details: List any details that should be present but aren't
-   - incomplete_sections: Identify partial or incomplete drawings
-   
-2. CONSISTENCY: Check for conflicts and contradictions
-   - scale_mismatches: Different scales used inconsistently
-   - unit_conflicts: Mixed units (feet vs meters) causing confusion
-   - dimension_contradictions: Same element has different dimensions in different views
-   - schedule_vs_elevation_conflicts: Door/window schedules don't match elevations
-   
-3. RISK_FLAGS: Identify potential problems
-   - Safety hazards, code violations, structural concerns
-   - Budget risks (overly complex details)
-   - Timeline risks (missing information that will cause delays)
-   - Quality risks (unclear specifications)
-   
-4. AUDIT_TRAIL: Document what was analyzed
-   - pages_analyzed: Array of page numbers you examined
-   - chunks_processed: Number of distinct sections analyzed
-   - coverage_percentage: What % of the plan set you believe you've covered
-   - assumptions_made: List every assumption you made, with reason
-
-CRITICAL: Even if the plan is unclear or incomplete, you MUST still populate all quality_analysis fields. Use them to document what's missing or unclear.`
-
-    case 'quality':
-      return basePrompt + jobTypePrompt + `
-
-QUALITY ANALYSIS FOCUS (BE AGGRESSIVE - FIND ISSUES):
-You MUST find and report issues. Even if the plan looks good, there are ALWAYS things to check:
-- Missing dimensions or unclear measurements
-- Code compliance concerns (egress, accessibility, structural requirements)
-- Inconsistencies between sheets or details
-- Potential construction challenges
-- Safety or quality concerns
-- Missing or incomplete details
-
-MANDATORY CHECKS - You MUST verify:
-1. ALL dimensions are provided and consistent across sheets
-2. Door/window schedules match elevations
-3. Code compliance (egress, guardrails, stairs, accessibility)
-4. Structural details are complete and clear
-5. MEP systems are properly detailed
-6. No contradictions between plans
-7. All referenced details exist
-8. Scale is consistent across sheets
-9. Material specifications are clear
-10. Finish schedules are complete
-
-IF YOU FIND 0 ISSUES, that means you didn't look hard enough. Every plan has:
-- At least some missing dimensions
-- Some unclear details
-- Potential code compliance questions
-- Areas that need clarification
-
-SEVERITY LEVELS:
-- CRITICAL: Safety hazards, code violations, structural issues that could cause injury or failure
-- WARNING: Quality concerns, potential problems, unclear details that could cause delays/cost overruns
-- INFO: Recommendations, best practices, minor observations that improve quality
-
-BE AGGRESSIVE: Look for problems. Question everything. If something is unclear, it's an issue.
-BE THOROUGH: Examine every detail for potential issues - dimension checks, code compliance, consistency
-BE SPECIFIC: Provide detailed descriptions of problems with exact locations
-INCLUDE IMPACT: Explain the impact of each issue (cost, timeline, safety, quality)
-PROVIDE SOLUTIONS: Give specific recommendations for each issue
-ASSIGN SEVERITY: Use appropriate severity levels - when in doubt, mark as WARNING
-INCLUDE LOCATIONS: Specify exactly where each issue is located (sheet number, detail reference)
-PROVIDE BOUNDING BOXES: Every issue must have a bounding_box with coordinates
-
-EXPECTED ISSUE COUNT:
-- For a 5-page plan: 5-15 issues minimum
-- For a 19-page plan: 15-40 issues minimum
-- If you find fewer, you're not looking hard enough
-
-Common issues to look for:
-- Missing dimensions on plans
-- Door/window schedules don't match elevations
-- Stair dimensions don't meet code
-- Guardrail heights missing or unclear
-- Egress routes unclear or non-compliant
-- Scale inconsistencies
-- Structural details incomplete
-- MEP systems lack detail
-- Material specifications vague
-- Finish schedules incomplete
-- Details referenced but not shown`
 
     case 'bid_analysis':
       return basePrompt + jobTypePrompt + `
@@ -1110,22 +821,21 @@ function buildUserPrompt(imageCount: number, drawings?: any[], extractedText?: s
   let prompt = `Analyze this construction plan with ${imageCount} page${imageCount > 1 ? 's' : ''} for COMPREHENSIVE construction analysis.
 
 IMAGES PROVIDED: ${imageCount} page${imageCount > 1 ? 's' : ''} of construction plans
-ANALYSIS REQUIRED: BOTH complete takeoff (all quantities) AND complete quality analysis
+ANALYSIS REQUIRED: Complete takeoff (all quantities)
 
 ${extractedText && extractedText.length > 0 ? `=== EXTRACTED TEXT FROM PDF (truncated) ===
 ${extractedText.slice(0, 8000)}${extractedText.length > 8000 ? '\n\n...(additional text truncated)' : ''}
 
 === VISUAL ANALYSIS INSTRUCTIONS ===` : ''}
 
-MANDATORY INSTRUCTIONS - YOU MUST PROVIDE BOTH:
+MANDATORY INSTRUCTIONS:
 
 TEMPLATE-BASED ANALYSIS:
 You have been provided with a COMPREHENSIVE TAKEOFF TEMPLATE in the system prompt. You MUST:
 1. Go through EVERY category in the template (structural, exterior, interior, mep, finishes, other)
 2. For each subcategory, check if items exist in the plan
 3. Extract ALL items you find - don't skip any category
-4. If a category doesn't apply, document why in quality_analysis.completeness
-5. If you're uncertain about an item, include it with low confidence (<0.6) but still include it
+4. If you're uncertain about an item, include it with low confidence (<0.6) but still include it
 
 MULTI-MODEL STRATEGY:
 - Your job is to find items OTHER models might miss
@@ -1153,13 +863,6 @@ CRITICAL: You must extract MULTIPLE items per page. A single page typically cont
 
 For 5 pages of a 19-page plan, you should extract AT LEAST 20-50 total items, not just 2-3.
 
-QUALITY ANALYSIS REQUIREMENTS:
-8. Assess completeness - what's missing or incomplete?
-9. Check consistency - any conflicts or contradictions?
-10. Identify risk flags - safety, code, quality concerns
-11. Document audit trail - what was analyzed, what assumptions were made
-12. Build a detailed trade_scope_review list summarizing each trade's status (complete/partial/missing), including page references and a summary row with counts
-
 IMPORTANT:
 - Be SPECIFIC: "2x6 Top Plate" not just "lumber"
 - SHOW YOUR MATH: Include dimensions used for calculations
@@ -1169,26 +872,15 @@ IMPORTANT:
 - ASSIGN COST CODES: Use the Procore cost codes provided
 - INCLUDE LOCATIONS: Specify where each item is located
 - PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
-- If dimensions are unclear or not visible, state "dimension not visible" in notes AND add to quality_analysis.completeness.missing_dimensions
-
-QUALITY ANALYSIS REQUIREMENTS - POPULATE ALL FIELDS:
-- completeness: Assess what's missing (sheets, dimensions, details, sections)
-- consistency: Check for conflicts (scales, units, dimensions, schedules)
-- risk_flags: Identify potential problems (safety, code, budget, timeline, quality)
-- audit_trail: Document coverage (pages analyzed, chunks, coverage %, assumptions)
-- trade_scope_review: Provide an itemized list of categories/trades with status_icon (✅ complete, ⚠️ partial, ❌ missing), supporting notes, page references, and a summary entry with counts
+- If dimensions are unclear or not visible, state "dimension not visible" in notes
 
 CRITICAL RESPONSE REQUIREMENTS:
 1. You MUST respond with ONLY the JSON object - no explanatory text
-2. The JSON MUST include both "items" array AND "quality_analysis" object
-3. If you cannot find certain information, document it in quality_analysis.completeness
-4. If there are contradictions, document them in quality_analysis.consistency
-5. Every assumption you make MUST be listed in quality_analysis.audit_trail.assumptions_made
-6. Even if the plan is unclear, return the full structure with empty arrays/objects where appropriate, but always populate quality_analysis fields to explain what's missing
+2. The JSON MUST include the "items" array
+3. Even if the plan is unclear, return the full structure with empty arrays/objects where appropriate
 
 DO NOT:
 - Return partial results
-- Skip the quality_analysis section
 - Omit fields because they're empty (use empty arrays/objects)
 - Include any text outside the JSON object`
 
@@ -1376,7 +1068,6 @@ async function runOrchestratorAnalysis(
         model_agreements: result.final_json.metadata.models_used,
         disagreements: result.consensus_report.disagreements_count,
         engine_recommendation: result.engine_recommendation,
-        quality_analysis: result.final_json.quality_analysis
       },
       ai_model: 'orchestrator-consensus',
       confidence_scores: {
@@ -1407,48 +1098,6 @@ async function runOrchestratorAnalysis(
         .eq('id', planId)
     }
 
-    // Save quality analysis
-    const qualityAnalysisData = {
-      plan_id: planId,
-      user_id: userId,
-      overall_score: result.final_json.quality_analysis.completeness.overall_score,
-      issues: result.final_json.quality_analysis.risk_flags.map(flag => ({
-        severity: flag.level === 'high' ? 'critical' : flag.level === 'medium' ? 'warning' : 'info',
-        category: flag.category,
-        description: flag.description,
-        location: flag.location,
-        recommendation: flag.recommendation
-      })),
-      recommendations: result.engine_recommendation.recommendation_details.split('. ').filter(r => r.trim()),
-      missing_details: result.final_json.quality_analysis.completeness.missing_details,
-      findings_by_category: {},
-      findings_by_severity: {
-        critical: result.final_json.quality_analysis.risk_flags.filter(f => f.level === 'high'),
-        warning: result.final_json.quality_analysis.risk_flags.filter(f => f.level === 'medium'),
-        info: result.final_json.quality_analysis.risk_flags.filter(f => f.level === 'low')
-      },
-      ai_model: 'orchestrator-consensus',
-      processing_time_ms: processingTime,
-      job_type: jobType
-    }
-
-    const { data: qualityAnalysis, error: qualityError } = await supabase
-      .from('plan_quality_analysis')
-      .insert(qualityAnalysisData)
-      .select()
-      .single()
-
-    if (qualityError) {
-      console.error('Error saving orchestrator quality analysis:', qualityError)
-    } else {
-      await supabase
-        .from('plans')
-        .update({
-          quality_analysis_status: 'completed',
-          has_quality_analysis: true
-        })
-        .eq('id', planId)
-    }
 
     // Build response with detailed orchestrator info
     return {
