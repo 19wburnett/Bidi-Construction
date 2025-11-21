@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { userHasJobAccess } from '@/lib/job-access'
 
 export const runtime = 'nodejs'
 
@@ -28,14 +29,24 @@ export async function GET(
 
     const supabase = await createServerSupabaseClient()
 
-    // Verify user owns this job
+    // Verify user owns this job or has access
     const { data: job, error: jobError } = await supabase
       .from('jobs')
       .select('user_id')
       .eq('id', jobId)
       .single()
 
-    if (jobError || !job || job.user_id !== user.id) {
+    if (jobError || !job) {
+      return NextResponse.json(
+        { error: 'Job not found or unauthorized' },
+        { status: 404 }
+      )
+    }
+
+    const isCreator = job.user_id === user.id
+    const hasAccess = isCreator || await userHasJobAccess(supabase, jobId, user.id)
+
+    if (!hasAccess) {
       return NextResponse.json(
         { error: 'Job not found or unauthorized' },
         { status: 404 }

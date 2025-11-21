@@ -12,7 +12,8 @@ This document describes the JSON structure expected for takeoff items in the spr
       "description": "Interior wall framing with 2x4 studs at 16\" OC",
       "quantity": 150.5,
       "unit": "LF",
-      "category": "structural"
+      "category": "structural",
+      "subcontractor": "Framing"
     }
   ]
 }
@@ -33,7 +34,7 @@ This document describes the JSON structure expected for takeoff items in the spr
       "total_cost": 376.25,
       "category": "structural",
       "subcategory": "Framing",
-      "subcontractor": "ABC Framing Co",
+      "subcontractor": "Framing",
       "cost_code": "06-10-00",
       "cost_code_description": "Rough Carpentry",
       "location": "Interior partitions, Kitchen area",
@@ -77,8 +78,8 @@ This document describes the JSON structure expected for takeoff items in the spr
 - **id** (string): Unique identifier (auto-generated if not provided)
 - **unit_cost** (number): Cost per unit
 - **total_cost** (number): Total cost (calculated as quantity × unit_cost if not provided)
-- **subcategory** (string): Subcategory name (e.g., "Framing", "Foundation", "Windows")
-- **subcontractor** (string): Subcontractor name (defaults to "Unassigned" if not provided)
+- **subcategory** (string): Subcategory name (e.g., "Wall Types", "Fixtures")
+- **subcontractor** (string): Trade Type (e.g., "Electrical", "Plumbing", "Framing", "Concrete")
 - **cost_code** (string): Procore cost code (e.g., "06-10-00", "3,300")
 - **cost_code_description** (string): Description of the cost code
 - **location** (string): Location reference (e.g., "North Wall", "Kitchen", "Sheet A1.2")

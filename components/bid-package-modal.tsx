@@ -51,7 +51,7 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import { modalBackdrop, modalContent, successCheck, staggerContainer, staggerItem } from '@/lib/animations'
-import { BidPackage, Job } from '@/types/takeoff'
+import { BidPackage, Job, JobReport } from '@/types/takeoff'
 import { TRADE_CATEGORIES, TRADE_GROUPS, getAllTrades, normalizeTrade } from '@/lib/trade-types'
 
 interface BidPackageModalProps {
@@ -123,6 +123,7 @@ const TRADE_ICONS: Record<string, any> = {
 const STEP_NAMES = [
   'Select Trades',
   'Select Line Items',
+  'Attach Reports',
   'Select Subcontractors',
   'Email Status'
 ]
@@ -171,6 +172,8 @@ export default function BidPackageModal({
   const [loadingTrades, setLoadingTrades] = useState(false)
   const [showMoreItems, setShowMoreItems] = useState<Record<string, boolean>>({})
   const [showCustomLineItemForm, setShowCustomLineItemForm] = useState(false)
+  const [reports, setReports] = useState<JobReport[]>([])
+  const [selectedReportIds, setSelectedReportIds] = useState<string[]>([])
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -359,6 +362,25 @@ export default function BidPackageModal({
 
       if (insertError) throw insertError
 
+      // Link reports to bid packages
+      if (selectedReportIds.length > 0 && Array.isArray(data)) {
+        const reportRows = []
+        for (const pkg of data) {
+          for (const reportId of selectedReportIds) {
+            reportRows.push({
+              bid_package_id: pkg.id,
+              report_id: reportId
+            })
+          }
+        }
+        
+        const { error: reportLinkError } = await supabase
+          .from('bid_package_reports')
+          .insert(reportRows)
+          
+        if (reportLinkError) console.error('Error linking reports:', reportLinkError)
+      }
+
       // Send emails to selected subcontractors (grouped per trade)
       if (selectedSubs.length > 0 && Array.isArray(data)) {
         const normalizedLookup = new Map(
@@ -383,7 +405,8 @@ export default function BidPackageModal({
                 body: JSON.stringify({
                   bidPackageId: pkg.id,
                   subcontractorIds: tradeSubs.map(sub => sub.id),
-                  planId: planId
+                  planId: planId,
+                  reportIds: selectedReportIds // Pass report IDs to API
                 })
               })
 
@@ -407,8 +430,8 @@ export default function BidPackageModal({
           await loadRecipients(data.map(p => p.id))
         }
         
-        // Move to Step 4 to show email status
-        setStep(4)
+        // Move to Step 5 to show email status
+        setStep(5)
       } else {
         setSuccess(true)
         setTimeout(() => {
@@ -1495,8 +1518,96 @@ export default function BidPackageModal({
                     </motion.div>
                   )}
 
-                  {/* Step 3: Subcontractors */}
+                  {/* Step 3: Attach Reports */}
                   {step === 3 && (
+                    <motion.div
+                      variants={staggerContainer}
+                      initial="initial"
+                      animate="animate"
+                      className="space-y-6 h-full flex flex-col"
+                    >
+                      <div className="flex items-center justify-between flex-shrink-0">
+                        <h3 className="text-lg font-semibold">Attach Reports</h3>
+                        <Badge variant="outline">{selectedReportIds.length} attached</Badge>
+                      </div>
+                      <div className="text-sm text-gray-600 mb-4 flex-shrink-0">
+                        Select reports to include with this bid package. Subcontractors will receive links to download them.
+                      </div>
+
+                      <div className="flex-1 min-h-0 border rounded-md overflow-y-auto p-4 bg-gray-50">
+                        {reports.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                            <FileText className="h-12 w-12 mb-2 opacity-20" />
+                            <p>No reports available</p>
+                            <p className="text-xs mt-1">Upload reports in the Plans tab first</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {reports.map((report) => {
+                              const isSelected = selectedReportIds.includes(report.id)
+                              return (
+                                <div
+                                  key={report.id}
+                                  className={`flex items-center p-3 rounded-lg border cursor-pointer transition-colors ${
+                                    isSelected
+                                      ? 'bg-blue-50 border-blue-200'
+                                      : 'bg-white border-gray-200 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedReportIds((prev) =>
+                                      isSelected
+                                        ? prev.filter((id) => id !== report.id)
+                                        : [...prev, report.id]
+                                    )
+                                  }}
+                                >
+                                  <Checkbox
+                                    checked={isSelected}
+                                    onCheckedChange={() => {
+                                      setSelectedReportIds((prev) =>
+                                        isSelected
+                                          ? prev.filter((id) => id !== report.id)
+                                          : [...prev, report.id]
+                                      )
+                                    }}
+                                    className="mr-3"
+                                  />
+                                  <FileText className={`h-5 w-5 mr-3 ${isSelected ? 'text-blue-500' : 'text-gray-400'}`} />
+                                  <div className="flex-1">
+                                    <p className={`font-medium text-sm ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
+                                      {report.title || report.file_name}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {new Date(report.created_at).toLocaleDateString()} • {(report.file_size / 1024 / 1024).toFixed(2)} MB
+                                    </p>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2 mt-4 flex-shrink-0">
+                        <Button
+                          variant="outline"
+                          onClick={() => setStep(2)}
+                          className="flex-1"
+                        >
+                          Back
+                        </Button>
+                        <Button
+                          onClick={() => setStep(4)}
+                          className="flex-1"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Step 4: Subcontractors */}
+                  {step === 4 && (
                     <motion.div
                       variants={staggerContainer}
                       initial="initial"
@@ -1781,7 +1892,7 @@ export default function BidPackageModal({
                           <div className="flex flex-col sm:flex-row gap-2">
                             <Button 
                               variant="outline" 
-                              onClick={() => setStep(2)}
+                              onClick={() => setStep(3)}
                               className="flex-1 h-10 md:h-auto"
                             >
                               Back
@@ -1903,9 +2014,10 @@ export default function BidPackageModal({
                                           {sub.trade_category}
                                         </Badge>
                                         {sub.website_url && (
-                                          <Button asChild variant="secondary" size="sm">
+                                          <Button asChild variant="outline" size="sm" className="h-7 gap-1 text-xs">
                                             <a href={sub.website_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center">
-                                              <Globe className="h-4 w-4" />
+                                              <Globe className="h-3 w-3" />
+                                              Website
                                             </a>
                                           </Button>
                                         )}
@@ -1914,8 +2026,8 @@ export default function BidPackageModal({
                                     {sub.source === 'bidi' && (
                                       <div className="flex flex-wrap items-center gap-2 mt-2">
                                         {(() => {
-                                          const rating = Number((sub as any).google_review_score)
-                                          return !isNaN(rating) ? (
+                                          const rating = (sub as any).google_review_score
+                                          return (typeof rating === 'number' && rating > 0) ? (
                                             <Badge variant="outline" className="text-xs">
                                               <Star className="h-3 w-3 mr-1 text-yellow-400 fill-yellow-400" /> {rating.toFixed(1)}
                                             </Badge>
@@ -1967,7 +2079,10 @@ export default function BidPackageModal({
                                 const subject = `${job?.name || 'Project'} - Bid Request: ${trade}`
                                 const prettyDeadline = deadline ? new Date(deadline).toLocaleString() : 'No deadline set'
                                 const attachments = [
-                                  `Project Plan - ${job?.name || 'Project'} (Plan ID: ${planId}) - Link included`
+                                  `Project Plan - ${job?.name || 'Project'} (Plan ID: ${planId}) - Link included`,
+                                  ...reports
+                                    .filter(r => selectedReportIds.includes(r.id))
+                                    .map(r => `Report: ${r.title || r.file_name} - Link included`)
                                 ]
                                 return (
                                   <div key={trade} className="p-4 border rounded-lg space-y-3">
@@ -2034,8 +2149,8 @@ Thank you,`}
                     </motion.div>
                   )}
 
-                  {/* Step 4: Email Status & Responses */}
-                  {step === 4 && (
+                  {/* Step 5: Email Status & Responses */}
+                  {step === 5 && (
                     <motion.div
                       variants={staggerContainer}
                       initial="initial"
@@ -2150,7 +2265,7 @@ Thank you,`}
                       <div className="flex flex-col sm:flex-row gap-2">
                         <Button
                           variant="outline"
-                          onClick={() => setStep(3)}
+                          onClick={() => setStep(4)}
                           className="flex-1"
                         >
                           Back

@@ -34,6 +34,7 @@ export async function userHasJobAccess(
 type JobWithRole = {
   role: 'owner' | 'collaborator'
   job: Record<string, unknown> | null
+  last_viewed_at?: string
 }
 
 export async function getJobForUser<T extends string = '*'>(
@@ -76,12 +77,13 @@ export async function listJobsForUser<T extends string = '*'>(
   supabase: GenericSupabase,
   userId: string,
   columns: T = '*' as T
-): Promise<Array<{ job: any; role: 'owner' | 'collaborator' }>> {
+): Promise<Array<{ job: any; role: 'owner' | 'collaborator'; last_viewed_at?: string }>> {
   const { data, error } = await supabase
     .from('job_members')
     .select(
       `
         role,
+        last_viewed_at,
         job:jobs(${columns})
       `
     )
@@ -97,7 +99,8 @@ export async function listJobsForUser<T extends string = '*'>(
     .filter((row) => row.job)
     .map((row) => ({
       job: row.job,
-      role: row.role
+      role: row.role,
+      last_viewed_at: (row as any).last_viewed_at
     }))
 }
 

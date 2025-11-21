@@ -132,10 +132,22 @@ export default function JobsPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'draft': return 'bg-gray-100 text-gray-800'
-      case 'active': return 'bg-green-100 text-green-800'
-      case 'completed': return 'bg-blue-100 text-blue-800'
+      case 'needs_takeoff': return 'bg-orange-100 text-orange-800'
+      case 'needs_packages': return 'bg-blue-100 text-blue-800'
+      case 'waiting_for_bids': return 'bg-purple-100 text-purple-800'
+      case 'completed': return 'bg-green-100 text-green-800'
       case 'archived': return 'bg-gray-100 text-gray-600'
+      case 'active': return 'bg-green-100 text-green-800' // Legacy
       default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const formatStatus = (status: string) => {
+    switch (status) {
+      case 'needs_takeoff': return 'Needs Takeoff'
+      case 'needs_packages': return 'Need Packages'
+      case 'waiting_for_bids': return 'Waiting for Bids'
+      default: return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')
     }
   }
 
@@ -223,7 +235,9 @@ export default function JobsPage() {
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="needs_takeoff">Needs Takeoff</SelectItem>
+                      <SelectItem value="needs_packages">Need Packages</SelectItem>
+                      <SelectItem value="waiting_for_bids">Waiting for Bids</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
                       <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
@@ -307,7 +321,7 @@ export default function JobsPage() {
                               )}
                             </div>
                             <Badge className={getStatusColor(job.status)}>
-                              {job.status}
+                              {formatStatus(job.status)}
                             </Badge>
                           </div>
                         </CardHeader>

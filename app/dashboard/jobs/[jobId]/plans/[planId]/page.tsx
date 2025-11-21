@@ -25,12 +25,17 @@ import {
   MessageSquare,
   Bot,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Pencil,
+  Check,
+  X
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
 import { Job, Plan } from '@/types/takeoff'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import { Input } from '@/components/ui/input'
+import { updatePlanTitle } from '@/app/actions/plan'
 import FastPlanCanvas from '@/components/fast-plan-canvas'
 import CommentPinForm from '@/components/comment-pin-form'
 import { canvasUtils } from '@/lib/canvas-utils'
@@ -79,6 +84,12 @@ export default function EnhancedPlanViewer() {
   const [isRunningTakeoff, setIsRunningTakeoff] = useState(false)
   const [isRunningQuality, setIsRunningQuality] = useState(false)
   const [isGeneratingShare, setIsGeneratingShare] = useState(false)
+  
+  // Plan title editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [isUpdatingTitle, setIsUpdatingTitle] = useState(false)
+
   const [takeoffResults, setTakeoffResults] = useState<any>(null)
   const [modalTakeoffItems, setModalTakeoffItems] = useState<Array<{
     id: string
@@ -503,6 +514,15 @@ export default function EnhancedPlanViewer() {
         
         const itemsWithIds = ensureItemIds(itemsArray)
         
+        // Add visual indicator for items from other plans
+        const itemsWithSource = itemsWithIds.map((item: any) => ({
+          ...item,
+          // If item has a plan_file_name and it's different from current plan, indicate it
+          source_display: item.plan_file_name && item.plan_id !== planId 
+            ? item.plan_file_name 
+            : undefined
+        }))
+        
         // Extract quality_analysis from takeoff summary if it exists
         const qualityAnalysisFromTakeoff = takeoffAnalysis.summary?.quality_analysis
         const normalizedTradeScopeReview = qualityAnalysisFromTakeoff
@@ -528,7 +548,7 @@ export default function EnhancedPlanViewer() {
             consensusCount: takeoffAnalysis.confidence_scores?.model_count || 1
           },
           results: {
-            items: itemsWithIds,
+            items: itemsWithSource,
             summary: takeoffAnalysis.summary || {},
             quality_analysis: normalizedQualityAnalysisFromTakeoff || undefined // Include quality analysis from takeoff
           }
@@ -1485,6 +1505,39 @@ export default function EnhancedPlanViewer() {
     }
   }
 
+  function startEditing() {
+    if (plan) {
+      setEditingTitle(plan.title || plan.file_name)
+      setIsEditingTitle(true)
+    }
+  }
+
+  async function saveTitle() {
+    if (!plan || !editingTitle.trim()) return
+
+    setIsUpdatingTitle(true)
+    try {
+      const result = await updatePlanTitle(plan.id, editingTitle)
+      
+      if (result.success) {
+        setPlan(prev => prev ? { ...prev, title: editingTitle } : null)
+        setIsEditingTitle(false)
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error) {
+      console.error('Error updating plan title:', error)
+      alert('Failed to update plan name')
+    } finally {
+      setIsUpdatingTitle(false)
+    }
+  }
+
+  function cancelEditing() {
+    setIsEditingTitle(false)
+    setEditingTitle('')
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1521,8 +1574,59 @@ export default function EnhancedPlanViewer() {
                   <span className="hidden md:inline">Back to Job</span>
                 </Button>
               </Link>
-              <div className="text-xs md:text-sm text-gray-600 truncate">
-                <span className="font-medium">{job.name}</span> - <span className="hidden sm:inline">{plan.title || plan.file_name}</span>
+              <div className="text-xs md:text-sm text-gray-600 truncate flex items-center">
+                <span className="font-medium mr-1">{job.name}</span> - 
+                {isEditingTitle ? (
+                  <div className="flex items-center ml-2 gap-1">
+                    <Input
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      className="h-6 text-sm w-48 md:w-64"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveTitle()
+                        if (e.key === 'Escape') cancelEditing()
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        saveTitle()
+                      }}
+                      disabled={isUpdatingTitle}
+                    >
+                      <Check className="h-3 w-3" />
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        cancelEditing()
+                      }}
+                      disabled={isUpdatingTitle}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="group flex items-center ml-1">
+                    <span className="hidden sm:inline">{plan.title || plan.file_name}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
+                      onClick={startEditing}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
             

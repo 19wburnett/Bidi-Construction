@@ -34,16 +34,23 @@ import {
   AlertCircle,
   BarChart3,
   Bell,
-  ArrowRight
+  ArrowRight,
+  Pencil,
+  Check,
+  X,
+  Search
 } from 'lucide-react'
 import Link from 'next/link'
 import { staggerContainer, staggerItem, cardHover, skeletonPulse } from '@/lib/animations'
-import { Job, Plan, BidPackage } from '@/types/takeoff'
+import { Job, Plan, BidPackage, JobReport } from '@/types/takeoff'
 import { getJobForUser } from '@/lib/job-access'
+import { updatePlanTitle } from '@/app/actions/plan'
 import BidComparisonModal from '@/components/bid-comparison-modal'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidPackageViewModal from '@/components/bid-package-view-modal'
+import AddBidModal from '@/components/add-bid-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
+import ReportViewerModal from '@/components/report-viewer-modal'
 
 const PROJECT_TYPES = [
   'Residential',
@@ -54,7 +61,16 @@ const PROJECT_TYPES = [
   'Other'
 ]
 
-const JOB_STATUSES: Job['status'][] = ['draft', 'active', 'completed', 'archived']
+const JOB_STATUSES: Job['status'][] = ['draft', 'needs_takeoff', 'needs_packages', 'waiting_for_bids', 'completed', 'archived']
+
+const formatStatus = (status: string) => {
+  switch (status) {
+    case 'needs_takeoff': return 'Needs Takeoff'
+    case 'needs_packages': return 'Need Packages'
+    case 'waiting_for_bids': return 'Waiting for Bids'
+    default: return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')
+  }
+}
 
 type EditFormState = {
   name: string
@@ -79,24 +95,36 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null)
   const [jobRole, setJobRole] = useState<'owner' | 'collaborator' | null>(null)
   const [plans, setPlans] = useState<Plan[]>([])
+  const [reports, setReports] = useState<JobReport[]>([])
   const [bidPackages, setBidPackages] = useState<BidPackage[]>([])
   const [bids, setBids] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [uploadingReport, setUploadingReport] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [showBidsModal, setShowBidsModal] = useState(false)
   const [showPackageModal, setShowPackageModal] = useState(false)
   const [showPackageViewModal, setShowPackageViewModal] = useState(false)
+  const [showAddBidModal, setShowAddBidModal] = useState(false)
+  const [showReportViewer, setShowReportViewer] = useState(false)
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+  const [selectedReport, setSelectedReport] = useState<JobReport | null>(null)
   const [takeoffItems, setTakeoffItems] = useState<any[]>([])
   const [aggregatedTakeoffItems, setAggregatedTakeoffItems] = useState<any[]>([])
-  const [takeoffAnalysisMap, setTakeoffAnalysisMap] = useState<Record<string, string>>({}) // plan_id -> analysis_id
+  const [takeoffAnalysisId, setTakeoffAnalysisId] = useState<string | null>(null)
   const [loadingTakeoff, setLoadingTakeoff] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
   const isSavingTakeoffRef = useRef(false)
+  
+  // Plan editing state
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [isUpdatingTitle, setIsUpdatingTitle] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
   const [editForm, setEditForm] = useState<EditFormState>({
     name: '',
     location: '',
@@ -130,6 +158,16 @@ export default function JobDetailPage() {
         return
       }
 
+      // Update last viewed timestamp (fire and forget)
+      supabase
+        .from('job_members')
+        .update({ last_viewed_at: new Date().toISOString() })
+        .eq('job_id', jobId)
+        .eq('user_id', user.id)
+        .then(({ error }) => {
+           if (error) console.error('Failed to update last viewed:', error)
+        })
+
       setJob(membership.job)
       setJobRole(membership.role)
 
@@ -142,6 +180,16 @@ export default function JobDetailPage() {
 
       if (plansError) throw plansError
       setPlans(plansData || [])
+
+      // Load job reports
+      const { data: reportsData, error: reportsError } = await supabase
+        .from('job_reports')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+
+      if (reportsError) console.error('Error loading reports:', reportsError)
+      setReports(reportsData || [])
 
       // Load bid packages for this job
       const { data: packagesData, error: packagesError } = await supabase
@@ -178,52 +226,51 @@ export default function JobDetailPage() {
     
     setLoadingTakeoff(true)
     try {
-      const allItems: any[] = []
-      const analysisMap: Record<string, string> = {}
+      // Fetch the latest takeoff analysis for this job
+      const { data: takeoffAnalysis, error: takeoffError } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('id, items')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      // Load takeoff analysis for each plan
-      for (const plan of plansList) {
-        const hasTakeoff = plan.takeoff_analysis_status === 'completed' || plan.has_takeoff_analysis === true
-        if (!hasTakeoff) continue
-
-        const { data: takeoffAnalysis, error: takeoffError } = await supabase
-          .from('plan_takeoff_analysis')
-          .select('id, items')
-          .eq('job_id', plan.job_id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (takeoffError || !takeoffAnalysis) continue
-
-        analysisMap[plan.id] = takeoffAnalysis.id
-
-        // Parse takeoff items
-        let itemsArray: any[] = []
-        try {
-          if (typeof takeoffAnalysis.items === 'string') {
-            const parsed = JSON.parse(takeoffAnalysis.items)
-            itemsArray = parsed.takeoffs || parsed.items || (Array.isArray(parsed) ? parsed : [])
-          } else if (Array.isArray(takeoffAnalysis.items)) {
-            itemsArray = takeoffAnalysis.items
-          }
-        } catch (parseError) {
-          console.error('Error parsing takeoff items for plan', plan.id, parseError)
-          continue
-        }
-
-        // Add plan_id to each item for tracking
-        const itemsWithPlanId = itemsArray.map((item: any) => ({
-          ...item,
-          plan_id: plan.id,
-          plan_name: plan.title || plan.file_name
-        }))
-
-        allItems.push(...itemsWithPlanId)
+      if (takeoffError) {
+        console.error('Error fetching takeoff analysis:', takeoffError)
+        return
       }
 
-      setAggregatedTakeoffItems(allItems)
-      setTakeoffAnalysisMap(analysisMap)
+      if (!takeoffAnalysis) {
+        setAggregatedTakeoffItems([])
+        return
+      }
+
+      setTakeoffAnalysisId(takeoffAnalysis.id)
+
+      let itemsArray: any[] = []
+      try {
+        if (typeof takeoffAnalysis.items === 'string') {
+          const parsed = JSON.parse(takeoffAnalysis.items)
+          itemsArray = parsed.takeoffs || parsed.items || (Array.isArray(parsed) ? parsed : [])
+        } else if (Array.isArray(takeoffAnalysis.items)) {
+          itemsArray = takeoffAnalysis.items
+        }
+      } catch (parseError) {
+        console.error('Error parsing takeoff items:', parseError)
+      }
+
+      // If items don't have plan_name but have plan_id, we can enrich them from plansList
+      const enrichedItems = itemsArray.map((item: any) => {
+        if (item.plan_id && !item.plan_name) {
+           const plan = plansList.find(p => p.id === item.plan_id)
+           if (plan) {
+             return { ...item, plan_name: plan.title || plan.file_name }
+           }
+        }
+        return item
+      })
+
+      setAggregatedTakeoffItems(enrichedItems)
     } catch (error) {
       console.error('Error loading aggregated takeoff items:', error)
     } finally {
@@ -232,74 +279,22 @@ export default function JobDetailPage() {
   }
 
   const handleTakeoffItemsChange = async (updatedItems: any[]) => {
-    if (!user || isSavingTakeoffRef.current) return
-
-    // Get the first plan with takeoff analysis for items without plan_id
-    const firstPlanWithTakeoff = plans.find(p => 
-      (p.takeoff_analysis_status === 'completed' || p.has_takeoff_analysis === true) &&
-      takeoffAnalysisMap[p.id]
-    )
-    const defaultPlanId = firstPlanWithTakeoff?.id
-    const defaultPlanName = firstPlanWithTakeoff?.title || firstPlanWithTakeoff?.file_name
-
-    // Assign plan_id to items that don't have one
-    const itemsWithPlanId = updatedItems.map(item => {
-      if (!item.plan_id && defaultPlanId) {
-        return {
-          ...item,
-          plan_id: defaultPlanId,
-          plan_name: defaultPlanName
-        }
-      }
-      return item
-    })
+    if (!user || isSavingTakeoffRef.current || !takeoffAnalysisId) return
 
     // Update local state immediately for responsive UI
-    setAggregatedTakeoffItems(itemsWithPlanId)
+    setAggregatedTakeoffItems(updatedItems)
 
-    // Save to database in the background (don't reload on success to prevent refresh)
+    // Save to database in the background
     isSavingTakeoffRef.current = true
     setLoadingTakeoff(true)
     try {
-      // Group items by plan_id
-      const itemsByPlan: Record<string, any[]> = {}
+      const { error } = await supabase
+        .from('plan_takeoff_analysis')
+        .update({ items: updatedItems })
+        .eq('id', takeoffAnalysisId)
+
+      if (error) throw error
       
-      itemsWithPlanId.forEach(item => {
-        const planId = item.plan_id
-        if (!planId) {
-          console.warn('Skipping item without plan_id:', item)
-          return
-        }
-        
-        if (!itemsByPlan[planId]) {
-          itemsByPlan[planId] = []
-        }
-        
-        // Remove plan_id and plan_name before saving
-        const { plan_id, plan_name, ...itemToSave } = item
-        itemsByPlan[planId].push(itemToSave)
-      })
-
-      // Update each plan's takeoff analysis
-      for (const [planId, items] of Object.entries(itemsByPlan)) {
-        const analysisId = takeoffAnalysisMap[planId]
-        if (!analysisId) {
-          console.warn(`No analysis ID found for plan ${planId}`)
-          continue
-        }
-
-        const { error } = await supabase
-          .from('plan_takeoff_analysis')
-          .update({ items })
-          .eq('id', analysisId)
-
-        if (error) {
-          console.error(`Error updating takeoff items for plan ${planId}:`, error)
-          // Only reload on error to sync with database
-          await loadAggregatedTakeoffItems(plans)
-          return
-        }
-      }
       // Success - don't reload, state is already updated
     } catch (error) {
       console.error('Error saving takeoff items:', error)
@@ -322,8 +317,9 @@ export default function JobDetailPage() {
       }
     }
     
-    // Check if any plan has completed takeoff
-    const hasTakeoff = plans.some(p => p.takeoff_analysis_status === 'completed' || p.has_takeoff_analysis === true)
+    // Check if we have items or an analysis ID (job-level takeoff)
+    const hasTakeoff = aggregatedTakeoffItems.length > 0 || !!takeoffAnalysisId
+    
     if (!hasTakeoff) {
       return { 
         message: 'Run takeoff analysis on your plans', 
@@ -467,6 +463,42 @@ export default function JobDetailPage() {
     }
   }
 
+  function startEditingPlan(plan: Plan) {
+    setEditingPlanId(plan.id)
+    setEditingTitle(plan.title || plan.file_name)
+  }
+
+  async function savePlanTitle() {
+    if (!editingPlanId || !editingTitle.trim()) return
+
+    setIsUpdatingTitle(true)
+    try {
+      const result = await updatePlanTitle(editingPlanId, editingTitle)
+      
+      if (result.success) {
+        // Update local state
+        setPlans(prev => prev.map(p => 
+          p.id === editingPlanId 
+            ? { ...p, title: editingTitle } 
+            : p
+        ))
+        setEditingPlanId(null)
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error) {
+      console.error('Error updating plan title:', error)
+      alert('Failed to update plan name')
+    } finally {
+      setIsUpdatingTitle(false)
+    }
+  }
+
+  function cancelEditingPlan() {
+    setEditingPlanId(null)
+    setEditingTitle('')
+  }
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     // Auto-trigger ingestion after upload (same pattern as plans/new page)
     const files = Array.from(e.target.files || [])
@@ -550,12 +582,138 @@ export default function JobDetailPage() {
     }
   }
 
+  const handleReportUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length || !job) return
+
+    setUploadingReport(true)
+    try {
+      for (const file of files) {
+        const fileExt = file.name.split('.').pop()
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+        const filePath = `job-plans/reports/${user?.id}/${jobId}/${fileName}`
+
+        // Upload to storage (using job-plans bucket with reports/ prefix)
+        const { error: uploadError } = await supabase.storage
+          .from('job-plans')
+          .upload(filePath, file)
+
+        if (uploadError) throw uploadError
+
+        // Create report record
+        const { error: insertError } = await supabase
+          .from('job_reports')
+          .insert({
+            job_id: jobId,
+            created_by: user?.id,
+            title: file.name.split('.')[0],
+            file_name: file.name,
+            file_path: filePath,
+            file_size: file.size,
+            file_type: file.type
+          })
+
+        if (insertError) throw insertError
+      }
+
+      // Reload data
+      await loadJobData()
+    } catch (error) {
+      console.error('Error uploading reports:', error)
+      alert('Failed to upload report. Please try again.')
+    } finally {
+      setUploadingReport(false)
+    }
+  }
+
+  const deleteReport = async (report: JobReport) => {
+    if (!confirm(`Are you sure you want to delete "${report.title || report.file_name}"?`)) return
+
+    try {
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('job-plans')
+        .remove([report.file_path])
+
+      if (storageError) console.error('Error deleting file from storage:', storageError)
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('job_reports')
+        .delete()
+        .eq('id', report.id)
+
+      if (dbError) throw dbError
+
+      // Update local state
+      setReports(prev => prev.filter(r => r.id !== report.id))
+    } catch (error) {
+      console.error('Error deleting report:', error)
+      alert('Failed to delete report.')
+    }
+  }
+
+  const handleDeletePlan = async (plan: Plan) => {
+    if (!confirm(`Are you sure you want to delete "${plan.title || plan.file_name}"? This will also delete all associated takeoff data.`)) return
+
+    try {
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('job-plans')
+        .remove([plan.file_path])
+
+      if (storageError) console.error('Error deleting file from storage:', storageError)
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('plans')
+        .delete()
+        .eq('id', plan.id)
+
+      if (dbError) throw dbError
+
+      // Update local state
+      setPlans(prev => prev.filter(p => p.id !== plan.id))
+      
+      // Reload job data to update takeoff summaries etc
+      loadJobData()
+    } catch (error) {
+      console.error('Error deleting plan:', error)
+      alert('Failed to delete plan.')
+    }
+  }
+
+  const handleDownloadPlan = async (plan: Plan) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('job-plans')
+        .download(plan.file_path)
+
+      if (error) throw error
+
+      const url = URL.createObjectURL(data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = plan.file_name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error downloading plan:', error)
+      alert('Failed to download plan.')
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'draft': return 'bg-gray-100 text-gray-800'
-      case 'active': return 'bg-green-100 text-green-800'
-      case 'completed': return 'bg-blue-100 text-blue-800'
+      case 'needs_takeoff': return 'bg-orange-100 text-orange-800'
+      case 'needs_packages': return 'bg-blue-100 text-blue-800'
+      case 'waiting_for_bids': return 'bg-purple-100 text-purple-800'
+      case 'completed': return 'bg-green-100 text-green-800'
       case 'archived': return 'bg-gray-100 text-gray-600'
+      case 'active': return 'bg-green-100 text-green-800' // Legacy
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -563,44 +721,15 @@ export default function JobDetailPage() {
   const handleCreatePackageClick = async () => {
     if (!user || plans.length === 0) return
 
-    // Find the first plan with takeoff analysis
-    const planWithTakeoff = plans.find(p => 
-      p.takeoff_analysis_status === 'completed' || p.has_takeoff_analysis === true
-    )
-
-    if (!planWithTakeoff) {
+    // Check if we have takeoff items or an analysis ID
+    if (aggregatedTakeoffItems.length === 0 && !takeoffAnalysisId) {
       alert('Please run takeoff analysis on at least one plan before creating a bid package.')
       return
     }
 
     try {
-      // Load takeoff items for the selected plan
-      const { data: takeoffAnalysis, error: takeoffError } = await supabase
-        .from('plan_takeoff_analysis')
-        .select('items')
-        .eq('job_id', planWithTakeoff.job_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (takeoffError || !takeoffAnalysis) {
-        alert('Could not load takeoff items. Please ensure takeoff analysis is complete.')
-        return
-      }
-
-      // Parse takeoff items
-      let itemsArray: any[] = []
-      try {
-        if (typeof takeoffAnalysis.items === 'string') {
-          const parsed = JSON.parse(takeoffAnalysis.items)
-          itemsArray = parsed.takeoffs || parsed.items || []
-        } else if (Array.isArray(takeoffAnalysis.items)) {
-          itemsArray = takeoffAnalysis.items
-        }
-      } catch (parseError) {
-        console.error('Error parsing takeoff items:', parseError)
-        itemsArray = []
-      }
+      // Use existing items
+      const itemsArray = aggregatedTakeoffItems
 
       // Ensure items have required fields
       const normalizedItems = itemsArray.map((item: any, index: number) => ({
@@ -614,7 +743,13 @@ export default function JobDetailPage() {
       }))
 
       setTakeoffItems(normalizedItems)
-      setSelectedPlanId(planWithTakeoff.id)
+      
+      // Select a default plan ID (required by modal/API)
+      // Try to find from items, otherwise use first plan
+      const itemWithPlan = itemsArray.find((i: any) => i.plan_id)
+      const defaultPlanId = itemWithPlan?.plan_id || plans[0]?.id
+      
+      setSelectedPlanId(defaultPlanId)
       setShowPackageModal(true)
     } catch (error) {
       console.error('Error preparing package creation:', error)
@@ -658,6 +793,10 @@ export default function JobDetailPage() {
   const nextStep = getNextStep()
   const recentActivity = getRecentActivity()
 
+  const filteredPlans = plans.filter(plan => 
+    (plan.title || plan.file_name).toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   return (
     <>
       <div className="min-h-screen bg-gray-50">
@@ -696,7 +835,7 @@ export default function JobDetailPage() {
               </div>
               <div className="flex items-center space-x-2">
                 <Badge className={getStatusColor(job.status)}>
-                  {job.status}
+                  {formatStatus(job.status)}
                 </Badge>
                 {(jobRole === 'owner' || (job.user_id === user?.id)) && (
                   <Button variant="outline" size="sm" onClick={openEditDialog}>
@@ -827,7 +966,7 @@ export default function JobDetailPage() {
             <TabsContent value="plans" className="space-y-6">
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
                       <CardTitle className="flex items-center">
                         <FileText className="h-5 w-5 mr-2 text-orange-600" />
@@ -837,33 +976,44 @@ export default function JobDetailPage() {
                         Upload and manage your construction plans
                       </CardDescription>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="file"
-                        id="plan-upload"
-                        multiple
-                        accept=".pdf,.dwg,.jpg,.jpeg,.png,.tiff"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                        disabled={uploading}
-                      />
-                      <label htmlFor="plan-upload">
-                        <Button asChild disabled={uploading}>
-                          <span>
-                            {uploading ? (
-                              <>
-                                <Clock className="h-4 w-4 mr-2 animate-spin" />
-                                Uploading...
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="h-4 w-4 mr-2" />
-                                Upload Plans
-                              </>
-                            )}
-                          </span>
-                        </Button>
-                      </label>
+                    <div className="flex items-center gap-4">
+                      <div className="relative w-full md:w-64">
+                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+                        <Input
+                          placeholder="Search plans..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="pl-8"
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="file"
+                          id="plan-upload"
+                          multiple
+                          accept=".pdf,.dwg,.jpg,.jpeg,.png,.tiff"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                          disabled={uploading}
+                        />
+                        <label htmlFor="plan-upload">
+                          <Button asChild disabled={uploading}>
+                            <span>
+                              {uploading ? (
+                                <>
+                                  <Clock className="h-4 w-4 mr-2 animate-spin" />
+                                  Uploading...
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="h-4 w-4 mr-2" />
+                                  Upload Plans
+                                </>
+                              )}
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 </CardHeader>
@@ -888,74 +1038,234 @@ export default function JobDetailPage() {
                           </Button>
                         </label>
                       </motion.div>
+                    ) : filteredPlans.length === 0 ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-center py-12"
+                      >
+                        <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No plans found</h3>
+                        <p className="text-gray-600">Try adjusting your search query</p>
+                      </motion.div>
                     ) : (
                       <motion.div
                         variants={staggerContainer}
                         initial="initial"
                         animate="animate"
-                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                        className="flex flex-col space-y-3"
                       >
-                        {plans.map((plan) => (
+                        {filteredPlans.map((plan) => (
                           <motion.div
                             key={plan.id}
                             variants={staggerItem}
-                            whileHover="hover"
-                            whileTap="tap"
+                            className="flex items-stretch gap-3 group"
                           >
-                            <Link href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}>
-                              <Card className="cursor-pointer">
-                                <CardContent className="p-4">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center space-x-2 min-w-0 flex-1">
-                                      <FileText className="h-5 w-5 text-orange-600 flex-shrink-0" />
-                                      <span className="font-medium text-sm truncate min-w-0">
-                                        {plan.title || plan.file_name}
+                            {editingPlanId === plan.id ? (
+                              <div className="flex-1 flex items-center p-4 bg-white border rounded-lg shadow-sm ring-2 ring-orange-500 border-transparent transition-all">
+                                <FileText className="h-8 w-8 text-orange-600 mr-4 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="flex items-center gap-1 flex-1 min-w-0">
+                                      <Input
+                                        value={editingTitle}
+                                        onChange={(e) => setEditingTitle(e.target.value)}
+                                        className="h-7 text-sm px-2 max-w-[300px]"
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                          e.stopPropagation()
+                                          if (e.key === 'Enter') savePlanTitle()
+                                          if (e.key === 'Escape') cancelEditingPlan()
+                                        }}
+                                      />
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost" 
+                                        className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 flex-shrink-0"
+                                        onClick={savePlanTitle}
+                                      >
+                                        <Check className="h-3 w-3" />
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost" 
+                                        className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 flex-shrink-0"
+                                        onClick={cancelEditingPlan}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                    <Badge variant="secondary" className="text-xs ml-2">{plan.status}</Badge>
+                                  </div>
+                                  <div className="text-sm text-gray-500 flex items-center gap-3">
+                                    <span>{plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}</span>
+                                    <span>•</span>
+                                    <span>Uploaded {new Date(plan.created_at || new Date()).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <Link 
+                                href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}
+                                className="flex-1 flex"
+                              >
+                                <div className="flex-1 flex items-center p-4 bg-white border rounded-lg hover:border-orange-500 hover:shadow-md transition-all cursor-pointer group-hover:border-orange-500">
+                                  <FileText className="h-8 w-8 text-orange-600 mr-4 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="font-semibold text-gray-900 truncate text-lg">
+                                          {plan.title || plan.file_name}
                                       </span>
-                                    </div>
-                                    <Badge variant="outline" className="text-xs flex-shrink-0 ml-2">
-                                      {plan.status}
-                                    </Badge>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex space-x-1">
-                                      <Button variant="ghost" size="sm">
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                      <Button 
-                                        variant="ghost" 
+                                      <Button
+                                        variant="ghost"
                                         size="sm"
+                                        className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
                                         onClick={(e) => {
                                           e.preventDefault()
                                           e.stopPropagation()
-                                          // TODO: Add download functionality
+                                          startEditingPlan(plan)
                                         }}
                                       >
-                                        <Download className="h-4 w-4" />
+                                        <Pencil className="h-3 w-3" />
                                       </Button>
-                                      <Button 
-                                        variant="ghost" 
-                                        size="sm"
-                                        onClick={(e) => {
-                                          e.preventDefault()
-                                          e.stopPropagation()
-                                          // TODO: Add delete functionality
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                      <Badge variant="secondary" className="text-xs ml-2">{plan.status}</Badge>
                                     </div>
-                                    <div className="text-xs text-gray-500">
-                                      {plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}
+                                    <div className="text-sm text-gray-500 flex items-center gap-3">
+                                      <span>{plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}</span>
+                                      <span>•</span>
+                                      <span>Uploaded {new Date(plan.created_at || new Date()).toLocaleDateString()}</span>
                                     </div>
                                   </div>
-                                </CardContent>
-                              </Card>
-                            </Link>
+                                  <div className="text-sm font-medium text-orange-600 flex items-center opacity-0 group-hover:opacity-100 transition-opacity px-4">
+                                    View Plan <ArrowRight className="ml-1 h-4 w-4" />
+                                  </div>
+                                </div>
+                              </Link>
+                            )}
+                            
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-full flex-1 bg-white hover:bg-gray-50 hover:text-blue-600 border-gray-200 w-12"
+                                title="Download"
+                                onClick={() => handleDownloadPlan(plan)}
+                              >
+                                <Download className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-full flex-1 bg-white hover:bg-red-50 hover:text-red-600 border-gray-200 w-12"
+                                title="Delete"
+                                onClick={() => handleDeletePlan(plan)}
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </Button>
+                            </div>
                           </motion.div>
                         ))}
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </CardContent>
+              </Card>
+
+              {/* Reports Section */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center">
+                        <FileText className="h-5 w-5 mr-2 text-blue-600" />
+                        Reports
+                      </CardTitle>
+                      <CardDescription>
+                        Upload additional PDF reports (e.g., Soil Reports, Engineering Specs)
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="file"
+                        id="report-upload"
+                        multiple
+                        accept=".pdf"
+                        onChange={handleReportUpload}
+                        className="hidden"
+                        disabled={uploadingReport}
+                      />
+                      <label htmlFor="report-upload">
+                        <Button asChild disabled={uploadingReport} variant="outline">
+                          <span>
+                            {uploadingReport ? (
+                              <>
+                                <Clock className="h-4 w-4 mr-2 animate-spin" />
+                                Uploading...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="h-4 w-4 mr-2" />
+                                Upload Reports
+                              </>
+                            )}
+                          </span>
+                        </Button>
+                      </label>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {reports.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No reports uploaded</h3>
+                      <p className="text-gray-600">Upload PDF reports to attach to bid packages</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {reports.map((report) => (
+                        <Card key={report.id} className="hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                <FileText className="h-8 w-8 text-blue-500 flex-shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium text-sm truncate" title={report.title || report.file_name}>
+                                    {report.title || report.file_name}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {new Date(report.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end space-x-1 mt-2">
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedReport(report)
+                                  setShowReportViewer(true)
+                                }}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => deleteReport(report)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -1168,13 +1478,21 @@ export default function JobDetailPage() {
                 <motion.div variants={staggerItem}>
                   <Card>
                     <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <Users className="h-5 w-5 mr-2 text-orange-600" />
-                        Received Bids
-                      </CardTitle>
-                      <CardDescription>
-                        View and manage bids from subcontractors
-                      </CardDescription>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center">
+                            <Users className="h-5 w-5 mr-2 text-orange-600" />
+                            Received Bids
+                          </CardTitle>
+                          <CardDescription>
+                            View and manage bids from subcontractors
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" onClick={() => setShowAddBidModal(true)}>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Manually Add Bid
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       {bids.length === 0 ? (
@@ -1314,7 +1632,7 @@ export default function JobDetailPage() {
                   <SelectContent>
                     {JOB_STATUSES.map((statusOption) => (
                       <SelectItem key={statusOption} value={statusOption}>
-                        {statusOption.charAt(0).toUpperCase() + statusOption.slice(1)}
+                        {formatStatus(statusOption)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1401,6 +1719,28 @@ export default function JobDetailPage() {
           }}
         />
       )}
+
+      {/* Add Bid Modal */}
+      {jobId && (
+        <AddBidModal
+          jobId={jobId}
+          isOpen={showAddBidModal}
+          onClose={() => setShowAddBidModal(false)}
+          onBidAdded={() => {
+            loadJobData()
+          }}
+        />
+      )}
+
+      {/* Report Viewer Modal */}
+      <ReportViewerModal
+        report={selectedReport}
+        isOpen={showReportViewer}
+        onClose={() => {
+          setShowReportViewer(false)
+          setSelectedReport(null)
+        }}
+      />
     </>
   )
 }

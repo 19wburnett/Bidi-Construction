@@ -13,13 +13,22 @@ import {
   DollarSign,
   Clock,
   GitCompare,
-  Mail
+  Mail,
+  Check,
+  X,
+  ChevronRight,
+  Building2,
+  Phone,
+  Globe,
+  Calendar,
+  Search
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { modalBackdrop, modalContent, staggerContainer, staggerItem } from '@/lib/animations'
+import { modalBackdrop, modalContent } from '@/lib/animations'
 
 interface BidComparisonModalProps {
   jobId: string
@@ -59,6 +68,7 @@ interface BidLineItem {
   unit_price: number | null
   amount: number
   notes: string | null
+  cost_code?: string | null
 }
 
 interface TakeoffItem {
@@ -84,12 +94,13 @@ export default function BidComparisonModal({
   const [error, setError] = useState('')
   const [emailStatuses, setEmailStatuses] = useState<Record<string, any>>({})
   const [allRecipients, setAllRecipients] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'overview' | 'detailed'>('overview')
+  const [activeTab, setActiveTab] = useState<'details' | 'comparison'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
   const [showEmailResponseForm, setShowEmailResponseForm] = useState(false)
   const [responseText, setResponseText] = useState('')
   const [sendingResponse, setSendingResponse] = useState(false)
+  const [takeoffSearchTerm, setTakeoffSearchTerm] = useState('')
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -124,6 +135,7 @@ export default function BidComparisonModal({
         .order('created_at', { ascending: false })
 
       if (bidsError) throw bidsError
+      console.log('Loaded bids:', bidsData)
       setBids(bidsData || [])
 
       // Load email statuses for this job
@@ -131,51 +143,57 @@ export default function BidComparisonModal({
         const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
         if (statusResponse.ok) {
           const statusData = await statusResponse.json()
-          console.log('Email statuses loaded:', statusData)
           if (statusData.recipients && Array.isArray(statusData.recipients)) {
-            // Store full recipients array
             setAllRecipients(statusData.recipients)
-            console.log(`Loaded ${statusData.recipients.length} email recipients`)
-            
-            // Create a map by email address for quick lookup
             const statusMap: Record<string, any> = {}
             statusData.recipients.forEach((recipient: any) => {
               statusMap[recipient.subcontractor_email] = recipient
             })
             setEmailStatuses(statusMap)
           } else {
-            console.log('No recipients found in response')
             setAllRecipients([])
           }
-        } else {
-          const errorText = await statusResponse.text()
-          console.error('Failed to load email statuses:', statusResponse.status, errorText)
-          setAllRecipients([])
         }
       } catch (err) {
         console.error('Error loading email statuses:', err)
         setAllRecipients([])
       }
 
-      // Load takeoff items from plans in this job
-      const { data: plansData } = await supabase
-        .from('plans')
-        .select('id, takeoff_analysis_status, job_id')
+      // Load takeoff items directly from job-level analysis
+      const { data: takeoffData } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('items')
         .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      if (plansData && plansData.length > 0) {
-        const planWithTakeoff = plansData.find(p => p.takeoff_analysis_status === 'completed')
-        if (planWithTakeoff && planWithTakeoff.job_id) {
-          const { data: takeoffData } = await supabase
-            .from('plan_takeoff_analysis')
-            .select('items')
-            .eq('job_id', planWithTakeoff.job_id)
-            .single()
+      if (takeoffData && takeoffData.items) {
+        let itemsArray: any[] = []
+        try {
+          if (typeof takeoffData.items === 'string') {
+            const parsed = JSON.parse(takeoffData.items)
+            itemsArray = parsed.takeoffs || parsed.items || (Array.isArray(parsed) ? parsed : [])
+          } else if (Array.isArray(takeoffData.items)) {
+            itemsArray = takeoffData.items
+          }
+        } catch (parseError) {
+          console.error('Error parsing takeoff items:', parseError)
+        }
 
-          if (takeoffData && takeoffData.items) {
-            setTakeoffItems(takeoffData.items)
-            // Select all items by default
-            setSelectedTakeoffItemIds(new Set(takeoffData.items.map((item: TakeoffItem) => item.id)))
+        if (itemsArray.length > 0) {
+          const typedItems: TakeoffItem[] = itemsArray.map((item: any) => ({
+            id: item.id || crypto.randomUUID(),
+            category: item.category || 'Uncategorized',
+            description: item.description || item.name || 'Item',
+            quantity: Number(item.quantity) || 0,
+            unit: item.unit || 'ea',
+            unit_cost: Number(item.unit_cost) || null
+          }))
+          
+          setTakeoffItems(typedItems)
+          if (selectedTakeoffItemIds.size === 0) {
+            setSelectedTakeoffItemIds(new Set(typedItems.map(item => item.id)))
           }
         }
       }
@@ -205,8 +223,7 @@ export default function BidComparisonModal({
   useEffect(() => {
     if (selectedBidId) {
       loadBidLineItems(selectedBidId)
-      // Reset to overview tab when bid changes
-      setActiveTab('overview')
+      setActiveTab('details')
     }
   }, [selectedBidId])
 
@@ -225,6 +242,13 @@ export default function BidComparisonModal({
   }, [takeoffItems])
 
   const selectedBid = bids.find(b => b.id === selectedBidId)
+  
+  useEffect(() => {
+    if (selectedBid) {
+      console.log('Selected Bid:', selectedBid)
+      console.log('Subcontractor Info:', selectedBid.subcontractors)
+    }
+  }, [selectedBid])
 
   // Calculate discrepancies between takeoff and bid
   const calculateDiscrepancies = () => {
@@ -232,7 +256,6 @@ export default function BidComparisonModal({
       return []
     }
 
-    // Filter to only selected takeoff items
     const selectedTakeoffItems = takeoffItems.filter(item => selectedTakeoffItemIds.has(item.id))
     
     if (selectedTakeoffItems.length === 0 || bidLineItems.length === 0) {
@@ -247,7 +270,6 @@ export default function BidComparisonModal({
       percentage?: number
     }> = []
 
-    // Check for missing items
     selectedTakeoffItems.forEach(takeoffItem => {
       const matchingBidItem = bidLineItems.find(bidItem => 
         bidItem.description.toLowerCase().includes(takeoffItem.description.toLowerCase()) ||
@@ -260,7 +282,6 @@ export default function BidComparisonModal({
           takeoffItem
         })
       } else {
-        // Check quantity differences (more than 20%)
         if (matchingBidItem.quantity && takeoffItem.quantity) {
           const quantityDiff = Math.abs(matchingBidItem.quantity - takeoffItem.quantity)
           const percentage = (quantityDiff / takeoffItem.quantity) * 100
@@ -276,7 +297,6 @@ export default function BidComparisonModal({
           }
         }
 
-        // Check price differences (more than 15%)
         if (matchingBidItem.unit_price && takeoffItem.unit_cost) {
           const priceDiff = Math.abs(matchingBidItem.unit_price - takeoffItem.unit_cost)
           const percentage = (priceDiff / takeoffItem.unit_cost) * 100
@@ -299,7 +319,6 @@ export default function BidComparisonModal({
 
   const discrepancies = calculateDiscrepancies()
 
-  // Calculate simplified comparison metrics
   const calculateSimplifiedMetrics = () => {
     if (!selectedBid || takeoffItems.length === 0) {
       return null
@@ -317,7 +336,6 @@ export default function BidComparisonModal({
     const bidTotal = bidLineItems.reduce((sum, item) => sum + item.amount, 0)
     const overallBidAmount = selectedBid.bid_amount || 0
 
-    // Count matches
     let matchedCount = 0
     let missingCount = 0
     selectedTakeoffItems.forEach(takeoffItem => {
@@ -360,7 +378,7 @@ export default function BidComparisonModal({
       initial="initial"
       animate="animate"
       exit="exit"
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4"
       onClick={onClose}
       style={{ pointerEvents: 'auto' }}
     >
@@ -369,1165 +387,741 @@ export default function BidComparisonModal({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="bg-white rounded-lg shadow-xl max-w-7xl w-[98vw] h-[95vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-xl shadow-2xl w-[98vw] h-[95vh] overflow-hidden flex flex-col border border-gray-200"
         onClick={(e) => e.stopPropagation()}
       >
-                 <Card className="border-0 shadow-none flex-1 flex flex-col h-full">
-           <CardHeader className="flex-shrink-0 border-b">
-             <div className="flex items-center justify-between">
-               <div>
-                 <CardTitle className="flex items-center">
-                   <FileText className="h-5 w-5 mr-2 text-orange-600" />
-                   View & Compare Bids
-                 </CardTitle>
-                 <CardDescription>
-                   Compare bids against your takeoff analysis
-                 </CardDescription>
-               </div>
-               <div className="flex items-center gap-2">
-                 <Button variant="ghost" size="sm" onClick={onClose}>
-                   ×
-                 </Button>
-               </div>
-             </div>
-           </CardHeader>
-           
-           <CardContent className="flex-1 overflow-hidden flex flex-col">
-            {loading ? (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-600">Loading bids...</p>
+        {/* Header */}
+        <div className="flex-shrink-0 border-b bg-white px-6 py-4 flex items-center justify-between z-10">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-orange-100 rounded-lg">
+              <FileText className="h-6 w-6 text-orange-600" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Bid Review & Comparison</h2>
+              <p className="text-sm text-gray-500">Compare bids against your takeoff analysis</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-gray-100">
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+        
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-hidden flex">
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+                <p className="text-gray-500 font-medium">Loading bids...</p>
               </div>
-            ) : error ? (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-red-600">{error}</p>
+            </div>
+          ) : error ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-center gap-3">
+                <AlertCircle className="h-5 w-5" />
+                <p>{error}</p>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-[300px_1fr] gap-4 h-full overflow-hidden">
-                {/* Left: Bids/Emails List with Tabs */}
-                <div className="border-r overflow-hidden flex flex-col">
-                  <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="h-full flex flex-col">
-                    <TabsList className="grid w-full grid-cols-2 mb-3 mx-2 mt-2">
-                      <TabsTrigger 
-                        value="bids"
-                        onClick={() => {
-                          setSelectedEmailRecipient(null)
-                          setShowEmailResponseForm(false)
-                          setResponseText('')
-                        }}
-                      >
+            </div>
+          ) : (
+            <>
+              {/* Left Sidebar: Bids & Emails List */}
+              <div className="w-[320px] border-r flex flex-col bg-gray-50/50">
+                <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col">
+                  <div className="p-3 border-b bg-white">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
                         Bids
                         {bids.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 text-xs">
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
                             {bids.length}
                           </Badge>
                         )}
                       </TabsTrigger>
-                      <TabsTrigger value="emails">
+                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
                         Emails
                         {allRecipients.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 text-xs">
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
                             {allRecipients.length}
                           </Badge>
                         )}
                       </TabsTrigger>
                     </TabsList>
-                    
-                    <TabsContent value="bids" className="flex-1 overflow-y-auto mt-0 pr-2">
-                      <h3 className="font-semibold mb-3 sticky top-0 bg-white pb-2">Bids ({bids.length})</h3>
-                      <div className="space-y-3">
-                        {bids.map((bid) => (
-                          <motion.div
-                            key={bid.id}
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.99 }}
-                          >
-                            <Card 
-                              className={`cursor-pointer transition-all ${
-                                selectedBidId === bid.id 
-                                  ? 'border-orange-500 bg-orange-50 shadow-md' 
-                                  : 'hover:border-gray-300'
-                              }`}
-                              onClick={() => {
-                                setSelectedBidId(bid.id)
-                                setSelectedEmailRecipient(null)
-                                setShowEmailResponseForm(false)
-                                setResponseText('')
-                                setLeftSideTab('bids')
-                              }}
-                            >
-                              <CardContent className="p-3 space-y-2">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <h4 className="font-semibold text-sm text-gray-900 truncate">
-                                      {bid.subcontractors?.name || bid.subcontractor_email || 'Unknown'}
-                                    </h4>
-                                    <p className="text-xs text-gray-600 truncate">{bid.subcontractors?.email || bid.subcontractor_email}</p>
-                                  </div>
-                                  <div className="flex flex-col items-end gap-1 ml-2">
-                                    {bid.status && (
-                                      <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'} className="text-xs">
-                                        {bid.status}
-                                      </Badge>
-                                    )}
-                                    {(() => {
-                                      const emailStatus = emailStatuses[bid.subcontractors?.email || bid.subcontractor_email]
-                                      if (emailStatus) {
-                                        const statusColors: Record<string, string> = {
-                                          sent: 'bg-blue-100 text-blue-800',
-                                          delivered: 'bg-green-100 text-green-800',
-                                          opened: 'bg-purple-100 text-purple-800',
-                                          bounced: 'bg-red-100 text-red-800',
-                                          failed: 'bg-red-100 text-red-800',
-                                          responded: 'bg-orange-100 text-orange-800',
-                                          pending: 'bg-gray-100 text-gray-800'
-                                        }
-                                        return (
-                                          <>
-                                            <Badge className={`text-xs ${statusColors[emailStatus.status] || 'bg-gray-100 text-gray-800'}`}>
-                                              {emailStatus.status}
-                                            </Badge>
-                                            {emailStatus.has_clarifying_questions && (
-                                              <Badge variant="destructive" className="text-xs">
-                                                ?
-                                              </Badge>
-                                            )}
-                                          </>
-                                        )
-                                      }
-                                      return null
-                                    })()}
-                                  </div>
-                                </div>
-                                
-                                {bid.bid_amount && (
-                                  <div className="text-xl font-bold text-green-600">
-                                    ${bid.bid_amount.toLocaleString()}
-                                  </div>
-                                )}
-                                
-                                {bid.subcontractors?.google_review_score && (
-                                  <div className="flex items-center text-xs text-gray-600">
-                                    ⭐ {bid.subcontractors.google_review_score}
-                                  </div>
-                                )}
-                              </CardContent>
-                            </Card>
-                          </motion.div>
-                        ))}
+                  </div>
+                  
+                  <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3">
+                    {bids.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                        <p className="text-sm">No bids received yet</p>
                       </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="emails" className="flex-1 overflow-y-auto mt-0 pr-2">
-                      <h3 className="font-semibold mb-3 sticky top-0 bg-white pb-2">Email Statuses ({allRecipients.length})</h3>
-                      {allRecipients.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500 py-8">
-                          <Mail className="h-12 w-12 mb-3 text-gray-400" />
-                          <p className="text-sm text-center">No emails sent</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {(() => {
-                            const groupedByPackage: Record<string, any[]> = {}
-                            allRecipients.forEach((recipient: any) => {
-                              const packageId = recipient.bid_package_id || 'unknown'
-                              if (!groupedByPackage[packageId]) {
-                                groupedByPackage[packageId] = []
-                              }
-                              groupedByPackage[packageId].push(recipient)
-                            })
-                            
-                            return Object.entries(groupedByPackage).map(([packageId, recipients]) => {
-                              const tradeCategory = recipients[0]?.bid_packages?.trade_category || 'Unknown Trade'
-                              const hasBids = recipients.filter((r: any) => r.bids && r.bids.length > 0).length
-                              
-                              return (
-                                <div key={packageId} className="space-y-2">
-                                  <div className="text-xs font-semibold text-gray-700 mb-2">{tradeCategory}</div>
-                                  {recipients.map((recipient: any) => {
-                                    const statusColors: Record<string, string> = {
-                                      sent: 'bg-blue-100 text-blue-800 border-blue-300',
-                                      delivered: 'bg-green-100 text-green-800 border-green-300',
-                                      opened: 'bg-purple-100 text-purple-800 border-purple-300',
-                                      bounced: 'bg-red-100 text-red-800 border-red-300',
-                                      failed: 'bg-red-100 text-red-800 border-red-300',
-                                      responded: 'bg-orange-100 text-orange-800 border-orange-300',
-                                      pending: 'bg-gray-100 text-gray-800 border-gray-300'
-                                    }
-                                    
-                                    const hasBid = recipient.bids && recipient.bids.length > 0
-                                    const bid = hasBid ? recipient.bids[0] : null
-                                    
-                                    return (
-                                      <Card
-                                        key={recipient.id}
-                                        className={`cursor-pointer transition-all ${
-                                          selectedEmailRecipient?.id === recipient.id
-                                            ? 'border-orange-500 bg-orange-50 shadow-md'
-                                            : hasBid
-                                            ? 'bg-green-50 border-green-200'
-                                            : 'hover:border-gray-300'
-                                        }`}
-                                        onClick={() => {
-                                          setSelectedEmailRecipient(recipient)
-                                          setSelectedBidId(null)
-                                          setShowEmailResponseForm(false)
-                                          setResponseText('')
-                                        }}
-                                      >
-                                        <CardContent className="p-3 space-y-2">
-                                          <div className="flex items-start justify-between">
-                                            <div className="flex-1 min-w-0">
-                                              <h4 className="font-semibold text-sm text-gray-900 truncate">
-                                                {recipient.subcontractor_name || recipient.subcontractors?.name || recipient.subcontractor_email}
-                                              </h4>
-                                              <p className="text-xs text-gray-600 truncate">{recipient.subcontractor_email}</p>
-                                            </div>
-                                            <div className="flex flex-col items-end gap-1 ml-2">
-                                              <Badge className={`text-xs border ${statusColors[recipient.status] || 'bg-gray-100 text-gray-800 border-gray-300'}`}>
-                                                {recipient.status}
-                                              </Badge>
-                                              {recipient.has_clarifying_questions && (
-                                                <Badge variant="destructive" className="text-xs">
-                                                  ?
-                                                </Badge>
-                                              )}
-                                              {hasBid && (
-                                                <Badge variant="default" className="text-xs bg-green-600">
-                                                  Bid
-                                                </Badge>
-                                              )}
-                                            </div>
-                                          </div>
-                                          
-                                          {hasBid && bid && bid.bid_amount && (
-                                            <div className="text-lg font-bold text-green-600">
-                                              ${bid.bid_amount.toLocaleString()}
-                                            </div>
-                                          )}
-                                          
-                                          {recipient.responded_at && (
-                                            <div className="text-xs text-gray-500">
-                                              Responded: {new Date(recipient.responded_at).toLocaleDateString()}
-                                            </div>
-                                          )}
-                                        </CardContent>
-                                      </Card>
-                                    )
-                                  })}
-                                </div>
-                              )
-                            })
-                          })()}
-                        </div>
-                      )}
-                    </TabsContent>
-                  </Tabs>
-                </div>
-
-                {/* Right: Tabbed Content */}
-                <div className="overflow-hidden flex flex-col">
-                  {selectedEmailRecipient ? (
-                    <div className="flex-1 overflow-y-auto">
-                      {/* Email Detail View */}
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                    )}
+                    {bids.map((bid) => (
+                      <div
+                        key={bid.id}
+                        onClick={() => {
+                          setSelectedBidId(bid.id)
+                          setSelectedEmailRecipient(null)
+                          setShowEmailResponseForm(false)
+                          setResponseText('')
+                          setLeftSideTab('bids')
+                        }}
+                        className={`
+                          cursor-pointer rounded-lg p-4 border transition-all hover:shadow-sm
+                          ${selectedBidId === bid.id 
+                            ? 'border-orange-400 bg-white shadow-md ring-1 ring-orange-400/20' 
+                            : 'bg-white border-gray-200 hover:border-orange-200'
+                          }
+                        `}
+                      >
+                        <div className="flex justify-between items-start mb-2">
                           <div>
-                            <h3 className="text-lg font-semibold">Email Details</h3>
-                            <p className="text-sm text-gray-600">
-                              {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
+                            <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
+                              {bid.subcontractors?.name || bid.subcontractor_email || 'Unknown'}
+                            </h4>
+                            <p className="text-xs text-gray-500 truncate max-w-[160px]">
+                              {bid.subcontractors?.email || bid.subcontractor_email}
                             </p>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedEmailRecipient(null)
-                              setShowEmailResponseForm(false)
-                              setResponseText('')
-                            }}
-                          >
-                            ×
-                          </Button>
+                          <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'} className="text-[10px] capitalize">
+                            {bid.status}
+                          </Badge>
                         </div>
-
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base">Recipient Information</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <p className="text-sm text-gray-600">Email</p>
-                                <p className="font-medium">{selectedEmailRecipient.subcontractor_email}</p>
-                              </div>
-                              <div>
-                                <p className="text-sm text-gray-600">Status</p>
-                                <Badge className={`text-xs ${
-                                  selectedEmailRecipient.status === 'sent' ? 'bg-blue-100 text-blue-800' :
-                                  selectedEmailRecipient.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                                  selectedEmailRecipient.status === 'opened' ? 'bg-purple-100 text-purple-800' :
-                                  selectedEmailRecipient.status === 'responded' ? 'bg-orange-100 text-orange-800' :
-                                  selectedEmailRecipient.status === 'bounced' || selectedEmailRecipient.status === 'failed' ? 'bg-red-100 text-red-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {selectedEmailRecipient.status}
-                                </Badge>
-                              </div>
+                        
+                        <div className="flex items-baseline gap-1 mb-2">
+                          <span className="text-lg font-bold text-gray-900">
+                            ${bid.bid_amount?.toLocaleString() ?? '0.00'}
+                          </span>
+                          <span className="text-xs text-gray-500">total</span>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {new Date(bid.created_at).toLocaleDateString()}
+                          </div>
+                          {bid.subcontractors?.google_review_score && (
+                            <div className="flex items-center gap-1 text-orange-600">
+                              <span>★</span>
+                              {bid.subcontractors.google_review_score}
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                              {selectedEmailRecipient.sent_at && (
-                                <div>
-                                  <p className="text-sm text-gray-600">Sent</p>
-                                  <p className="text-sm">{new Date(selectedEmailRecipient.sent_at).toLocaleString()}</p>
-                                </div>
-                              )}
-                              {selectedEmailRecipient.delivered_at && (
-                                <div>
-                                  <p className="text-sm text-gray-600">Delivered</p>
-                                  <p className="text-sm">{new Date(selectedEmailRecipient.delivered_at).toLocaleString()}</p>
-                                </div>
-                              )}
-                              {selectedEmailRecipient.opened_at && (
-                                <div>
-                                  <p className="text-sm text-gray-600">Opened</p>
-                                  <p className="text-sm">{new Date(selectedEmailRecipient.opened_at).toLocaleString()}</p>
-                                </div>
-                              )}
-                              {selectedEmailRecipient.responded_at && (
-                                <div>
-                                  <p className="text-sm text-gray-600">Responded</p>
-                                  <p className="text-sm">{new Date(selectedEmailRecipient.responded_at).toLocaleString()}</p>
-                                </div>
-                              )}
-                            </div>
-
-                            {selectedEmailRecipient.bid_packages && (
-                              <div>
-                                <p className="text-sm text-gray-600">Trade Category</p>
-                                <p className="font-medium">{selectedEmailRecipient.bid_packages.trade_category}</p>
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-
-                        {/* Original Email Sent */}
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base flex items-center">
-                              <Mail className="h-4 w-4 mr-2 text-blue-600" />
-                              Original Email Sent
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            {selectedEmailRecipient.bid_packages && (
-                              <div>
-                                <p className="text-sm text-gray-600 mb-1">Subject</p>
-                                <p className="text-sm font-medium">
-                                  Bid Request: {selectedEmailRecipient.bid_packages.trade_category}
-                                </p>
-                              </div>
-                            )}
-                            {selectedEmailRecipient.sent_at && (
-                              <div>
-                                <p className="text-sm text-gray-600 mb-1">Sent On</p>
-                                <p className="text-sm">{new Date(selectedEmailRecipient.sent_at).toLocaleString()}</p>
-                              </div>
-                            )}
-                            <div className="bg-gray-50 p-3 rounded border border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">Email Content:</p>
-                              <p className="text-sm text-gray-700">
-                                A bid package email was sent to {selectedEmailRecipient.subcontractor_email} requesting a bid for the {selectedEmailRecipient.bid_packages?.trade_category || 'specified'} trade category. 
-                                {selectedEmailRecipient.bid_packages && ' The email included plan attachments and project details.'}
-                              </p>
-                              {selectedEmailRecipient.reminder_count > 0 && (
-                                <p className="text-xs text-gray-500 mt-2">
-                                  {selectedEmailRecipient.reminder_count} reminder{selectedEmailRecipient.reminder_count !== 1 ? 's' : ''} sent
-                                  {selectedEmailRecipient.last_reminder_sent_at && ` (last: ${new Date(selectedEmailRecipient.last_reminder_sent_at).toLocaleDateString()})`}
-                                </p>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* Response Content */}
-                        {selectedEmailRecipient.response_text && (
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="text-base">Response Received</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="prose prose-sm max-w-none">
-                                <p className="whitespace-pre-wrap text-sm">{selectedEmailRecipient.response_text}</p>
-                              </div>
-                              {selectedEmailRecipient.responded_at && (
-                                <p className="text-xs text-gray-500 mt-3">
-                                  Received: {new Date(selectedEmailRecipient.responded_at).toLocaleString()}
-                                </p>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
-
-                        {/* Clarifying Questions */}
-                        {selectedEmailRecipient.clarifying_questions && selectedEmailRecipient.clarifying_questions.length > 0 && (
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="text-base flex items-center">
-                                <AlertCircle className="h-4 w-4 mr-2 text-orange-600" />
-                                Clarifying Questions
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              <ul className="list-disc pl-5 space-y-2">
-                                {selectedEmailRecipient.clarifying_questions.map((q: string, idx: number) => (
-                                  <li key={idx} className="text-sm text-gray-700">{q}</li>
-                                ))}
-                              </ul>
-                            </CardContent>
-                          </Card>
-                        )}
-
-                        {/* Bid Information */}
-                        {selectedEmailRecipient.bids && selectedEmailRecipient.bids.length > 0 && (
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="text-base flex items-center justify-between">
-                                <span>Bid Received</span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </TabsContent>
+                  
+                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3">
+                    {allRecipients.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                        <p className="text-sm">No emails sent</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {Object.entries(allRecipients.reduce((acc: any, r: any) => {
+                          const key = r.bid_packages?.trade_category || 'Other'
+                          if (!acc[key]) acc[key] = []
+                          acc[key].push(r)
+                          return acc
+                        }, {})).map(([category, recipients]: [string, any]) => (
+                          <div key={category}>
+                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
+                              {category}
+                            </h3>
+                            <div className="space-y-2">
+                              {recipients.map((recipient: any) => (
+                                <div
+                                  key={recipient.id}
                                   onClick={() => {
-                                    const bidId = selectedEmailRecipient.bids[0].id
-                                    if (bidId) {
-                                      setSelectedBidId(bidId)
+                                    setSelectedEmailRecipient(recipient)
+                                    setSelectedBidId(null)
+                                    setShowEmailResponseForm(false)
+                                    setResponseText('')
+                                  }}
+                                  className={`
+                                    cursor-pointer rounded-lg p-3 border transition-all
+                                    ${selectedEmailRecipient?.id === recipient.id 
+                                      ? 'border-blue-400 bg-white shadow-md ring-1 ring-blue-400/20' 
+                                      : 'bg-white border-gray-200 hover:border-blue-200'
+                                    }
+                                  `}
+                                >
+                                  <div className="flex justify-between items-start mb-1">
+                                    <h4 className="font-medium text-sm text-gray-900 truncate max-w-[180px]">
+                                      {recipient.subcontractor_name || recipient.subcontractors?.name || recipient.subcontractor_email}
+                                    </h4>
+                                    {recipient.has_clarifying_questions && (
+                                      <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" />
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between mt-2">
+                                    <Badge variant="outline" className={`
+                                      text-[10px] px-1.5 py-0 h-5 capitalize border-0
+                                      ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                        recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                        recipient.status === 'opened' ? 'bg-purple-100 text-purple-700' :
+                                        recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-gray-100 text-gray-600'}
+                                    `}>
+                                      {recipient.status}
+                                    </Badge>
+                                    {recipient.bids?.length > 0 && (
+                                      <Badge className="text-[10px] h-5 bg-green-600 px-1.5">Bid</Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              </div>
+
+              {/* Right Content Area */}
+              <div className="flex-1 overflow-hidden flex flex-col bg-white">
+                {selectedEmailRecipient ? (
+                  // Email View
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <div className="max-w-3xl mx-auto space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-2xl font-bold text-gray-900">Email Details</h2>
+                          <p className="text-gray-500">
+                            Communication with {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
+                          </p>
+                        </div>
+                        <Button variant="outline" onClick={() => setSelectedEmailRecipient(null)}>Close</Button>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="text-sm text-gray-500 mb-1">Status</div>
+                            <div className="font-semibold capitalize">{selectedEmailRecipient.status}</div>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="text-sm text-gray-500 mb-1">Last Activity</div>
+                            <div className="font-semibold">
+                              {new Date(selectedEmailRecipient.updated_at || selectedEmailRecipient.created_at).toLocaleDateString()}
+                            </div>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="text-sm text-gray-500 mb-1">Bid Package</div>
+                            <div className="font-semibold">
+                              {selectedEmailRecipient.bid_packages?.trade_category || 'General'}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* Response/Thread Content */}
+                      <div className="space-y-4">
+                        {selectedEmailRecipient.response_text && (
+                          <Card className="border-orange-200 bg-orange-50">
+                            <CardHeader>
+                              <CardTitle className="text-base text-orange-900">Response from Subcontractor</CardTitle>
+                              <CardDescription className="text-orange-700">
+                                Received {new Date(selectedEmailRecipient.responded_at).toLocaleString()}
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <p className="whitespace-pre-wrap text-gray-800">{selectedEmailRecipient.response_text}</p>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {/* Reply Action */}
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-base">Reply</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                             {!showEmailResponseForm ? (
+                               <div className="flex gap-3">
+                                 <Button onClick={() => setShowEmailResponseForm(true)}>
+                                    <Mail className="h-4 w-4 mr-2" />
+                                    Send Message
+                                 </Button>
+                                 {selectedEmailRecipient.bids?.length > 0 && (
+                                   <Button variant="outline" onClick={() => {
+                                      setSelectedBidId(selectedEmailRecipient.bids[0].id)
                                       setSelectedEmailRecipient(null)
                                       setLeftSideTab('bids')
-                                    }
-                                  }}
-                                >
-                                  View Bid Details
-                                </Button>
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              {selectedEmailRecipient.bids[0].bid_amount && (
-                                <div className="text-2xl font-bold text-green-600 mb-2">
-                                  ${selectedEmailRecipient.bids[0].bid_amount.toLocaleString()}
-                                </div>
-                              )}
-                              {selectedEmailRecipient.bids[0].timeline && (
-                                <p className="text-sm text-gray-600 mb-2">
-                                  Timeline: {selectedEmailRecipient.bids[0].timeline}
-                                </p>
-                              )}
-                              {selectedEmailRecipient.bids[0].status && (
-                                <Badge variant={selectedEmailRecipient.bids[0].status === 'accepted' ? 'default' : 'outline'}>
-                                  {selectedEmailRecipient.bids[0].status}
-                                </Badge>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
-
-                        {/* Action Buttons */}
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base">Actions</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-3">
-                            <div className="flex gap-2">
-                              <Button
-                                variant="default"
-                                onClick={() => setShowEmailResponseForm(!showEmailResponseForm)}
-                                className="bg-orange-600 hover:bg-orange-700"
-                              >
-                                <Mail className="h-4 w-4 mr-2" />
-                                {selectedEmailRecipient.response_text ? 'Follow Up' : 'Respond'}
-                              </Button>
-                              {(() => {
-                                const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
-                                if (!bidPackageId || !selectedEmailRecipient.id) return null
-                                
-                                return (
-                                  <Button
-                                    variant="outline"
-                                    onClick={async () => {
-                                      // Send a reminder/follow-up email
-                                      try {
-                                        setSendingResponse(true)
-                                        setError('')
-                                        const response = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({
-                                            recipientId: selectedEmailRecipient.id,
-                                            responseText: 'This is a friendly reminder about the bid request. Please let us know if you have any questions or need additional information.'
-                                          })
-                                        })
-                                        
-                                        if (response.ok) {
-                                          // Reload data
-                                          await loadData()
-                                          setShowEmailResponseForm(false)
-                                          setResponseText('')
-                                        } else {
-                                          const errorData = await response.json()
-                                          setError(errorData.error || 'Failed to send reminder')
-                                        }
-                                      } catch (err: any) {
-                                        setError(err.message || 'Failed to send reminder')
-                                      } finally {
-                                        setSendingResponse(false)
-                                      }
-                                    }}
-                                    disabled={sendingResponse}
-                                  >
-                                    <Clock className="h-4 w-4 mr-2" />
-                                    Send Reminder
-                                  </Button>
-                                )
-                              })()}
-                            </div>
-
-                            {/* Response Form */}
-                            {showEmailResponseForm && (
-                              <div className="space-y-3 pt-3 border-t">
-                                <div>
-                                  <Label htmlFor="response-text">Your Response</Label>
-                                  <Textarea
-                                    id="response-text"
-                                    placeholder="Type your response here..."
+                                   }}>
+                                      View Bid
+                                   </Button>
+                                 )}
+                               </div>
+                             ) : (
+                               <div className="space-y-4">
+                                 <Textarea
                                     value={responseText}
                                     onChange={(e) => setResponseText(e.target.value)}
-                                    rows={6}
-                                    className="mt-2"
-                                  />
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="default"
-                                    onClick={async () => {
-                                      if (!responseText.trim()) {
-                                        setError('Please enter a response')
-                                        return
-                                      }
-                                      
-                                      if (!selectedEmailRecipient.id) {
-                                        setError('Recipient ID not found')
-                                        return
-                                      }
-                                      
-                                      const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
-                                      if (!bidPackageId) {
-                                        setError('Bid package ID not found')
-                                        return
-                                      }
+                                    placeholder="Type your message here..."
+                                    rows={5}
+                                 />
+                                 <div className="flex gap-3">
+                                   <Button 
+                                      disabled={sendingResponse || !responseText.trim()}
+                                      onClick={async () => {
+                                        if (!responseText.trim() || !selectedEmailRecipient.id) return
+                                        const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
+                                        if (!bidPackageId) return
 
-                                      // Validate before starting async operation
-                                      const requestBody = {
-                                        recipientId: selectedEmailRecipient.id,
-                                        responseText: responseText.trim()
-                                      }
-                                      
-                                      if (!requestBody.recipientId) {
-                                        setError('Recipient ID is missing')
-                                        return
-                                      }
-                                      if (!requestBody.responseText) {
-                                        setError('Response text is required')
-                                        return
-                                      }
-                                      
-                                      try {
                                         setSendingResponse(true)
-                                        setError('')
-                                        
-                                        const response = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify(requestBody)
-                                        })
-                                        
-                                        if (response.ok) {
-                                          // Reload data to get updated email status
-                                          await loadData()
-                                          setShowEmailResponseForm(false)
-                                          setResponseText('')
-                                          // Refresh selected recipient
-                                          const updatedRecipient = allRecipients.find(r => r.id === selectedEmailRecipient.id)
-                                          if (updatedRecipient) {
-                                            setSelectedEmailRecipient(updatedRecipient)
+                                        try {
+                                          const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                              recipientId: selectedEmailRecipient.id,
+                                              responseText: responseText.trim()
+                                            })
+                                          })
+                                          if (res.ok) {
+                                            await loadData()
+                                            setShowEmailResponseForm(false)
+                                            setResponseText('')
+                                            const updated = allRecipients.find(r => r.id === selectedEmailRecipient.id)
+                                            if (updated) setSelectedEmailRecipient(updated)
+                                          } else {
+                                            const err = await res.json()
+                                            setError(err.error || 'Failed to send')
                                           }
-                                        } else {
-                                          const errorData = await response.json().catch(() => ({ error: 'Unknown error occurred' }))
-                                          setError(errorData.error || 'Failed to send response')
+                                        } catch (e: any) {
+                                          setError(e.message)
+                                        } finally {
+                                          setSendingResponse(false)
                                         }
-                                      } catch (err: any) {
-                                        console.error('Error sending response:', err)
-                                        setError(err.message || 'Failed to send response')
-                                      } finally {
-                                        setSendingResponse(false)
-                                      }
-                                    }}
-                                    disabled={sendingResponse || !responseText.trim()}
-                                    className="bg-orange-600 hover:bg-orange-700"
-                                  >
-                                    {sendingResponse ? 'Sending...' : 'Send Response'}
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => {
-                                      setShowEmailResponseForm(false)
-                                      setResponseText('')
-                                    }}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                                {error && (
-                                  <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
-                                    {error}
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                      }}
+                                   >
+                                      {sendingResponse ? 'Sending...' : 'Send Message'}
+                                   </Button>
+                                   <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
+                                 </div>
+                                 {error && <p className="text-sm text-red-600">{error}</p>}
+                               </div>
+                             )}
                           </CardContent>
                         </Card>
                       </div>
                     </div>
-                  ) : selectedBid ? (
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'overview' | 'detailed')} className="h-full flex flex-col">
-                      <TabsList className="grid w-full grid-cols-2 mb-4">
-                        <TabsTrigger value="overview">Overview</TabsTrigger>
-                        <TabsTrigger value="detailed">Detailed Comparison</TabsTrigger>
-                      </TabsList>
-                      
-                      <TabsContent value="overview" className="flex-1 overflow-y-auto mt-0">
-                        {/* Simplified Comparison View */}
-                        {takeoffItems.length > 0 && simplifiedMetrics ? (
-                          <div className="space-y-6">
-                            {/* Bid Details Card */}
+                  </div>
+                ) : selectedBid ? (
+                  // Bid View
+                  <div className="flex flex-col h-full">
+                    {/* Subcontractor Header */}
+                    <div className="bg-white border-b p-6 pb-0">
+                      <div className="flex justify-between items-start mb-6">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <h2 className="text-2xl font-bold text-gray-900">
+                              {selectedBid.subcontractors?.name || selectedBid.subcontractor_email || 'Unknown Subcontractor'}
+                            </h2>
+                            <Badge variant={selectedBid.status === 'accepted' ? 'default' : 'outline'}>
+                              {selectedBid.status}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-gray-500 flex-wrap">
+                            <div className="flex items-center gap-1">
+                              <Mail className="h-3.5 w-3.5" />
+                              {selectedBid.subcontractors?.email || selectedBid.subcontractor_email}
+                            </div>
+                            {selectedBid.subcontractors?.phone && (
+                              <div className="flex items-center gap-1">
+                                <Phone className="h-3.5 w-3.5" />
+                                {selectedBid.subcontractors.phone}
+                              </div>
+                            )}
+                            {selectedBid.subcontractors?.website_url && (
+                              <div className="flex items-center gap-1">
+                                <Globe className="h-3.5 w-3.5" />
+                                <a href={selectedBid.subcontractors.website_url} target="_blank" rel="noreferrer" className="hover:underline text-blue-600">
+                                  Website
+                                </a>
+                              </div>
+                            )}
+                            {selectedBid.subcontractors?.google_review_score && (
+                              <div className="flex items-center gap-1 text-orange-600">
+                                <span>★</span>
+                                {selectedBid.subcontractors.google_reviews_link ? (
+                                  <a 
+                                    href={selectedBid.subcontractors.google_reviews_link} 
+                                    target="_blank" 
+                                    rel="noreferrer" 
+                                    className="hover:underline font-medium"
+                                  >
+                                    {selectedBid.subcontractors.google_review_score}
+                                  </a>
+                                ) : (
+                                  <span className="font-medium">{selectedBid.subcontractors.google_review_score}</span>
+                                )}
+                                <span className="text-gray-400 text-xs">/ 5.0</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-3xl font-bold text-gray-900">
+                            ${selectedBid.bid_amount?.toLocaleString() ?? '0.00'}
+                          </div>
+                          <div className="text-sm text-gray-500">Total Bid Amount</div>
+                        </div>
+                      </div>
+
+                      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'details' | 'comparison')} className="w-full">
+                        <TabsList className="bg-transparent border-b rounded-none p-0 h-auto w-full justify-start gap-6">
+                          <TabsTrigger 
+                            value="details"
+                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-600 px-4 py-3"
+                          >
+                            Bid Details
+                          </TabsTrigger>
+                          <TabsTrigger 
+                            value="comparison"
+                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-600 px-4 py-3"
+                          >
+                            Comparison Analysis
+                          </TabsTrigger>
+                        </TabsList>
+                      </Tabs>
+                    </div>
+
+                    {/* Scrollable Content */}
+                    <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6">
+                      <Tabs value={activeTab} className="space-y-6">
+                        <TabsContent value="details" className="mt-0 space-y-6">
+                          {/* Stats Cards */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <Card>
-                              <CardHeader>
-                                <CardTitle className="text-lg">Bid Details</CardTitle>
-                              </CardHeader>
-                              <CardContent className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <p className="text-sm text-gray-600">Subcontractor</p>
-                                    <p className="font-medium">{selectedBid.subcontractors?.name || selectedBid.subcontractor_email || 'Unknown'}</p>
-                                  </div>
-                                  {selectedBid.subcontractors?.phone && (
-                                    <div>
-                                      <p className="text-sm text-gray-600">Phone</p>
-                                      <p className="font-medium">{selectedBid.subcontractors.phone}</p>
-                                    </div>
-                                  )}
-                                </div>
-                                {selectedBid.subcontractors?.website_url && (
-                                  <div>
-                                    <p className="text-sm text-gray-600">Website</p>
-                                    <a href={selectedBid.subcontractors.website_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
-                                      {selectedBid.subcontractors.website_url}
-                                    </a>
-                                  </div>
-                                )}
-                                {selectedBid.bid_amount && (
-                                  <div>
-                                    <p className="text-sm text-gray-600">Total Bid Amount</p>
-                                    <p className="text-3xl font-bold text-green-600">
-                                      ${selectedBid.bid_amount.toLocaleString()}
-                                    </p>
-                                  </div>
-                                )}
-                                {selectedBid.notes && (
-                                  <div>
-                                    <p className="text-sm text-gray-600">Notes</p>
-                                    <p className="text-sm">{selectedBid.notes}</p>
-                                  </div>
-                                )}
+                              <CardContent className="p-4">
+                                <div className="text-sm font-medium text-gray-500 mb-1">Scope Coverage</div>
+                                <div className="text-2xl font-bold text-gray-900">{bidLineItems.length} Items</div>
                               </CardContent>
                             </Card>
-
-                            {/* Comparison Summary */}
                             <Card>
-                              <CardHeader>
-                                <CardTitle className="text-lg flex items-center">
-                                  <GitCompare className="h-5 w-5 mr-2 text-orange-600" />
-                                  Comparison Summary
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="space-y-6">
-                                {/* Cost Comparison */}
-                                <div className="grid grid-cols-3 gap-4">
-                                  <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                    <p className="text-xs text-gray-600 mb-1">Takeoff Total</p>
-                                    <p className="text-2xl font-bold text-blue-600">
-                                      ${simplifiedMetrics.takeoffTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
-                                    <p className="text-xs text-gray-500 mt-1">{simplifiedMetrics.selectedTakeoffItemsCount} items</p>
-                                  </div>
-                                  {simplifiedMetrics.bidLineItemsCount > 0 ? (
-                                    <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-                                      <p className="text-xs text-gray-600 mb-1">Bid Line Items Total</p>
-                                      <p className="text-2xl font-bold text-green-600">
-                                        ${simplifiedMetrics.bidTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </p>
-                                      <p className="text-xs text-gray-500 mt-1">{simplifiedMetrics.bidLineItemsCount} items</p>
-                                    </div>
-                                  ) : (
-                                    <div className="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                      <p className="text-xs text-gray-600 mb-1">No Line Items</p>
-                                      <p className="text-sm text-gray-500">Bid has no detailed breakdown</p>
-                                    </div>
-                                  )}
-                                  <div className="text-center p-4 bg-orange-50 rounded-lg border border-orange-200">
-                                    <p className="text-xs text-gray-600 mb-1">Overall Bid Amount</p>
-                                    <p className="text-2xl font-bold text-orange-600">
-                                      ${simplifiedMetrics.overallBidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Match Statistics */}
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="p-4 bg-gray-50 rounded-lg border">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <span className="text-sm font-medium text-gray-700">Items Matched</span>
-                                      <span className="text-lg font-bold text-green-600">{simplifiedMetrics.matchedCount}</span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                      <div 
-                                        className="bg-green-600 h-2 rounded-full transition-all"
-                                        style={{ width: `${simplifiedMetrics.matchPercentage}%` }}
-                                      />
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-1">{simplifiedMetrics.matchPercentage}% match rate</p>
-                                  </div>
-                                  <div className="p-4 bg-gray-50 rounded-lg border">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <span className="text-sm font-medium text-gray-700">Items Missing</span>
-                                      <span className="text-lg font-bold text-red-600">{simplifiedMetrics.missingCount}</span>
-                                    </div>
-                                    <p className="text-xs text-gray-500">Not found in bid</p>
-                                  </div>
-                                </div>
-
-                                {/* Discrepancies Alert */}
-                                {simplifiedMetrics.discrepancyCount > 0 && (
-                                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-                                    <div className="flex items-center mb-2">
-                                      <AlertCircle className="h-5 w-5 text-orange-600 mr-2" />
-                                      <span className="font-semibold text-orange-900">
-                                        {simplifiedMetrics.discrepancyCount} Discrepancy{simplifiedMetrics.discrepancyCount !== 1 ? 'ies' : ''} Detected
-                                      </span>
-                                    </div>
-                                    <p className="text-sm text-orange-800 mb-3">
-                                      Major differences found between your takeoff and this bid (quantity differences &gt;20% or price differences &gt;15%).
-                                    </p>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => setActiveTab('detailed')}
-                                      className="border-orange-300 text-orange-700 hover:bg-orange-100"
-                                    >
-                                      View Detailed Comparison
-                                    </Button>
-                                  </div>
-                                )}
-
-                                {/* No Line Items Alert */}
-                                {simplifiedMetrics.bidLineItemsCount === 0 && (
-                                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <div className="flex items-center mb-2">
-                                      <AlertCircle className="h-5 w-5 text-blue-600 mr-2" />
-                                      <span className="font-semibold text-blue-900">
-                                        No Bid Line Items Available
-                                      </span>
-                                    </div>
-                                    <p className="text-sm text-blue-800">
-                                      This bid doesn't have detailed line items. Only the overall bid amount is available.
-                                    </p>
-                                  </div>
-                                )}
-
-                                {/* View Detailed Comparison Button */}
-                                {simplifiedMetrics.bidLineItemsCount > 0 && (
-                                  <div className="flex justify-center">
-                                    <Button
-                                      variant="default"
-                                      size="lg"
-                                      onClick={() => setActiveTab('detailed')}
-                                      className="bg-orange-600 hover:bg-orange-700"
-                                    >
-                                      <GitCompare className="h-4 w-4 mr-2" />
-                                      View Detailed Comparison
-                                    </Button>
-                                  </div>
-                                )}
+                              <CardContent className="p-4">
+                                <div className="text-sm font-medium text-gray-500 mb-1">Timeline</div>
+                                <div className="text-2xl font-bold text-gray-900">{selectedBid.timeline || 'Not specified'}</div>
+                              </CardContent>
+                            </Card>
+                            <Card>
+                              <CardContent className="p-4">
+                                <div className="text-sm font-medium text-gray-500 mb-1">AI Summary</div>
+                                <div className="text-sm text-gray-600 line-clamp-2">{selectedBid.ai_summary || 'No summary available'}</div>
                               </CardContent>
                             </Card>
                           </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full text-gray-600">
-                            <FileText className="h-16 w-16 mb-4 text-gray-400" />
-                            <p>No takeoff data available for comparison</p>
-                          </div>
-                        )}
-                      </TabsContent>
-                      
-                      <TabsContent value="detailed" className="flex-1 overflow-y-auto mt-0">
-                        {/* Detailed Comparison View */}
-                        {takeoffItems.length > 0 ? (
-                          <div className="space-y-4">
-                            {/* Takeoff Items Selection */}
-                            <Card className="p-4">
-                              <h4 className="font-medium mb-3 text-sm">Select Takeoff Items to Compare:</h4>
-                              <div className="max-h-48 overflow-y-auto space-y-2 mb-3">
-                                {takeoffItems.map((item) => {
-                                  const isSelected = selectedTakeoffItemIds.has(item.id)
-                                  return (
-                                    <div
-                                      key={item.id}
-                                      className={`flex items-center space-x-3 p-2 border rounded-lg transition-colors ${
-                                        isSelected ? 'bg-orange-50 border-orange-300' : 'hover:bg-gray-50'
-                                      }`}
-                                    >
-                                      <Checkbox
-                                        checked={isSelected}
-                                        onCheckedChange={(checked: boolean) => {
-                                          const newSet = new Set(selectedTakeoffItemIds)
-                                          if (checked) {
-                                            newSet.add(item.id)
-                                          } else {
-                                            newSet.delete(item.id)
-                                          }
-                                          setSelectedTakeoffItemIds(newSet)
-                                        }}
-                                      />
-                                      <div className="flex-1">
-                                        <div className="font-medium text-sm">{item.description}</div>
-                                        <div className="text-xs text-gray-600">
-                                          {item.quantity} {item.unit}
-                                          {item.unit_cost !== undefined && item.unit_cost !== null && ` • $${(item.unit_cost ?? 0).toFixed(2)}/${item.unit}`}
-                                        </div>
-                                      </div>
-                                      <Badge variant="outline" className="text-xs">
-                                        {item.category}
-                                      </Badge>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                              
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs text-gray-500">
-                                  {selectedTakeoffItemIds.size} of {takeoffItems.length} items selected
-                                </p>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    if (selectedTakeoffItemIds.size === takeoffItems.length) {
-                                      setSelectedTakeoffItemIds(new Set())
-                                    } else {
-                                      setSelectedTakeoffItemIds(new Set(takeoffItems.map(item => item.id)))
-                                    }
-                                  }}
-                                >
-                                  {selectedTakeoffItemIds.size === takeoffItems.length ? 'Deselect All' : 'Select All'}
-                                </Button>
-                              </div>
-                            </Card>
 
-                            {/* Detailed Comparison Table */}
-                            {selectedTakeoffItemIds.size > 0 ? (
-                              <div className="space-y-4">
-                                {bidLineItems.length === 0 && (
-                                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <div className="flex items-center mb-2">
-                                      <AlertCircle className="h-5 w-5 text-blue-600 mr-2" />
-                                      <span className="font-semibold text-blue-900">
-                                        No Bid Line Items Available
-                                      </span>
-                                    </div>
-                                    <p className="text-sm text-blue-800">
-                                      This bid doesn't have detailed line items. Showing takeoff items only. Total bid amount: ${selectedBid?.bid_amount?.toLocaleString() || 'N/A'}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {discrepancies.length > 0 && (
-                                  <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-                                    <div className="flex items-center mb-2">
-                                      <AlertCircle className="h-5 w-5 text-orange-600 mr-2" />
-                                      <span className="font-semibold text-orange-900">
-                                        {discrepancies.length} Discrepancy(ies) Detected
-                                      </span>
-                                    </div>
-                                    <p className="text-sm text-orange-800">
-                                      Major differences found between your takeoff and this bid.
-                                    </p>
-                                  </div>
-                                )}
-
-                                {/* Side-by-Side Comparison Table */}
-                                <Card className="overflow-hidden">
-                                  <CardHeader className="bg-gray-50 border-b p-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                      <div>
-                                        <h4 className="font-semibold text-gray-900 flex items-center">
-                                          <FileText className="h-4 w-4 mr-2 text-blue-600" />
-                                          Your Takeoff
-                                        </h4>
-                                        <p className="text-xs text-gray-600 mt-1">
-                                          {selectedTakeoffItemIds.size} item{selectedTakeoffItemIds.size !== 1 ? 's' : ''} selected
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-semibold text-gray-900 flex items-center">
-                                          <DollarSign className="h-4 w-4 mr-2 text-green-600" />
-                                          Bid Line Items
-                                        </h4>
-                                        <p className="text-xs text-gray-600 mt-1">
-                                          {bidLineItems.length} line item{bidLineItems.length !== 1 ? 's' : ''}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </CardHeader>
-                                  
-                                  <CardContent className="p-0">
-                                    {bidLineItems.length > 0 ? (
-                                      <div className="divide-y max-h-[600px] overflow-y-auto">
-                                        {takeoffItems
-                                          .filter(item => selectedTakeoffItemIds.has(item.id))
-                                          .map((takeoffItem) => {
-                                            const matchingBidItem = bidLineItems.find(bidItem => 
-                                              bidItem.description.toLowerCase().includes(takeoffItem.description.toLowerCase()) ||
-                                              takeoffItem.description.toLowerCase().includes(bidItem.description.toLowerCase())
-                                            )
-                                            
-                                            const itemDiscrepancy = discrepancies.find(d => 
-                                              d.takeoffItem?.id === takeoffItem.id
-                                            )
-                                            
-                                            const takeoffTotal = (takeoffItem.unit_cost ?? 0) * takeoffItem.quantity
-                                            const bidTotal = matchingBidItem?.amount || 0
-                                            const difference = bidTotal - takeoffTotal
-                                            const hasDiscrepancy = itemDiscrepancy !== undefined
-                                            
-                                            return (
-                                              <div
-                                                key={takeoffItem.id}
-                                                className={`grid grid-cols-2 gap-4 p-4 hover:bg-gray-50 transition-colors ${
-                                                  hasDiscrepancy ? 'bg-orange-50/50' : 'bg-white'
-                                                }`}
-                                              >
-                                                {/* Takeoff Item Column */}
-                                                <div className="border-r pr-4">
-                                                  <div className="flex items-start justify-between mb-2">
-                                                    <div className="flex-1">
-                                                      <div className="flex items-center gap-2 mb-1">
-                                                        <Badge variant="outline" className="text-xs">
-                                                          {takeoffItem.category}
-                                                        </Badge>
-                                                        {hasDiscrepancy && (
-                                                          <Badge variant="destructive" className="text-xs">
-                                                            {itemDiscrepancy.type === 'missing' && 'Missing'}
-                                                            {itemDiscrepancy.type === 'quantity' && 'Qty Diff'}
-                                                            {itemDiscrepancy.type === 'price' && 'Price Diff'}
-                                                          </Badge>
-                                                        )}
-                                                      </div>
-                                                      <p className="font-medium text-sm text-gray-900 mb-1">
-                                                        {takeoffItem.description}
-                                                      </p>
-                                                      <div className="text-xs text-gray-600 space-y-0.5">
-                                                        <div>
-                                                          <span className="font-mono">{takeoffItem.quantity}</span> {takeoffItem.unit}
-                                                        </div>
-                                                        {takeoffItem.unit_cost !== undefined && takeoffItem.unit_cost !== null && (
-                                                          <div>
-                                                            @ <span className="font-mono">${(takeoffItem.unit_cost ?? 0).toFixed(2)}</span>/{takeoffItem.unit}
-                                                          </div>
-                                                        )}
-                                                      </div>
-                                                    </div>
-                                                    <div className="text-right ml-4">
-                                                      {takeoffItem.unit_cost !== undefined && takeoffItem.unit_cost !== null ? (
-                                                        <div className="text-lg font-bold text-blue-600">
-                                                          ${takeoffTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                        </div>
-                                                      ) : (
-                                                        <div className="text-sm text-gray-400 italic">
-                                                          No cost data
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  </div>
-                                                  {itemDiscrepancy && itemDiscrepancy.percentage && (
-                                                    <div className="mt-2 text-xs text-orange-600">
-                                                      {itemDiscrepancy.type === 'quantity' && (
-                                                        <span>Quantity difference: {itemDiscrepancy.percentage.toFixed(1)}%</span>
-                                                      )}
-                                                      {itemDiscrepancy.type === 'price' && (
-                                                        <span>Price difference: {itemDiscrepancy.percentage.toFixed(1)}%</span>
-                                                      )}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                
-                                                {/* Bid Item Column */}
-                                                <div className="pl-4">
-                                                  {matchingBidItem ? (
-                                                    <div>
-                                                      <div className="flex items-start justify-between mb-2">
-                                                        <div className="flex-1">
-                                                          <div className="flex items-center gap-2 mb-1">
-                                                            {matchingBidItem.category && (
-                                                              <Badge variant="outline" className="text-xs">
-                                                                {matchingBidItem.category}
-                                                              </Badge>
-                                                            )}
-                                                            <span className="font-mono text-xs text-gray-500">
-                                                              #{matchingBidItem.item_number}
-                                                            </span>
-                                                          </div>
-                                                          <p className="font-medium text-sm text-gray-900 mb-1">
-                                                            {matchingBidItem.description}
-                                                          </p>
-                                                          <div className="text-xs text-gray-600 space-y-0.5">
-                                                            {matchingBidItem.quantity && matchingBidItem.unit && (
-                                                              <div>
-                                                                <span className="font-mono">{matchingBidItem.quantity}</span> {matchingBidItem.unit}
-                                                              </div>
-                                                            )}
-                                                            {matchingBidItem.unit_price && matchingBidItem.unit && (
-                                                              <div>
-                                                                @ <span className="font-mono">${(matchingBidItem.unit_price ?? 0).toFixed(2)}</span>/{matchingBidItem.unit}
-                                                              </div>
-                                                            )}
-                                                            {matchingBidItem.notes && (
-                                                              <div className="text-gray-500 italic mt-1">
-                                                                {matchingBidItem.notes}
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        </div>
-                                                        <div className="text-right ml-4">
-                                                          <div className={`text-lg font-bold ${
-                                                            hasDiscrepancy ? 'text-orange-600' : 'text-green-600'
-                                                          }`}>
-                                                            ${bidTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                          </div>
-                                                          {difference !== 0 && (
-                                                            <div className={`text-xs mt-1 ${
-                                                              difference > 0 ? 'text-red-600' : 'text-green-600'
-                                                            }`}>
-                                                              {difference > 0 ? '+' : ''}${difference.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                            </div>
-                                                          )}
-                                                        </div>
-                                                      </div>
-                                                    </div>
-                                                  ) : (
-                                                    <div className="flex items-center justify-center h-full min-h-[60px] text-gray-400">
-                                                      <div className="text-center">
-                                                        <AlertCircle className="h-6 w-6 mx-auto mb-1 text-orange-400" />
-                                                        <p className="text-xs">Not found in bid</p>
-                                                      </div>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            )
-                                          })}
-                                        
-                                        {/* Summary Totals */}
-                                        <div className="bg-gray-50 p-4 border-t-2 border-gray-300">
-                                          <div className="grid grid-cols-2 gap-4">
-                                            <div className="text-right pr-4">
-                                              <div className="text-xs text-gray-600 mb-1">Takeoff Total</div>
-                                              <div className="text-xl font-bold text-blue-600">
-                                                $
-                                                {takeoffItems
-                                                  .filter(item => selectedTakeoffItemIds.has(item.id))
-                                                  .reduce((sum, item) => sum + (item.quantity * (item.unit_cost ?? 0)), 0)
-                                                  .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              </div>
-                                            </div>
-                                            <div className="pl-4">
-                                              <div className="text-xs text-gray-600 mb-1">Bid Total</div>
-                                              <div className="text-xl font-bold text-green-600">
-                                                ${bidLineItems
-                                                  .reduce((sum, item) => sum + item.amount, 0)
-                                                  .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              </div>
-                                              <div className="text-xs text-gray-500 mt-1">
-                                                (from {bidLineItems.length} line item{bidLineItems.length !== 1 ? 's' : ''})
-                                              </div>
-                                            </div>
-                                          </div>
-                                          {selectedBid?.bid_amount && (
-                                            <div className="mt-3 pt-3 border-t border-gray-300 text-center">
-                                              <div className="text-xs text-gray-600 mb-1">Overall Bid Amount</div>
-                                              <div className="text-2xl font-bold text-gray-900">
-                                                ${selectedBid.bid_amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                              </div>
-                                            </div>
+                          {/* Line Items Table - Redesigned */}
+                          <Card className="overflow-hidden border-gray-200 shadow-sm">
+                            <CardHeader className="bg-white border-b py-4">
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <FileText className="h-5 w-5 text-blue-600" />
+                                Bid Line Items
+                              </CardTitle>
+                            </CardHeader>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                                  <tr>
+                                    <th className="px-6 py-3 font-medium w-[100px]">Cost Code</th>
+                                    <th className="px-6 py-3 font-medium">Description</th>
+                                    <th className="px-6 py-3 font-medium">Category</th>
+                                    <th className="px-6 py-3 font-medium text-right">Qty</th>
+                                    <th className="px-6 py-3 font-medium text-right">Unit Price</th>
+                                    <th className="px-6 py-3 font-medium text-right">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                  {bidLineItems.length > 0 ? (
+                                    bidLineItems.map((item) => (
+                                      <tr key={item.id} className="hover:bg-gray-50/50">
+                                        <td className="px-6 py-4 text-gray-500">
+                                          {item.cost_code ? (
+                                            <span className="font-mono text-xs">{item.cost_code}</span>
+                                          ) : (
+                                            item.item_number
                                           )}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="p-8 text-center text-gray-500">
-                                        <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                                        <p>No bid line items to compare.</p>
-                                        <p className="text-sm mt-2">
-                                          Showing {selectedTakeoffItemIds.size} selected takeoff item{selectedTakeoffItemIds.size !== 1 ? 's' : ''} only.
-                                        </p>
+                                        </td>
+                                        <td className="px-6 py-4 font-medium text-gray-900">
+                                          {item.description}
+                                          {item.notes && <div className="text-xs text-gray-500 font-normal mt-1">{item.notes}</div>}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                          <Badge variant="secondary" className="font-normal bg-gray-100 text-gray-600">
+                                            {item.category}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-6 py-4 text-right tabular-nums">
+                                          {item.quantity ? (
+                                            <span>
+                                              {item.quantity} <span className="text-gray-400 text-xs">{item.unit}</span>
+                                            </span>
+                                          ) : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 text-right tabular-nums">
+                                          {item.unit_price ? `$${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 text-right font-medium tabular-nums">
+                                          ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                                        No line items found in this bid.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                                {bidLineItems.length > 0 && (
+                                  <tfoot className="bg-gray-50 border-t font-semibold text-gray-900">
+                                    <tr>
+                                      <td colSpan={5} className="px-6 py-4 text-right">Total</td>
+                                      <td className="px-6 py-4 text-right">
+                                        ${bidLineItems.reduce((sum, i) => sum + i.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  </tfoot>
+                                )}
+                              </table>
+                            </div>
+                          </Card>
+
+                          {/* Notes Section */}
+                          {selectedBid.notes && (
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="text-base">Bidder Notes</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <p className="text-gray-700 whitespace-pre-wrap">{selectedBid.notes}</p>
+                              </CardContent>
+                            </Card>
+                          )}
+                        </TabsContent>
+
+                        <TabsContent value="comparison" className="mt-0 space-y-6">
+                          {takeoffItems.length > 0 ? (
+                            <>
+                              {/* Comparison Summary Cards */}
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Card className="bg-blue-50 border-blue-100">
+                                  <CardContent className="p-4 text-center">
+                                    <div className="text-sm text-blue-600 font-medium mb-1">Takeoff Estimate</div>
+                                    <div className="text-2xl font-bold text-blue-700">
+                                      ${(simplifiedMetrics?.takeoffTotal || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                                <Card className="bg-green-50 border-green-100">
+                                  <CardContent className="p-4 text-center">
+                                    <div className="text-sm text-green-600 font-medium mb-1">Bid Total</div>
+                                    <div className="text-2xl font-bold text-green-700">
+                                      ${(simplifiedMetrics?.bidTotal || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                                <Card className={`border-l-4 ${simplifiedMetrics && simplifiedMetrics.discrepancyCount > 0 ? 'border-l-orange-500' : 'border-l-green-500'}`}>
+                                  <CardContent className="p-4 flex items-center justify-between">
+                                    <div>
+                                      <div className="text-sm text-gray-500">Match Rate</div>
+                                      <div className="text-2xl font-bold text-gray-900">{simplifiedMetrics?.matchPercentage || 0}%</div>
+                                    </div>
+                                    {simplifiedMetrics && simplifiedMetrics.discrepancyCount > 0 && (
+                                      <div className="text-right">
+                                        <div className="text-sm text-orange-600 font-medium">Discrepancies</div>
+                                        <div className="text-2xl font-bold text-orange-600">{simplifiedMetrics.discrepancyCount}</div>
                                       </div>
                                     )}
                                   </CardContent>
                                 </Card>
                               </div>
-                            ) : (
-                              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-                                <GitCompare className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-                                <p className="text-sm">Select items above to see the detailed comparison</p>
+
+                              {/* Comparison Tool */}
+                              <div className="grid grid-cols-1 xl:grid-cols-[300px_1fr] gap-6 h-[600px]">
+                                {/* Selection Panel */}
+                                <Card className="flex flex-col h-full">
+                                  <CardHeader className="py-3 px-4 border-b">
+                                    <div className="space-y-3">
+                                      <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-medium">Takeoff Items</CardTitle>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm" 
+                                          className="h-6 text-xs"
+                                          onClick={() => {
+                                            if (selectedTakeoffItemIds.size === takeoffItems.length) {
+                                              setSelectedTakeoffItemIds(new Set())
+                                            } else {
+                                              setSelectedTakeoffItemIds(new Set(takeoffItems.map(i => i.id)))
+                                            }
+                                          }}
+                                        >
+                                          {selectedTakeoffItemIds.size === takeoffItems.length ? 'None' : 'All'}
+                                        </Button>
+                                      </div>
+                                      <div className="relative">
+                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                                        <Input
+                                          placeholder="Search items..."
+                                          value={takeoffSearchTerm}
+                                          onChange={(e) => setTakeoffSearchTerm(e.target.value)}
+                                          className="h-8 pl-8 text-xs"
+                                        />
+                                      </div>
+                                    </div>
+                                  </CardHeader>
+                                  <CardContent className="flex-1 overflow-y-auto p-2 space-y-1">
+                                    {takeoffItems
+                                      .filter(item => 
+                                        !takeoffSearchTerm || 
+                                        item.description.toLowerCase().includes(takeoffSearchTerm.toLowerCase()) ||
+                                        item.category.toLowerCase().includes(takeoffSearchTerm.toLowerCase())
+                                      )
+                                      .map(item => (
+                                      <div 
+                                        key={item.id}
+                                        onClick={() => {
+                                          const newSet = new Set(selectedTakeoffItemIds)
+                                          if (newSet.has(item.id)) newSet.delete(item.id)
+                                          else newSet.add(item.id)
+                                          setSelectedTakeoffItemIds(newSet)
+                                        }}
+                                        className={`
+                                          flex items-center gap-3 p-2 rounded-md cursor-pointer text-sm transition-colors
+                                          ${selectedTakeoffItemIds.has(item.id) ? 'bg-orange-50 text-orange-900' : 'hover:bg-gray-100 text-gray-600'}
+                                        `}
+                                      >
+                                        <Checkbox checked={selectedTakeoffItemIds.has(item.id)} className="pointer-events-none" />
+                                        <div className="flex-1 truncate">
+                                          <div className="font-medium truncate">{item.description}</div>
+                                          <div className="text-xs opacity-70">{item.quantity} {item.unit}</div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {takeoffItems.filter(item => 
+                                      !takeoffSearchTerm || 
+                                      item.description.toLowerCase().includes(takeoffSearchTerm.toLowerCase()) ||
+                                      item.category.toLowerCase().includes(takeoffSearchTerm.toLowerCase())
+                                    ).length === 0 && (
+                                      <div className="text-center py-4 text-xs text-gray-500">
+                                        No items found
+                                      </div>
+                                    )}
+                                  </CardContent>
+                                </Card>
+
+                                {/* Comparison Table */}
+                                <Card className="flex flex-col h-full overflow-hidden">
+                                  <CardHeader className="py-3 px-4 border-b bg-gray-50">
+                                    <div className="grid grid-cols-2 gap-4 font-medium text-sm">
+                                      <div className="text-blue-700">Your Takeoff</div>
+                                      <div className="text-green-700">Bidder Line Item</div>
+                                    </div>
+                                  </CardHeader>
+                                  <CardContent className="flex-1 overflow-y-auto p-0">
+                                    <div className="divide-y">
+                                      {takeoffItems
+                                        .filter(item => selectedTakeoffItemIds.has(item.id))
+                                        .map(takeoffItem => {
+                                          const matchingBidItem = bidLineItems.find(bi => 
+                                            bi.description.toLowerCase().includes(takeoffItem.description.toLowerCase()) ||
+                                            takeoffItem.description.toLowerCase().includes(bi.description.toLowerCase())
+                                          )
+                                          const discrepancy = discrepancies.find(d => d.takeoffItem?.id === takeoffItem.id)
+                                          
+                                          return (
+                                            <div key={takeoffItem.id} className={`grid grid-cols-2 gap-4 p-4 ${discrepancy ? 'bg-orange-50/30' : ''}`}>
+                                              {/* Takeoff Side */}
+                                              <div className="pr-4 border-r">
+                                                <div className="flex justify-between items-start">
+                                                  <div>
+                                                    <div className="font-medium text-sm text-gray-900">{takeoffItem.description}</div>
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                      {takeoffItem.quantity} {takeoffItem.unit} 
+                                                      {takeoffItem.unit_cost && ` @ $${takeoffItem.unit_cost}/unit`}
+                                                    </div>
+                                                  </div>
+                                                  {takeoffItem.unit_cost && (
+                                                    <div className="font-bold text-blue-600">
+                                                      ${(takeoffItem.quantity * takeoffItem.unit_cost).toLocaleString()}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+
+                                              {/* Bid Side */}
+                                              <div className="pl-4">
+                                                {matchingBidItem ? (
+                                                  <div className="flex justify-between items-start">
+                                                    <div>
+                                                      <div className="font-medium text-sm text-gray-900">{matchingBidItem.description}</div>
+                                                      <div className="text-xs text-gray-500 mt-1">
+                                                        {matchingBidItem.quantity} {matchingBidItem.unit}
+                                                        {matchingBidItem.unit_price && ` @ $${matchingBidItem.unit_price}/unit`}
+                                                      </div>
+                                                      {discrepancy && (
+                                                        <Badge variant="outline" className="mt-2 text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                          {discrepancy.type === 'quantity' ? `Qty mismatch (${discrepancy.percentage?.toFixed(0)}%)` : 'Price mismatch'}
+                                                        </Badge>
+                                                      )}
+                                                    </div>
+                                                    <div className={`font-bold ${discrepancy ? 'text-orange-600' : 'text-green-600'}`}>
+                                                      ${matchingBidItem.amount.toLocaleString()}
+                                                    </div>
+                                                  </div>
+                                                ) : (
+                                                  <div className="text-sm text-gray-400 italic flex items-center gap-2">
+                                                    <AlertCircle className="h-4 w-4" />
+                                                    Not found in bid
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
+                                    </div>
+                                  </CardContent>
+                                </Card>
                               </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center h-full text-gray-600">
-                            <FileText className="h-16 w-16 mb-4 text-gray-400" />
-                            <p>No takeoff data available for comparison</p>
-                          </div>
-                        )}
-                      </TabsContent>
-                    </Tabs>
-                  ) : bids.length === 0 && allRecipients.length > 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-600">
-                      <Mail className="h-16 w-16 mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No Bids Received Yet</h3>
-                      <p className="text-gray-600 mb-4 text-center max-w-md">
-                        {allRecipients.length} email{allRecipients.length !== 1 ? 's' : ''} {allRecipients.length === 1 ? 'has' : 'have'} been sent. 
-                        View email statuses in the left panel. Once bids are received, they will appear in the Bids tab.
-                      </p>
+                            </>
+                          ) : (
+                             <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                               <GitCompare className="h-16 w-16 mb-4 text-gray-300" />
+                               <p>No takeoff data available to compare against.</p>
+                             </div>
+                          )}
+                        </TabsContent>
+                      </Tabs>
                     </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-600">
-                      <FileText className="h-16 w-16 mb-4" />
-                      <p>Select a bid to view details and comparison</p>
+                  </div>
+                ) : (
+                  // Empty State
+                  <div className="flex-1 flex flex-col items-center justify-center text-gray-500 bg-gray-50">
+                    <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mb-4">
+                      <Search className="h-8 w-8 text-gray-400" />
                     </div>
-                  )}
-                </div>
+                    <h3 className="text-lg font-medium text-gray-900">Select a Bid or Email</h3>
+                    <p className="max-w-sm text-center mt-2 text-sm">
+                      Choose a bid from the sidebar to view its details and compare it against your takeoff, or view email communications.
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </>
+          )}
+        </div>
       </motion.div>
     </motion.div>
   )
 }
-

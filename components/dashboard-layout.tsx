@@ -47,13 +47,11 @@ export default function DashboardLayout({ children, className }: DashboardLayout
         <aside 
           className={`hidden lg:block flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
             isPlanViewer 
-              ? (desktopSidebarOpen ? 'w-64' : 'w-0') 
-              : 'w-64'
+              ? (desktopSidebarOpen ? '' : 'w-0') 
+              : ''
           }`}
         >
-          <div className="w-64 h-full border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-black">
-             <DashboardSidebar />
-          </div>
+          <DashboardSidebar />
         </aside>
 
         {/* Sidebar - Mobile */}

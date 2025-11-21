@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge'
 import Navbar from '@/components/navbar'
 import Footer from '@/components/footer'
 import Link from 'next/link'
-import { Users, Mail, FileText, Star, CheckCircle, ArrowRight, Zap, Clock, DollarSign, Phone, MapPin, Play, Search, Brain, AlertCircle } from 'lucide-react'
+import { Users, Mail, FileText, Star, CheckCircle, ArrowRight, Zap, Clock, DollarSign, Phone, MapPin, Play, Search, Brain, AlertCircle, ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+
 export default function HomePage() {
   const [isVisible, setIsVisible] = useState(false)
   const [hoveredCard, setHoveredCard] = useState<number | null>(null)
@@ -142,6 +144,13 @@ export default function HomePage() {
             <Zap className="mr-2 h-5 w-5 group-hover:animate-pulse" />
             See How It Works
           </Button>
+        </div>
+
+        {/* 3D Dashboard Preview */}
+        <div className={`mt-16 sm:mt-20 transition-all duration-1000 delay-1200 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'
+        }`}>
+          <HeroPlanVisual />
         </div>
       </section>
 
@@ -567,10 +576,6 @@ export default function HomePage() {
         </div>
       </section>
 
-
-
-
-
       {/* Demo Section */}
       <section id="demo-section" className="container mx-auto px-4 py-16 relative z-10 overflow-hidden">
         {/* Demo Header */}
@@ -587,8 +592,13 @@ export default function HomePage() {
         <DemoSection />
       </section>
 
-            {/* CTA Section */}
-            <section className="bg-white dark:bg-black text-black dark:text-white py-16 relative overflow-hidden transition-colors duration-300">
+      {/* FAQ Section */}
+      <section className="container mx-auto px-4 py-16 relative z-10">
+        <FAQSection />
+      </section>
+
+      {/* CTA Section */}
+      <section className="bg-white dark:bg-black text-black dark:text-white py-16 relative overflow-hidden transition-colors duration-300">
         {/* Decorative background elements */}
         <div className="absolute inset-0 bg-gradient-to-br from-orange/8 via-transparent to-orange-500/8 dark:from-orange/12 dark:to-orange-500/12"></div>
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-orange via-transparent to-orange opacity-50"></div>
@@ -623,6 +633,346 @@ export default function HomePage() {
       </section>
 
       <Footer />
+    </div>
+  )
+}
+
+// Hero Plan Visual Component
+function HeroPlanVisual() {
+  return (
+    <div className="relative w-full max-w-5xl mx-auto perspective-1000">
+      {/* Floating Animation Wrapper */}
+      <div 
+        className="relative animate-float" 
+        style={{ 
+          transformStyle: 'preserve-3d',
+          transform: 'rotateX(20deg) rotateY(0deg) rotateZ(0deg)',
+        }}
+      >
+        {/* Main Plan Viewer Card */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border-4 border-gray-200 dark:border-gray-800 shadow-2xl overflow-hidden flex flex-col h-[600px]">
+          {/* Browser/App Header */}
+          <div className="bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-3 flex items-center gap-2 shrink-0">
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-400"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
+              <div className="w-3 h-3 rounded-full bg-green-400"></div>
+            </div>
+            <div className="bg-white dark:bg-gray-950 rounded px-3 py-1 text-xs text-gray-500 flex-1 mx-4 text-center font-mono flex items-center justify-between">
+              <span>app.bidi.construction/plans/view/P-102</span>
+              <div className="flex items-center space-x-2">
+                <Badge variant="outline" className="text-[10px] h-5">A1.02 Floor Plan</Badge>
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-[10px] h-5">Processed</Badge>
+              </div>
+            </div>
+          </div>
+
+          {/* Plan Viewer Toolbar */}
+          <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-2 flex items-center justify-between shrink-0">
+            <div className="flex items-center space-x-1">
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <Search className="h-4 w-4" />
+              </Button>
+              <div className="h-4 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
+              <Button variant="secondary" size="sm" className="h-8 w-8 p-0 bg-orange-100 text-orange-700">
+                <MapPin className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <FileText className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <ChevronDown className="h-4 w-4 rotate-90" />
+              </Button>
+              <span className="text-xs font-mono">75%</span>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <ChevronDown className="h-4 w-4 -rotate-90" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Main Content Area */}
+          <div className="flex-1 relative bg-gray-50 dark:bg-gray-950 overflow-hidden flex">
+            {/* Left Sidebar (Miniature) */}
+            <div className="w-16 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col items-center py-4 space-y-4 shrink-0">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className={`w-10 h-14 border rounded ${i === 2 ? 'border-orange bg-orange-50' : 'border-gray-200 bg-gray-50'}`}></div>
+              ))}
+            </div>
+
+            {/* Canvas Area */}
+            <div className="flex-1 relative overflow-hidden flex items-center justify-center p-8">
+              <div className="relative bg-white shadow-sm border border-gray-200 w-full h-full max-w-[800px] aspect-[4/3] p-8 overflow-hidden">
+                {/* SVG Plan Drawing */}
+                <svg viewBox="0 0 800 600" className="w-full h-full text-gray-800 dark:text-gray-300">
+                  <defs>
+                    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeOpacity="0.05" strokeWidth="1"/>
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#grid)" />
+                  
+                  {/* Walls */}
+                  <g stroke="currentColor" strokeWidth="4" fill="none" strokeLinecap="square">
+                    {/* Outer Walls */}
+                    <path d="M 100,100 L 700,100 L 700,500 L 100,500 Z" />
+                    
+                    {/* Inner Walls */}
+                    <path d="M 100,250 L 400,250" />
+                    <path d="M 400,100 L 400,500" />
+                    <path d="M 400,350 L 700,350" />
+                    <path d="M 250,250 L 250,500" />
+                  </g>
+
+                  {/* Doors */}
+                  <g stroke="currentColor" strokeWidth="2" fill="none">
+                    <path d="M 180,250 Q 215,285 215,250" />
+                    <line x1="180" y1="250" x2="215" y2="250" strokeWidth="1" strokeDasharray="4,4" />
+                    
+                    <path d="M 400,180 Q 435,215 435,180" transform="rotate(90 400 180)" />
+                    
+                    <path d="M 550,350 Q 585,385 585,350" />
+                  </g>
+
+                  {/* Room Labels */}
+                  <g fill="currentColor" fontFamily="monospace" fontSize="12" textAnchor="middle" opacity="0.6">
+                    <text x="250" y="175">LIVING AREA</text>
+                    <text x="550" y="225">MASTER SUITE</text>
+                    <text x="175" y="375">KITCHEN</text>
+                    <text x="325" y="375">DINING</text>
+                    <text x="550" y="425">GUEST ROOM</text>
+                  </g>
+
+                  {/* Dimensions */}
+                  <g stroke="currentColor" strokeWidth="1" opacity="0.4">
+                    <line x1="80" y1="100" x2="80" y2="500" />
+                    <line x1="75" y1="100" x2="85" y2="100" />
+                    <line x1="75" y1="500" x2="85" y2="500" />
+                    <text x="70" y="300" textAnchor="end" dominantBaseline="middle" fontSize="10" transform="rotate(-90 70 300)">40' - 0"</text>
+
+                    <line x1="100" y1="520" x2="700" y2="520" />
+                    <line x1="100" y1="515" x2="100" y2="525" />
+                    <line x1="700" y1="515" x2="700" y2="525" />
+                    <text x="400" y="535" textAnchor="middle" fontSize="10">60' - 0"</text>
+                  </g>
+
+                  {/* Annotations / Pins */}
+                  <g>
+                    {/* Pin 1 - Material */}
+                    <g transform="translate(160, 360)">
+                      <circle cx="0" cy="0" r="10" fill="#f97316" fillOpacity="0.2" className="animate-pulse" />
+                      <circle cx="0" cy="0" r="5" fill="#f97316" stroke="white" strokeWidth="2" />
+                      <g transform="translate(10, -20)">
+                        <rect x="0" y="0" width="120" height="40" rx="4" fill="white" stroke="#e5e7eb" className="shadow-lg" />
+                        <text x="10" y="15" fontSize="10" fill="#6b7280" fontWeight="bold">Cabinetry</text>
+                        <text x="10" y="30" fontSize="10" fill="#111827">Install custom units</text>
+                      </g>
+                    </g>
+
+                    {/* Pin 2 - Issue */}
+                    <g transform="translate(650, 150)">
+                      <circle cx="0" cy="0" r="10" fill="#ef4444" fillOpacity="0.2" className="animate-pulse" />
+                      <circle cx="0" cy="0" r="5" fill="#ef4444" stroke="white" strokeWidth="2" />
+                      <g transform="translate(-130, -20)">
+                        <rect x="0" y="0" width="120" height="40" rx="4" fill="white" stroke="#e5e7eb" className="shadow-lg" />
+                        <text x="10" y="15" fontSize="10" fill="#ef4444" fontWeight="bold">Missing Spec</text>
+                        <text x="10" y="30" fontSize="10" fill="#111827">Confirm floor finish</text>
+                      </g>
+                    </g>
+
+                    {/* Pin 3 - Measurement */}
+                    <g transform="translate(300, 250)">
+                      <circle cx="0" cy="0" r="10" fill="#22c55e" fillOpacity="0.2" className="animate-pulse" />
+                      <circle cx="0" cy="0" r="5" fill="#22c55e" stroke="white" strokeWidth="2" />
+                    </g>
+                  </g>
+                </svg>
+
+                {/* Overlaid UI Elements on Canvas */}
+                <div className="absolute bottom-4 right-4 bg-white shadow-md border border-gray-200 rounded-md p-2 flex flex-col space-y-2">
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <div className="w-4 h-4 border-2 border-gray-400 rounded-sm"></div>
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <div className="w-4 h-0.5 bg-gray-400"></div>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Sidebar (Analysis) */}
+            <div className="w-64 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col shrink-0">
+              <div className="p-3 border-b border-gray-100 dark:border-gray-800 font-semibold text-sm">
+                AI Analysis
+              </div>
+              <div className="p-3 space-y-3 overflow-y-auto">
+                <div className="bg-orange-50 border border-orange-100 rounded p-2">
+                  <div className="flex items-center text-xs font-medium text-orange-800 mb-1">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Missing Information
+                  </div>
+                  <p className="text-[10px] text-orange-700">
+                    Floor finish schedule missing for Room 102 (Master Suite).
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-500">Takeoff Summary</p>
+                  {[
+                    { name: 'Int. Walls', qty: '1,240 SF' },
+                    { name: 'Ext. Walls', qty: '850 SF' },
+                    { name: 'Doors', qty: '8 Units' },
+                    { name: 'Windows', qty: '12 Units' },
+                  ].map((item, i) => (
+                    <div key={i} className="flex justify-between text-xs border-b border-gray-50 pb-1">
+                      <span className="text-gray-700 dark:text-gray-300">{item.name}</span>
+                      <span className="font-mono text-gray-500">{item.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Glow Effect Behind */}
+        <div className="absolute -inset-4 bg-orange/20 blur-3xl -z-10 rounded-[30px]"></div>
+      </div>
+    </div>
+  )
+}
+
+// Hero Dashboard Visual Component
+function HeroDashboardVisual() {
+  return (
+    <div className="relative w-full max-w-5xl mx-auto perspective-1000">
+      {/* Floating Animation Wrapper */}
+      <div 
+        className="relative animate-float" 
+        style={{ 
+          transformStyle: 'preserve-3d',
+          transform: 'rotateX(20deg) rotateY(0deg) rotateZ(0deg)',
+        }}
+      >
+        {/* Main Dashboard Card */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border-4 border-gray-200 dark:border-gray-800 shadow-2xl overflow-hidden">
+          {/* Browser/App Header */}
+          <div className="bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-3 flex items-center gap-2">
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-400"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
+              <div className="w-3 h-3 rounded-full bg-green-400"></div>
+            </div>
+            <div className="bg-white dark:bg-gray-950 rounded px-3 py-1 text-xs text-gray-500 flex-1 mx-4 text-center font-mono">
+              app.bidi.construction/dashboard/project/1284
+            </div>
+          </div>
+
+          {/* Dashboard Content Preview */}
+          <div className="p-6 bg-gray-50 dark:bg-gray-950 min-h-[300px] sm:min-h-[400px]">
+            {/* Header Row */}
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Commercial Complex - Phase 1</h3>
+                <p className="text-sm text-gray-500">Last updated 2 hours ago</p>
+              </div>
+              <div className="flex gap-2">
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Active</Badge>
+                <Badge variant="outline">Export</Badge>
+              </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Total Estimate</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">$1.2M</p>
+              </div>
+              <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Bids Received</p>
+                <p className="text-xl font-bold text-green-600">12/15</p>
+              </div>
+              <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Action Items</p>
+                <p className="text-xl font-bold text-orange-500">3 Pending</p>
+              </div>
+            </div>
+
+            {/* Table Preview */}
+            <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+              <div className="grid grid-cols-4 gap-4 p-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-500">
+                <div className="col-span-2">Trade Package</div>
+                <div>Lowest Bid</div>
+                <div>Status</div>
+              </div>
+              {[
+                { name: '03 30 00 - Cast-in-Place Concrete', bid: '$145,200', status: 'Leveled' },
+                { name: '04 20 00 - Unit Masonry', bid: '$82,500', status: 'Reviewing' },
+                { name: '05 12 00 - Structural Steel', bid: '$215,000', status: 'Pending' },
+                { name: '09 29 00 - Gypsum Board', bid: '$68,400', status: 'Leveled' },
+              ].map((row, i) => (
+                <div key={i} className="grid grid-cols-4 gap-4 p-3 border-b border-gray-100 dark:border-gray-800 last:border-0 text-sm">
+                  <div className="col-span-2 font-medium text-gray-900 dark:text-white">{row.name}</div>
+                  <div className="text-gray-600 dark:text-gray-300">{row.bid}</div>
+                  <div>
+                    <Badge variant="secondary" className={`text-[10px] ${
+                      row.status === 'Leveled' ? 'bg-green-100 text-green-700' :
+                      row.status === 'Reviewing' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {row.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Glow Effect Behind */}
+        <div className="absolute -inset-4 bg-orange/20 blur-3xl -z-10 rounded-[30px]"></div>
+      </div>
+    </div>
+  )
+}
+
+// FAQ Section Component
+function FAQSection() {
+  const faqs = [
+    {
+      question: "What kind of plan files can I upload?",
+      answer: "We support all standard PDF construction plan sets. You can upload single multi-page files or individual sheets. Our system automatically processes vector and raster PDFs, though vector PDFs (generated directly from CAD/BIM software) typically yield the fastest results."
+    },
+    {
+      question: "Does this work with my existing subcontractors?",
+      answer: "Absolutely. You can upload your own subcontractor directory to BIDI. When you start a project, you can choose to invite your own subs, our network of vetted subcontractors, or a mix of both. We handle the outreach and follow-ups for everyone."
+    },
+    {
+      question: "How does the bid leveling work?",
+      answer: "When subcontractors submit their bids, our AI automatically parses their proposals—even if they're just PDFs or emails—and standardizes them into a single comparison table. It highlights deviations, scope gaps, and outliers so you can compare apples to apples."
+    }
+  ]
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <h2 className="text-3xl font-bold text-black dark:text-white mb-4">Frequently Asked Questions</h2>
+        <p className="text-gray-600 dark:text-gray-300">Everything you need to know about BIDI</p>
+      </div>
+      
+      <Accordion type="single" collapsible className="w-full">
+        {faqs.map((faq, index) => (
+          <AccordionItem key={index} value={`item-${index}`}>
+            <AccordionTrigger className="text-left text-lg font-medium text-gray-900 dark:text-gray-100">
+              {faq.question}
+            </AccordionTrigger>
+            <AccordionContent className="text-base text-gray-600 dark:text-gray-300">
+              {faq.answer}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
     </div>
   )
 }

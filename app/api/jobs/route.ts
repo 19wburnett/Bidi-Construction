@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json()
-    const { name, description, location, budget_range, project_type, status = 'draft' } = body
+    const { name, description, location, budget_range, project_type, status = 'needs_takeoff' } = body
 
     // Validate required fields
     if (!name || !location) {

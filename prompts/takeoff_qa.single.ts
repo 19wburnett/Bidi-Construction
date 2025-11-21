@@ -22,6 +22,7 @@ export interface RepoTakeoffItem {
   ai_provider?: string
   description: string
   subcategory: string
+  subcontractor?: string // The Trade Type, e.g., "Electrical", "Plumbing", "Framing"
   bounding_box: {
     x: number
     y: number
@@ -89,6 +90,7 @@ ITEM FIELDS (use EXACT field names):
 - unit: string (LF, SF, CF, CY, EA, SQ, LS)
 - notes: string (optional)
 - category: "structural" | "exterior" | "interior" | "mep" | "finishes" | "other"
+- subcontractor: string (REQUIRED: The Trade Type, e.g., "Electrical", "Plumbing", "Framing", "Concrete")
 - location: string (e.g., "Interior partitions", "Kitchen area")
 - quantity: number
 - cost_code: string (e.g., "06-10-00" or "06 10 00")

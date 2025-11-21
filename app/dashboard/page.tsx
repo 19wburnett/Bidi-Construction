@@ -168,9 +168,10 @@ export default function DashboardPage() {
         'id, status, created_at, name, location'
       )
 
-      const jobsData = memberships.map(({ job, role }) => ({
+      const jobsData = memberships.map(({ job, role, last_viewed_at }) => ({
         ...job,
-        membership_role: role as 'owner' | 'collaborator'
+        membership_role: role as 'owner' | 'collaborator',
+        last_viewed_at
       }))
 
       const userJobIds = jobsData.map(job => job.id)
@@ -183,11 +184,13 @@ export default function DashboardPage() {
           supabase
             .from('plans')
             .select('id, job_id, created_at, file_name, title')
-            .in('job_id', userJobIds),
+            .in('job_id', userJobIds)
+            .limit(10000),
           supabase
             .from('bid_packages')
             .select('id, job_id, status, created_at, trade_category')
             .in('job_id', userJobIds)
+            .limit(10000)
         ])
 
         if (plansResult.error) throw plansResult.error
@@ -198,19 +201,20 @@ export default function DashboardPage() {
       }
 
       const bidPackageIds = packagesData.map(pkg => pkg.id)
-      let bidsData: { id: string; status: string | null; bid_package_id: string | null; created_at: string; raw_email: string }[] = []
+      let bidsData: { id: string; status: string | null; bid_package_id: string | null; created_at: string; raw_email: string; subcontractors: any }[] = []
       if (bidPackageIds.length > 0) {
         const { data: bidsResult, error: bidsError } = await supabase
           .from('bids')
-          .select('id, status, bid_package_id, created_at, raw_email')
+          .select('id, status, bid_package_id, created_at, raw_email, subcontractors(name, email)')
           .in('bid_package_id', bidPackageIds)
+          .limit(10000)
 
         if (bidsError) throw bidsError
         bidsData = bidsResult || []
       }
 
       const totalJobs = jobsData.length
-      const activeJobs = jobsData.filter(job => job.status === 'active').length
+      const activeJobs = jobsData.filter(job => ACTIVE_STATUSES.includes(job.status)).length
       const completedJobs = jobsData.filter(job => job.status === 'completed').length
       const totalPlans = plansData.length
       const totalBidPackages = packagesData.length
@@ -240,7 +244,11 @@ export default function DashboardPage() {
       })
 
       const recentJobsSorted = [...jobsData].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        (a, b) => {
+          const dateA = new Date(a.last_viewed_at || a.created_at).getTime()
+          const dateB = new Date(b.last_viewed_at || b.created_at).getTime()
+          return dateB - dateA
+        }
       )
 
       const formattedRecentJobs = recentJobsSorted.map((job) => {
@@ -265,7 +273,7 @@ export default function DashboardPage() {
       setRecentJobs(formattedRecentJobs.slice(0, 5))
       
       // Set Hero Job (First active job, or first job if none active)
-      const firstActive = formattedRecentJobs.find(j => j.status === 'active')
+      const firstActive = formattedRecentJobs.find(j => ACTIVE_STATUSES.includes(j.status))
       setHeroJob(firstActive || formattedRecentJobs[0] || null)
 
       // --- Activity Feed Generation ---
@@ -306,11 +314,12 @@ export default function DashboardPage() {
         if (pkg) {
           const job = jobsData.find(j => j.id === pkg.job_id)
           if (job) {
+            const sub = Array.isArray(bid.subcontractors) ? bid.subcontractors[0] : bid.subcontractors
             activities.push({
               id: `bid-${bid.id}`,
               type: 'bid_received',
               title: 'Bid Received',
-              description: `From ${bid.raw_email || 'Subcontractor'}`,
+              description: `From ${sub?.name || sub?.email || bid.raw_email || 'Subcontractor'}`,
               timestamp: bid.created_at,
               link: `/dashboard/jobs/${job.id}`,
               jobName: job.name
@@ -380,15 +389,32 @@ export default function DashboardPage() {
     }
   }
 
+    
+    
+  const ACTIVE_STATUSES = ['active', 'needs_takeoff', 'needs_packages', 'waiting_for_bids']
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'draft': return 'bg-gray-100 text-gray-800'
-      case 'active': return 'bg-green-100 text-green-800'
-      case 'completed': return 'bg-blue-100 text-blue-800'
+      case 'needs_takeoff': return 'bg-orange-100 text-orange-800'
+      case 'needs_packages': return 'bg-blue-100 text-blue-800'
+      case 'waiting_for_bids': return 'bg-purple-100 text-purple-800'
+      case 'completed': return 'bg-green-100 text-green-800'
       case 'archived': return 'bg-gray-100 text-gray-600'
+      case 'active': return 'bg-green-100 text-green-800' // Legacy
       default: return 'bg-gray-100 text-gray-800'
     }
   }
+
+  const formatStatus = (status: string) => {
+    switch (status) {
+      case 'needs_takeoff': return 'Needs Takeoff'
+      case 'needs_packages': return 'Need Packages'
+      case 'waiting_for_bids': return 'Waiting for Bids'
+      default: return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')
+    }
+  }
+
 
   // Show loading while checking subscription
   if (checkingSubscription || (loading && subscriptionStatus === 'active')) {
@@ -574,7 +600,7 @@ export default function DashboardPage() {
                         <div>
                           <div className="flex items-center gap-2 mb-2">
                             <h3 className="text-2xl font-bold text-gray-900">{heroJob.name}</h3>
-                            <Badge className={getStatusColor(heroJob.status)}>{heroJob.status}</Badge>
+                            <Badge className={getStatusColor(heroJob.status)}>{formatStatus(heroJob.status)}</Badge>
                           </div>
                           <div className="flex items-center text-gray-500 text-sm">
                             <MapPin className="h-4 w-4 mr-1" />
@@ -708,7 +734,7 @@ export default function DashboardPage() {
                            <div className="flex items-center gap-4">
                               <div className="text-right hidden sm:block">
                                 <p className="text-sm font-medium text-gray-900">{job.bid_count} Bids</p>
-                                <p className="text-xs text-gray-500">{job.status}</p>
+                                <p className="text-xs text-gray-500">{formatStatus(job.status)}</p>
                               </div>
                               <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-orange transition-colors" />
                            </div>

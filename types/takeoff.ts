@@ -7,7 +7,7 @@ export type CommentType = 'general' | 'question' | 'suggestion' | 'issue'
 export type ChatRole = 'user' | 'assistant' | 'system'
 
 // Job-centric types
-export type JobStatus = 'draft' | 'active' | 'completed' | 'archived'
+export type JobStatus = 'draft' | 'needs_takeoff' | 'needs_packages' | 'waiting_for_bids' | 'completed' | 'archived' | 'active' // keeping active for backward compatibility temporarily if needed, but mostly replacing it
 export type BidPackageStatus = 'draft' | 'sent' | 'receiving' | 'closed'
 export type SharePermissions = 'view_only' | 'markup' | 'comment' | 'all'
 
@@ -48,6 +48,18 @@ export interface PlanShare {
   accessed_count: number
   last_accessed_at: string | null
   created_at: string
+}
+
+export interface JobReport {
+  id: string
+  job_id: string
+  title: string | null
+  file_name: string
+  file_path: string
+  file_size: number
+  file_type: string
+  created_at: string
+  created_by: string | null
 }
 
 export interface Plan {

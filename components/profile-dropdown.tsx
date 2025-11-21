@@ -6,6 +6,11 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { User, LogOut, LayoutDashboard, Bell, X } from 'lucide-react'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 
 interface UserProfile {
   id: string
@@ -183,17 +188,17 @@ export default function ProfileDropdown() {
         id: bid.id,
         job_id: bid.job_request_id,
         job_title: bid.job_requests.trade_category,
-          subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
+        subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
-        read: false,
+        read: bid.seen || false,
         seen: bid.seen || false,
         dismissed: false
       }))
 
       setNotifications(notifications)
     } catch (err) {
-      // Silent error handling
+      console.error('Error fetching notifications from bids:', err)
     }
   }
 
@@ -207,22 +212,29 @@ export default function ProfileDropdown() {
           .from('notifications')
           .update({ read: true })
           .eq('id', notification.notification_id)
+      } else {
+        // Fallback: mark bid as seen
+        await supabase
+          .from('bids')
+          .update({ seen: true })
+          .eq('id', notificationId)
       }
 
       setNotifications(prev => prev.map(n => {
         const nIdentifier = n.notification_id || n.id
         const identifierToFilter = notification.notification_id || notification.id
         if (nIdentifier === identifierToFilter) {
-          return { ...n, read: true }
+          return { ...n, read: true, seen: true }
         }
         return n
       }))
     } catch (err) {
+      console.error('Error marking notification as read:', err)
       // Fallback: mark as read in local state
       setNotifications(prev => prev.map(n => {
         const nIdentifier = n.notification_id || n.id
         if (nIdentifier === notificationId) {
-          return { ...n, read: true }
+          return { ...n, read: true, seen: true }
         }
         return n
       }))
@@ -284,187 +296,177 @@ export default function ProfileDropdown() {
   if (!user) return null
 
   return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-2 p-2 relative"
-      >
-        {user.avatar_url ? (
-          <img
-            src={`https://images.weserv.nl/?url=${encodeURIComponent(user.avatar_url)}&w=32&h=32&fit=cover&mask=circle`}
-            alt="Profile"
-            className="w-8 h-8 rounded-full object-cover"
-            onError={(e) => {
-              // Fallback to initials if image fails to load
-              e.currentTarget.style.display = 'none'
-              e.currentTarget.nextElementSibling?.classList.remove('hidden')
-            }}
-          />
-        ) : null}
-        <div className={`w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ${user.avatar_url ? 'hidden' : ''}`}>
-          <User className="w-4 h-4 text-white" />
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="flex items-center space-x-2 p-2 relative"
+        >
+          {user.avatar_url ? (
+            <img
+              src={`https://images.weserv.nl/?url=${encodeURIComponent(user.avatar_url)}&w=32&h=32&fit=cover&mask=circle`}
+              alt="Profile"
+              className="w-8 h-8 rounded-full object-cover"
+              onError={(e) => {
+                // Fallback to initials if image fails to load
+                e.currentTarget.style.display = 'none'
+                e.currentTarget.nextElementSibling?.classList.remove('hidden')
+              }}
+            />
+          ) : null}
+          <div className={`w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ${user.avatar_url ? 'hidden' : ''}`}>
+            <User className="w-4 h-4 text-white" />
+          </div>
+          <span className="hidden sm:block text-sm font-medium">
+            {user.full_name || user.email}
+          </span>
+          {unreadCount > 0 && (
+            <Badge 
+              variant="destructive" 
+              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+            >
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-80 p-0 max-h-[500px] flex flex-col" align="start">
+        <div className="py-1 border-b">
+          <div className="px-4 py-2">
+            <p className="text-sm font-medium text-gray-900 truncate">
+              {user.full_name || 'User'}
+            </p>
+            <p className="text-sm text-gray-500 truncate" title={user.email}>
+              {user.email}
+            </p>
+          </div>
         </div>
-        <span className="hidden sm:block text-sm font-medium">
-          {user.full_name || user.email}
-        </span>
-        {unreadCount > 0 && (
-          <Badge 
-            variant="destructive" 
-            className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+
+        {/* Toggle between Notifications and Menu */}
+        <div className="flex border-b">
+          <button
+            onClick={() => setShowNotifications(true)}
+            className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+              showNotifications
+                ? 'text-orange-600 border-b-2 border-orange-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
           >
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </Badge>
-        )}
-      </Button>
-
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-10" 
-            onClick={() => setIsOpen(false)}
-          />
-          
-          {/* Dropdown */}
-          <div className="absolute left-0 mt-2 w-80 bg-white rounded-md shadow-lg border z-20 max-w-[calc(100vw-2rem)] max-h-[500px] flex flex-col">
-            <div className="py-1 border-b">
-              <div className="px-4 py-2">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {user.full_name || 'User'}
-                </p>
-                <p className="text-sm text-gray-500 truncate" title={user.email}>
-                  {user.email}
-                </p>
-              </div>
+            <div className="flex items-center justify-center space-x-1">
+              <Bell className="w-4 h-4" />
+              <span>Notifications</span>
+              {unreadCount > 0 && (
+                <Badge variant="destructive" className="h-5 min-w-[20px] flex items-center justify-center p-1 text-xs">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Badge>
+              )}
             </div>
-
-            {/* Toggle between Notifications and Menu */}
-            <div className="flex border-b">
-              <button
-                onClick={() => setShowNotifications(true)}
-                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                  showNotifications
-                    ? 'text-orange-600 border-b-2 border-orange-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <div className="flex items-center justify-center space-x-1">
-                  <Bell className="w-4 h-4" />
-                  <span>Notifications</span>
-                  {unreadCount > 0 && (
-                    <Badge variant="destructive" className="h-5 min-w-[20px] flex items-center justify-center p-1 text-xs">
-                      {unreadCount > 9 ? '9+' : unreadCount}
-                    </Badge>
-                  )}
-                </div>
-              </button>
-              <button
-                onClick={() => setShowNotifications(false)}
-                className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                  !showNotifications
-                    ? 'text-orange-600 border-b-2 border-orange-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <div className="flex items-center justify-center space-x-1">
-                  <User className="w-4 h-4" />
-                  <span>Account</span>
-                </div>
-              </button>
+          </button>
+          <button
+            onClick={() => setShowNotifications(false)}
+            className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
+              !showNotifications
+                ? 'text-orange-600 border-b-2 border-orange-600'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <div className="flex items-center justify-center space-x-1">
+              <User className="w-4 h-4" />
+              <span>Account</span>
             </div>
+          </button>
+        </div>
 
-            {/* Content */}
-            {showNotifications ? (
-              <div className="overflow-y-auto flex-1">
-                {notifications.filter(n => !n.dismissed).length === 0 ? (
-                  <div className="px-4 py-8 text-center text-gray-500">
-                    <Bell className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                    <p>No new notifications</p>
-                  </div>
-                ) : (
-                  notifications.filter(n => !n.dismissed).map((notification) => (
-                    <div
-                      key={notification.id}
-                      className={`px-4 py-3 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer ${
-                        !notification.read ? 'bg-blue-50' : !notification.seen ? 'bg-yellow-50' : ''
-                      }`}
-                      onClick={() => {
-                        markAsRead(notification.notification_id || notification.id)
-                        router.push(`/dashboard/jobs/${notification.job_id}`)
-                        setIsOpen(false)
-                      }}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              New bid on {notification.job_title}
-                            </p>
-                            {!notification.read ? (
-                              <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" title="Unread notification"></div>
-                            ) : !notification.seen ? (
-                              <div className="w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Unseen bid"></div>
-                            ) : null}
-                          </div>
-                          <p className="text-sm text-gray-600 truncate">
-                            {notification.subcontractor_name}
-                          </p>
-                          {notification.bid_amount && (
-                            <p className="text-sm font-semibold text-green-600">
-                              {formatCurrency(notification.bid_amount)}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-2 ml-2">
-                          <span className="text-xs text-gray-500">
-                            {formatTimeAgo(notification.created_at)}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              dismissNotification(notification.notification_id || notification.id)
-                            }}
-                            className="h-6 w-6 p-0"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
+        {/* Content */}
+        {showNotifications ? (
+          <div className="overflow-y-auto flex-1 max-h-[300px]">
+            {notifications.filter(n => !n.dismissed).length === 0 ? (
+              <div className="px-4 py-8 text-center text-gray-500">
+                <Bell className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                <p>No new notifications</p>
               </div>
             ) : (
-              <div className="py-1">
-                {isAdmin && (
-                  <button
-                    onClick={() => {
-                      setIsOpen(false)
-                      router.push('/admin/demo-settings')
-                    }}
-                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    <LayoutDashboard className="w-4 h-4 mr-2" />
-                    Admin Dashboard
-                  </button>
-                )}
-                
-                <button
-                  onClick={handleSignOut}
-                  className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+              notifications.filter(n => !n.dismissed).map((notification) => (
+                <div
+                  key={notification.id}
+                  className={`px-4 py-3 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer ${
+                    !notification.read ? 'bg-blue-50' : !notification.seen ? 'bg-yellow-50' : ''
+                  }`}
+                  onClick={() => {
+                    markAsRead(notification.notification_id || notification.id)
+                    router.push(`/dashboard/jobs/${notification.job_id}`)
+                    setIsOpen(false)
+                  }}
                 >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out
-                </button>
-              </div>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          New bid on {notification.job_title}
+                        </p>
+                        {!notification.read ? (
+                          <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" title="Unread notification"></div>
+                        ) : !notification.seen ? (
+                          <div className="w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Unseen bid"></div>
+                        ) : null}
+                      </div>
+                      <p className="text-sm text-gray-600 truncate">
+                        {notification.subcontractor_name}
+                      </p>
+                      {notification.bid_amount && (
+                        <p className="text-sm font-semibold text-green-600">
+                          {formatCurrency(notification.bid_amount)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2 ml-2">
+                      <span className="text-xs text-gray-500">
+                        {formatTimeAgo(notification.created_at)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          dismissNotification(notification.notification_id || notification.id)
+                        }}
+                        className="h-6 w-6 p-0"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))
             )}
           </div>
-        </>
-      )}
-    </div>
+        ) : (
+          <div className="py-1">
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setIsOpen(false)
+                  router.push('/admin/demo-settings')
+                }}
+                className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                <LayoutDashboard className="w-4 h-4 mr-2" />
+                Admin Dashboard
+              </button>
+            )}
+            
+            <button
+              onClick={handleSignOut}
+              className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign Out
+            </button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

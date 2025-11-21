@@ -70,7 +70,7 @@ export default function NewJobPage() {
           location: formData.location,
           budget_range: formData.budget_range || null,
           project_type: formData.project_type || null,
-          status: 'draft'
+          status: 'needs_takeoff'
         }),
       })
 

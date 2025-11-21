@@ -19,8 +19,12 @@ import {
   Download,
   Share2,
   Copy,
-  CheckCheck
+  CheckCheck,
+  Pencil,
+  X,
+  Check
 } from 'lucide-react'
+import { updatePlanTitle } from '@/app/actions/plan'
 import Link from 'next/link'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import {
@@ -67,6 +71,11 @@ export default function PlansPage() {
   const [allowComments, setAllowComments] = useState(true)
   const [allowDrawings, setAllowDrawings] = useState(true)
   const [linkCopied, setLinkCopied] = useState(false)
+
+  // Edit plan title state
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const [isUpdatingTitle, setIsUpdatingTitle] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -123,6 +132,42 @@ export default function PlansPage() {
       console.error('Error deleting plan:', error)
       alert('Failed to delete plan')
     }
+  }
+
+  function startEditing(plan: Plan) {
+    setEditingPlanId(plan.id)
+    setEditingTitle(plan.title || plan.file_name)
+  }
+
+  async function saveTitle() {
+    if (!editingPlanId || !editingTitle.trim()) return
+
+    setIsUpdatingTitle(true)
+    try {
+      const result = await updatePlanTitle(editingPlanId, editingTitle)
+      
+      if (result.success) {
+        // Update local state
+        setPlans(prev => prev.map(p => 
+          p.id === editingPlanId 
+            ? { ...p, title: editingTitle } 
+            : p
+        ))
+        setEditingPlanId(null)
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error) {
+      console.error('Error updating plan title:', error)
+      alert('Failed to update plan name')
+    } finally {
+      setIsUpdatingTitle(false)
+    }
+  }
+
+  function cancelEditing() {
+    setEditingPlanId(null)
+    setEditingTitle('')
   }
 
   async function handleSharePlan(planId: string) {
@@ -266,9 +311,55 @@ export default function PlansPage() {
                     </Badge>
                   </div>
 
-                  <h3 className="font-semibold text-lg mb-2 truncate dark:text-white">
-                    {plan.title || plan.file_name}
-                  </h3>
+                  {editingPlanId === plan.id ? (
+                    <div className="flex items-center gap-2 mb-2">
+                      <Input
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        className="h-8 text-sm"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveTitle()
+                          if (e.key === 'Escape') cancelEditing()
+                        }}
+                      />
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        onClick={saveTitle}
+                        disabled={isUpdatingTitle}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={cancelEditing}
+                        disabled={isUpdatingTitle}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="group relative">
+                      <h3 className="font-semibold text-lg mb-2 truncate dark:text-white pr-8">
+                        {plan.title || plan.file_name}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          startEditing(plan)
+                        }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
 
                   {plan.project_name && (
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 truncate">

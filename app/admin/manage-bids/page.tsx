@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
@@ -33,12 +34,12 @@ import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 interface Bid {
   id: string
   job_id: string | null
-  job_request_id: string | null
+  bid_package_id: string | null
   subcontractor_id: string | null
-  subcontractor_email: string | null
   bid_amount: number | null
   timeline: string | null
   notes: string | null
+  raw_email: string
   status: string
   created_at: string
   subcontractors: {
@@ -65,6 +66,18 @@ interface BidLineItem {
   notes: string | null
   created_at: string
   updated_at: string
+}
+
+interface Job {
+  id: string
+  name: string
+  status: string
+}
+
+interface Subcontractor {
+  id: string
+  name: string
+  email: string
 }
 
 const CATEGORIES = [
@@ -102,6 +115,8 @@ const UNITS = [
 
 export default function ManageBidsPage() {
   const [bids, setBids] = useState<Bid[]>([])
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([])
   const [bidLineItems, setBidLineItems] = useState<BidLineItem[]>([])
   const [selectedBidId, setSelectedBidId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -111,6 +126,17 @@ export default function ManageBidsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  
+  // Bid Form State
+  const [showBidForm, setShowBidForm] = useState(false)
+  const [isEditingBid, setIsEditingBid] = useState(false)
+  const [currentBidId, setCurrentBidId] = useState<string | null>(null)
+  const [bidFormData, setBidFormData] = useState({
+    job_id: '',
+    subcontractor_id: '',
+    notes: '',
+    status: 'pending'
+  })
   
   const [formData, setFormData] = useState({
     item_number: 1,
@@ -136,6 +162,8 @@ export default function ManageBidsPage() {
 
     checkAdminStatus()
     fetchBids()
+    fetchJobs()
+    fetchSubcontractors()
   }, [user, authLoading, router])
 
   useEffect(() => {
@@ -187,17 +215,59 @@ export default function ManageBidsPage() {
           jobs (
             id,
             name
+          ),
+          bid_line_items (
+            amount
           )
         `)
         .order('created_at', { ascending: false })
         .limit(100)
 
       if (error) throw error
-      setBids(data || [])
+      
+      // Calculate total amount from line items
+      const bidsWithCalculatedAmount = (data || []).map((bid: any) => {
+        const totalAmount = bid.bid_line_items?.reduce((sum: number, item: any) => sum + (item.amount || 0), 0) || 0
+        return {
+          ...bid,
+          bid_amount: totalAmount
+        }
+      })
+      
+      setBids(bidsWithCalculatedAmount)
     } catch (err: any) {
       setError(err.message || 'Failed to fetch bids')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchJobs = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('id, name, status')
+        .in('status', ['active', 'draft', 'needs_takeoff', 'needs_packages', 'waiting_for_bids']) // Show all active statuses
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setJobs(data || [])
+    } catch (err: any) {
+      console.error('Error fetching jobs:', err)
+    }
+  }
+
+  const fetchSubcontractors = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('subcontractors')
+        .select('id, name, email')
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      setSubcontractors(data || [])
+    } catch (err: any) {
+      console.error('Error fetching subcontractors:', err)
     }
   }
 
@@ -242,6 +312,76 @@ export default function ManageBidsPage() {
 
   const handleSelectChange = (name: string, value: string) => {
     setFormData(prev => ({ ...prev, [name]: value }))
+  }
+
+  // Bid Management Handlers
+  const openCreateBid = () => {
+    setBidFormData({
+      job_id: '',
+      subcontractor_id: '',
+      notes: '',
+      status: 'pending'
+    })
+    setIsEditingBid(false)
+    setCurrentBidId(null)
+    setShowBidForm(true)
+  }
+
+  const openEditBid = (bid: Bid, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent selecting the bid row
+    setBidFormData({
+      job_id: bid.job_id || '',
+      subcontractor_id: bid.subcontractor_id || '',
+      notes: bid.notes || '',
+      status: bid.status || 'pending'
+    })
+    setIsEditingBid(true)
+    setCurrentBidId(bid.id)
+    setShowBidForm(true)
+  }
+
+  const handleBidFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      setLoading(true)
+      setError('')
+
+      // Get selected subcontractor email
+      const selectedSub = subcontractors.find(s => s.id === bidFormData.subcontractor_id)
+      
+      const bidData = {
+        job_id: bidFormData.job_id || null,
+        subcontractor_id: bidFormData.subcontractor_id || null,
+        raw_email: selectedSub?.email || 'manual_entry@placeholder.com', // Required field
+        notes: bidFormData.notes || null,
+        status: bidFormData.status
+      }
+
+      if (isEditingBid && currentBidId) {
+        const { error } = await supabase
+          .from('bids')
+          .update(bidData)
+          .eq('id', currentBidId)
+
+        if (error) throw error
+        setSuccess('Bid updated successfully')
+      } else {
+        const { error } = await supabase
+          .from('bids')
+          .insert([bidData])
+
+        if (error) throw error
+        setSuccess('Bid created successfully')
+      }
+
+      setShowBidForm(false)
+      fetchBids()
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to save bid')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const resetForm = (closeForm: boolean = true) => {
@@ -359,7 +499,7 @@ export default function ManageBidsPage() {
     const searchLower = searchQuery.toLowerCase()
     const subcontractorName = bid.subcontractors?.name?.toLowerCase() || ''
     const subcontractorEmail = bid.subcontractors?.email?.toLowerCase() || ''
-    const bidEmail = bid.subcontractor_email?.toLowerCase() || ''
+    const bidEmail = bid.raw_email?.toLowerCase() || ''
     const jobName = bid.jobs?.name?.toLowerCase() || ''
     const bidAmount = bid.bid_amount?.toString() || ''
     
@@ -435,8 +575,16 @@ export default function ManageBidsPage() {
           {/* Left: Bids List */}
           <Card>
             <CardHeader>
-              <CardTitle>Bids</CardTitle>
-              <CardDescription>Select a bid to manage its line items</CardDescription>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Bids</CardTitle>
+                  <CardDescription>Select a bid to manage its line items</CardDescription>
+                </div>
+                <Button onClick={openCreateBid} size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Bid
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {/* Search */}
@@ -477,10 +625,10 @@ export default function ManageBidsPage() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <h3 className="font-semibold text-gray-900">
-                              {bid.subcontractors?.name || bid.subcontractor_email || 'Unknown'}
+                              {bid.subcontractors?.name || bid.raw_email || 'Unknown'}
                             </h3>
                             <p className="text-sm text-gray-600">
-                              {bid.subcontractors?.email || bid.subcontractor_email}
+                              {bid.subcontractors?.email || bid.raw_email}
                             </p>
                             {bid.jobs?.name && (
                               <p className="text-xs text-gray-500 mt-1">Job: {bid.jobs.name}</p>
@@ -491,9 +639,19 @@ export default function ManageBidsPage() {
                               </p>
                             )}
                           </div>
-                          <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'}>
-                            {bid.status}
-                          </Badge>
+                          <div className="flex flex-col items-end space-y-2">
+                            <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'}>
+                              {bid.status}
+                            </Badge>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => openEditBid(bid, e)}
+                            >
+                              <Edit className="h-4 w-4 text-gray-500 hover:text-gray-900" />
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -509,7 +667,7 @@ export default function ManageBidsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>
-                    {selectedBid ? `Line Items for ${selectedBid.subcontractors?.name || selectedBid.subcontractor_email || 'Bid'}` : 'Line Items'}
+                    {selectedBid ? `Line Items for ${selectedBid.subcontractors?.name || selectedBid.raw_email || 'Bid'}` : 'Line Items'}
                   </CardTitle>
                   <CardDescription>
                     {selectedBid 
@@ -777,6 +935,101 @@ export default function ManageBidsPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Bid Create/Edit Modal */}
+        <Dialog open={showBidForm} onOpenChange={setShowBidForm}>
+          <DialogContent className="sm:max-w-[600px] p-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-xl font-semibold">{isEditingBid ? 'Edit Bid' : 'Create New Bid'}</DialogTitle>
+              <DialogDescription className="text-gray-500 mt-1.5">
+                {isEditingBid ? 'Update the bid details below.' : 'Fill in the details to create a new bid for a job and subcontractor.'}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleBidFormSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="job_id" className="text-sm font-medium">Job *</Label>
+                  <Select
+                    value={bidFormData.job_id}
+                    onValueChange={(value) => setBidFormData(prev => ({ ...prev, job_id: value }))}
+                    required
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select a job" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jobs.map(job => (
+                        <SelectItem key={job.id} value={job.id}>
+                          {job.name} <span className="text-gray-400 text-xs ml-2">({job.status})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="subcontractor_id" className="text-sm font-medium">Subcontractor *</Label>
+                  <Select
+                    value={bidFormData.subcontractor_id}
+                    onValueChange={(value) => setBidFormData(prev => ({ ...prev, subcontractor_id: value }))}
+                    required
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select a subcontractor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {subcontractors.map(sub => (
+                        <SelectItem key={sub.id} value={sub.id}>
+                          {sub.name} <span className="text-gray-400 text-xs ml-2">({sub.email})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="status" className="text-sm font-medium">Status</Label>
+                    <Select
+                      value={bidFormData.status}
+                      onValueChange={(value) => setBidFormData(prev => ({ ...prev, status: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="accepted">Accepted</SelectItem>
+                        <SelectItem value="declined">Declined</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="notes" className="text-sm font-medium">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    value={bidFormData.notes}
+                    onChange={(e) => setBidFormData(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Add internal notes..."
+                    rows={3}
+                    className="resize-none"
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                <Button type="button" variant="outline" onClick={() => setShowBidForm(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="bg-orange-600 hover:bg-orange-700 text-white">
+                  {isEditingBid ? 'Save Changes' : 'Create Bid'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

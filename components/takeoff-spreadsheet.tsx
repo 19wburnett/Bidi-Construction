@@ -68,6 +68,12 @@ export default function TakeoffSpreadsheet({
   const [showNewSubcontractorInput, setShowNewSubcontractorInput] = useState<string | null>(null)
   const [subcontractorSearchQuery, setSubcontractorSearchQuery] = useState<string>('')
   const [allTrades, setAllTrades] = useState<string[]>([])
+  const [columnVisibility, setColumnVisibility] = useState({
+    costCode: true,
+    description: true,
+    location: true,
+    page: true
+  })
   const tableRef = useRef<HTMLDivElement>(null)
   const categoryRefs = useRef<Record<string, HTMLTableRowElement>>({})
   const subcontractorDropdownRef = useRef<HTMLDivElement>(null)
@@ -487,6 +493,8 @@ export default function TakeoffSpreadsheet({
     } else if (editingCell.field === 'description') {
       const trimmed = editValue.trim()
       updated.description = trimmed || item.description || ''
+    } else if (editingCell.field === 'cost_code') {
+      updated.cost_code = editValue.trim() || undefined
     } else if (editingCell.field === 'quantity') {
       updated.quantity = parseFloat(editValue) || 0
       updated.total_cost = updated.quantity * (updated.unit_cost || 0)
@@ -616,27 +624,29 @@ export default function TakeoffSpreadsheet({
             ref={(el) => {
               if (el) categoryRefs.current[row.id] = el
             }}
-            className={`${config?.bgColor || 'bg-gray-100'} border-b-2 border-gray-300 cursor-pointer hover:opacity-90`}
+            className={`group cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-200`}
             onClick={() => toggleCategory(row.id)}
           >
-            <td colSpan={11} className="p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {isExpanded ? (
-                    <ChevronDown className="h-5 w-5" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5" />
-                  )}
-                  <span className="font-bold text-lg">{row.name}</span>
-                  <Badge variant="outline" className="ml-2">
-                    {row.children?.length || 0} subcontractors
+            <td colSpan={12} className="p-0">
+              <div className={`flex items-center justify-between py-3 px-4 ${config?.bgColor || 'bg-gray-50'} border-l-4 ${config?.color?.replace('text-', 'border-') || 'border-gray-400'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`p-1 rounded-md hover:bg-black/5 transition-colors`}>
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    )}
+                  </div>
+                  <span className={`font-bold text-sm uppercase tracking-wide ${config?.color || 'text-gray-800'}`}>{row.name}</span>
+                  <Badge variant="secondary" className="ml-2 bg-white/50 text-xs font-normal border-gray-200 text-gray-600">
+                    {row.children?.length || 0} Subs
+                  </Badge>
+                  <Badge variant="secondary" className="ml-1 bg-white/50 text-xs font-normal border-gray-200 text-gray-600">
+                    {row.children?.reduce((sum, sub) => sum + (sub.children?.length || 0), 0) || 0} Items
                   </Badge>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm text-gray-600">
-                    {row.children?.reduce((sum, sub) => sum + (sub.children?.length || 0), 0) || 0} items
-                  </span>
-                  <span className="font-bold text-lg">{formatCurrency(row.total)}</span>
+                  <span className="font-bold text-gray-900">{formatCurrency(row.total)}</span>
                 </div>
               </div>
             </td>
@@ -656,27 +666,31 @@ export default function TakeoffSpreadsheet({
       return (
         <React.Fragment key={row.id}>
           <tr
-            className="bg-gray-50 border-b border-gray-200 cursor-pointer hover:bg-gray-100"
+            className="bg-gray-50/50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
             onClick={() => toggleSubcontractor(row.id)}
           >
-            <td className="p-2 pl-8">
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
+            <td className="py-2 px-4 pl-8 border-l border-gray-100">
+               <div className={`p-1 rounded-md w-fit hover:bg-black/5 transition-colors`}>
+                {isExpanded ? (
+                  <ChevronDown className="h-3 w-3 text-gray-400" />
+                ) : (
+                  <ChevronRight className="h-3 w-3 text-gray-400" />
+                )}
+              </div>
             </td>
-            <td colSpan={2} className="p-2">
-              <span className="font-semibold">{row.name}</span>
+            <td colSpan={4} className="py-2 px-4">
+              <span className="font-medium text-gray-700 text-sm flex items-center gap-2">
+                {row.name}
+                <span className="text-xs text-gray-400 font-normal">({row.quantity?.toLocaleString()} items)</span>
+              </span>
             </td>
-            <td className="p-2"></td>
-            <td className="p-2 text-right">{row.quantity?.toLocaleString()}</td>
-            <td className="p-2"></td>
-            <td className="p-2"></td>
-            <td className="p-2 text-right font-semibold">{formatCurrency(row.total)}</td>
-            <td className="p-2"></td>
-            <td className="p-2"></td>
-            <td className="p-2"></td>
+            <td className="py-2 px-4"></td>
+            <td className="py-2 px-4"></td>
+            <td className="py-2 px-4"></td>
+            <td className="py-2 px-4 text-right font-medium text-gray-700 text-sm">{formatCurrency(row.total)}</td>
+            <td className="py-2 px-4"></td>
+            <td className="py-2 px-4"></td>
+            <td className="py-2 px-4"></td>
           </tr>
           {isExpanded && row.children?.map(child => renderRow(child))}
         </React.Fragment>
@@ -689,11 +703,8 @@ export default function TakeoffSpreadsheet({
     }
     
     const categoryId = `category-${row.categoryKey}`
-    // Construct subcontractorId to match the format used when creating subcontractor rows
-    // Format: category-{categoryKey}-sub-{subcontractor}
     const subcontractorId = `${categoryId}-sub-${row.subcontractor}`
     
-    // Only render if both category and subcontractor are expanded
     const categoryExpanded = expandedCategories.has(categoryId)
     const subcontractorExpanded = expandedSubcontractors.has(subcontractorId)
     
@@ -708,7 +719,7 @@ export default function TakeoffSpreadsheet({
     return (
       <tr
         key={row.id}
-        className="border-b border-gray-100 hover:bg-gray-50"
+        className="group border-b border-gray-50 hover:bg-orange-50/30 transition-colors bg-white"
         onClick={(e) => {
           if (item.bounding_box && onItemHighlight) {
             e.stopPropagation()
@@ -716,8 +727,12 @@ export default function TakeoffSpreadsheet({
           }
         }}
       >
-        <td className="p-2 pl-12"></td>
-        <td className="p-2">
+        <td className="py-2 px-4 border-l border-gray-100 relative">
+            {item.bounding_box && (
+              <div className="absolute inset-y-0 left-0 w-1 bg-orange-200 opacity-0 group-hover:opacity-100 transition-opacity" />
+            )}
+        </td>
+        <td className="py-2 px-4 text-sm">
           {isEditing && editingCell?.field === 'name' ? (
             <Input
               value={editValue}
@@ -728,11 +743,11 @@ export default function TakeoffSpreadsheet({
                 if (e.key === 'Escape') cancelEdit()
               }}
               autoFocus
-              className="h-8"
+              className="h-8 text-sm"
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1' : ''}
+              className={`font-medium text-gray-900 ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'name', item.name)
@@ -742,7 +757,33 @@ export default function TakeoffSpreadsheet({
             </div>
           )}
         </td>
-        <td className="p-2 text-sm text-gray-600">
+        <td className="py-2 px-4 text-sm">
+            {isEditing && editingCell?.field === 'cost_code' ? (
+            <Input
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={saveEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveEdit()
+                if (e.key === 'Escape') cancelEdit()
+              }}
+              autoFocus
+              className="h-8 text-sm font-mono"
+              placeholder="Code"
+            />
+          ) : (
+            <div
+              className={`text-gray-500 font-mono text-xs ${editable ? 'cursor-text hover:text-orange-600' : ''} ${!item.cost_code ? 'opacity-50 italic' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (editable) startEdit(row.id, 'cost_code', item.cost_code || '')
+              }}
+            >
+              {item.cost_code || 'Add code'}
+            </div>
+          )}
+        </td>
+        <td className="py-2 px-4 text-sm text-gray-600">
           {isEditing && editingCell?.field === 'description' ? (
             <Input
               value={editValue}
@@ -758,39 +799,35 @@ export default function TakeoffSpreadsheet({
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1' : ''}
+              className={`truncate max-w-[300px] ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
+              title={item.description}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'description', item.description || '')
               }}
             >
-              {item.description && item.name !== item.description ? item.description : <span className="text-gray-400">—</span>}
+              {item.description && item.name !== item.description ? item.description : <span className="text-gray-300">—</span>}
             </div>
           )}
         </td>
-        <td className="p-2">
+        <td className="py-2 px-4 text-sm">
           {isEditing && editingCell?.field === 'subcontractor' ? (
             <div className="relative subcontractor-dropdown-container" ref={subcontractorDropdownRef}>
+              {/* Existing dropdown logic - simplified for brevity but keeping functional */}
               <div className="relative">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 z-10" />
                 <Input
                   value={subcontractorSearchQuery}
                   onChange={(e) => setSubcontractorSearchQuery(e.target.value)}
-                  onFocus={(e) => {
-                    e.stopPropagation()
-                    setSubcontractorSearchQuery('')
-                  }}
-                  placeholder="Search subcontractor types..."
-                  className="h-8 w-48 pl-7 pr-8"
+                  placeholder="Type..."
+                  className="h-8 w-full text-xs"
                   autoFocus
                 />
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               </div>
-              <div 
-                className="absolute z-50 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto"
+               <div 
+                className="absolute z-50 mt-1 w-64 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div
+                 <div
                   className="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-50 border-b"
                   onClick={(e) => {
                     e.stopPropagation()
@@ -815,7 +852,7 @@ export default function TakeoffSpreadsheet({
                   .map(type => (
                     <div
                       key={type}
-                      className="px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"
+                      className="px-3 py-2 text-xs cursor-pointer hover:bg-gray-50 border-b border-gray-50 last:border-0"
                       onClick={(e) => {
                         e.stopPropagation()
                         const item = normalizedItems.find(i => i.id === row.id)
@@ -832,29 +869,23 @@ export default function TakeoffSpreadsheet({
                       {type}
                     </div>
                   ))}
-                {allTrades.filter(type => 
-                  subcontractorSearchQuery === '' || 
-                  type.toLowerCase().includes(subcontractorSearchQuery.toLowerCase())
-                ).length === 0 && (
-                  <div className="px-3 py-2 text-sm text-gray-400 text-center">
-                    No matches found
-                  </div>
-                )}
               </div>
             </div>
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1' : ''}
+              className={`text-gray-600 ${editable ? 'cursor-pointer hover:text-orange-600' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'subcontractor', item.subcontractor || '')
               }}
             >
-              {item.subcontractor || <span className="text-gray-400">Unassigned</span>}
+              <Badge variant="outline" className="font-normal text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200">
+                {item.subcontractor || 'Unassigned'}
+              </Badge>
             </div>
           )}
         </td>
-        <td className="p-2 text-right">
+        <td className="py-2 px-4 text-right text-sm">
           {isEditing && editingCell?.field === 'quantity' ? (
             <Input
               type="number"
@@ -866,11 +897,11 @@ export default function TakeoffSpreadsheet({
                 if (e.key === 'Escape') cancelEdit()
               }}
               autoFocus
-              className="h-8 w-20 text-right"
+              className="h-8 w-20 text-right text-sm"
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1 text-right' : 'text-right'}
+              className={`font-mono text-gray-700 ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'quantity', item.quantity)
@@ -880,7 +911,7 @@ export default function TakeoffSpreadsheet({
             </div>
           )}
         </td>
-        <td className="p-2 text-sm text-gray-600">
+        <td className="py-2 px-4 text-sm text-gray-500">
           {isEditing && editingCell?.field === 'unit' ? (
             <Input
               value={editValue}
@@ -891,22 +922,21 @@ export default function TakeoffSpreadsheet({
                 if (e.key === 'Escape') cancelEdit()
               }}
               autoFocus
-              className="h-8 w-16"
-              placeholder="Unit"
+              className="h-8 w-16 text-sm"
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1' : ''}
+              className={editable ? 'cursor-text hover:text-orange-600' : ''}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'unit', item.unit || '')
               }}
             >
-              {item.unit || <span className="text-gray-400">—</span>}
+              {item.unit || '—'}
             </div>
           )}
         </td>
-        <td className="p-2 text-right">
+        <td className="py-2 px-4 text-right text-sm">
           {isEditing && editingCell?.field === 'unit_cost' ? (
             <Input
               type="number"
@@ -919,11 +949,11 @@ export default function TakeoffSpreadsheet({
                 if (e.key === 'Escape') cancelEdit()
               }}
               autoFocus
-              className="h-8 w-24 text-right"
+              className="h-8 w-24 text-right text-sm"
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1 text-right' : 'text-right'}
+              className={`font-mono text-gray-600 ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'unit_cost', item.unit_cost)
@@ -933,8 +963,8 @@ export default function TakeoffSpreadsheet({
             </div>
           )}
         </td>
-        <td className="p-2 text-right font-semibold">{formatCurrency(itemCost)}</td>
-        <td className="p-2 text-sm text-gray-600">
+        <td className="py-2 px-4 text-right font-medium text-gray-900 text-sm font-mono">{formatCurrency(itemCost)}</td>
+        <td className="py-2 px-4 text-sm text-gray-500">
           {isEditing && editingCell?.field === 'location' ? (
             <Input
               value={editValue}
@@ -946,60 +976,64 @@ export default function TakeoffSpreadsheet({
               }}
               autoFocus
               className="h-8 text-sm"
-              placeholder="Location..."
             />
           ) : (
             <div
-              className={editable ? 'cursor-pointer hover:bg-gray-100 rounded px-1' : ''}
+              className={`truncate max-w-[150px] ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
+              title={item.location}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'location', item.location || '')
               }}
             >
-              {item.location || <span className="text-gray-400">—</span>}
+              {item.location || '—'}
             </div>
           )}
         </td>
-        <td className="p-2">
+        <td className="py-2 px-4 text-center">
           {item.bounding_box && (
             <Badge
-              variant="secondary"
-              className="text-xs cursor-pointer hover:bg-orange-50"
+              variant="outline"
+              className="text-[10px] h-5 px-1.5 bg-gray-50 hover:bg-orange-50 cursor-pointer transition-colors border-gray-200"
               onClick={(e) => {
                 e.stopPropagation()
                 onPageNavigate?.(item.bounding_box!.page)
               }}
             >
-              <MapPin className="h-3 w-3 mr-1" />
+              <MapPin className="h-3 w-3 mr-1 text-orange-500" />
               {item.bounding_box.page}
             </Badge>
           )}
         </td>
-        <td className="p-2">
-          {editable && (
-            <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  startEdit(row.id, 'name', item.name)
-                }}
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  deleteItem(row.id)
-                }}
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </div>
-          )}
+        <td className="py-2 px-4">
+          <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+            {editable && (
+              <>
+                 <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-gray-400 hover:text-gray-700"
+                   onClick={(e) => {
+                    e.stopPropagation()
+                    startEdit(row.id, 'name', item.name)
+                  }}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-gray-400 hover:text-red-600"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteItem(row.id)
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </>
+            )}
+          </div>
         </td>
       </tr>
     )
@@ -1018,7 +1052,11 @@ export default function TakeoffSpreadsheet({
     calculateItemCost,
     onItemHighlight,
     onPageNavigate,
-    formatCurrency
+    formatCurrency,
+    normalizedItems,
+    onItemsChange,
+    subcontractorSearchQuery,
+    allTrades
   ])
 
   // Get category list for navigation
@@ -1096,25 +1134,26 @@ export default function TakeoffSpreadsheet({
       )}
 
       {/* Table */}
-      <div ref={tableRef} className="border rounded-lg overflow-hidden bg-white">
+      <div ref={tableRef} className="border rounded-xl overflow-hidden bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-100 border-b-2 border-gray-300 sticky top-0 z-10">
+          <table className="w-full border-collapse">
+            <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-20">
               <tr>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 w-8"></th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Item Name</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Description</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Subcontractor</th>
-                <th className="p-3 text-right text-xs font-semibold text-gray-600">Quantity</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Unit</th>
-                <th className="p-3 text-right text-xs font-semibold text-gray-600">Unit Cost</th>
-                <th className="p-3 text-right text-xs font-semibold text-gray-600">Total Cost</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Location</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600">Page</th>
-                <th className="p-3 text-left text-xs font-semibold text-gray-600 w-20">Actions</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Item Name</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Cost Code</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Description</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[150px]">Subcontractor</th>
+                <th className="py-3 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Quantity</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Unit</th>
+                <th className="py-3 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Unit Cost</th>
+                <th className="py-3 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Total Cost</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Location</th>
+                <th className="py-3 px-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Page</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-20"></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {groupedRows.map(row => (
                 <React.Fragment key={row.id}>
                   {renderRow(row)}

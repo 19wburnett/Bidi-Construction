@@ -1,35 +1,33 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Navbar from '@/components/navbar'
 import Footer from '@/components/footer'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
+import { BackgroundPattern } from '@/components/ui/background-pattern'
 import { 
-  Building2, 
   Mail, 
   Users, 
   FileText, 
   Star, 
   CheckCircle, 
   ArrowRight, 
-  Sparkles, 
-  Zap,
   Clock,
   DollarSign,
   MapPin,
-  Phone,
-  Briefcase
+  Briefcase,
+  Shield
 } from 'lucide-react'
 
 export default function SubcontractorsPage() {
   const [isVisible, setIsVisible] = useState(false)
+  const [visibleSections, setVisibleSections] = useState<Set<string>>(new Set())
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -40,6 +38,34 @@ export default function SubcontractorsPage() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [error, setError] = useState('')
   const supabase = createClient()
+
+  useEffect(() => {
+    setIsVisible(true)
+
+    // Intersection Observer for scroll-triggered animations
+    const observerOptions = {
+      threshold: 0.2,
+      rootMargin: '0px 0px -100px 0px'
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const sectionId = entry.target.getAttribute('data-section-id')
+          if (sectionId) {
+            setVisibleSections(prev => new Set(prev).add(sectionId))
+          }
+        }
+      })
+    }, observerOptions)
+
+    const sections = document.querySelectorAll('[data-section-id]')
+    sections.forEach(section => observer.observe(section))
+
+    return () => {
+      sections.forEach(section => observer.unobserve(section))
+    }
+  }, [])
 
   const tradeCategories = [
     'Electrical',
@@ -124,55 +150,60 @@ export default function SubcontractorsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300">
-      {/* Professional Construction Background */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 to-white dark:from-black dark:to-orange-950/20"></div>
-        <div className="absolute top-0 left-0 w-full h-1 bg-orange"></div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-orange/5 dark:bg-orange/10 rounded-full blur-3xl"></div>
-      </div>
+    <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300 overflow-hidden">
+      <BackgroundPattern />
 
       <Navbar />
 
       {/* Hero Section */}
-      <section className="container mx-auto px-4 py-8 sm:py-16 text-center relative z-10">
-        <div className="flex justify-center mb-6">
-          <div className="bg-gray-100 text-gray-800 px-4 py-2 text-sm font-semibold border border-gray-200 flex items-center space-x-2">
+      <section className="container mx-auto px-4 py-16 sm:py-24 text-center relative z-10">
+        <div className={`flex justify-center mb-8 transition-all duration-1000 delay-300 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
+          <div className="bg-gray-100 border-2 border-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2">
             <Briefcase className="h-4 w-4" />
             <span>For Subcontractors</span>
           </div>
         </div>
         
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black dark:text-white mb-6">
+        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-500 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
           Get More Jobs
           <span className="block bidi-orange-text">
             Automatically
           </span>
         </h1>
         
-        <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-300 mb-8 max-w-3xl mx-auto font-medium">
+        <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto font-medium transition-all duration-1000 delay-700 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
           Join our network of subcontractors and get jobs sent to your inbox.<strong className="bidi-orange-text"> No software needed, just reply to our emails with your bid.</strong>
         </p>
         
-        <div className="flex justify-center">
+        <div className={`flex justify-center transition-all duration-1000 delay-1000 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
           <Button 
             size="lg" 
             variant="orange"
-            className="text-base sm:text-lg px-6 sm:px-8 py-3 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group"
+            className="text-lg sm:text-xl px-8 sm:px-12 py-4 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group font-bold"
             onClick={() => document.getElementById('signup-form')?.scrollIntoView({ behavior: 'smooth' })}
           >
             Join Now - It's Free!
-            <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform duration-200" />
+            <ArrowRight className="ml-2 h-6 w-6 group-hover:translate-x-1 transition-transform duration-200" />
           </Button>
         </div>
       </section>
 
       {/* How It Works Section */}
-      <section className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
-        <h2 className="text-2xl sm:text-3xl font-bold text-center text-black dark:text-white mb-8 sm:mb-12">
+      <section className="container mx-auto px-4 py-12 sm:py-20 relative z-10">
+        <h2 className={`text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-black dark:text-white mb-12 sm:mb-16 tracking-tight transition-all duration-1000 delay-1200 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
           How It Works for Subcontractors
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
           {[
             {
               icon: Briefcase,
@@ -200,33 +231,41 @@ export default function SubcontractorsPage() {
             }
           ].map((step, index) => {
             const Icon = step.icon
+            const sectionId = `step-${index}`
+            const isSectionVisible = visibleSections.has(sectionId)
+            
             return (
-              <Card key={index} className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-                <CardHeader>
-                  <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${step.bgColor} ${step.borderColor} border-2 group-hover:scale-110 transition-transform duration-300`}>
-                    <Icon className={`h-8 w-8 ${step.iconColor}`} />
-                  </div>
-                  <CardTitle className="text-lg text-black dark:text-white group-hover:text-black dark:group-hover:text-white transition-colors duration-300">
-                    {step.title}
-                  </CardTitle>
-                  <CardDescription className="text-sm text-gray-600 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors duration-300">
-                    {step.description}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+              <div key={index} data-section-id={sectionId} className={`transition-all duration-700 ${
+                isSectionVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+              }`} style={{ transitionDelay: `${index * 150}ms` }}>
+                <Card className="text-center hover:scale-105 transition-all duration-300 hover:shadow-xl group border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 h-full">
+                  <CardHeader>
+                    <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${step.bgColor} ${step.borderColor} border-2 group-hover:scale-110 transition-transform duration-300`}>
+                      <Icon className={`h-8 w-8 ${step.iconColor}`} />
+                    </div>
+                    <CardTitle className="text-xl font-bold text-black dark:text-white group-hover:text-black dark:group-hover:text-white transition-colors duration-300">
+                      {step.title}
+                    </CardTitle>
+                    <CardDescription className="text-base text-gray-600 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors duration-300 mt-2">
+                      {step.description}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              </div>
             )
           })}
         </div>
       </section>
 
       {/* Benefits Section */}
-      <section className="bg-gray-50 dark:bg-black py-8 sm:py-16 transition-colors duration-300">
+      <section className="bg-gray-50 dark:bg-black py-16 sm:py-24 transition-colors duration-300 relative overflow-hidden">
+        <div className="absolute inset-0 construction-grid opacity-30 -z-10"></div>
         <div className="container mx-auto px-4">
-          <h2 className="text-2xl sm:text-3xl font-bold text-center text-black dark:text-white mb-8 sm:mb-12">
+          <h2 className={`text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-black dark:text-white mb-12 sm:mb-16 tracking-tight`}>
             Why Join Our Network?
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                      {[
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+            {[
             {
               icon: Clock,
               title: "Save Time",
@@ -242,7 +281,7 @@ export default function SubcontractorsPage() {
               iconColor: "text-gray-700"
             },
             {
-              icon: Star,
+              icon: Shield,
               title: "Professional Presentation",
               description: "Your bids are organized and presented professionally to help you win more work.",
               bgColor: "bg-gray-100",
@@ -263,7 +302,7 @@ export default function SubcontractorsPage() {
               iconColor: "text-gray-700"
             },
             {
-              icon: DollarSign,
+              icon: Star,
               title: "Completely Free",
               description: "No fees, no subscriptions, no hidden costs. Join and start receiving jobs at no cost.",
               bgColor: "bg-gray-100",
@@ -271,12 +310,17 @@ export default function SubcontractorsPage() {
             }
           ].map((benefit, index) => {
             const Icon = benefit.icon
+            const sectionId = `benefit-${index}`
+            const isSectionVisible = visibleSections.has(sectionId)
+            
             return (
-              <div key={index} className="text-center">
-                <div className={`w-16 h-16 ${benefit.bgColor} dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-gray-200 dark:border-gray-700`}>
+              <div key={index} data-section-id={sectionId} className={`text-center p-6 rounded-xl hover:bg-white dark:hover:bg-gray-900 hover:shadow-lg transition-all duration-300 ${
+                isSectionVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
+              }`} style={{ transitionDelay: `${index * 100}ms` }}>
+                <div className={`w-16 h-16 ${benefit.bgColor} dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-gray-200 dark:border-gray-700 group-hover:scale-110 transition-transform duration-300`}>
                   <Icon className={`h-8 w-8 ${benefit.iconColor}`} />
                 </div>
-                <h3 className="text-xl font-semibold text-black dark:text-white mb-3">{benefit.title}</h3>
+                <h3 className="text-xl font-bold text-black dark:text-white mb-3">{benefit.title}</h3>
                 <p className="text-gray-600 dark:text-gray-300 font-medium">{benefit.description}</p>
               </div>
             )
@@ -286,36 +330,41 @@ export default function SubcontractorsPage() {
       </section>
 
       {/* Sign Up Form Section */}
-      <section id="signup-form" className="container mx-auto px-4 py-8 sm:py-16 relative z-10">
-        <div className="max-w-2xl mx-auto">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-4">
+      <section id="signup-form" className="container mx-auto px-4 py-16 sm:py-24 relative z-10">
+        <div className="max-w-3xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl sm:text-4xl font-bold text-black dark:text-white mb-6 tracking-tight">
               Join Our Network Today - It's Free!
             </h2>
-            <p className="text-lg text-gray-600 dark:text-gray-300 font-medium">
+            <p className="text-xl text-gray-600 dark:text-gray-300 font-medium">
               Fill out the form below and start receiving job opportunities in your area. 
-              <strong className="bidi-orange-text"> No cost, no fees, no strings attached.</strong>
+              <strong className="bidi-orange-text block mt-2"> No cost, no fees, no strings attached.</strong>
             </p>
           </div>
 
           {!isSubmitted ? (
-            <Card className="shadow-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-              <CardHeader>
-                <CardTitle className="text-center dark:text-white">Subcontractor Registration</CardTitle>
-                <CardDescription className="text-center font-medium text-gray-600 dark:text-gray-300">
+            <Card className="shadow-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 overflow-hidden relative">
+              {/* Decorative accent */}
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange to-orange-600"></div>
+              
+              <CardHeader className="pt-8 pb-6 text-center">
+                <CardTitle className="text-2xl dark:text-white mb-2">Subcontractor Registration</CardTitle>
+                <CardDescription className="text-base font-medium text-gray-600 dark:text-gray-300">
                   Complete your profile to start receiving job notifications
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-6 sm:px-10 pb-10">
                 {error && (
-                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-red-800 text-sm">{error}</p>
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg animate-shake">
+                    <p className="text-red-800 text-sm font-medium flex items-center">
+                      <span className="mr-2">⚠️</span> {error}
+                    </p>
                   </div>
                 )}
                 <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="name">Full Name *</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="name" className="text-sm font-semibold">Full Name *</Label>
                       <Input
                         id="name"
                         name="name"
@@ -324,10 +373,11 @@ export default function SubcontractorsPage() {
                         value={formData.name}
                         onChange={handleInputChange}
                         placeholder="John Smith"
+                        className="h-12 border-gray-300 focus:border-orange focus:ring-orange"
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="email">Email Address *</Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="text-sm font-semibold">Email Address *</Label>
                       <Input
                         id="email"
                         name="email"
@@ -336,15 +386,16 @@ export default function SubcontractorsPage() {
                         value={formData.email}
                         onChange={handleInputChange}
                         placeholder="john@example.com"
+                        className="h-12 border-gray-300 focus:border-orange focus:ring-orange"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="trade">Primary Trade *</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="trade" className="text-sm font-semibold">Primary Trade *</Label>
                       <Select value={formData.trade} onValueChange={(value) => handleSelectChange('trade', value)}>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-12 border-gray-300 focus:border-orange focus:ring-orange">
                           <SelectValue placeholder="Select your trade" />
                         </SelectTrigger>
                         <SelectContent>
@@ -356,8 +407,8 @@ export default function SubcontractorsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div>
-                      <Label htmlFor="location">Service Area *</Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="location" className="text-sm font-semibold">Service Area *</Label>
                       <Input
                         id="location"
                         name="location"
@@ -366,6 +417,7 @@ export default function SubcontractorsPage() {
                         value={formData.location}
                         onChange={handleInputChange}
                         placeholder="City, State (e.g., Austin, TX)"
+                        className="h-12 border-gray-300 focus:border-orange focus:ring-orange"
                       />
                     </div>
                   </div>
@@ -373,7 +425,7 @@ export default function SubcontractorsPage() {
                   <Button 
                     type="submit" 
                     variant="orange"
-                    className="w-full text-lg py-3 font-bold"
+                    className="w-full text-lg py-6 font-bold mt-4 shadow-md hover:shadow-lg transition-all duration-200 transform hover:-translate-y-1"
                     disabled={isSubmitting}
                   >
                     {isSubmitting ? (
@@ -388,55 +440,60 @@ export default function SubcontractorsPage() {
                       </>
                     )}
                   </Button>
+                  
+                  <p className="text-xs text-center text-gray-500 mt-4">
+                    By joining, you agree to receive email notifications about relevant job opportunities. 
+                    You can unsubscribe at any time.
+                  </p>
                 </form>
               </CardContent>
             </Card>
           ) : (
-            <Card className="shadow-2xl text-center border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-              <CardContent className="pt-8">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle className="h-8 w-8 text-green-600" />
+            <Card className="shadow-2xl text-center border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 animate-scale-in">
+              <CardContent className="pt-12 pb-12 px-8">
+                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+                  <CheckCircle className="h-10 w-10 text-green-600" />
                 </div>
-                <h3 className="text-2xl font-bold text-black dark:text-white mb-4">Welcome to Bidi!</h3>
-                <p className="text-lg text-gray-600 dark:text-gray-300 mb-6 font-medium">
+                <h3 className="text-3xl font-bold text-black dark:text-white mb-4">Welcome to Bidi!</h3>
+                <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 font-medium max-w-xl mx-auto">
                   Thank you for joining our free network! You've been successfully added to our database 
                   and will start receiving email notifications for jobs matching your trade ({formData.trade}) 
-                  and location ({formData.location}) - at no cost to you.
+                  and location ({formData.location}).
                 </p>
-                <div className="bg-blue-50 rounded-lg p-4 mb-6">
-                  <p className="text-sm text-blue-800">
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-6 mb-8 border border-blue-100 dark:border-blue-800">
+                  <p className="text-blue-800 dark:text-blue-300 font-medium">
                     <strong>What's next?</strong> You'll receive email notifications whenever new jobs 
                     are posted that match your trade and location. No action needed on your part - 
                     just reply to the emails with your bid details when jobs interest you.
                   </p>
                 </div>
-                <Button 
-                  onClick={() => {
-                    setIsSubmitted(false)
-                    setFormData({
-                      name: '',
-                      email: '',
-                      trade: '',
-                      location: ''
-                    })
-                  }}
-                  variant="construction"
-                  className="mr-4"
-                >
-                  Register Another
-                </Button>
-                <Link href="/">
-                  <Button variant="orange" className="font-bold">
-                    Back to Home
+                <div className="flex flex-col sm:flex-row justify-center gap-4">
+                  <Button 
+                    onClick={() => {
+                      setIsSubmitted(false)
+                      setFormData({
+                        name: '',
+                        email: '',
+                        trade: '',
+                        location: ''
+                      })
+                    }}
+                    variant="outline"
+                    className="border-2"
+                  >
+                    Register Another
                   </Button>
-                </Link>
+                  <Link href="/">
+                    <Button variant="orange" className="font-bold">
+                      Back to Home
+                    </Button>
+                  </Link>
+                </div>
               </CardContent>
             </Card>
           )}
         </div>
       </section>
-
-      {/* CTA Section */}
 
       <Footer />
     </div>

@@ -5,21 +5,31 @@
  */
 
 import { generateTemplateInstructions } from '@/lib/takeoff-template'
+import { getRelevantCostCodesForPrompt, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
 
 /**
  * Build specialized system prompt based on task type and job type
  */
-export function buildTakeoffSystemPrompt(taskType: string, jobType: string = 'residential'): string {
+export function buildTakeoffSystemPrompt(
+  taskType: string, 
+  jobType: string = 'residential',
+  costCodeStandard: CostCodeStandard = 'csi-16'
+): string {
+  const costCodeInstructions = getRelevantCostCodesForPrompt(costCodeStandard)
+  const standardName = getStandardName(costCodeStandard)
+  
   const basePrompt = `You are an expert construction analyst with specialized knowledge in construction plans, building codes, and material takeoffs. You are part of a multi-model consensus system that provides the most accurate analysis possible.
 
 CRITICAL INSTRUCTIONS:
 - Analyze ALL provided images thoroughly
 - Provide detailed, accurate measurements and quantities
 - Include specific locations and bounding boxes
-- Assign appropriate Procore cost codes
+- Assign appropriate ${standardName} cost codes
 - Identify potential issues and code violations
 - Provide professional recommendations
 - ALWAYS return BOTH takeoff data AND quality analysis, even if one section has limited data
+
+${costCodeInstructions}
 
 RESPONSE FORMAT - YOU MUST RETURN BOTH SECTIONS:
 Return ONLY a valid JSON object with this EXACT structure. Both "items" and "quality_analysis" are REQUIRED:
@@ -33,8 +43,9 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
       "unit_cost": 2.50,
       "location": "Specific location",
       "category": "structural|exterior|interior|mep|finishes|other",
+      "subcontractor": "Trade Type (e.g. Electrical, Plumbing, Framing)",
       "subcategory": "Specific subcategory",
-      "cost_code": "Procore cost code",
+      "cost_code": "The standardized cost code",
       "cost_code_description": "Cost code description",
       "notes": "Additional notes",
       "dimensions": "Original dimensions from plan",
@@ -216,13 +227,13 @@ TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
 - Identify all construction materials, fixtures, and components
 - Use standard construction estimating practices
 - Cross-reference dimensions to ensure accuracy
-- Assign appropriate Procore cost codes to each item
+- Assign appropriate ${standardName} cost codes to each item
 - Provide realistic unit_cost pricing for each item
 
 3-LEVEL CATEGORIZATION:
 LEVEL 1: CATEGORY (structural, exterior, interior, mep, finishes, other)
 LEVEL 2: SUBCATEGORY (specific work type)
-LEVEL 3: LINE ITEMS (individual materials with Procore cost codes)
+LEVEL 3: LINE ITEMS (individual materials with ${standardName} cost codes)
 
 PRICING REQUIREMENTS:
 - For each item, you MUST provide a realistic "unit_cost" based on material type, grade, and typical market rates (as of 2024)
@@ -236,7 +247,7 @@ BE SPECIFIC: "2x6 Top Plate" not just "lumber"
 SHOW YOUR MATH: Include dimensions used for calculations
 USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
 ASSIGN SUBCATEGORIES: Every item must have a subcategory
-ASSIGN COST CODES: Use the Procore cost codes provided
+ASSIGN COST CODES: Use the ${standardName} cost codes provided in the reference section
 INCLUDE LOCATIONS: Specify where each item is located
 PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
 INCLUDE PRICING: Every item must have a realistic unit_cost
@@ -377,9 +388,12 @@ export function buildTakeoffUserPrompt(
   pageStart?: number,
   pageEnd?: number,
   extractedText?: string,
-  drawings?: any[]
+  drawings?: any[],
+  costCodeStandard: CostCodeStandard = 'csi-16'
 ): string {
+  const standardName = getStandardName(costCodeStandard)
   const pageRange = pageStart && pageEnd ? ` (pages ${pageStart}-${pageEnd})` : ''
+  
   let prompt = `Analyze this construction plan with ${imageCount} page${imageCount > 1 ? 's' : ''}${pageRange} for COMPREHENSIVE construction analysis.
 
 IMAGES PROVIDED: ${imageCount} page${imageCount > 1 ? 's' : ''} of construction plans${pageRange}
@@ -412,7 +426,7 @@ TAKEOFF REQUIREMENTS:
 3. Identify all construction materials, fixtures, and components
 4. Use standard construction estimating practices
 5. Cross-reference dimensions to ensure accuracy
-6. Assign appropriate Procore cost codes to each item
+6. Assign appropriate ${standardName} cost codes to each item
 7. Include realistic unit_cost pricing for every item
 
 CRITICAL: You must extract MULTIPLE items per page. A single page typically contains:
@@ -439,7 +453,7 @@ IMPORTANT:
 - USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
 - BE THOROUGH: Extract every measurable element visible in the plan
 - ASSIGN SUBCATEGORIES: Every item must have a subcategory
-- ASSIGN COST CODES: Use the Procore cost codes provided
+- ASSIGN COST CODES: Use the ${standardName} cost codes provided
 - INCLUDE LOCATIONS: Specify where each item is located
 - PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
 - If dimensions are unclear or not visible, state "dimension not visible" in notes AND add to quality_analysis.completeness.missing_dimensions
@@ -471,6 +485,3 @@ DO NOT:
 
   return prompt
 }
-
-
-

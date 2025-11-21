@@ -7,10 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
-import { Save, User, Phone, Bell, CreditCard, Coins } from 'lucide-react'
+import { Save, User, Phone, Bell, CreditCard, Coins, ListChecks } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import DocumentTemplatesManager from '@/components/document-templates-manager'
+import { AVAILABLE_STANDARDS, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
 
 interface UserSettings {
   first_name: string
@@ -22,6 +24,7 @@ interface UserSettings {
   payment_type: 'subscription' | 'credits' | 'pay_per_job'
   subscription_status: string
   credits: number
+  preferred_cost_code_standard: CostCodeStandard
 }
 
 export default function SettingsPage() {
@@ -35,6 +38,7 @@ export default function SettingsPage() {
     payment_type: 'subscription',
     subscription_status: 'inactive',
     credits: 0,
+    preferred_cost_code_standard: 'csi-16'
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -66,15 +70,15 @@ export default function SettingsPage() {
       if (authUser) {
         const metadata = authUser.user_metadata || {}
         
-        // Get payment information from users table
+        // Get payment information and preferences from users table
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('payment_type, subscription_status, credits')
+          .select('payment_type, subscription_status, credits, preferred_cost_code_standard')
           .eq('id', authUser.id)
           .single()
         
         if (userError) {
-          console.error('Error fetching user payment data:', userError)
+          console.error('Error fetching user data:', userError)
         }
         
         setSettings({
@@ -87,6 +91,7 @@ export default function SettingsPage() {
           payment_type: userData?.payment_type || 'subscription',
           subscription_status: userData?.subscription_status || 'inactive',
           credits: userData?.credits || 0,
+          preferred_cost_code_standard: (userData?.preferred_cost_code_standard as CostCodeStandard) || 'csi-16'
         })
       }
     } catch (error) {
@@ -108,8 +113,8 @@ export default function SettingsPage() {
     setMessage(null)
 
     try {
-      // Update user metadata in Supabase Auth
-      const { error } = await supabase.auth.updateUser({
+      // 1. Update user metadata in Supabase Auth (for profile info)
+      const { error: authError } = await supabase.auth.updateUser({
         data: {
           first_name: settings.first_name,
           last_name: settings.last_name,
@@ -120,8 +125,19 @@ export default function SettingsPage() {
         }
       })
 
-      if (error) {
-        throw error
+      if (authError) throw authError
+
+      // 2. Update users table (for preferences)
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const { error: dbError } = await supabase
+          .from('users')
+          .update({
+            preferred_cost_code_standard: settings.preferred_cost_code_standard
+          })
+          .eq('id', authUser.id)
+
+        if (dbError) throw dbError
       }
 
       setMessage({ type: 'success', text: 'Settings saved successfully!' })
@@ -247,6 +263,42 @@ export default function SettingsPage() {
                 onChange={(e) => handleInputChange('phone', e.target.value)}
                 placeholder="Enter your phone number"
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Cost Code Preferences */}
+        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <ListChecks className="h-5 w-5 mr-2" />
+              Cost Code Standards
+            </CardTitle>
+            <CardDescription className="font-medium text-gray-600">
+              Select the cost code standard you prefer for your takeoffs
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cost_code_standard">Preferred Standard</Label>
+              <Select 
+                value={settings.preferred_cost_code_standard} 
+                onValueChange={(value) => handleInputChange('preferred_cost_code_standard', value)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a standard" />
+                </SelectTrigger>
+                <SelectContent>
+                  {AVAILABLE_STANDARDS.map((std) => (
+                    <SelectItem key={std.id} value={std.id}>
+                      {std.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-gray-500 mt-1">
+                This standard will be used by the AI to categorize items in your future takeoffs.
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -451,5 +503,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-
