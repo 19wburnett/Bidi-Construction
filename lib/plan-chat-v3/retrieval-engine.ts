@@ -234,47 +234,22 @@ export async function findTakeoffItemsByTarget(
   targets: string[],
   jobId: string | null
 ): Promise<NormalizedTakeoffItem[]> {
-  // Load takeoff items - try job_id first (like V2), then fall back to plan_id
-  let takeoffRow: any = null
-  let error: any = null
-
-  if (jobId) {
-    // First try by job_id (matches V2 behavior)
-    const result = await supabase
-      .from('plan_takeoff_analysis')
-      .select('id, items')
-      .eq('job_id', jobId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    
-    if (!result.error && result.data) {
-      takeoffRow = result.data
-    } else {
-      error = result.error
-    }
+  // Load takeoff items - plan_takeoff_analysis now only has job_id (plan_id and user_id were removed)
+  if (!jobId) {
+    console.log('[RetrievalEngine] No jobId provided, cannot query takeoff data')
+    return []
   }
 
-  // Fallback to plan_id + user_id if job_id query didn't work
-  if (!takeoffRow) {
-    const result = await supabase
-      .from('plan_takeoff_analysis')
-      .select('id, items')
-      .eq('plan_id', planId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    
-    if (!result.error && result.data) {
-      takeoffRow = result.data
-    } else if (!error) {
-      error = result.error
-    }
-  }
+  const { data: takeoffRow, error } = await supabase
+    .from('plan_takeoff_analysis')
+    .select('id, items')
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   if (error || !takeoffRow) {
-    console.log('[RetrievalEngine] No takeoff data found', { planId, userId, jobId, error: error?.message })
+    console.log('[RetrievalEngine] No takeoff data found', { jobId, error: error?.message })
     return []
   }
 
@@ -407,27 +382,13 @@ export async function getProjectMetadata(
     const plan = planResult.data
     const job = jobResult?.data || null
 
-    // Load takeoff items for category summaries - try job_id first, then plan_id
+    // Load takeoff items for category summaries - plan_takeoff_analysis only has job_id
     let takeoffRow: any = null
     if (jobId) {
       const result = await supabase
         .from('plan_takeoff_analysis')
         .select('items')
         .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      
-      if (!result.error && result.data) {
-        takeoffRow = result.data
-      }
-    }
-
-    if (!takeoffRow) {
-      const result = await supabase
-        .from('plan_takeoff_analysis')
-        .select('items')
-        .eq('plan_id', planId)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
