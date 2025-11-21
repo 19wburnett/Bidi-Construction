@@ -793,15 +793,24 @@ export default function JobDetailPage() {
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                          <div 
+                            className={`text-center p-4 bg-gray-50 rounded-lg ${plans.length > 0 ? 'cursor-pointer hover:bg-gray-100 transition-colors' : ''}`}
+                            onClick={() => plans.length > 0 && setActiveTab('plans')}
+                          >
                             <div className="text-2xl font-bold text-gray-900">{plans.length}</div>
                             <div className="text-sm text-gray-600">Plans</div>
                           </div>
-                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                          <div 
+                            className={`text-center p-4 bg-gray-50 rounded-lg ${bidPackages.length > 0 ? 'cursor-pointer hover:bg-gray-100 transition-colors' : ''}`}
+                            onClick={() => bidPackages.length > 0 && setActiveTab('bids')}
+                          >
                             <div className="text-2xl font-bold text-gray-900">{bidPackages.length}</div>
                             <div className="text-sm text-gray-600">Bid Packages</div>
                           </div>
-                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                          <div 
+                            className={`text-center p-4 bg-gray-50 rounded-lg ${bids.length > 0 ? 'cursor-pointer hover:bg-gray-100 transition-colors' : ''}`}
+                            onClick={() => bids.length > 0 && setActiveTab('bids')}
+                          >
                             <div className="text-2xl font-bold text-gray-900">{bids.length}</div>
                             <div className="text-sm text-gray-600">Bids Received</div>
                           </div>

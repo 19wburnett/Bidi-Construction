@@ -25,7 +25,8 @@ import {
   MessageSquare,
   Bot,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Plus
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -623,6 +624,13 @@ export default function EnhancedPlanViewer() {
   // Handle comment pin click (to place new comment)
   const handleCommentPinClick = useCallback((x: number, y: number, pageNumber: number) => {
     setCommentPosition({ x, y, pageNumber })
+    setCommentFormOpen(true)
+  }, [])
+
+  // Handle add comment from comments tab
+  const handleAddCommentFromTab = useCallback(() => {
+    // Set default position (center-ish of page 1)
+    setCommentPosition({ x: 400, y: 400, pageNumber: 1 })
     setCommentFormOpen(true)
   }, [])
 
@@ -1366,23 +1374,25 @@ export default function EnhancedPlanViewer() {
                     <div className="flex-1 overflow-y-auto p-2 md:p-4 pb-6">
                       <TabsContent value="takeoff" className="mt-0">
                         <div className="space-y-3 md:space-y-4">
-                          <Button 
-                            className="w-full h-10 md:h-auto" 
-                            onClick={() => handleRunAITakeoff()}
-                            disabled={isRunningTakeoff}
-                          >
-                            {isRunningTakeoff ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-4 w-4 mr-2" />
-                                Run AI Takeoff
-                              </>
-                            )}
-                          </Button>
+                          {!takeoffResults && (
+                            <Button 
+                              className="w-full h-10 md:h-auto" 
+                              onClick={() => handleRunAITakeoff()}
+                              disabled={isRunningTakeoff}
+                            >
+                              {isRunningTakeoff ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Analyzing...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-4 w-4 mr-2" />
+                                  Run AI Takeoff
+                                </>
+                              )}
+                            </Button>
+                          )}
                           {(isRunningTakeoff || (analysisProgress.percent === 100 && analysisProgress.step.includes('underway'))) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
@@ -1451,12 +1461,29 @@ export default function EnhancedPlanViewer() {
                             <h4 className="text-sm font-semibold text-gray-900">
                               Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
                             </h4>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleAddCommentFromTab}
+                              className="h-7 px-2 text-xs"
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              Add Comment
+                            </Button>
                           </div>
                           {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                             <div className="text-center py-12">
                               <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                              <p className="text-sm text-gray-600">No comments yet</p>
-                              <p className="text-xs text-gray-500 mt-1">Click on the plan to add a comment</p>
+                              <p className="text-sm text-gray-600 mb-3">No comments yet</p>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={handleAddCommentFromTab}
+                                className="h-8"
+                              >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Add Comment
+                              </Button>
                             </div>
                           ) : (() => {
                             const commentMap = new Map<string, Drawing>()

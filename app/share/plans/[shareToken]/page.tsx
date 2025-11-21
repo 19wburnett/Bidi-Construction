@@ -17,7 +17,8 @@ import {
   AlertCircle,
   BarChart3,
   AlertTriangle,
-  ChevronLeft
+  ChevronLeft,
+  Plus
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -176,6 +177,16 @@ export default function GuestPlanViewer() {
       return
     }
     setCommentPosition({ x, y, pageNumber })
+    setCommentFormOpen(true)
+  }, [share])
+
+  // Handle add comment from comments tab
+  const handleAddCommentFromTab = useCallback(() => {
+    if (!share || (share.permissions !== 'comment' && share.permissions !== 'all')) {
+      return
+    }
+    // Set default position (center-ish of page 1)
+    setCommentPosition({ x: 400, y: 400, pageNumber: 1 })
     setCommentFormOpen(true)
   }, [share])
 
@@ -527,13 +538,37 @@ export default function GuestPlanViewer() {
                 </TabsContent>
                 
                 <TabsContent value="comments" className="space-y-3">
-                  <div className="text-sm font-medium text-gray-900 mb-2">
-                    Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-medium text-gray-900">
+                      Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
+                    </div>
+                    {canComment && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddCommentFromTab}
+                        className="h-7 px-2 text-xs"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add Comment
+                      </Button>
+                    )}
                   </div>
                   {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                     <div className="text-center py-8">
                       <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <p className="text-sm text-gray-600">No comments yet</p>
+                      <p className="text-sm text-gray-600 mb-3">No comments yet</p>
+                      {canComment && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleAddCommentFromTab}
+                          className="h-8"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add Comment
+                        </Button>
+                      )}
                     </div>
                   ) : (() => {
                     const commentMap = new Map<string, Drawing>()
