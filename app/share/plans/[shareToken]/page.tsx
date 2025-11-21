@@ -538,18 +538,18 @@ export default function GuestPlanViewer() {
                 </TabsContent>
                 
                 <TabsContent value="comments" className="space-y-3">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="text-sm font-medium text-gray-900">
                       Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
                     </div>
                     {canComment && (
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant="default"
                         onClick={handleAddCommentFromTab}
-                        className="h-7 px-2 text-xs"
+                        className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white"
                       >
-                        <Plus className="h-3 w-3 mr-1" />
+                        <Plus className="h-3.5 w-3.5 mr-1.5" />
                         Add Comment
                       </Button>
                     )}
@@ -561,11 +561,11 @@ export default function GuestPlanViewer() {
                       {canComment && (
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant="default"
                           onClick={handleAddCommentFromTab}
-                          className="h-8"
+                          className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white"
                         >
-                          <Plus className="h-3 w-3 mr-1" />
+                          <Plus className="h-4 w-4 mr-1.5" />
                           Add Comment
                         </Button>
                       )}
