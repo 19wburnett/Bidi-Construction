@@ -28,7 +28,8 @@ import {
   Minimize2,
   Pencil,
   Check,
-  X
+  X,
+  Plus
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -56,7 +57,7 @@ import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-sc
 import { getJobForUser } from '@/lib/job-access'
 
 
-type AnalysisMode = 'takeoff' | 'quality' | 'chat' | 'comments'
+type AnalysisMode = 'takeoff' | 'chat' | 'comments'
 
 type TradeScopeStatus = 'complete' | 'partial' | 'missing'
 
@@ -82,7 +83,6 @@ export default function EnhancedPlanViewer() {
   const [commentFormOpen, setCommentFormOpen] = useState(false)
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
   const [isRunningTakeoff, setIsRunningTakeoff] = useState(false)
-  const [isRunningQuality, setIsRunningQuality] = useState(false)
   const [isGeneratingShare, setIsGeneratingShare] = useState(false)
   
   // Plan title editing state
@@ -99,8 +99,6 @@ export default function EnhancedPlanViewer() {
     unit: string
     unit_cost?: number
   }>>([])
-  const [qualityResults, setQualityResults] = useState<any>(null)
-  const [qualityAnalysisRowId, setQualityAnalysisRowId] = useState<string | null>(null)
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number; timeEstimate?: string }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
@@ -481,18 +479,18 @@ export default function EnhancedPlanViewer() {
 
     try {
       // Load takeoff analysis
-      if (!plan?.job_id) {
-        console.error('Plan job_id not found')
+      if (!planId) {
+        console.error('Plan ID not found')
         return
       }
 
       const { data: takeoffAnalysis } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
-        .eq('job_id', plan.job_id)
+        .eq('plan_id', planId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
       if (takeoffAnalysis) {
         console.log('Loading existing takeoff analysis:', takeoffAnalysis)
@@ -554,31 +552,6 @@ export default function EnhancedPlanViewer() {
           }
         })
         
-        // If quality_analysis is in takeoff results, populate quality tab
-        if (normalizedQualityAnalysisFromTakeoff) {
-          const issuesFromQA = normalizedQualityAnalysisFromTakeoff.risk_flags?.map((rf: any) => ({
-            id: crypto.randomUUID(),
-            severity: rf.level === 'high' ? 'critical' : rf.level === 'medium' ? 'warning' : 'info',
-            category: rf.category || 'general',
-            description: rf.description || '',
-            location: rf.location || '',
-            recommendation: rf.recommendation || '',
-            status: 'open'
-          })) || []
-          
-          // Set issues at top level to match API response format for frontend display
-          setQualityResults({
-            success: true,
-            planId,
-            taskType: 'takeoff',
-            issues: issuesFromQA, // Top level for frontend compatibility
-            results: {
-              issues: issuesFromQA,
-              quality_analysis: normalizedQualityAnalysisFromTakeoff
-            }
-          })
-        }
-        
         // Prepare items for BidPackageModal
         const items = itemsWithIds.map((it: any, idx: number) => ({
           id: it.id,
@@ -591,93 +564,6 @@ export default function EnhancedPlanViewer() {
         setModalTakeoffItems(items)
       }
 
-      // Load quality analysis from plan_quality_analysis table (separate from takeoff)
-      const { data: qualityAnalysis, error: qualityError } = await supabase
-        .from('plan_quality_analysis')
-        .select('*')
-        .eq('plan_id', planId)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (qualityAnalysis && !qualityError) {
-        console.log('Loading existing quality analysis:', qualityAnalysis)
-        setQualityAnalysisRowId(qualityAnalysis.id)
-        
-        // Parse issues if needed
-        let issuesArray = []
-        try {
-          if (typeof qualityAnalysis.issues === 'string') {
-            issuesArray = JSON.parse(qualityAnalysis.issues)
-          } else if (Array.isArray(qualityAnalysis.issues)) {
-            issuesArray = qualityAnalysis.issues
-          } else if (qualityAnalysis.findings_by_severity) {
-            // Combine issues from severity buckets
-            issuesArray = [
-              ...(qualityAnalysis.findings_by_severity.critical || []),
-              ...(qualityAnalysis.findings_by_severity.warning || []),
-              ...(qualityAnalysis.findings_by_severity.info || [])
-            ]
-          }
-        } catch (parseError) {
-          console.error('Error parsing quality issues:', parseError)
-          issuesArray = []
-        }
-        
-        const issuesWithIds = ensureIssueIds(issuesArray)
-        
-        // Build quality_analysis object from DB data
-        const tradeScopeReview = normalizeTradeScopeReview(qualityAnalysis.trade_scope_review, issuesArray)
-
-        const qualityAnalysisObj = {
-          completeness: {
-            overall_score: qualityAnalysis.overall_score || 0.8,
-            missing_sheets: [],
-            missing_dimensions: qualityAnalysis.missing_details || [],
-            missing_details: qualityAnalysis.missing_details || [],
-            incomplete_sections: [],
-            notes: 'Quality analysis loaded from database'
-          },
-          consistency: {
-            scale_mismatches: [],
-            unit_conflicts: [],
-            dimension_contradictions: [],
-            schedule_vs_elevation_conflicts: [],
-            notes: 'Consistency check from database'
-          },
-          risk_flags: issuesArray.map((issue: any) => ({
-            level: issue.severity === 'critical' ? 'high' : issue.severity === 'warning' ? 'medium' : 'low',
-            category: issue.category || 'general',
-            description: issue.description || issue.detail || issue.message || '',
-            location: issue.location || '',
-            recommendation: issue.recommendation || ''
-          })),
-          audit_trail: {
-            pages_analyzed: [],
-            chunks_processed: 1,
-            coverage_percentage: 100,
-            assumptions_made: []
-          },
-          trade_scope_review: tradeScopeReview
-        }
-        
-        // Set issues at top level to match API response format for frontend display
-        setQualityResults({
-          success: true,
-          planId,
-          taskType: 'quality',
-          processingTime: qualityAnalysis.processing_time_ms || 0,
-          issues: issuesWithIds, // Top level for frontend compatibility
-          results: {
-            issues: issuesWithIds,
-            quality_analysis: qualityAnalysisObj
-          }
-        })
-      } else if (qualityError && qualityError.code !== 'PGRST116') {
-        // PGRST116 is "not found" error, which is fine
-        console.error('Error loading quality analysis:', qualityError)
-      }
     } catch (error) {
       console.error('Error loading existing analysis:', error)
     }
@@ -688,18 +574,18 @@ export default function EnhancedPlanViewer() {
     try {
       let rowId = takeoffAnalysisRowId
       if (!rowId) {
-        if (!plan?.job_id) {
-          console.error('Plan job_id not found')
+        if (!planId) {
+          console.error('Plan ID not found')
           return
         }
 
         const { data } = await supabase
           .from('plan_takeoff_analysis')
           .select('id')
-          .eq('job_id', plan.job_id)
+          .eq('plan_id', planId)
           .order('created_at', { ascending: false })
           .limit(1)
-          .single()
+          .maybeSingle()
         rowId = data?.id || null
         if (rowId) setTakeoffAnalysisRowId(rowId)
       }
@@ -774,6 +660,13 @@ export default function EnhancedPlanViewer() {
   // Handle comment pin click (to place new comment)
   const handleCommentPinClick = useCallback((x: number, y: number, pageNumber: number) => {
     setCommentPosition({ x, y, pageNumber })
+    setCommentFormOpen(true)
+  }, [])
+
+  // Handle add comment from comments tab
+  const handleAddCommentFromTab = useCallback(() => {
+    // Set default position (center-ish of page 1)
+    setCommentPosition({ x: 400, y: 400, pageNumber: 1 })
     setCommentFormOpen(true)
   }, [])
 
@@ -1146,26 +1039,6 @@ export default function EnhancedPlanViewer() {
             
             setTakeoffResults(batchAnalysisData)
             
-            // Handle quality results from batch
-            if (batchAnalysisData.results?.issues || batchAnalysisData.results?.quality_analysis) {
-              const apiIssues = batchAnalysisData?.results?.issues || []
-              const issuesWithIds = ensureIssueIds(apiIssues)
-              setQualityResults({ ...batchAnalysisData, issues: issuesWithIds })
-              
-              try {
-                const { data } = await supabase
-                  .from('plan_quality_analysis')
-                  .select('id')
-                  .eq('plan_id', planId)
-                  .eq('user_id', user?.id)
-                  .order('created_at', { ascending: false })
-                  .limit(1)
-                  .single()
-                if (data?.id) setQualityAnalysisRowId(data.id)
-              } catch (e) {
-                console.warn('Could not fetch quality analysis row id')
-              }
-            }
             
             setTimeout(() => {
               setIsRunningTakeoff(false)
@@ -1199,27 +1072,6 @@ export default function EnhancedPlanViewer() {
       
       setTakeoffResults(analysisData)
       
-      // Also populate quality results if present (API now returns both takeoff and quality)
-      if (analysisData.results?.issues || analysisData.results?.quality_analysis) {
-        const apiIssues = analysisData?.results?.issues || []
-        const issuesWithIds = ensureIssueIds(apiIssues)
-        setQualityResults({ ...analysisData, issues: issuesWithIds })
-        
-        // Fetch quality analysis row id if it was saved
-        try {
-          const { data } = await supabase
-            .from('plan_quality_analysis')
-            .select('id')
-            .eq('plan_id', planId)
-            .eq('user_id', user?.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single()
-          if (data?.id) setQualityAnalysisRowId(data.id)
-        } catch (e) {
-          console.warn('Could not fetch quality analysis row id')
-        }
-      }
       
       // Complete analysis
       setTimeout(() => {
@@ -1283,187 +1135,6 @@ export default function EnhancedPlanViewer() {
     }
   }
 
-  // Handle quality check analysis
-  const handleRunQualityCheck = async () => {
-    if (!plan || !planUrl) {
-      alert('Plan not loaded yet')
-      return
-    }
-
-    setIsRunningQuality(true)
-    setAnalysisProgress({ step: 'Starting analysis...', percent: 0 })
-
-    try {
-      // Step 1: Convert PDF to images (0-70%)
-      const images = await convertPdfToImages()
-
-      // Step 2: Send to AI (70-90%)
-      setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75 })
-      const analysisResponse = await fetch('/api/plan/analyze-enhanced', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planId: planId,
-          images: images,
-          drawings: drawings,
-          taskType: 'quality'
-        })
-      })
-
-      if (!analysisResponse.ok) {
-        if (analysisResponse.status === 413) {
-          // Check if server suggests using batch endpoint
-          let errorData
-          try {
-            errorData = await analysisResponse.json()
-          } catch (parseError) {
-            throw new Error('Request too large - try with fewer pages or lower quality images')
-          }
-          
-          // If server suggests batch, automatically retry with batch endpoint
-          if (errorData.suggestBatch) {
-            console.log(`Auto-switching to batch endpoint for ${errorData.totalPages} pages`)
-            setAnalysisProgress({ step: 'Switching to batch processing...', percent: 75 })
-            
-            const batchResponse = await fetch('/api/plan/analyze-enhanced-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                planId: planId,
-                images: images,
-                drawings: drawings,
-                taskType: 'quality'
-              })
-            })
-            
-            if (!batchResponse.ok) {
-              throw new Error(errorData.message || 'Batch processing also failed')
-            }
-            
-            const batchAnalysisData = await batchResponse.json()
-            setAnalysisProgress({ step: 'Complete!', percent: 100 })
-            
-            const apiIssues = batchAnalysisData?.results?.issues || batchAnalysisData?.issues || []
-            const issuesWithIds = ensureIssueIds(apiIssues)
-            setQualityResults({ ...batchAnalysisData, issues: issuesWithIds })
-            
-            try {
-              const { data } = await supabase
-                .from('plan_quality_analysis')
-                .select('id')
-                .eq('plan_id', planId)
-                .eq('user_id', user?.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .single()
-              if (data?.id) setQualityAnalysisRowId(data.id)
-            } catch (e) {
-              console.warn('Could not fetch quality analysis row id')
-            }
-            
-            setTimeout(() => {
-              setIsRunningQuality(false)
-              setAnalysisProgress({ step: '', percent: 0 })
-            }, 2000)
-            
-            return
-          }
-          
-          throw new Error(errorData.message || 'Request too large')
-        }
-        
-        let errorData
-        try {
-          errorData = await analysisResponse.json()
-        } catch (parseError) {
-          const errorText = await analysisResponse.text()
-          throw new Error(`Server error (${analysisResponse.status}): ${errorText.substring(0, 200)}...`)
-        }
-        throw new Error(errorData.error || 'Quality analysis failed')
-      }
-
-      setAnalysisProgress({ step: 'Processing results...', percent: 90 })
-      const analysisData = await analysisResponse.json()
-      // Normalize issue IDs and status (support API response under results.issues)
-      const apiIssues = analysisData?.results?.issues || analysisData?.issues || []
-      const issuesWithIds = ensureIssueIds(apiIssues)
-      setQualityResults({ ...analysisData, issues: issuesWithIds })
-      // Fetch latest analysis row id for persistence updates
-      try {
-        const { data } = await supabase
-          .from('plan_quality_analysis')
-          .select('id')
-          .eq('plan_id', planId)
-          .eq('user_id', user?.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-        if (data?.id) setQualityAnalysisRowId(data.id)
-      } catch (e) {
-        console.warn('Could not fetch quality analysis row id')
-      }
-      const issueCount = analysisData.issues?.length || 0
-      alert(`Quality check complete! Found ${issueCount} issue${issueCount !== 1 ? 's' : ''}.`)
-      // Step 3: Complete (90-100%)
-      setAnalysisProgress({ step: 'Complete!', percent: 100 })
-      setTimeout(() => {
-        setAnalysisProgress({ step: '', percent: 0 })
-        setIsRunningQuality(false)
-      }, 500)
-
-    } catch (error) {
-      console.error('Error running quality check:', error)
-      alert(`Failed to run quality check: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      setIsRunningQuality(false)
-      setAnalysisProgress({ step: '', percent: 0 })
-    }
-  }
-
-  // Resolve a single quality issue and persist
-  const handleResolveQualityIssue = useCallback(async (issueId: string) => {
-    setQualityResults((prev: any) => {
-      if (!prev?.issues) return prev
-      const updatedIssues = prev.issues.map((iss: any) => iss.id === issueId ? {
-        ...iss,
-        status: 'resolved',
-        resolved_at: new Date().toISOString(),
-        resolved_by: user?.id
-      } : iss)
-      return { ...prev, issues: updatedIssues }
-    })
-
-    try {
-      let rowId = qualityAnalysisRowId
-      if (!rowId) {
-        const { data } = await supabase
-          .from('plan_quality_analysis')
-          .select('id')
-          .eq('plan_id', planId)
-          .eq('user_id', user?.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-        rowId = data?.id || null
-        if (rowId) setQualityAnalysisRowId(rowId)
-      }
-      if (!rowId) return
-
-      // Persist updated issues
-      const issuesToSave = (qualityResults?.issues || []).map((iss: any) => iss.id === issueId ? {
-        ...iss,
-        status: 'resolved',
-        resolved_at: new Date().toISOString(),
-        resolved_by: user?.id
-      } : iss)
-
-      await supabase
-        .from('plan_quality_analysis')
-        .update({ issues: issuesToSave })
-        .eq('id', rowId)
-    } catch (e) {
-      console.error('Failed to persist issue resolution:', e)
-    }
-  }, [planId, qualityAnalysisRowId, supabase, user, qualityResults])
 
   // Handle share link generation
   const handleGenerateShareLink = async () => {
@@ -1805,14 +1476,10 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
+                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
                       <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-3">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden xl:inline">Takeoff</span>
-                      </TabsTrigger>
-                      <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-3">
-                        <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden xl:inline">Quality</span>
                       </TabsTrigger>
                       <TabsTrigger value="chat" className="text-xs md:text-sm px-2 md:px-3">
                         <Bot className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
@@ -1827,23 +1494,25 @@ export default function EnhancedPlanViewer() {
                     <div className="flex-1 overflow-y-auto p-2 md:p-4 pb-6">
                       <TabsContent value="takeoff" className="mt-0">
                         <div className="space-y-3 md:space-y-4">
-                          <Button 
-                            className="w-full h-10 md:h-auto" 
-                            onClick={() => handleRunAITakeoff()}
-                            disabled={isRunningTakeoff}
-                          >
-                            {isRunningTakeoff ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-4 w-4 mr-2" />
-                                Run AI Takeoff
-                              </>
-                            )}
-                          </Button>
+                          {!takeoffResults && (
+                            <Button 
+                              className="w-full h-10 md:h-auto" 
+                              onClick={() => handleRunAITakeoff()}
+                              disabled={isRunningTakeoff}
+                            >
+                              {isRunningTakeoff ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  Analyzing...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-4 w-4 mr-2" />
+                                  Run AI Takeoff
+                                </>
+                              )}
+                            </Button>
+                          )}
                           {(isRunningTakeoff || (analysisProgress.percent === 100 && analysisProgress.step.includes('underway'))) && (
                             <div className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
@@ -1901,136 +1570,6 @@ export default function EnhancedPlanViewer() {
                           )}
                         </div>
                       </TabsContent>
-                      
-                      <TabsContent value="quality" className="mt-0">
-                        <div className="space-y-4">
-                          <Button 
-                            className="w-full"
-                            onClick={handleRunQualityCheck}
-                            disabled={isRunningQuality}
-                          >
-                            {isRunningQuality ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Checking...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-4 w-4 mr-2" />
-                                Run Quality Check
-                              </>
-                            )}
-                          </Button>
-                          {isRunningQuality && (
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-gray-600">{analysisProgress.step}</span>
-                                <span className="text-gray-600">{Math.round(analysisProgress.percent)}%</span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                                <div 
-                                  className="bg-blue-600 h-2 transition-all duration-300 ease-out rounded-full"
-                                  style={{ width: `${analysisProgress.percent}%` }}
-                                />
-                              </div>
-                              <p className="text-xs text-gray-500">
-                                Estimated time: {analysisProgress.timeEstimate || 'Calculating...'}
-                              </p>
-                            </div>
-                          )}
-                          {qualityResults?.results?.quality_analysis?.trade_scope_review?.items?.length ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <h4 className="font-semibold text-gray-900">Trade Scope Review</h4>
-                                <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-                                  <span>✅ {qualityResults.results.quality_analysis.trade_scope_review.summary.complete} complete</span>
-                                  <span>⚠️ {qualityResults.results.quality_analysis.trade_scope_review.summary.partial} partial</span>
-                                  <span>❌ {qualityResults.results.quality_analysis.trade_scope_review.summary.missing} missing</span>
-                                </div>
-                              </div>
-                              <div className="space-y-2">
-                                {qualityResults.results.quality_analysis.trade_scope_review.items.map((entry: TradeScopeReviewEntry, idx: number) => (
-                                  <div key={`${entry.trade}-${idx}`} className="border rounded-md p-3">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-lg" aria-hidden>{entry.status_icon}</span>
-                                      <span className="font-semibold text-gray-900">{entry.trade}</span>
-                                      <Badge variant="outline" className="text-xs capitalize">{entry.category}</Badge>
-                                    </div>
-                                    {entry.notes && (
-                                      <div className="text-xs text-gray-600 mt-2">{entry.notes}</div>
-                                    )}
-                                    {entry.page_refs?.length ? (
-                                      <div className="text-[11px] text-gray-500 mt-1">Pages: {entry.page_refs.join(', ')}</div>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                              {qualityResults.results.quality_analysis.trade_scope_review.summary.notes && (
-                                <p className="text-xs text-gray-500 italic">
-                                  {qualityResults.results.quality_analysis.trade_scope_review.summary.notes}
-                                </p>
-                              )}
-                            </div>
-                          ) : null}
-                          {qualityResults?.issues?.length ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <h4 className="font-semibold text-gray-900">Quality Issues ({qualityResults.issues.length})</h4>
-                              </div>
-                              <div className="space-y-2">
-                                {(qualityResults.issues || []).map((issue: any, idx: number) => (
-                                  <div key={issue.id || idx} className="border rounded-md p-3 flex items-start justify-between">
-                                    <div className="pr-3">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <Badge variant="outline" className="text-xs capitalize">{issue.severity || 'warning'}</Badge>
-                                        {issue.pageNumber ? (
-                                          <button
-                                            className="text-xs text-blue-600 hover:underline"
-                                            onClick={() => {
-                                              setGoToPage(issue.pageNumber)
-                                              setTimeout(() => setGoToPage(undefined), 100)
-                                            }}
-                                          >
-                                            Page {issue.pageNumber}
-                                          </button>
-                                        ) : null}
-                                        {issue.status === 'resolved' && (
-                                          <span className="text-xs text-green-600 flex items-center gap-1">
-                                            <CheckCircle2 className="h-4 w-4" /> Resolved
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="text-sm text-gray-800">
-                                        {issue.description || issue.detail || issue.message || 'Issue'}
-                                      </div>
-                                      {issue.recommendation && (
-                                        <div className="text-xs text-gray-500 mt-1">{issue.recommendation}</div>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        disabled={issue.status === 'resolved'}
-                                        onClick={() => handleResolveQualityIssue(issue.id)}
-                                        className={`${issue.status === 'resolved' ? 'bg-green-100 text-green-700 border border-green-300 cursor-default' : 'bg-green-600 hover:bg-green-700 text-white'} `}
-                                      >
-                                        <CheckCircle2 className="h-4 w-4 mr-1" />
-                                        {issue.status === 'resolved' ? 'Resolved' : 'Resolve'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-center py-8">
-                              <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                              <h4 className="font-semibold text-gray-900 mb-2">No quality analysis yet</h4>
-                              <p className="text-sm text-gray-600">Run AI analysis to check for issues</p>
-                            </div>
-                          )}
-                        </div>
-                      </TabsContent>
 
                       <TabsContent value="chat" className="mt-0">
                         <PlanChatPanel jobId={jobId} planId={planId} />
@@ -2042,12 +1581,29 @@ export default function EnhancedPlanViewer() {
                             <h4 className="text-sm font-semibold text-gray-900">
                               Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
                             </h4>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleAddCommentFromTab}
+                              className="h-7 px-2 text-xs"
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              Add Comment
+                            </Button>
                           </div>
                           {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                             <div className="text-center py-12">
                               <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                              <p className="text-sm text-gray-600">No comments yet</p>
-                              <p className="text-xs text-gray-500 mt-1">Click on the plan to add a comment</p>
+                              <p className="text-sm text-gray-600 mb-3">No comments yet</p>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={handleAddCommentFromTab}
+                                className="h-8"
+                              >
+                                <Plus className="h-3 w-3 mr-1" />
+                                Add Comment
+                              </Button>
                             </div>
                           ) : (() => {
                             const commentMap = new Map<string, Drawing>()

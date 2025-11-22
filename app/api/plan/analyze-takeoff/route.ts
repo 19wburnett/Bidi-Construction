@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
       .from('plan_takeoff_analysis')
       .insert({
         job_id: plan.job_id,
-        plan_id: plan.id, // Make sure plan_id is saved
+        plan_id: planId,
         items: takeoffData.items || [],
         summary: takeoffData.summary || takeoffData,
         ai_model: 'gpt-4o',

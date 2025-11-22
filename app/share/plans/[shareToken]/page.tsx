@@ -17,7 +17,8 @@ import {
   AlertCircle,
   BarChart3,
   AlertTriangle,
-  ChevronLeft
+  ChevronLeft,
+  Plus
 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -46,7 +47,6 @@ export default function GuestPlanViewer() {
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
   const [activeTab, setActiveTab] = useState<AnalysisMode>('takeoff')
   const [takeoffData, setTakeoffData] = useState<any>(null)
-  const [qualityData, setQualityData] = useState<any>(null)
   
   const supabase = createClient()
 
@@ -156,18 +156,6 @@ export default function GuestPlanViewer() {
         }
       }
       
-      // Load quality analysis if available
-      const { data: qualityAnalysis } = await supabase
-        .from('plan_quality_analysis')
-        .select('*')
-        .eq('plan_id', planData.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-      
-      if (qualityAnalysis) {
-        setQualityData(qualityAnalysis)
-      }
 
     } catch (err: any) {
       setError(err.message || 'Failed to load plan')
@@ -189,6 +177,16 @@ export default function GuestPlanViewer() {
       return
     }
     setCommentPosition({ x, y, pageNumber })
+    setCommentFormOpen(true)
+  }, [share])
+
+  // Handle add comment from comments tab
+  const handleAddCommentFromTab = useCallback(() => {
+    if (!share || (share.permissions !== 'comment' && share.permissions !== 'all')) {
+      return
+    }
+    // Set default position (center-ish of page 1)
+    setCommentPosition({ x: 400, y: 400, pageNumber: 1 })
     setCommentFormOpen(true)
   }, [share])
 
@@ -498,14 +496,10 @@ export default function GuestPlanViewer() {
               </div>
               
               <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)}>
-                <TabsList className="grid w-full grid-cols-3 mb-3 md:mb-4 gap-1">
+                <TabsList className="grid w-full grid-cols-2 mb-3 md:mb-4 gap-1">
                   <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-4">
                     <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                     <span className="hidden sm:inline">Takeoff</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="quality" className="text-xs md:text-sm px-2 md:px-4">
-                    <AlertTriangle className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                    <span className="hidden sm:inline">Quality</span>
                   </TabsTrigger>
                   <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-4">
                     <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
@@ -543,42 +537,38 @@ export default function GuestPlanViewer() {
                   )}
                 </TabsContent>
                 
-                <TabsContent value="quality" className="space-y-3">
-                  {qualityData ? (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium text-gray-900">Quality Analysis</div>
-                      <div className="text-sm text-gray-600">
-                        {Array.isArray(qualityData.issues) ? qualityData.issues.length : 0} issues found
-                      </div>
-                      {Array.isArray(qualityData.issues) && qualityData.issues.length > 0 && (
-                        <div className="space-y-2 mt-4">
-                          {qualityData.issues.slice(0, 10).map((issue: any, index: number) => (
-                            <div key={index} className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                              <div className="font-medium text-sm text-red-900">
-                                {issue.severity || issue.type || 'Issue'}
-                              </div>
-                              <div className="text-xs text-red-700 mt-1">{issue.description || issue.message}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <p className="text-sm text-gray-600">No quality analysis available</p>
-                    </div>
-                  )}
-                </TabsContent>
-                
                 <TabsContent value="comments" className="space-y-3">
-                  <div className="text-sm font-medium text-gray-900 mb-2">
-                    Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-medium text-gray-900">
+                      Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
+                    </div>
+                    {canComment && (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={handleAddCommentFromTab}
+                        className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1.5" />
+                        Add Comment
+                      </Button>
+                    )}
                   </div>
                   {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
                     <div className="text-center py-8">
                       <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <p className="text-sm text-gray-600">No comments yet</p>
+                      <p className="text-sm text-gray-600 mb-3">No comments yet</p>
+                      {canComment && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={handleAddCommentFromTab}
+                          className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          <Plus className="h-4 w-4 mr-1.5" />
+                          Add Comment
+                        </Button>
+                      )}
                     </div>
                   ) : (() => {
                     const commentMap = new Map<string, Drawing>()

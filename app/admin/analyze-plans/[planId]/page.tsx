@@ -25,7 +25,6 @@ import {
 } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import TakeoffItemForm, { TakeoffItem } from '@/components/admin/takeoff-item-form'
-import QualityIssueForm, { QualityIssue } from '@/components/admin/quality-issue-form'
 import AnalysisItemsList from '@/components/admin/analysis-items-list'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
@@ -108,10 +107,8 @@ export default function AdminAnalyzePlanPage() {
   // Analysis state
   const [activeTab, setActiveTab] = useState('takeoff')
   const [takeoffItems, setTakeoffItems] = useState<TakeoffItem[]>([])
-  const [qualityIssues, setQualityIssues] = useState<QualityIssue[]>([])
   const [isPlacingMarker, setIsPlacingMarker] = useState(false)
   const [editingTakeoffItem, setEditingTakeoffItem] = useState<TakeoffItem | null>(null)
-  const [editingQualityIssue, setEditingQualityIssue] = useState<QualityIssue | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
@@ -277,27 +274,15 @@ export default function AdminAnalyzePlanPage() {
       const { data: takeoffData } = await supabase
         .from('plan_takeoff_analysis')
         .select('*')
-        .eq('job_id', planData.job_id)
+        .eq('plan_id', planId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
       if (takeoffData && takeoffData.items) {
         setTakeoffItems(takeoffData.items)
       }
 
-      // Load quality analysis
-      const { data: qualityData } = await supabase
-        .from('plan_quality_analysis')
-        .select('*')
-        .eq('plan_id', planId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (qualityData && qualityData.issues) {
-        setQualityIssues(qualityData.issues)
-      }
 
       // Load existing markers
       const { data: markersData } = await supabase
@@ -500,48 +485,9 @@ export default function AdminAnalyzePlanPage() {
     }
   }
 
-  // Add quality issue with marker
-  const handleAddQualityIssue = (issue: QualityIssue) => {
-    if (editingQualityIssue) {
-      setQualityIssues(prev => prev.map(i => i.id === issue.id ? issue : i))
-      
-      if (issue.marker) {
-        setDrawings(prev => prev.map(d => 
-          d.analysis_item_id === issue.id 
-            ? {
-                ...d,
-                geometry: { x1: issue.marker!.x, y1: issue.marker!.y, isRelative: false },
-                page_number: issue.marker!.page
-              }
-            : d
-        ))
-      }
-      setEditingQualityIssue(null)
-    } else {
-      setQualityIssues(prev => [...prev, issue])
-      
-      if (issue.marker) {
-        const marker: Drawing = {
-          id: `marker-${issue.id}`,
-          type: 'note',
-          geometry: { x1: issue.marker.x, y1: issue.marker.y, isRelative: false },
-          style: { color: '#f97316', strokeWidth: 3, opacity: 1 },
-          page_number: issue.marker.page,
-          analysis_item_id: issue.id,
-          analysis_type: 'quality'
-        }
-        setDrawings(prev => [...prev, marker])
-      }
-    }
-  }
-
   // Delete item
   const handleDeleteItem = (id: string) => {
-    if (activeTab === 'takeoff') {
-      setTakeoffItems(prev => prev.filter(i => i.id !== id))
-    } else {
-      setQualityIssues(prev => prev.filter(i => i.id !== id))
-    }
+    setTakeoffItems(prev => prev.filter(i => i.id !== id))
     // Remove associated marker
     setDrawings(prev => prev.filter(d => d.analysis_item_id !== id))
   }
@@ -605,46 +551,6 @@ export default function AdminAnalyzePlanPage() {
         }
       }
 
-      if (activeTab === 'quality' && qualityIssues.length > 0) {
-        const overallScore = 1 - (qualityIssues.filter(i => i.severity === 'critical').length * 0.3 +
-          qualityIssues.filter(i => i.severity === 'warning').length * 0.1) / qualityIssues.length
-
-        const { error: qualityError } = await supabase
-          .from('plan_quality_analysis')
-          .upsert({
-            plan_id: planId,
-            user_id: user.id,
-            issues: qualityIssues,
-            overall_score: Math.max(0, overallScore),
-            recommendations: qualityIssues.map(i => i.recommendation).filter(Boolean)
-          }, { onConflict: 'plan_id' })
-
-        if (qualityError) {
-          console.error('Error saving quality analysis:', qualityError)
-          throw new Error('Failed to save quality analysis')
-        }
-
-        // Save markers
-        for (const marker of drawings.filter(d => d.analysis_type === 'quality')) {
-          const { error: markerError } = await supabase
-            .from('plan_drawings')
-            .upsert({
-              id: marker.id,
-              plan_id: planId,
-              user_id: user.id,
-              page_number: marker.page_number,
-              drawing_type: marker.type,
-              geometry: marker.geometry,
-              style: marker.style,
-              analysis_item_id: marker.analysis_item_id,
-              analysis_type: marker.analysis_type
-            }, { onConflict: 'id' })
-
-          if (markerError) {
-            console.error('Error saving marker:', markerError)
-          }
-        }
-      }
 
       alert('Draft saved successfully!')
     } catch (error) {
@@ -662,15 +568,12 @@ export default function AdminAnalyzePlanPage() {
       return
     }
 
-    const analysisType = activeTab as 'takeoff' | 'quality'
-    const items = analysisType === 'takeoff' ? takeoffItems : qualityIssues
-
-    if (items.length === 0) {
-      alert(`Please add at least one ${analysisType} item before submitting`)
+    if (takeoffItems.length === 0) {
+      alert('Please add at least one takeoff item before submitting')
       return
     }
 
-    if (!confirm(`Submit ${analysisType} analysis? The user will be notified via email.`)) {
+    if (!confirm('Submit takeoff analysis? The user will be notified via email.')) {
       return
     }
 
@@ -685,8 +588,8 @@ export default function AdminAnalyzePlanPage() {
       const { error: updateError } = await supabase
         .from('plans')
         .update({ 
-          [`${analysisType}_analysis_status`]: 'completed',
-          [`has_${analysisType}_analysis`]: true 
+          takeoff_analysis_status: 'completed',
+          has_takeoff_analysis: true 
         })
         .eq('id', planId)
 
@@ -701,7 +604,7 @@ export default function AdminAnalyzePlanPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId,
-          type: analysisType,
+          type: 'takeoff',
           userEmail: plan.users?.email
         })
       })
@@ -711,7 +614,7 @@ export default function AdminAnalyzePlanPage() {
         // Don't throw error here, just log it
       }
 
-      alert(`${analysisType === 'takeoff' ? 'Takeoff' : 'Quality'} analysis submitted successfully! User has been notified.`)
+      alert('Takeoff analysis submitted successfully! User has been notified.')
       router.push('/admin/analyze-plans')
     } catch (error) {
       console.error('Error submitting analysis:', error)
@@ -1009,9 +912,8 @@ export default function AdminAnalyzePlanPage() {
           }}
         >
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-            <TabsList className="grid w-full grid-cols-2 m-4">
+            <TabsList className="grid w-full grid-cols-1 m-4">
               <TabsTrigger value="takeoff">Takeoff</TabsTrigger>
-              <TabsTrigger value="quality">Quality</TabsTrigger>
             </TabsList>
 
             <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -1036,32 +938,6 @@ export default function AdminAnalyzePlanPage() {
                     items={takeoffItems}
                     type="takeoff"
                     onEdit={(item) => setEditingTakeoffItem(item as TakeoffItem)}
-                    onDelete={handleDeleteItem}
-                  />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="quality" className="mt-0 space-y-4">
-                <Card>
-                  <CardContent className="p-4">
-                    <h3 className="font-semibold mb-4">Add Quality Issue</h3>
-                    <QualityIssueForm
-                      onAddIssue={handleAddQualityIssue}
-                      onPlaceMarker={() => setIsPlacingMarker(true)}
-                      isPlacingMarker={isPlacingMarker}
-                      markerPosition={tempMarkerPosition}
-                      editingIssue={editingQualityIssue}
-                      onCancelEdit={() => setEditingQualityIssue(null)}
-                    />
-                  </CardContent>
-                </Card>
-
-                <div>
-                  <h3 className="font-semibold mb-2">Issues ({qualityIssues.length})</h3>
-                  <AnalysisItemsList
-                    items={qualityIssues}
-                    type="quality"
-                    onEdit={(item) => setEditingQualityIssue(item as QualityIssue)}
                     onDelete={handleDeleteItem}
                   />
                 </div>
@@ -1091,7 +967,7 @@ export default function AdminAnalyzePlanPage() {
               <Button
                 className="w-full bg-green-600 hover:bg-green-700"
                 onClick={submitAnalysis}
-                disabled={isSaving || (activeTab === 'takeoff' ? takeoffItems.length === 0 : qualityIssues.length === 0)}
+                disabled={isSaving || takeoffItems.length === 0}
               >
                 {isSaving ? (
                   <>

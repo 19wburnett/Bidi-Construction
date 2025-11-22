@@ -4,6 +4,7 @@ import { classifyPlanChatQuestion } from '@/lib/planChat/classifier'
 import { buildDeterministicResult } from '@/lib/planChat/deterministicEngine'
 import { generatePlanChatAnswer } from '@/lib/planChat/answerModel'
 import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
+import { generateAnswer } from '@/lib/plan-chat-v3'
 
 type ChatHistoryMessage = {
   role: 'user' | 'assistant'
@@ -440,7 +441,7 @@ async function loadPlanContext(
   const { data: takeoffRow, error: takeoffError } = await supabase
     .from('plan_takeoff_analysis')
     .select('id, items, summary, updated_at, created_at')
-    .eq('job_id', plan.job_id)
+    .eq('plan_id', planId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -1156,49 +1157,92 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Stage 1: Classify the question
-    const classification = await classifyPlanChatQuestion(latestUserMessage.content)
+    // Use V3 system (can be toggled with environment variable)
+    const useV3 = process.env.PLAN_CHAT_V3_ENABLED !== 'false' // Default to true
 
-    // Stage 2: Build deterministic result
-    const deterministicResult = await buildDeterministicResult({
-          supabase,
-      jobId,
-          planId,
-      userId: user.id,
-      question: latestUserMessage.content,
-      classification,
-    })
+    if (useV3) {
+      // V3: Cursor-Style Copilot System
+      const result = await generateAnswer(
+        supabase,
+        planId,
+        user.id,
+        jobId,
+        latestUserMessage.content
+      )
 
-    // Stage 3: Generate answer
-    // Get last 3 messages for context
-    const recentMessages = sanitizedHistory.slice(-3)
-    const answer = await generatePlanChatAnswer(deterministicResult, recentMessages)
-
-    // Save messages to database
-    try {
-      // Save user message
-      await supabase.from('plan_chat_messages').insert({
+      // Also save to legacy plan_chat_messages table for backward compatibility
+      try {
+        await supabase.from('plan_chat_messages').insert({
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
           role: 'user',
-        content: latestUserMessage.content,
+          content: latestUserMessage.content,
         })
 
-      // Save assistant reply
-      await supabase.from('plan_chat_messages').insert({
+        await supabase.from('plan_chat_messages').insert({
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
           role: 'assistant',
-        content: answer,
+          content: result.answer,
         })
-    } catch (dbError) {
-      console.error('[PlanChat] Failed to save chat messages to database:', dbError)
-      // Don't fail the request if DB save fails
-    }
+      } catch (dbError) {
+        console.error('[PlanChatV3] Failed to save to legacy messages table:', dbError)
+        // Don't fail the request if DB save fails
+      }
 
-    return NextResponse.json({ reply: answer })
+      return NextResponse.json({
+        reply: result.answer,
+        mode: result.mode,
+        metadata: result.metadata,
+      })
+    } else {
+      // V2: Legacy system (kept for backward compatibility)
+      // Stage 1: Classify the question
+      const classification = await classifyPlanChatQuestion(latestUserMessage.content)
+
+      // Stage 2: Build deterministic result
+      const deterministicResult = await buildDeterministicResult({
+        supabase,
+        jobId,
+        planId,
+        userId: user.id,
+        question: latestUserMessage.content,
+        classification,
+      })
+
+      // Stage 3: Generate answer
+      // Get last 3 messages for context
+      const recentMessages = sanitizedHistory.slice(-3)
+      const answer = await generatePlanChatAnswer(deterministicResult, recentMessages)
+
+      // Save messages to database
+      try {
+        // Save user message
+        await supabase.from('plan_chat_messages').insert({
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'user',
+          content: latestUserMessage.content,
+        })
+
+        // Save assistant reply
+        await supabase.from('plan_chat_messages').insert({
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          role: 'assistant',
+          content: answer,
+        })
+      } catch (dbError) {
+        console.error('[PlanChat] Failed to save chat messages to database:', dbError)
+        // Don't fail the request if DB save fails
+      }
+
+      return NextResponse.json({ reply: answer })
+    }
   } catch (error) {
     console.error('[PlanChat] Plan Chat completion failed:', error)
     return NextResponse.json(

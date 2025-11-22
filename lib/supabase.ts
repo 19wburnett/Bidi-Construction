@@ -727,6 +727,7 @@ export interface Database {
         Row: {
           id: string
           job_id: string
+          plan_id: string
           items: any
           summary: any
           ai_model: string | null
@@ -747,6 +748,7 @@ export interface Database {
         Insert: {
           id?: string
           job_id: string
+          plan_id: string
           items?: any
           summary?: any
           ai_model?: string | null
@@ -767,6 +769,7 @@ export interface Database {
         Update: {
           id?: string
           job_id?: string
+          plan_id?: string
           items?: any
           summary?: any
           ai_model?: string | null

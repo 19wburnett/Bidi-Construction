@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
     // Create pending analysis record
     const analysisData = {
       job_id: plan.job_id,
+      plan_id: planId,
       status: 'pending',
       job_type: finalJobType,
       started_at: new Date().toISOString()
