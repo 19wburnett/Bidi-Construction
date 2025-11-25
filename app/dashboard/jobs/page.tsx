@@ -83,7 +83,7 @@ export default function JobsPage() {
         return aValue > bValue ? -1 : 1
       })
 
-      // Calculate bid counts for each job through bid_packages
+      // Calculate bid counts for each job through bid_packages AND directly via job_id
       const formattedJobs = await Promise.all(
         filteredMemberships.map(async ({ job, role }) => {
           // Get bid packages for this job
@@ -93,16 +93,41 @@ export default function JobsPage() {
             .eq('job_id', job.id)
           
           const packageIds = jobBidPackages?.map(pkg => pkg.id) || []
-          let bidCount = 0
           
+          // Fetch all bids for this job (both via packages and directly) to avoid double counting
+          const bidQueries = []
+          
+          // Query bids linked through bid packages
           if (packageIds.length > 0) {
-            const { count } = await supabase
-              .from('bids')
-              .select('*', { count: 'exact', head: true })
-              .in('bid_package_id', packageIds)
-            
-            bidCount = count || 0
+            bidQueries.push(
+              supabase
+                .from('bids')
+                .select('id')
+                .in('bid_package_id', packageIds)
+            )
           }
+          
+          // Query bids directly linked to the job via job_id
+          bidQueries.push(
+            supabase
+              .from('bids')
+              .select('id')
+              .eq('job_id', job.id)
+          )
+          
+          // Execute all queries and deduplicate by bid ID
+          const bidResults = await Promise.all(bidQueries)
+          const uniqueBidIds = new Set<string>()
+          
+          bidResults.forEach(result => {
+            if (result.data) {
+              result.data.forEach(bid => {
+                uniqueBidIds.add(bid.id)
+              })
+            }
+          })
+          
+          const bidCount = uniqueBidIds.size
 
           return {
             ...job,

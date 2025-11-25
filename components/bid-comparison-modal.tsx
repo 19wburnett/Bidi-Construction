@@ -39,6 +39,7 @@ interface BidComparisonModalProps {
 interface Bid {
   id: string
   subcontractor_id: string | null
+  contact_id: string | null
   subcontractor_email: string
   bid_amount: number | null
   timeline: string | null
@@ -55,7 +56,26 @@ interface Bid {
     website_url: string | null
     google_review_score: number | null
     google_reviews_link: string | null
+    trade_category: string | null
   } | null
+  gc_contacts?: {
+    id: string
+    name: string
+    email: string
+    phone: string | null
+    trade_category: string
+    location: string
+    company: string | null
+  } | null
+  bid_packages?: {
+    id: string
+    trade_category: string
+  } | null
+  bid_attachments?: {
+    id: string
+    file_name: string
+    file_path: string
+  }[]
 }
 
 interface BidLineItem {
@@ -116,7 +136,7 @@ export default function BidComparisonModal({
     setError('')
     
     try {
-      // Load bids for this job with subcontractor information joined
+      // Load bids for this job with subcontractor and contact information joined
       const { data: bidsData, error: bidsError } = await supabase
         .from('bids')
         .select(`
@@ -128,7 +148,26 @@ export default function BidComparisonModal({
             phone,
             website_url,
             google_review_score,
-            google_reviews_link
+            google_reviews_link,
+            trade_category
+          ),
+          gc_contacts (
+            id,
+            name,
+            email,
+            phone,
+            trade_category,
+            location,
+            company
+          ),
+          bid_packages (
+            id,
+            trade_category
+          ),
+          bid_attachments (
+            id,
+            file_name,
+            file_path
           )
         `)
         .eq('job_id', jobId)
@@ -136,6 +175,13 @@ export default function BidComparisonModal({
 
       if (bidsError) throw bidsError
       console.log('Loaded bids:', bidsData)
+      if (bidsData) {
+        bidsData.forEach(b => {
+          if (b.bid_attachments && b.bid_attachments.length > 0) {
+            console.log(`Bid ${b.id} has attachments:`, b.bid_attachments)
+          }
+        })
+      }
       setBids(bidsData || [])
 
       // Load email statuses for this job
@@ -368,6 +414,24 @@ export default function BidComparisonModal({
     }
   }
 
+  const handleDownloadAttachment = async (path: string, fileName: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      const { data, error } = await supabase.storage
+        .from('bid-attachments')
+        .createSignedUrl(path, 60) // 60 seconds validity
+
+      if (error) throw error
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank')
+      }
+    } catch (err: any) {
+      console.error('Error downloading attachment:', err)
+      // Ideally show a toast here
+    }
+  }
+
   const simplifiedMetrics = calculateSimplifiedMetrics()
 
   if (!isOpen) return null
@@ -455,7 +519,9 @@ export default function BidComparisonModal({
                         <p className="text-sm">No bids received yet</p>
                       </div>
                     )}
-                    {bids.map((bid) => (
+                    {bids.map((bid) => {
+                      const bidPackage = (bid.bid_packages as any)
+                      return (
                       <div
                         key={bid.id}
                         onClick={() => {
@@ -476,15 +542,27 @@ export default function BidComparisonModal({
                         <div className="flex justify-between items-start mb-2">
                           <div>
                             <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
-                              {bid.subcontractors?.name || bid.subcontractor_email || 'Unknown'}
+                              {bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'}
                             </h4>
                             <p className="text-xs text-gray-500 truncate max-w-[160px]">
-                              {bid.subcontractors?.email || bid.subcontractor_email}
+                              {bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email}
                             </p>
                           </div>
-                          <Badge variant={bid.status === 'accepted' ? 'default' : 'outline'} className="text-[10px] capitalize">
-                            {bid.status}
-                          </Badge>
+                          {bid.subcontractors?.trade_category && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {bid.subcontractors.trade_category}
+                            </Badge>
+                          )}
+                          {!bid.subcontractors?.trade_category && bid.gc_contacts?.trade_category && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {bid.gc_contacts.trade_category}
+                            </Badge>
+                          )}
+                          {!bid.subcontractors?.trade_category && !bid.gc_contacts?.trade_category && bidPackage && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {bidPackage.trade_category}
+                            </Badge>
+                          )}
                         </div>
                         
                         <div className="flex items-baseline gap-1 mb-2">
@@ -507,7 +585,8 @@ export default function BidComparisonModal({
                           )}
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                   </TabsContent>
                   
                   <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3">
@@ -723,7 +802,7 @@ export default function BidComparisonModal({
                         <div>
                           <div className="flex items-center gap-3 mb-2">
                             <h2 className="text-2xl font-bold text-gray-900">
-                              {selectedBid.subcontractors?.name || selectedBid.subcontractor_email || 'Unknown Subcontractor'}
+                              {selectedBid.subcontractors?.name || selectedBid.gc_contacts?.name || selectedBid.subcontractor_email || 'Unknown Subcontractor'}
                             </h2>
                             <Badge variant={selectedBid.status === 'accepted' ? 'default' : 'outline'}>
                               {selectedBid.status}
@@ -732,12 +811,12 @@ export default function BidComparisonModal({
                           <div className="flex items-center gap-4 text-sm text-gray-500 flex-wrap">
                             <div className="flex items-center gap-1">
                               <Mail className="h-3.5 w-3.5" />
-                              {selectedBid.subcontractors?.email || selectedBid.subcontractor_email}
+                              {selectedBid.subcontractors?.email || selectedBid.gc_contacts?.email || selectedBid.subcontractor_email}
                             </div>
-                            {selectedBid.subcontractors?.phone && (
+                            {(selectedBid.subcontractors?.phone || selectedBid.gc_contacts?.phone) && (
                               <div className="flex items-center gap-1">
                                 <Phone className="h-3.5 w-3.5" />
-                                {selectedBid.subcontractors.phone}
+                                {selectedBid.subcontractors?.phone || selectedBid.gc_contacts?.phone}
                               </div>
                             )}
                             {selectedBid.subcontractors?.website_url && (
@@ -764,6 +843,17 @@ export default function BidComparisonModal({
                                   <span className="font-medium">{selectedBid.subcontractors.google_review_score}</span>
                                 )}
                                 <span className="text-gray-400 text-xs">/ 5.0</span>
+                              </div>
+                            )}
+                            {selectedBid.gc_contacts?.company && (
+                              <div className="flex items-center gap-1">
+                                <Building2 className="h-3.5 w-3.5" />
+                                {selectedBid.gc_contacts.company}
+                              </div>
+                            )}
+                            {selectedBid.gc_contacts?.location && (
+                              <div className="flex items-center gap-1">
+                                <span>{selectedBid.gc_contacts.location}</span>
                               </div>
                             )}
                           </div>
@@ -799,7 +889,7 @@ export default function BidComparisonModal({
                       <Tabs value={activeTab} className="space-y-6">
                         <TabsContent value="details" className="mt-0 space-y-6">
                           {/* Stats Cards */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className={`grid grid-cols-1 gap-4 ${selectedBid.bid_attachments && selectedBid.bid_attachments.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
                             <Card>
                               <CardContent className="p-4">
                                 <div className="text-sm font-medium text-gray-500 mb-1">Scope Coverage</div>
@@ -818,6 +908,28 @@ export default function BidComparisonModal({
                                 <div className="text-sm text-gray-600 line-clamp-2">{selectedBid.ai_summary || 'No summary available'}</div>
                               </CardContent>
                             </Card>
+                            {selectedBid.bid_attachments && selectedBid.bid_attachments.length > 0 && (
+                                <Card>
+                                    <CardContent className="p-4">
+                                        <div className="text-sm font-medium text-gray-500 mb-1">Attachments</div>
+                                        <div className="space-y-1">
+                                            {selectedBid.bid_attachments.map(att => (
+                                                <div key={att.id} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
+                                                    <FileText className="h-4 w-4 mr-2" />
+                                                    <a
+                                                        href="#"
+                                                        onClick={(e) => handleDownloadAttachment(att.file_path, att.file_name, e)}
+                                                        className="underline truncate block max-w-[150px]"
+                                                        title={att.file_name}
+                                                    >
+                                                        {att.file_name}
+                                                    </a>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
                           </div>
 
                           {/* Line Items Table - Redesigned */}

@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { createClient } from '@/lib/supabase'
@@ -24,18 +26,24 @@ import {
   X,
   Save,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Contact,
+  ChevronsUpDown,
+  Check
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import UserMasqueradeSelector from '@/components/admin/user-masquerade-selector'
+import { cn } from '@/lib/utils'
 
 interface Bid {
   id: string
   job_id: string | null
   bid_package_id: string | null
   subcontractor_id: string | null
+  contact_id: string | null
   bid_amount: number | null
   timeline: string | null
   notes: string | null
@@ -47,10 +55,23 @@ interface Bid {
     name: string
     email: string
   } | null
+  gc_contacts?: {
+    id: string
+    name: string
+    email: string
+    trade_category: string
+    location: string
+  } | null
   jobs: {
     id: string
     name: string
+    sub_title?: string
   } | null
+  bid_attachments?: {
+    id: string
+    file_name: string
+    file_path: string
+  }[]
 }
 
 interface BidLineItem {
@@ -72,12 +93,23 @@ interface Job {
   id: string
   name: string
   status: string
+  user_id: string
 }
 
 interface Subcontractor {
   id: string
   name: string
   email: string
+}
+
+interface Contact {
+  id: string
+  name: string
+  email: string
+  trade_category: string
+  location: string
+  company?: string | null
+  phone?: string | null
 }
 
 const CATEGORIES = [
@@ -117,6 +149,7 @@ export default function ManageBidsPage() {
   const [bids, setBids] = useState<Bid[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
   const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
   const [bidLineItems, setBidLineItems] = useState<BidLineItem[]>([])
   const [selectedBidId, setSelectedBidId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -134,9 +167,11 @@ export default function ManageBidsPage() {
   const [bidFormData, setBidFormData] = useState({
     job_id: '',
     subcontractor_id: '',
+    contact_id: '',
     notes: '',
     status: 'pending'
   })
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   
   const [formData, setFormData] = useState({
     item_number: 1,
@@ -164,6 +199,10 @@ export default function ManageBidsPage() {
     fetchBids()
     fetchJobs()
     fetchSubcontractors()
+    // Only fetch admin's contacts on initial load if user exists
+    if (user) {
+      fetchContactsForGc(user.id)
+    }
   }, [user, authLoading, router])
 
   useEffect(() => {
@@ -212,12 +251,24 @@ export default function ManageBidsPage() {
             name,
             email
           ),
+          gc_contacts (
+            id,
+            name,
+            email,
+            trade_category,
+            location
+          ),
           jobs (
             id,
             name
           ),
           bid_line_items (
             amount
+          ),
+          bid_attachments (
+            id,
+            file_name,
+            file_path
           )
         `)
         .order('created_at', { ascending: false })
@@ -246,7 +297,7 @@ export default function ManageBidsPage() {
     try {
       const { data, error } = await supabase
         .from('jobs')
-        .select('id, name, status')
+        .select('id, name, status, user_id')
         .in('status', ['active', 'draft', 'needs_takeoff', 'needs_packages', 'waiting_for_bids']) // Show all active statuses
         .order('created_at', { ascending: false })
 
@@ -268,6 +319,122 @@ export default function ManageBidsPage() {
       setSubcontractors(data || [])
     } catch (err: any) {
       console.error('Error fetching subcontractors:', err)
+    }
+  }
+
+  const fetchContactsForGc = async (gcId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('gc_contacts')
+        .select('id, name, email, trade_category, location, company, phone, gc_id')
+        .eq('gc_id', gcId)
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      setContacts(data || [])
+    } catch (err: any) {
+      console.error('Error fetching contacts:', err)
+      setContacts([])
+    }
+  }
+
+  const fetchContacts = async (jobId?: string) => {
+    if (!jobId) {
+      // If no job selected, fetch admin's contacts
+      if (user) {
+        fetchContactsForGc(user.id)
+      }
+      return
+    }
+
+    try {
+      console.log('🔍 Fetching contacts for job:', jobId)
+      
+      // Get the job to find the owner (user_id)
+      const { data: job, error: jobError } = await supabase
+        .from('jobs')
+        .select('user_id')
+        .eq('id', jobId)
+        .single()
+
+      if (jobError) {
+        console.error('❌ Error fetching job:', jobError)
+        throw jobError
+      }
+
+      console.log('📋 Job data:', job)
+      console.log('👤 Job owner (user_id):', job?.user_id)
+
+      // Get all job members (GCs with access to this job)
+      const { data: jobMembers, error: membersError } = await supabase
+        .from('job_members')
+        .select('user_id')
+        .eq('job_id', jobId)
+
+      if (membersError) {
+        console.error('❌ Error fetching job members:', membersError)
+        throw membersError
+      }
+
+      console.log('👥 Job members:', jobMembers)
+      console.log('📊 Number of job members:', jobMembers?.length || 0)
+
+      // Collect all GC IDs: job owner + all job members
+      const gcIds = new Set<string>()
+      
+      // Add job owner
+      if (job?.user_id) {
+        gcIds.add(job.user_id)
+        console.log('✅ Added job owner to GC IDs:', job.user_id)
+      }
+      
+      // Add all job members
+      if (jobMembers && jobMembers.length > 0) {
+        jobMembers.forEach(member => {
+          if (member.user_id) {
+            gcIds.add(member.user_id)
+            console.log('✅ Added job member to GC IDs:', member.user_id)
+          }
+        })
+      }
+
+      console.log('🆔 All GC IDs to fetch contacts from:', Array.from(gcIds))
+      console.log('📈 Total unique GC IDs:', gcIds.size)
+
+      if (gcIds.size === 0) {
+        console.warn('⚠️ No GC IDs found, setting contacts to empty')
+        setContacts([])
+        return
+      }
+
+      // Fetch contacts from all GCs that have access to this job
+      const { data, error } = await supabase
+        .from('gc_contacts')
+        .select('id, name, email, trade_category, location, company, phone, gc_id')
+        .in('gc_id', Array.from(gcIds))
+        .order('name', { ascending: true })
+
+      if (error) {
+        console.error('❌ Error fetching contacts:', error)
+        throw error
+      }
+
+      console.log('📇 Contacts found:', data)
+      console.log('📊 Number of contacts:', data?.length || 0)
+      
+      if (data && data.length > 0) {
+        console.log('📋 Contact details:')
+        data.forEach(contact => {
+          console.log(`  - ${contact.name} (${contact.email}) - GC ID: ${contact.gc_id}`)
+        })
+      } else {
+        console.warn('⚠️ No contacts found for these GC IDs')
+      }
+
+      setContacts(data || [])
+    } catch (err: any) {
+      console.error('❌ Error fetching contacts:', err)
+      setContacts([])
     }
   }
 
@@ -319,9 +486,11 @@ export default function ManageBidsPage() {
     setBidFormData({
       job_id: '',
       subcontractor_id: '',
+      contact_id: '',
       notes: '',
       status: 'pending'
     })
+    setSelectedFiles([])
     setIsEditingBid(false)
     setCurrentBidId(null)
     setShowBidForm(true)
@@ -332,12 +501,18 @@ export default function ManageBidsPage() {
     setBidFormData({
       job_id: bid.job_id || '',
       subcontractor_id: bid.subcontractor_id || '',
+      contact_id: bid.contact_id || '',
       notes: bid.notes || '',
       status: bid.status || 'pending'
     })
+    setSelectedFiles([])
     setIsEditingBid(true)
     setCurrentBidId(bid.id)
     setShowBidForm(true)
+    // If editing a bid with a contact, fetch contacts for that job
+    if (bid.job_id) {
+      fetchContacts(bid.job_id)
+    }
   }
 
   const handleBidFormSubmit = async (e: React.FormEvent) => {
@@ -346,16 +521,41 @@ export default function ManageBidsPage() {
       setLoading(true)
       setError('')
 
-      // Get selected subcontractor email
-      const selectedSub = subcontractors.find(s => s.id === bidFormData.subcontractor_id)
+      // Validate that at least one recipient is selected
+      if (!bidFormData.contact_id && !bidFormData.subcontractor_id) {
+        setError('Please select either a subcontractor or a contact')
+        setLoading(false)
+        return
+      }
+
+      let subcontractorId = bidFormData.subcontractor_id || null
+      let contactId = bidFormData.contact_id || null
+      let rawEmail = 'manual_entry@placeholder.com'
+
+      // Handle contact selection - use contact_id directly
+      if (bidFormData.contact_id) {
+        const contact = contacts.find(c => c.id === bidFormData.contact_id)
+        if (contact) {
+          rawEmail = contact.email
+          contactId = contact.id
+          subcontractorId = null // Clear subcontractor_id when using contact
+        }
+      } else if (bidFormData.subcontractor_id) {
+        const selectedSub = subcontractors.find(s => s.id === bidFormData.subcontractor_id)
+        rawEmail = selectedSub?.email || 'manual_entry@placeholder.com'
+        contactId = null // Clear contact_id when using subcontractor
+      }
       
       const bidData = {
         job_id: bidFormData.job_id || null,
-        subcontractor_id: bidFormData.subcontractor_id || null,
-        raw_email: selectedSub?.email || 'manual_entry@placeholder.com', // Required field
+        subcontractor_id: subcontractorId,
+        contact_id: contactId,
+        raw_email: rawEmail,
         notes: bidFormData.notes || null,
         status: bidFormData.status
       }
+
+      let targetBidId = currentBidId
 
       if (isEditingBid && currentBidId) {
         const { error } = await supabase
@@ -366,12 +566,44 @@ export default function ManageBidsPage() {
         if (error) throw error
         setSuccess('Bid updated successfully')
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('bids')
           .insert([bidData])
+          .select('id')
+          .single()
 
         if (error) throw error
+        targetBidId = data.id
         setSuccess('Bid created successfully')
+      }
+
+      // Handle File Uploads
+      if (selectedFiles.length > 0 && targetBidId && user) {
+         const uploadPromises = selectedFiles.map(async (file) => {
+           const fileExt = file.name.split('.').pop()
+           const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+           const filePath = `${user.id}/${fileName}` // Use simple user.id prefix as per policy
+
+           const { error: uploadError } = await supabase.storage
+             .from('bid-attachments')
+             .upload(filePath, file)
+
+           if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`)
+
+           const { error: attachmentError } = await supabase
+              .from('bid_attachments')
+              .insert({
+                 bid_id: targetBidId,
+                 file_name: file.name,
+                 file_path: filePath,
+                 file_size: file.size,
+                 file_type: file.type
+              })
+           
+           if (attachmentError) throw new Error(`Attachment record failed for ${file.name}: ${attachmentError.message}`)
+         })
+
+         await Promise.all(uploadPromises)
       }
 
       setShowBidForm(false)
@@ -414,6 +646,24 @@ export default function ManageBidsPage() {
     })
     setEditingItemId(item.id)
     setShowAddForm(true)
+  }
+
+  const handleDownloadAttachment = async (path: string, fileName: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      const { data, error } = await supabase.storage
+        .from('bid-attachments')
+        .createSignedUrl(path, 60) // 60 seconds validity
+
+      if (error) throw error
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank')
+      }
+    } catch (err: any) {
+      console.error('Error downloading attachment:', err)
+      setError('Failed to download attachment')
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -499,6 +749,8 @@ export default function ManageBidsPage() {
     const searchLower = searchQuery.toLowerCase()
     const subcontractorName = bid.subcontractors?.name?.toLowerCase() || ''
     const subcontractorEmail = bid.subcontractors?.email?.toLowerCase() || ''
+    const contactName = bid.gc_contacts?.name?.toLowerCase() || ''
+    const contactEmail = bid.gc_contacts?.email?.toLowerCase() || ''
     const bidEmail = bid.raw_email?.toLowerCase() || ''
     const jobName = bid.jobs?.name?.toLowerCase() || ''
     const bidAmount = bid.bid_amount?.toString() || ''
@@ -506,6 +758,8 @@ export default function ManageBidsPage() {
     return (
       subcontractorName.includes(searchLower) ||
       subcontractorEmail.includes(searchLower) ||
+      contactName.includes(searchLower) ||
+      contactEmail.includes(searchLower) ||
       bidEmail.includes(searchLower) ||
       jobName.includes(searchLower) ||
       bidAmount.includes(searchLower)
@@ -540,6 +794,7 @@ export default function ManageBidsPage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <UserMasqueradeSelector />
               <Link href="/admin/demo-settings">
                 <Button variant="outline" className="hidden sm:flex">
                   <ArrowLeft className="h-4 w-4 mr-2" />
@@ -625,10 +880,10 @@ export default function ManageBidsPage() {
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <h3 className="font-semibold text-gray-900">
-                              {bid.subcontractors?.name || bid.raw_email || 'Unknown'}
+                              {bid.subcontractors?.name || bid.gc_contacts?.name || bid.raw_email || 'Unknown'}
                             </h3>
                             <p className="text-sm text-gray-600">
-                              {bid.subcontractors?.email || bid.raw_email}
+                              {bid.subcontractors?.email || bid.gc_contacts?.email || bid.raw_email}
                             </p>
                             {bid.jobs?.name && (
                               <p className="text-xs text-gray-500 mt-1">Job: {bid.jobs.name}</p>
@@ -637,6 +892,23 @@ export default function ManageBidsPage() {
                               <p className="text-lg font-bold text-green-600 mt-2">
                                 ${bid.bid_amount.toLocaleString()}
                               </p>
+                            )}
+                            {bid.bid_attachments && bid.bid_attachments.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                <p className="text-xs text-gray-500 font-medium">Attachments:</p>
+                                {bid.bid_attachments.map(att => (
+                                  <div key={att.id} className="flex items-center text-xs text-blue-600 hover:text-blue-800">
+                                    <FileText className="h-3 w-3 mr-1" />
+                                    <a 
+                                      href="#" 
+                                      onClick={(e) => handleDownloadAttachment(att.file_path, att.file_name, e)}
+                                      className="underline truncate max-w-[200px]"
+                                    >
+                                      {att.file_name}
+                                    </a>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                           </div>
                           <div className="flex flex-col items-end space-y-2">
@@ -951,7 +1223,13 @@ export default function ManageBidsPage() {
                   <Label htmlFor="job_id" className="text-sm font-medium">Job *</Label>
                   <Select
                     value={bidFormData.job_id}
-                    onValueChange={(value) => setBidFormData(prev => ({ ...prev, job_id: value }))}
+                    onValueChange={(value) => {
+                      console.log('🎯 Job selected:', value)
+                      setBidFormData(prev => ({ ...prev, job_id: value, contact_id: '', subcontractor_id: '' }))
+                      // Fetch contacts from all GCs that have access to this job
+                      console.log('📞 Calling fetchContacts with jobId:', value)
+                      fetchContacts(value)
+                    }}
                     required
                   >
                     <SelectTrigger className="w-full">
@@ -968,23 +1246,91 @@ export default function ManageBidsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="subcontractor_id" className="text-sm font-medium">Subcontractor *</Label>
-                  <Select
-                    value={bidFormData.subcontractor_id}
-                    onValueChange={(value) => setBidFormData(prev => ({ ...prev, subcontractor_id: value }))}
-                    required
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select a subcontractor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subcontractors.map(sub => (
-                        <SelectItem key={sub.id} value={sub.id}>
-                          {sub.name} <span className="text-gray-400 text-xs ml-2">({sub.email})</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="subcontractor_id" className="text-sm font-medium">Subcontractor or Contact *</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        className="w-full justify-between bg-white"
+                        disabled={!bidFormData.job_id}
+                      >
+                        {!bidFormData.job_id
+                          ? "Select a job first..."
+                          : bidFormData.contact_id
+                            ? contacts.find((c) => c.id === bidFormData.contact_id)?.name
+                            : bidFormData.subcontractor_id
+                              ? subcontractors.find((sub) => sub.id === bidFormData.subcontractor_id)?.name
+                              : "Select subcontractor or contact..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[400px] p-0 z-[10001]" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search subcontractors or contacts..." />
+                        <CommandList>
+                          <CommandEmpty>No subcontractor or contact found.</CommandEmpty>
+                          {contacts.length > 0 && (
+                            <CommandGroup heading={bidFormData.job_id ? "Job GCs' Contacts" : "My Contacts"}>
+                              {contacts.map((contact) => (
+                                <CommandItem
+                                  key={`contact-${contact.id}`}
+                                  value={contact.name}
+                                  onSelect={() => {
+                                    setBidFormData(prev => ({ 
+                                      ...prev, 
+                                      contact_id: contact.id,
+                                      subcontractor_id: ''
+                                    }))
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      bidFormData.contact_id === contact.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <Contact className="mr-2 h-4 w-4 text-blue-500" />
+                                  <div className="flex flex-col">
+                                    <span>{contact.name}</span>
+                                    <span className="text-xs text-gray-500">{contact.trade_category} • {contact.email}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                          <CommandGroup heading="Bidi Network Subcontractors">
+                            {subcontractors.map((sub) => (
+                              <CommandItem
+                                key={sub.id}
+                                value={sub.name}
+                                onSelect={() => {
+                                  setBidFormData(prev => ({ 
+                                    ...prev, 
+                                    subcontractor_id: sub.id,
+                                    contact_id: ''
+                                  }))
+                                }}
+                                className="cursor-pointer"
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    bidFormData.subcontractor_id === sub.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <div className="flex flex-col">
+                                  <span>{sub.name}</span>
+                                  <span className="text-xs text-gray-500">{sub.email}</span>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4">
@@ -1016,6 +1362,31 @@ export default function ManageBidsPage() {
                     rows={3}
                     className="resize-none"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="file" className="text-sm font-medium">Attach Original Bid(s) (PDF)</Label>
+                  <Input
+                    id="file"
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    onChange={(e) => {
+                      if (e.target.files) {
+                        setSelectedFiles(Array.from(e.target.files))
+                      }
+                    }}
+                  />
+                  {selectedFiles.length > 0 && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      <p className="font-medium mb-1">Selected files:</p>
+                      <ul className="list-disc list-inside">
+                        {selectedFiles.map((file, index) => (
+                          <li key={index}>{file.name}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
 

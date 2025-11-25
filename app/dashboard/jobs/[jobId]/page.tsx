@@ -230,10 +230,10 @@ export default function JobDetailPage() {
       if (packagesError) throw packagesError
       setBidPackages(packagesData || [])
 
-      // Load bids for this job with bid package info
+      // Load bids for this job with bid package info, subcontractors, and contacts
       const { data: bidsData, error: bidsError } = await supabase
         .from('bids')
-        .select('*, subcontractors (id, name, email), bid_packages (id, trade_category, description, minimum_line_items, status)')
+        .select('*, subcontractors (id, name, email, trade_category), gc_contacts (id, name, email, trade_category, location, company, phone), bid_packages (id, trade_category, description, minimum_line_items, status)')
         .eq('job_id', jobId)
         .order('created_at', { ascending: false })
 
@@ -418,7 +418,7 @@ export default function JobDetailPage() {
       activities.push({
         id: `bid-${bid.id}`,
         type: 'bid',
-        message: `New bid received from ${bid.subcontractors?.name || 'Unknown Subcontractor'}`,
+        message: `New bid received from ${bid.subcontractors?.name || bid.gc_contacts?.name || 'Unknown Subcontractor'}`,
         date: bid.created_at
       })
     })
@@ -1551,16 +1551,24 @@ export default function JobDetailPage() {
                         <div className="space-y-3">
                           {bids.map((bid) => {
                             const subcontractor = (bid.subcontractors as any)
+                            const contact = (bid.gc_contacts as any)
                             const bidPackage = (bid.bid_packages as any)
                             return (
                               <div key={bid.id} className="flex items-center justify-between p-4 border rounded-lg">
                                 <div className="flex-1">
                                   <div className="flex items-center space-x-2 mb-1">
-                                    <span className="font-semibold">{subcontractor?.name || 'Unknown'}</span>
-                                    <Badge className={bid.status === 'accepted' ? 'bg-green-100 text-green-800' : bid.status === 'declined' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}>
-                                      {bid.status || 'pending'}
-                                    </Badge>
-                                    {bidPackage && (
+                                    <span className="font-semibold">{subcontractor?.name || contact?.name || 'Unknown'}</span>
+                                    {subcontractor?.trade_category && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {subcontractor.trade_category}
+                                      </Badge>
+                                    )}
+                                    {!subcontractor?.trade_category && contact?.trade_category && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {contact.trade_category}
+                                      </Badge>
+                                    )}
+                                    {!subcontractor?.trade_category && !contact?.trade_category && bidPackage && (
                                       <Badge variant="outline" className="text-xs">
                                         {bidPackage.trade_category}
                                       </Badge>

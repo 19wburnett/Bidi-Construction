@@ -201,16 +201,36 @@ export default function DashboardPage() {
       }
 
       const bidPackageIds = packagesData.map(pkg => pkg.id)
-      let bidsData: { id: string; status: string | null; bid_package_id: string | null; created_at: string; raw_email: string; subcontractors: any }[] = []
+      const jobIds = jobsData.map(job => job.id)
+      let bidsData: { id: string; status: string | null; bid_package_id: string | null; job_id: string | null; created_at: string; raw_email: string; subcontractors: any }[] = []
+      
+      // Fetch bids linked through bid packages
       if (bidPackageIds.length > 0) {
-        const { data: bidsResult, error: bidsError } = await supabase
+        const { data: packageBidsResult, error: packageBidsError } = await supabase
           .from('bids')
-          .select('id, status, bid_package_id, created_at, raw_email, subcontractors(name, email)')
+          .select('id, status, bid_package_id, job_id, created_at, raw_email, subcontractors(name, email)')
           .in('bid_package_id', bidPackageIds)
           .limit(10000)
 
-        if (bidsError) throw bidsError
-        bidsData = bidsResult || []
+        if (packageBidsError) throw packageBidsError
+        if (packageBidsResult) bidsData.push(...packageBidsResult)
+      }
+      
+      // Fetch bids directly linked to jobs via job_id
+      if (jobIds.length > 0) {
+        const { data: directBidsResult, error: directBidsError } = await supabase
+          .from('bids')
+          .select('id, status, bid_package_id, job_id, created_at, raw_email, subcontractors(name, email)')
+          .in('job_id', jobIds)
+          .limit(10000)
+
+        if (directBidsError) throw directBidsError
+        if (directBidsResult) {
+          // Merge with existing bids, avoiding duplicates
+          const existingIds = new Set(bidsData.map(bid => bid.id))
+          const newBids = directBidsResult.filter(bid => !existingIds.has(bid.id))
+          bidsData.push(...newBids)
+        }
       }
 
       const totalJobs = jobsData.length
@@ -254,8 +274,10 @@ export default function DashboardPage() {
       const formattedRecentJobs = recentJobsSorted.map((job) => {
         const jobPackages = packagesData.filter(pkg => pkg.job_id === job.id)
         const jobPackageIds = jobPackages.map(pkg => pkg.id)
+        // Count bids linked through packages OR directly via job_id
         const jobBids = bidsData.filter(bid =>
-          bid.bid_package_id ? jobPackageIds.includes(bid.bid_package_id) : false
+          (bid.bid_package_id && jobPackageIds.includes(bid.bid_package_id)) ||
+          (bid.job_id === job.id)
         )
 
         return {

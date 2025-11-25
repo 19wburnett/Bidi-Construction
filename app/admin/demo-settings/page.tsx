@@ -30,6 +30,7 @@ import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import UserMasqueradeSelector from '@/components/admin/user-masquerade-selector'
 
 export default function AdminDashboardPage() {
   const [demoMode, setDemoMode] = useState(false)
@@ -217,6 +218,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <UserMasqueradeSelector />
               <NotificationBell />
               <ProfileDropdown />
             </div>
