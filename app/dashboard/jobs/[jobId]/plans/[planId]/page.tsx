@@ -55,6 +55,8 @@ import { CheckCircle2 } from 'lucide-react'
 import ScaleSettingsModal, { ScaleSetting } from '@/components/scale-settings-modal'
 import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-scope-review'
 import { getJobForUser } from '@/lib/job-access'
+import PDFSearch from '@/components/pdf-search'
+import MeasurementSummaryPanel from '@/components/measurement-summary-panel'
 
 
 type AnalysisMode = 'takeoff' | 'chat' | 'comments'
@@ -118,6 +120,12 @@ export default function EnhancedPlanViewer() {
   const [scaleSettingsModalOpen, setScaleSettingsModalOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null)
+  const [hasRestoredPage, setHasRestoredPage] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatchCount, setSearchMatchCount] = useState(0)
+  const [searchCurrentMatch, setSearchCurrentMatch] = useState(0)
+  const [selectedMeasurementIds, setSelectedMeasurementIds] = useState<Set<string>>(new Set())
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
   const [isCalibrating, setIsCalibrating] = useState(false)
   
@@ -169,10 +177,46 @@ export default function EnhancedPlanViewer() {
   
   const commentPersistenceRef = useRef<CommentPersistence | null>(null)
   const measurementPersistenceRef = useRef<MeasurementPersistence | null>(null)
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isSyncingRef = useRef(false)
+  const pendingSyncRef = useRef<Drawing[] | null>(null)
   const supabase = createClient()
 
   const jobId = params.jobId as string
   const planId = params.planId as string
+
+  // Restore saved page from localStorage on mount
+  useEffect(() => {
+    if (planId && !hasRestoredPage) {
+      const storageKey = `bidi-plan-page-${planId}`
+      try {
+        const savedPage = localStorage.getItem(storageKey)
+        if (savedPage) {
+          const pageNum = parseInt(savedPage, 10)
+          if (!isNaN(pageNum) && pageNum >= 1) {
+            setCurrentPage(pageNum)
+          }
+        }
+      } catch (e) {
+        // localStorage may be unavailable in some contexts
+        console.warn('Could not restore saved page:', e)
+      }
+      setHasRestoredPage(true)
+    }
+  }, [planId, hasRestoredPage])
+
+  // Save current page to localStorage when it changes
+  useEffect(() => {
+    if (planId && hasRestoredPage && currentPage >= 1) {
+      const storageKey = `bidi-plan-page-${planId}`
+      try {
+        localStorage.setItem(storageKey, currentPage.toString())
+      } catch (e) {
+        // localStorage may be unavailable or full
+        console.warn('Could not save page to localStorage:', e)
+      }
+    }
+  }, [planId, currentPage, hasRestoredPage])
 
   // Track current takeoff analysis row id for updates
   const [takeoffAnalysisRowId, setTakeoffAnalysisRowId] = useState<string | null>(null)
@@ -304,8 +348,9 @@ export default function EnhancedPlanViewer() {
       const deltaX = e.clientX - startX
       const newWidth = startWidth - deltaX
       
-      // Clamp width between 420px and 640px
-      const clampedWidth = Math.max(420, Math.min(640, newWidth))
+      // Clamp width between 420px and 80% of viewport width
+      const maxWidth = Math.floor(window.innerWidth * 0.8)
+      const clampedWidth = Math.max(420, Math.min(maxWidth, newWidth))
       setSidebarWidth(clampedWidth)
     }
 
@@ -635,8 +680,9 @@ export default function EnhancedPlanViewer() {
     }, 100)
   }, [plan])
 
-  // Handle drawings change and save
+  // Handle drawings change and save with debouncing to prevent race conditions
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
+    // Always update local state immediately for responsive UI
     setDrawings(newDrawings)
 
     const persistence = measurementPersistenceRef.current
@@ -644,17 +690,52 @@ export default function EnhancedPlanViewer() {
       return
     }
 
-    try {
-      const measurementDrawings = newDrawings.filter(isMeasurementDrawing)
-      const syncedMeasurements = await persistence.syncMeasurements(measurementDrawings)
-
-      setDrawings(current => {
-        const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
-        return [...nonMeasurements, ...syncedMeasurements]
-      })
-    } catch (error) {
-      console.error('Failed to sync measurements:', error)
+    // Clear any pending sync timeout
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current)
     }
+
+    // If a sync is in progress, store the latest drawings to sync after current completes
+    if (isSyncingRef.current) {
+      pendingSyncRef.current = newDrawings
+      return
+    }
+
+    // Debounce the sync to batch rapid changes (300ms delay)
+    syncTimeoutRef.current = setTimeout(async () => {
+      const performSync = async (drawingsToSync: Drawing[]) => {
+        isSyncingRef.current = true
+        try {
+          const measurementDrawings = drawingsToSync.filter(isMeasurementDrawing)
+          const syncedMeasurements = await persistence.syncMeasurements(measurementDrawings)
+
+          // Merge synced measurements with current state (not the state at sync start)
+          setDrawings(current => {
+            const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
+            // Keep any local measurements that weren't in the sync (newly added during sync)
+            const syncedIds = new Set(syncedMeasurements.map(m => m.id))
+            const currentMeasurements = current.filter(isMeasurementDrawing)
+            const localOnlyMeasurements = currentMeasurements.filter(m => !syncedIds.has(m.id))
+            return [...nonMeasurements, ...syncedMeasurements, ...localOnlyMeasurements]
+          })
+        } catch (error) {
+          console.error('Failed to sync measurements:', error)
+        } finally {
+          isSyncingRef.current = false
+          
+          // If there were changes during sync, process them now
+          if (pendingSyncRef.current) {
+            const pendingDrawings = pendingSyncRef.current
+            pendingSyncRef.current = null
+            // Use the latest state for the next sync
+            performSync(pendingDrawings)
+          }
+        }
+      }
+
+      // Use the latest drawings from ref to ensure we sync the most recent state
+      performSync(drawingsRef.current)
+    }, 300)
   }, [])
 
   // Handle comment pin click (to place new comment)
@@ -1209,6 +1290,37 @@ export default function EnhancedPlanViewer() {
     setEditingTitle('')
   }
 
+  // Search handlers
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query)
+    setSearchCurrentMatch(0) // Reset to first match when query changes
+  }, [])
+
+  const handleSearchNext = useCallback(() => {
+    if (searchMatchCount > 0) {
+      setSearchCurrentMatch(prev => (prev + 1) % searchMatchCount)
+    }
+  }, [searchMatchCount])
+
+  const handleSearchPrevious = useCallback(() => {
+    if (searchMatchCount > 0) {
+      setSearchCurrentMatch(prev => (prev - 1 + searchMatchCount) % searchMatchCount)
+    }
+  }, [searchMatchCount])
+
+  // Keyboard shortcut for search (Ctrl+F / Cmd+F)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1377,6 +1489,13 @@ export default function EnhancedPlanViewer() {
                 calibrationPoints={calibrationPoints}
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
+                searchQuery={searchQuery}
+                currentMatchIndex={searchCurrentMatch}
+                onSearchResults={(count) => {
+                  setSearchMatchCount(count)
+                }}
+                selectedMeasurementIds={selectedMeasurementIds}
+                onSelectedMeasurementsChange={setSelectedMeasurementIds}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -1831,6 +1950,34 @@ export default function EnhancedPlanViewer() {
           setIsCalibrating(false)
           setCalibrationPoints([])
         }}
+      />
+
+      {/* PDF Search Component */}
+      <PDFSearch
+        isOpen={searchOpen}
+        onSearch={handleSearch}
+        onNext={handleSearchNext}
+        onPrevious={handleSearchPrevious}
+        onClose={() => {
+          setSearchOpen(false)
+          setSearchQuery('')
+          setSearchMatchCount(0)
+          setSearchCurrentMatch(0)
+        }}
+        matchCount={searchMatchCount}
+        currentMatch={searchCurrentMatch}
+      />
+
+      {/* Measurement Selection Summary Panel */}
+      <MeasurementSummaryPanel
+        selectedMeasurements={drawings.filter(d => selectedMeasurementIds.has(d.id))}
+        onClearSelection={() => setSelectedMeasurementIds(new Set())}
+        onDeleteSelected={() => {
+          const newDrawings = drawings.filter(d => !selectedMeasurementIds.has(d.id))
+          handleDrawingsChange(newDrawings)
+          setSelectedMeasurementIds(new Set())
+        }}
+        unit={measurementScaleSettings[currentPage]?.unit || 'ft'}
       />
     </div>
   )

@@ -11,3 +11,6 @@ CREATE INDEX IF NOT EXISTS idx_bids_contact_id ON bids(contact_id);
 -- Add comment explaining the relationship
 COMMENT ON COLUMN bids.contact_id IS 'References gc_contacts table. A bid can be linked to either a subcontractor (subcontractor_id) or a GC contact (contact_id).';
 
+
+
+

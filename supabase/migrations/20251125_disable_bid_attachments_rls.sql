@@ -8,3 +8,6 @@ DROP POLICY IF EXISTS "Users can insert attachments for their bids" ON bid_attac
 DROP POLICY IF EXISTS "Users can delete attachments for their bids" ON bid_attachments;
 
 
+
+
+
