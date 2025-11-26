@@ -95,6 +95,10 @@ const calculatePixelDistance = (x1: number, y1: number, x2: number, y2: number):
   return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2))
 }
 
+// Snap threshold for closing polygon shapes (in PDF base coordinates)
+// Keep small since users often work at 200-400% zoom
+const SNAP_TO_CLOSE_THRESHOLD = 8
+
 const calculatePolygonArea = (points: number[]): number => {
   if (points.length < 6) return 0 // Need at least 3 points (6 numbers)
   let area = 0
@@ -193,6 +197,8 @@ export default function FastPlanCanvas({
   const [isDrawingMeasurement, setIsDrawingMeasurement] = useState(false)
   const [editingMeasurement, setEditingMeasurement] = useState<EditingMeasurementState | null>(null)
   const [isAdjustingMeasurement, setIsAdjustingMeasurement] = useState(false)
+  const [isSnappingToStart, setIsSnappingToStart] = useState(false)
+  const [hoveredMeasurementId, setHoveredMeasurementId] = useState<string | null>(null)
   // Calibration mode state
   const [internalIsCalibrating, setInternalIsCalibrating] = useState(false)
   const [internalCalibrationPoints, setInternalCalibrationPoints] = useState<{ x: number; y: number }[]>([])
@@ -408,51 +414,21 @@ export default function FastPlanCanvas({
   // Reset document component ready state when PDF URL changes
   useEffect(() => {
     setDocumentComponentReady(false)
+    // Reset related states for fresh PDF load
+    setDocumentReady(false)
+    setPdfLoaded(false)
+    setPdfError(null)
   }, [pdfUrl])
 
-  // Load PDF to get page count only, then destroy PDF object
+  // Mark document as ready once worker is ready and we have a URL
+  // The actual PDF loading is handled by the Document component
   useEffect(() => {
-    if (!pdfUrl || !workerReady || pdfLoaded) return
-
-    const loadPageCount = async () => {
-      try {
-        const pdfjs = await import('react-pdf')
-        if (!pdfjs.pdfjs) {
-          throw new Error('PDF.js not available')
-        }
-
-        // Load PDF just to get page count
-        const pdf = await pdfjs.pdfjs.getDocument(pdfUrl).promise
-        const loadedPages = pdf.numPages
-        console.log('PDF loaded successfully, pages:', loadedPages)
-        
-        setNumPages(loadedPages)
-        if (onNumPagesChange) {
-          onNumPagesChange(loadedPages)
-        }
-        setPdfLoaded(true)
-        setPdfError(null)
-        
-        // Brief delay before marking document as ready
-        // Allows worker messageHandler to fully initialize
-        setTimeout(() => {
-          setDocumentReady(true)
-        }, 200)
-
-        // Clean up document resources without tearing down the shared worker
-        if (typeof pdf.cleanup === 'function') {
-          await pdf.cleanup()
-          console.log('PDF resources cleaned up after page count extraction')
-        }
-      } catch (error) {
-        console.error('PDF loading failed:', error)
-        setPdfError('PDF could not be loaded. You can still use drawing tools on a blank canvas.')
-        setPdfLoaded(true) // Still allow drawing
-      }
+    if (pdfUrl && workerReady && !documentReady) {
+      // Allow the Document component to handle PDF loading
+      // Just mark that we're ready to attempt rendering
+      setDocumentReady(true)
     }
-
-    loadPageCount()
-  }, [pdfUrl, workerReady, pdfLoaded, onNumPagesChange])
+  }, [pdfUrl, workerReady, documentReady])
 
   // Progressive rendering: upgrade to high quality after initial render settles
   useEffect(() => {
@@ -946,8 +922,9 @@ export default function FastPlanCanvas({
         ctx.stroke()
         ctx.setLineDash([])
         
-        // Draw labels for each segment
-        if (measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
+        // Draw labels for each segment (only when hovered, selected, or editing)
+        const showLabels = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        if (showLabels && measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
           const segmentLengths = (measurementData as any).segmentLengths as number[]
           for (let i = 0; i < points.length - 2; i += 2) {
             const x1 = points[i]
@@ -960,14 +937,14 @@ export default function FastPlanCanvas({
             
             // Draw label background
             const label = formatMeasurement(length, unit)
-            ctx.font = '12px Arial'
+            ctx.font = '10px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 6, textWidth + padding * 2, 12)
             
             // Draw label text
             try {
@@ -983,17 +960,17 @@ export default function FastPlanCanvas({
             const lastX = points[points.length - 2]
             const lastY = points[points.length - 1]
             const label = `Total: ${formatMeasurement((measurementData as any).totalLength, unit)}`
-            ctx.font = '14px Arial'
+            ctx.font = '11px Arial'
             ctx.textAlign = 'left'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(lastX + 10, lastY - 10, textWidth + padding * 2, 20)
+            ctx.fillRect(lastX + 8, lastY - 8, textWidth + padding * 2, 16)
             
             try {
               ctx.fillStyle = '#1f2937'
-              ctx.fillText(label, lastX + 10 + padding, lastY)
+              ctx.fillText(label, lastX + 8 + padding, lastY)
             } catch (error) {
               console.warn('Error drawing text, skipping:', error)
             }
@@ -1029,8 +1006,9 @@ export default function FastPlanCanvas({
         ctx.fill()
         ctx.stroke()
         
-        // Draw area label at centroid
-        if (measurementData && 'area' in (measurementData as any) && scaleSetting) {
+        // Draw area label at centroid (only when hovered, selected, or editing)
+        const showAreaLabel = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        if (showAreaLabel && measurementData && 'area' in (measurementData as any) && scaleSetting) {
           // Calculate centroid
           let sumX = 0, sumY = 0
           for (let i = 0; i < points.length; i += 2) {
@@ -1044,14 +1022,14 @@ export default function FastPlanCanvas({
           let area = (measurementData as any).area
           const areaLabel = formatArea(area, unit)
           
-          ctx.font = '14px Arial'
+          ctx.font = '11px Arial'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           const textWidth = ctx.measureText(areaLabel).width
-          const padding = 6
+          const padding = 4
           
           ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
+          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 7, textWidth + padding * 2, 14)
           
           try {
             ctx.fillStyle = '#1f2937'
@@ -1102,14 +1080,14 @@ export default function FastPlanCanvas({
             const midY = (points[points.length - 3] + points[points.length - 1]) / 2
             const label = formatMeasurement(realDist, unit)
             
-            ctx.font = '12px Arial'
+            ctx.font = '10px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 6, textWidth + padding * 2, 12)
             
             try {
               ctx.fillStyle = '#1f2937'
@@ -1129,6 +1107,51 @@ export default function FastPlanCanvas({
         ctx.fill()
         ctx.stroke()
         
+        // Draw snap-to-close indicator at start point
+        const startX = points[0]
+        const startY = points[1]
+        const snapRadius = SNAP_TO_CLOSE_THRESHOLD * scale
+        
+        // Always draw a subtle indicator at start point
+        ctx.save()
+        ctx.strokeStyle = isSnappingToStart ? '#22c55e' : 'rgba(59, 130, 246, 0.5)'
+        ctx.lineWidth = isSnappingToStart ? 3 : 2
+        ctx.setLineDash(isSnappingToStart ? [] : [4, 4])
+        ctx.beginPath()
+        ctx.arc(startX, startY, snapRadius, 0, Math.PI * 2)
+        ctx.stroke()
+        
+        // Draw filled circle at start point when snapping
+        if (isSnappingToStart) {
+          ctx.fillStyle = 'rgba(34, 197, 94, 0.3)'
+          ctx.fill()
+          
+          // Draw inner solid circle
+          ctx.fillStyle = '#22c55e'
+          ctx.beginPath()
+          ctx.arc(startX, startY, 4, 0, Math.PI * 2)
+          ctx.fill()
+          
+          // Draw "Click to close" tooltip
+          ctx.font = 'bold 9px Arial'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'bottom'
+          const tooltipText = 'Click to close'
+          const tooltipWidth = ctx.measureText(tooltipText).width
+          const tooltipPadding = 4
+          const tooltipX = startX
+          const tooltipY = startY - snapRadius - 6
+          
+          ctx.fillStyle = '#22c55e'
+          ctx.beginPath()
+          ctx.roundRect(tooltipX - tooltipWidth / 2 - tooltipPadding, tooltipY - 12, tooltipWidth + tooltipPadding * 2, 14, 3)
+          ctx.fill()
+          
+          ctx.fillStyle = 'white'
+          ctx.fillText(tooltipText, tooltipX, tooltipY)
+        }
+        ctx.restore()
+        
         // Show live area if closed - use raw points for calculation
         if (scaleSetting) {
           const pixelArea = calculatePolygonArea(rawPoints)
@@ -1146,14 +1169,14 @@ export default function FastPlanCanvas({
             
             const areaLabel = formatArea(realArea, unit)
             
-            ctx.font = '14px Arial'
+            ctx.font = '11px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(areaLabel).width
-            const padding = 6
+            const padding = 4
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
+            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 7, textWidth + padding * 2, 14)
             
             try {
               ctx.fillStyle = '#1f2937'
@@ -1204,7 +1227,7 @@ export default function FastPlanCanvas({
     }
 
     // Comments are now rendered as HTML elements, not on canvas
-  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool, selectedMeasurementIds])
+  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool, selectedMeasurementIds, isSnappingToStart, hoveredMeasurementId])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
@@ -1811,6 +1834,41 @@ export default function FastPlanCanvas({
           return
         }
 
+        // For area measurements with 3+ points, check if clicking near start point to close the shape
+        if (selectedTool === 'measurement_area' && existingPoints.length >= 6) {
+          const startX = existingPoints[0]
+          const startY = existingPoints[1]
+          const distToStart = calculatePixelDistance(baseWorldX, baseWorldY, startX, startY)
+          
+          if (distToStart <= SNAP_TO_CLOSE_THRESHOLD) {
+            // Snap to start point and finalize the measurement
+            const updatedPoints = [...existingPoints]
+            const lastIndex = updatedPoints.length - 2
+            // Set the last preview point to the start point (closing the shape)
+            updatedPoints[lastIndex] = startX
+            updatedPoints[lastIndex + 1] = startY
+            
+            const closedMeasurement: Drawing = {
+              ...currentMeasurement,
+              geometry: {
+                ...currentMeasurement.geometry,
+                points: updatedPoints
+              }
+            }
+            
+            // Finalize the closed measurement
+            const finalized = finalizeMeasurementFromDrawing(closedMeasurement)
+            if (finalized) {
+              onDrawingsChange([...drawings, finalized])
+            }
+            
+            setCurrentMeasurement(null)
+            setIsDrawingMeasurement(false)
+            setIsSnappingToStart(false)
+            return
+          }
+        }
+
         const updatedPoints = [...existingPoints]
         const lastIndex = updatedPoints.length - 2
         updatedPoints[lastIndex] = baseWorldX
@@ -1826,25 +1884,7 @@ export default function FastPlanCanvas({
         }
 
         setCurrentMeasurement(updatedMeasurement)
-
-        if (selectedTool === 'measurement_line' && !e.shiftKey) {
-          const sanitizedPoints = updatedPoints.slice(0, Math.max(updatedPoints.length - 2, 0))
-          if (sanitizedPoints.length >= 4) {
-            const measurementToFinalize: Drawing = {
-              ...updatedMeasurement,
-              geometry: {
-                ...updatedMeasurement.geometry,
-                points: sanitizedPoints
-              }
-            }
-            const finalized = finalizeMeasurementFromDrawing(measurementToFinalize)
-            if (finalized) {
-              onDrawingsChange([...drawings, finalized])
-              setCurrentMeasurement(null)
-              setIsDrawingMeasurement(false)
-            }
-          }
-        }
+        // Line measurement now works like area: click to add points, double-click to finalize
       }
     } else if (selectedTool === 'measurement_select') {
       // Find measurement at click point
@@ -1939,12 +1979,30 @@ export default function FastPlanCanvas({
       const world = screenToWorld(screenX, screenY)
       
       // screenToWorld already returns base scale coordinates (zoom is handled by transform)
-      const baseWorldX = world.x
-      const baseWorldY = world.y
+      let baseWorldX = world.x
+      let baseWorldY = world.y
       
       // Update last point in measurement for preview (store at base scale)
       const points = currentMeasurement.geometry.points || []
       if (points.length >= 2) {
+        // For area measurements with 3+ points, check if near start point to snap
+        if (currentMeasurement.type === 'measurement_area' && points.length >= 6) {
+          const startX = points[0]
+          const startY = points[1]
+          const distToStart = calculatePixelDistance(baseWorldX, baseWorldY, startX, startY)
+          
+          if (distToStart <= SNAP_TO_CLOSE_THRESHOLD) {
+            // Snap to start point
+            baseWorldX = startX
+            baseWorldY = startY
+            setIsSnappingToStart(true)
+          } else {
+            setIsSnappingToStart(false)
+          }
+        } else {
+          setIsSnappingToStart(false)
+        }
+        
         const updatedPoints = [...points]
         updatedPoints[updatedPoints.length - 2] = baseWorldX
         updatedPoints[updatedPoints.length - 1] = baseWorldY
@@ -1957,8 +2015,26 @@ export default function FastPlanCanvas({
         })
       }
     }
+    
+    // Always check for measurement hover (unless actively panning or drawing)
+    // This runs regardless of tool selection to enable hover labels
+    if (!isPanning && !isDrawingMeasurement && !isAdjustingMeasurement) {
+      const container = containerRef.current
+      if (container) {
+        const rect = container.getBoundingClientRect()
+        const screenX = e.clientX - rect.left
+        const screenY = e.clientY - rect.top
+        const world = screenToWorld(screenX, screenY)
+        
+        const hoveredMeasurement = getMeasurementAtPoint(currentPage, world.x, world.y)
+        setHoveredMeasurementId(hoveredMeasurement?.id || null)
+      }
+    } else if (isPanning || isDrawingMeasurement) {
+      // Clear hover when panning or drawing
+      setHoveredMeasurementId(null)
+    }
     // Comment hover detection is now handled by HTML elements via onMouseEnter/onMouseLeave
-  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement])
+  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement, currentPage, getMeasurementAtPoint])
 
   const finalizeEditingMeasurement = useCallback(() => {
     if (!editingMeasurement) {
@@ -2068,6 +2144,7 @@ export default function FastPlanCanvas({
 
     setCurrentMeasurement(null)
     setIsDrawingMeasurement(false)
+    setIsSnappingToStart(false)
   }, [currentMeasurement, isDrawingMeasurement, finalizeMeasurementFromDrawing, drawings, onDrawingsChange])
 
   // Handle double-click to finish measurement
@@ -2100,6 +2177,7 @@ export default function FastPlanCanvas({
         }
         setCurrentMeasurement(null)
         setIsDrawingMeasurement(false)
+        setIsSnappingToStart(false)
         setSelectedTool('measurement_edit')
         e.preventDefault()
       } else if (e.key === 's' || e.key === 'S') {
@@ -2110,6 +2188,7 @@ export default function FastPlanCanvas({
         }
         setCurrentMeasurement(null)
         setIsDrawingMeasurement(false)
+        setIsSnappingToStart(false)
         setSelectedTool('measurement_select')
         e.preventDefault()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTool === 'measurement_edit' && editingMeasurement) {
@@ -2119,6 +2198,7 @@ export default function FastPlanCanvas({
         if (isDrawingMeasurement) {
           setCurrentMeasurement(null)
           setIsDrawingMeasurement(false)
+          setIsSnappingToStart(false)
           setSelectedTool('none')
         } else if (selectedTool === 'measurement_edit') {
           setEditingMeasurement(null)
@@ -2213,7 +2293,7 @@ export default function FastPlanCanvas({
         )}
 
         {/* PDF Page - Paginated view (single page) */}
-        {!pdfError && pdfUrl && documentReady && numPages > 0 && workerReady ? (
+        {!pdfError && pdfUrl && documentReady && workerReady ? (
           <div
             className="absolute inset-0 flex items-center justify-center"
             style={{
@@ -2243,14 +2323,25 @@ export default function FastPlanCanvas({
                   </div>
                 )
               }}
-              onLoadSuccess={() => {
+              onLoadSuccess={(pdf: { numPages: number }) => {
                 // Document component's internal PDF is now fully loaded and ready
-                console.log('PDF Document component loaded successfully')
+                console.log('PDF Document component loaded successfully, pages:', pdf.numPages)
+                
+                // Get page count from the Document component's PDF instance
+                // This avoids loading the PDF twice and prevents worker state conflicts
+                const loadedPages = pdf.numPages
+                setNumPages(loadedPages)
+                if (onNumPagesChange) {
+                  onNumPagesChange(loadedPages)
+                }
+                setPdfLoaded(true)
+                setPdfError(null)
                 setDocumentComponentReady(true)
               }}
               onLoadError={(error: Error) => {
                 console.error('PDF Document load error:', error)
-                setPdfError('Failed to load PDF document')
+                setPdfError('Failed to load PDF document. You can still use drawing tools on a blank canvas.')
+                setPdfLoaded(true) // Still allow drawing tools
               }}
             >
               <div 
@@ -2282,7 +2373,9 @@ export default function FastPlanCanvas({
                   </div>
                 )}
                 {/* Render current page + prefetch adjacent pages - only when Document is ready */}
-                {documentComponentReady && Array.from(new Set([currentPage, ...Array.from(pagesToRender)])).map(pageNum => {
+                {documentComponentReady && numPages > 0 && Array.from(new Set([currentPage, ...Array.from(pagesToRender)]))
+                  .filter(pageNum => pageNum >= 1 && pageNum <= numPages)
+                  .map(pageNum => {
                   const isCurrentPage = pageNum === currentPage
                   
                   return (
@@ -2629,7 +2722,7 @@ export default function FastPlanCanvas({
                 }
                 setSelectedTool('measurement_line')
              }}
-             title="Measure Line (M)"
+             title="Measure Line (M) - Click to add points, double-click to finish"
              className="rounded-full h-10 w-10"
            >
              <Ruler className="h-5 w-5" />

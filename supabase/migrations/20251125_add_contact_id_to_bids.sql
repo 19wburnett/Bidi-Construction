@@ -14,3 +14,4 @@ COMMENT ON COLUMN bids.contact_id IS 'References gc_contacts table. A bid can be
 
 
 
+

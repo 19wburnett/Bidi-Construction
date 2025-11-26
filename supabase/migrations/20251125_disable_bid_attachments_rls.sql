@@ -11,3 +11,4 @@ DROP POLICY IF EXISTS "Users can delete attachments for their bids" ON bid_attac
 
 
 
+
