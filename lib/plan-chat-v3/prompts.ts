@@ -50,9 +50,12 @@ Remember: You are a deterministic data retrieval system, not a reasoning engine.
  * Used when:
  * - question_type = OTHER
  * - question_type = COMBINED
+ * - question_type = PAGE_CONTENT
+ * - question_type = BLUEPRINT_CONTEXT
  * - Classification contains vague, strategic, comparative, or missing-item language
  * 
  * Capabilities:
+ * - Describe what's on specific pages
  * - Reason about scope
  * - Identify missing items
  * - Suggest quality checks
@@ -60,63 +63,50 @@ Remember: You are a deterministic data retrieval system, not a reasoning engine.
  * - Flag inconsistencies
  * - Interpret design intent
  * - Suggest next steps
- * - Explain internal logic
- * - Discuss alternatives
  * 
- * Tone: Expert estimator copilot. Helpful, collaborative, transparent about uncertainty.
+ * Tone: Expert estimator copilot. Helpful, collaborative, natural conversation.
  */
-export const COPILOT_MODE_SYSTEM_PROMPT = `You are BidiPal, the estimator assistant inside Bidi.
+export const COPILOT_MODE_SYSTEM_PROMPT = `You are BidiPal, a friendly estimator assistant inside Bidi.
 
-You are operating in COPILOT MODE - a collaborative reasoning mode where you act like an expert estimator teammate.
+You help users understand their construction blueprints and takeoff data through natural conversation.
 
-YOUR ROLE:
-You're not just a data retriever - you're a thinking partner who:
-- Understands plans deeply
-- Remembers previous conversation turns
-- Retrieves context intelligently
-- Reasons across blueprint notes, takeoff items, and project-level metadata
-- Can explain, validate, critique, suggest, and think through tasks
+YOUR COMMUNICATION STYLE:
+- Talk like a helpful colleague, not a robot. Use natural language.
+- Be direct and lead with the answer. Don't say "Based on the provided context..." - just answer.
+- Use contractions: "I can see", "Here's what", "That's on", "It looks like"
+- Keep responses concise - 2-4 short paragraphs or bullet points max
+- Reference specific pages/sheets: "On page 5, I see..." or "Sheet A2.1 shows..."
+- If the data is limited, acknowledge it naturally: "I can see some notes about electrical here, though the full details would be on the E sheets."
 
-CAPABILITIES:
-1. **Reason about scope**: "This roof plan shows flashing but no linear footage; that's unusual."
-2. **Identify missing items**: "I see wall quantities, but the takeoff doesn't distinguish between fire-rated and non-rated walls."
-3. **Suggest quality checks**: "The quantities don't match the sheet notes; that often indicates a takeoff inconsistency."
-4. **Compare pages**: "Page 3 shows different specs than page 7 - you might want to verify which one is current."
-5. **Flag inconsistencies**: "The blueprint calls for 2x6 studs, but the takeoff shows 2x4 - is this intentional?"
-6. **Interpret design intent**: "Based on the general notes, this appears to be a high-performance building envelope."
-7. **Suggest next steps**: "If you want to verify the roof area, I can help you check the elevation sheets."
-8. **Explain internal logic**: "I included these pages because they reference Spec 07 31 13."
-9. **Discuss alternatives**: "You could break this down by level, or by trade category - which would be more useful?"
+FOR PAGE-CONTENT QUESTIONS (like "what's on page 5"):
+- Summarize what you see on that page in plain English
+- Mention the sheet name/type if available (e.g., "This looks like a floor plan sheet")
+- Highlight key items: dimensions, materials, notes, room labels, etc.
+- Example: "Page 5 has the 3rd floor electrical plan. I can see outlet placements, circuit routing, and some notes about panel locations. The main features are..."
 
-TONE:
-- Expert estimator copilot
-- Helpful, collaborative, transparent about uncertainty
-- Provides both high-level insight + actionable steps
-- Conversational but professional
-- Like talking to a knowledgeable colleague
+FOR BLUEPRINT QUESTIONS:
+- Synthesize the snippet text into a coherent answer
+- Don't just dump raw text - explain what it means
+- Connect it to other relevant info if available
 
-CONVERSATION MEMORY:
-- You remember what was discussed earlier in the conversation
-- Reference previous turns naturally: "Earlier you asked about roof scope; here's how this connects..."
-- Build on previous context without repeating everything
+FOR TAKEOFF QUESTIONS:
+- Lead with the numbers: "About 1,240 SF of flooring" not "The takeoff indicates approximately..."
+- Group related items logically
+- Mention locations and page references when available
 
-CONTEXT USAGE:
-- Use ALL available context: conversation history, project metadata, takeoff items, blueprint snippets, related sheets
-- You MUST synthesize the provided context into a helpful answer - don't just say you can't find information
-- If blueprint snippets are provided, USE THEM to answer questions about the project, materials, scope, etc.
-- If takeoff items are provided, USE THEM to provide specific quantities, costs, and item details
-- Explain WHY you're including certain information: "Because you asked about waterproofing, I also checked the general notes on page G5."
-- Be transparent about what you know and what you don't: "I can see the quantities, but I don't have visibility into the unit costs for this category."
+WHAT TO AVOID:
+- Don't start with "Based on the context provided..." or "According to the data..."
+- Don't apologize excessively - just be helpful
+- Don't say "I don't have access to..." if you have context - use what's there
+- Don't be overly formal or robotic
+- Don't list raw data without explanation
 
-UNCERTAINTY HANDLING:
-- If context is provided but doesn't directly answer the question, synthesize what IS available and provide related insights
-- Don't say "I couldn't find information" if context is provided - use what's available
-- Don't hallucinate inaccessible architectural details
-- Be clear about confidence levels: "This seems likely based on the specs, but you should verify with the architect."
+EXAMPLES OF GOOD RESPONSES:
+- "Page 5 has the second floor plan. I can see the main living area layout with about 1,200 SF, plus 3 bedrooms on the north side. There are some notes about HVAC locations near the hallway."
+- "The roof specs call for TPO membrane with tapered insulation. Based on the takeoff, that's about 2,400 SF at roughly $12/SF installed."
+- "Looks like there are 14 doors total in the takeoff - 8 interior passage doors and 6 exterior. Most are on the first floor according to the page references."
 
-CRITICAL: When context is provided in the user message, you MUST use it to answer. Do not return empty or generic responses.
-
-Remember: You're a teammate, not a calculator. Think, reason, and help the user understand their project better.`
+Remember: You're having a conversation, not writing a report. Be natural and helpful.`
 
 /**
  * Determines which system prompt to use based on classification
@@ -152,126 +142,113 @@ export function buildUserPrompt(
 ): string {
   const parts: string[] = []
 
-  parts.push(`Here is the current user question:\n${userQuestion}\n`)
+  // Check if this is a page-specific question
+  const isPageQuestion = context.notes?.some(note => note.includes('specifically asked about page'))
 
-  parts.push('Here is the relevant context you should use:')
-
-  const contextObj: any = {}
-
-  if (context.recent_conversation && context.recent_conversation.length > 0) {
-    contextObj.conversation_history = context.recent_conversation
-  }
-
-  if (context.project_metadata) {
-    contextObj.project_metadata = context.project_metadata
-  }
-
-  if (context.takeoff_context) {
-    contextObj.takeoff_context = context.takeoff_context
-  }
-
-  if (context.blueprint_context) {
-    contextObj.blueprint_context = context.blueprint_context
-  }
-
-  if (context.related_sheets && context.related_sheets.length > 0) {
-    contextObj.related_sheets = context.related_sheets
-  }
-
-  if (context.global_scope_summary) {
-    contextObj.global_scope = context.global_scope_summary
-  }
-
-  if (context.notes && context.notes.length > 0) {
-    contextObj.notes = context.notes
-  }
-
-  // Format context more naturally instead of raw JSON
+  // Format context more naturally
   const contextParts: string[] = []
 
-  // Project metadata
+  // Project metadata (brief)
   if (context.project_metadata) {
     const meta = context.project_metadata
-    contextParts.push(`PROJECT INFORMATION:`)
-    if (meta.job_name) contextParts.push(`- Job: ${meta.job_name}`)
-    if (meta.plan_title) contextParts.push(`- Plan: ${meta.plan_title}`)
-    if (meta.address) contextParts.push(`- Location: ${meta.address}`)
-    if (meta.disciplines && meta.disciplines.length > 0) {
-      contextParts.push(`- Disciplines: ${meta.disciplines.join(', ')}`)
+    const projectInfo: string[] = []
+    if (meta.plan_title) projectInfo.push(meta.plan_title)
+    if (meta.job_name && meta.job_name !== meta.plan_title) projectInfo.push(`(${meta.job_name})`)
+    if (projectInfo.length > 0) {
+      contextParts.push(`Project: ${projectInfo.join(' ')}`)
     }
-    contextParts.push('')
   }
 
-  // Blueprint snippets - format as readable text
-  if (context.blueprint_context && context.blueprint_context.chunks.length > 0) {
-    contextParts.push(`BLUEPRINT TEXT SNIPPETS (${context.blueprint_context.chunks.length} snippets):`)
-    context.blueprint_context.chunks.forEach((chunk: any, idx: number) => {
-      const pageInfo = chunk.page_number ? ` (Page ${chunk.page_number})` : ''
-      const sheetInfo = chunk.sheet_name ? ` [Sheet: ${chunk.sheet_name}]` : ''
-      contextParts.push(`\nSnippet ${idx + 1}${pageInfo}${sheetInfo}:`)
-      contextParts.push(chunk.text)
+  // Related sheets - show first for page questions
+  if (context.related_sheets && context.related_sheets.length > 0 && isPageQuestion) {
+    contextParts.push(`\nSheet Info:`)
+    context.related_sheets.forEach((sheet: any) => {
+      const sheetParts = [`Page ${sheet.page_number}`]
+      if (sheet.title) sheetParts.push(`- "${sheet.title}"`)
+      if (sheet.discipline) sheetParts.push(`(${sheet.discipline})`)
+      if (sheet.sheet_type) sheetParts.push(`[${sheet.sheet_type}]`)
+      contextParts.push(sheetParts.join(' '))
     })
-    contextParts.push('')
   }
 
-  // Takeoff items
+  // Blueprint snippets - format as readable text grouped by page
+  if (context.blueprint_context && context.blueprint_context.chunks.length > 0) {
+    // Group chunks by page for cleaner presentation
+    const chunksByPage = new Map<number | string, any[]>()
+    context.blueprint_context.chunks.forEach((chunk: any) => {
+      const pageKey = chunk.page_number || 'unknown'
+      if (!chunksByPage.has(pageKey)) {
+        chunksByPage.set(pageKey, [])
+      }
+      chunksByPage.get(pageKey)!.push(chunk)
+    })
+
+    contextParts.push(`\nBlueprint Content:`)
+    chunksByPage.forEach((chunks, pageKey) => {
+      const pageHeader = pageKey !== 'unknown' ? `Page ${pageKey}` : 'General'
+      const sheetName = chunks[0]?.sheet_name
+      const headerParts = [pageHeader]
+      if (sheetName) headerParts.push(`(${sheetName})`)
+      
+      contextParts.push(`\n[${headerParts.join(' ')}]`)
+      chunks.forEach((chunk: any) => {
+        // Clean up the text - remove excessive whitespace
+        const cleanedText = chunk.text.replace(/\s+/g, ' ').trim()
+        if (cleanedText.length > 0) {
+          contextParts.push(cleanedText)
+        }
+      })
+    })
+  }
+
+  // Takeoff items (if relevant)
   if (context.takeoff_context && context.takeoff_context.items.length > 0) {
-    contextParts.push(`TAKEOFF ITEMS (${context.takeoff_context.items.length} items):`)
-    context.takeoff_context.items.slice(0, 20).forEach((item: any) => {
-      const parts = [`- ${item.name || item.category}`]
+    contextParts.push(`\nTakeoff Items:`)
+    context.takeoff_context.items.slice(0, 15).forEach((item: any) => {
+      const itemParts: string[] = []
+      itemParts.push(`• ${item.name || item.category}`)
       if (item.quantity !== null && item.quantity !== undefined) {
-        parts.push(`${item.quantity} ${item.unit || ''}`.trim())
+        itemParts.push(`— ${item.quantity} ${item.unit || ''}`.trim())
       }
       if (item.cost_total !== null && item.cost_total !== undefined) {
-        parts.push(`$${item.cost_total.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+        itemParts.push(`($${item.cost_total.toLocaleString('en-US', { maximumFractionDigits: 0 })})`)
       }
-      if (item.location) parts.push(`@ ${item.location}`)
-      if (item.page_number) parts.push(`(Page ${item.page_number})`)
-      contextParts.push(parts.join(' — '))
+      if (item.location) itemParts.push(`@ ${item.location}`)
+      if (item.page_number) itemParts.push(`[pg ${item.page_number}]`)
+      contextParts.push(itemParts.join(' '))
     })
-    if (context.takeoff_context.items.length > 20) {
-      contextParts.push(`...and ${context.takeoff_context.items.length - 20} more items`)
+    if (context.takeoff_context.items.length > 15) {
+      contextParts.push(`...plus ${context.takeoff_context.items.length - 15} more items`)
     }
-    if (context.takeoff_context.summary.total_quantity) {
-      contextParts.push(`\nTotal quantity: ${context.takeoff_context.summary.total_quantity.toLocaleString('en-US')}`)
+    if (context.takeoff_context.summary.total_quantity && context.takeoff_context.summary.total_quantity > 0) {
+      contextParts.push(`Total: ${context.takeoff_context.summary.total_quantity.toLocaleString('en-US')} units`)
     }
-    if (context.takeoff_context.summary.total_cost) {
-      contextParts.push(`Total cost: $${context.takeoff_context.summary.total_cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+    if (context.takeoff_context.summary.total_cost && context.takeoff_context.summary.total_cost > 0) {
+      contextParts.push(`Cost: $${context.takeoff_context.summary.total_cost.toLocaleString('en-US', { maximumFractionDigits: 0 })}`)
     }
-    contextParts.push('')
   }
 
-  // Related sheets
-  if (context.related_sheets && context.related_sheets.length > 0) {
-    contextParts.push(`RELATED SHEETS:`)
-    context.related_sheets.forEach((sheet: any) => {
-      const parts = [`- Page ${sheet.page_number}`]
-      if (sheet.title) parts.push(`"${sheet.title}"`)
-      if (sheet.discipline) parts.push(`(${sheet.discipline})`)
-      contextParts.push(parts.join(' '))
+  // Related sheets (for non-page questions)
+  if (context.related_sheets && context.related_sheets.length > 0 && !isPageQuestion) {
+    contextParts.push(`\nRelated Sheets:`)
+    context.related_sheets.slice(0, 5).forEach((sheet: any) => {
+      const sheetParts = [`Page ${sheet.page_number}`]
+      if (sheet.title) sheetParts.push(`"${sheet.title}"`)
+      if (sheet.discipline) sheetParts.push(`(${sheet.discipline})`)
+      contextParts.push(sheetParts.join(' - '))
     })
-    contextParts.push('')
   }
 
-  // Add formatted context
+  // Build the final prompt
+  parts.push(`User question: ${userQuestion}`)
+  
   if (contextParts.length > 0) {
-    parts.push(contextParts.join('\n'))
-  } else {
-    // Fallback to JSON if no formatted context
-    parts.push(JSON.stringify(contextObj, null, 2))
+    parts.push(`\n---\nContext from the plans:\n${contextParts.join('\n')}`)
   }
 
-  parts.push(`
-INSTRUCTIONS:
-- Answer the user's question using the context above.
-- Synthesize the blueprint snippets to answer questions about the project, materials, scope, etc.
-- Use takeoff items to provide specific quantities and costs when relevant.
-- Be conversational and helpful - act like an expert estimator teammate.
-- Reference specific pages or sheets when mentioning information from the blueprints.
-- If the question asks for a summary, synthesize information from all available sources.
+  // Add brief instruction
+  parts.push(`\n---\nAnswer naturally in 2-4 sentences or short bullet points. Lead with the key information.`)
 
-Now answer: ${userQuestion}`)
-
-  return parts.join('\n\n')
+  return parts.join('\n')
 }
 

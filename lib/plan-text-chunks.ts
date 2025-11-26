@@ -1,6 +1,8 @@
 import OpenAI from 'openai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
+import { extractTextWithOCR } from '@/lib/ingestion/pdf-ocr-extractor'
+import type { OCRPageText } from '@/lib/ingestion/pdf-ocr-extractor'
 
 const DEFAULT_STORAGE_BUCKET = process.env.NEXT_PUBLIC_PLAN_STORAGE_BUCKET || 'job-plans'
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small'
@@ -77,13 +79,63 @@ export async function ingestPlanTextChunks(
 
   const pdfBuffer = await downloadPlanPdf(supabase, plan.file_path)
 
-  const pageTexts = await extractTextPerPage(pdfBuffer)
+  // Step 1: Try regular text extraction first (for native PDFs)
+  let pageTexts = await extractTextPerPage(pdfBuffer)
   const pageCount = pageTexts.length
 
   const warnings: string[] = []
 
-  if (pageCount === 0) {
-    warnings.push('No text extracted from the plan file.')
+  // Step 2: Check if we got meaningful text
+  // If no text or very sparse text (< 50 chars per page average), try OCR
+  const totalTextLength = pageTexts.reduce((sum, page) => sum + (page.text?.length || 0), 0)
+  const avgTextPerPage = pageCount > 0 ? totalTextLength / pageCount : 0
+  const isScannedPDF = pageCount === 0 || avgTextPerPage < 50
+
+  if (isScannedPDF && process.env.PDF_CO_API_KEY) {
+    console.log(`Low text content detected (avg ${avgTextPerPage.toFixed(0)} chars/page). Attempting OCR...`)
+    warnings.push('Low text content detected - using OCR for scanned blueprint')
+    
+    // Try OCR extraction
+    const ocrPageTexts = await extractTextWithOCR(pdfBuffer, plan.file_name || 'plan.pdf')
+    
+    if (ocrPageTexts.length > 0) {
+      // Merge OCR results with existing text (OCR takes precedence for pages with OCR data)
+      const ocrByPage = new Map<number, OCRPageText>()
+      ocrPageTexts.forEach((ocrPage) => {
+        ocrByPage.set(ocrPage.pageNumber, ocrPage)
+      })
+
+      // Combine: use OCR text if available, otherwise use original text
+      const combinedPages: PageText[] = []
+      const maxPages = Math.max(pageTexts.length, ocrPageTexts.length)
+      
+      for (let i = 1; i <= maxPages; i++) {
+        const ocrPage = ocrByPage.get(i)
+        const originalPage = pageTexts.find((p) => p.pageNumber === i)
+        
+        if (ocrPage) {
+          // Use OCR text, but merge with original if it exists
+          const combinedText = ocrPage.text + (originalPage?.text ? `\n${originalPage.text}` : '')
+          combinedPages.push({
+            pageNumber: i,
+            text: combinedText,
+            textItems: ocrPage.textItems || originalPage?.textItems || [],
+          })
+        } else if (originalPage) {
+          // Use original text
+          combinedPages.push(originalPage)
+        }
+      }
+      
+      pageTexts = combinedPages
+      console.log(`OCR extracted text from ${ocrPageTexts.length} pages. Total pages with text: ${pageTexts.length}`)
+    } else {
+      warnings.push('OCR extraction attempted but returned no text. Plan may be image-only.')
+    }
+  }
+
+  if (pageCount === 0 && pageTexts.length === 0) {
+    warnings.push('No text extracted from the plan file (neither native text nor OCR).')
   }
 
   const sheetIndexByPage = await loadSheetMetadataByPage(supabase, planId)
@@ -96,7 +148,7 @@ export async function ingestPlanTextChunks(
       pageNumber: page.pageNumber,
       pageIndex,
       sheetMeta,
-      totalPages: pageCount,
+      totalPages: pageTexts.length,
     })
     chunkCandidates.push(...pageChunks)
   })

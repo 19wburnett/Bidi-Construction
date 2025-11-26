@@ -23,7 +23,8 @@ import {
   Archive,
   FileText,
   Package,
-  Bell
+  Bell,
+  Bot
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
@@ -179,6 +180,11 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       label: 'Contacts',
       href: '/dashboard/contacts',
       icon: Users
+    },
+    {
+      label: 'Blueprint Chat',
+      href: '/dashboard/chat',
+      icon: Bot
     },
     {
       label: 'Settings',
