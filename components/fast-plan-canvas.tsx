@@ -144,6 +144,75 @@ interface FastPlanCanvasProps {
 
 type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select'
 
+// Error Boundary to catch render-phase errors from react-pdf
+// This is necessary because PDF.js can throw errors during the render phase
+// when the document is destroyed while pages are still rendering
+import React from 'react'
+
+interface PageErrorBoundaryState {
+  hasError: boolean
+  error: Error | null
+}
+
+interface PageErrorBoundaryProps {
+  children: React.ReactNode
+  pageNumber: number
+  onError?: (error: Error) => void
+  fallback?: React.ReactNode
+}
+
+class PageErrorBoundary extends React.Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
+  constructor(props: PageErrorBoundaryProps) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error): PageErrorBoundaryState {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Check if this is a PDF.js cleanup error (harmless during navigation)
+    if (error.message?.includes('messageHandler') || 
+        error.message?.includes('sendWithPromise') ||
+        error.message?.includes('destroyed')) {
+      console.debug(`PDF page ${this.props.pageNumber} render skipped - document was destroyed (normal during navigation)`)
+    } else {
+      console.error(`Page ${this.props.pageNumber} render error:`, error)
+    }
+    this.props.onError?.(error)
+  }
+
+  componentDidUpdate(prevProps: PageErrorBoundaryProps) {
+    // Reset error state when page number changes
+    if (prevProps.pageNumber !== this.props.pageNumber && this.state.hasError) {
+      this.setState({ hasError: false, error: null })
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Check if it's a harmless PDF.js error
+      const isHarmlessError = this.state.error?.message?.includes('messageHandler') ||
+                              this.state.error?.message?.includes('sendWithPromise') ||
+                              this.state.error?.message?.includes('destroyed')
+      
+      if (isHarmlessError) {
+        // Return null for harmless errors - the page will re-render when document is ready
+        return null
+      }
+      
+      return this.props.fallback || (
+        <div className="flex items-center justify-center p-4 bg-red-50 text-red-600 text-sm">
+          Failed to render page {this.props.pageNumber}
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
+
 interface EditingMeasurementState {
   id: string
   type: Drawing['type']
@@ -155,6 +224,13 @@ interface EditingMeasurementState {
 interface MeasurementHandleHit {
   drawing: Drawing
   handleIndex: number
+}
+
+interface SegmentHit {
+  drawing: Drawing
+  segmentIndex: number // Index of the first point of the segment (0-based)
+  clickX: number
+  clickY: number
 }
 
 export default function FastPlanCanvas({
@@ -239,6 +315,8 @@ export default function FastPlanCanvas({
   }, [pageDimensions])
   const [documentReady, setDocumentReady] = useState(false) // Track if PDF is ready for rendering
   const [documentComponentReady, setDocumentComponentReady] = useState(false) // Track if Document component's internal PDF is loaded
+  const documentInstanceId = useRef(0) // Unique ID for each document load to prevent stale page renders
+  const componentIsMounted = useRef(true) // Track component lifecycle to prevent state updates after unmount
   const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set([1])) // Track visible pages for lazy loading
   const hasAutoFitted = useRef(false) // Track if we've already auto-fitted
   const [searchMatches, setSearchMatches] = useState<Array<{ page: number; index: number }>>([])
@@ -367,6 +445,49 @@ export default function FastPlanCanvas({
     return cappedScale
   }, [scale, renderQuality])
   
+  // Suppress PDF.js messageHandler errors that occur during navigation/cleanup
+  // These are harmless race conditions that don't affect functionality
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const handleError = (event: ErrorEvent) => {
+      if (event.message?.includes('messageHandler') || 
+          event.message?.includes('sendWithPromise') ||
+          event.error?.message?.includes('messageHandler') ||
+          event.error?.message?.includes('sendWithPromise')) {
+        event.preventDefault()
+        console.debug('Suppressed PDF.js worker cleanup error (harmless during navigation)')
+        return true
+      }
+    }
+    
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const errorMessage = event.reason?.message || String(event.reason)
+      if (errorMessage?.includes('messageHandler') || 
+          errorMessage?.includes('sendWithPromise')) {
+        event.preventDefault()
+        console.debug('Suppressed PDF.js unhandled rejection (harmless during navigation)')
+        return
+      }
+    }
+    
+    window.addEventListener('error', handleError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+    
+    return () => {
+      window.removeEventListener('error', handleError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [])
+
+  // Track component mount state to prevent state updates after unmount
+  useEffect(() => {
+    componentIsMounted.current = true
+    return () => {
+      componentIsMounted.current = false
+    }
+  }, [])
+  
   useEffect(() => {
     if (typeof window !== 'undefined' && !workerReady) {
       const initWorker = async () => {
@@ -418,6 +539,9 @@ export default function FastPlanCanvas({
     setDocumentReady(false)
     setPdfLoaded(false)
     setPdfError(null)
+    // Reset pages to render to prevent stale page loads
+    setPagesToRender(new Set([1]))
+    setCurrentPage(1)
   }, [pdfUrl])
 
   // Mark document as ready once worker is ready and we have a URL
@@ -445,7 +569,10 @@ export default function FastPlanCanvas({
     
     // Schedule upgrade to high quality after page settles
     qualityUpgradeTimeoutRef.current = setTimeout(() => {
-      setRenderQuality('high')
+      // Guard against state updates after unmount
+      if (componentIsMounted.current) {
+        setRenderQuality('high')
+      }
     }, 500) // Upgrade after 500ms of idle (increased for stability)
     
     return () => {
@@ -1038,6 +1165,25 @@ export default function FastPlanCanvas({
             console.warn('Error drawing text, skipping:', error)
           }
         }
+
+        // Draw edit handles for area measurements (same as lines)
+        const shouldShowAreaHandles = isEditMode && (isEditingThis || !editingMeasurement)
+        if (shouldShowAreaHandles) {
+          ctx.save()
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2
+          for (let i = 0; i < points.length; i += 2) {
+            const handleX = points[i]
+            const handleY = points[i + 1]
+            const radius = isEditingThis ? 6 : 5
+            ctx.fillStyle = isEditingThis ? '#ffffff' : 'rgba(255,255,255,0.75)'
+            ctx.beginPath()
+            ctx.arc(handleX, handleY, radius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
       }
       ctx.restore()
     })
@@ -1470,12 +1616,15 @@ export default function FastPlanCanvas({
       let minDistance = Infinity
 
       drawings.forEach(drawing => {
-        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
+        // Check both line and area measurements
+        if ((drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') || drawing.pageNumber !== pageNumber) {
           return
         }
 
         const points = drawing.geometry?.points
-        if (!points || points.length < 4) {
+        // Lines need at least 4 coordinates (2 points), areas need at least 6 (3 points)
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) {
           return
         }
 
@@ -1526,15 +1675,19 @@ export default function FastPlanCanvas({
       }
 
       drawings.forEach(drawing => {
-        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
+        // Check both line and area measurements
+        if ((drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') || drawing.pageNumber !== pageNumber) {
           return
         }
 
         const points = drawing.geometry?.points
-        if (!points || points.length < 4) {
+        // Lines need at least 4 coordinates (2 points), areas need at least 6 (3 points)
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) {
           return
         }
 
+        // Check all segments between consecutive points
         for (let i = 0; i < points.length - 2; i += 2) {
           const x1 = points[i]
           const y1 = points[i + 1]
@@ -1549,6 +1702,106 @@ export default function FastPlanCanvas({
             closest = {
               drawing,
               handleIndex
+            }
+            minDistance = distance
+          }
+        }
+
+        // For areas, also check the closing segment (last point to first point)
+        if (drawing.type === 'measurement_area' && points.length >= 6) {
+          const x1 = points[points.length - 2]
+          const y1 = points[points.length - 1]
+          const x2 = points[0]
+          const y2 = points[1]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            const distToStart = Math.sqrt(Math.pow(worldX - x1, 2) + Math.pow(worldY - y1, 2))
+            const distToEnd = Math.sqrt(Math.pow(worldX - x2, 2) + Math.pow(worldY - y2, 2))
+            // For closing segment: last point index or first point index (0)
+            const handleIndex = distToStart <= distToEnd ? (points.length - 2) / 2 : 0
+            closest = {
+              drawing,
+              handleIndex
+            }
+            minDistance = distance
+          }
+        }
+      })
+
+      return closest
+    },
+    [drawings]
+  )
+
+  // Get exact segment that was clicked (for adding new points)
+  const getSegmentAtPoint = useCallback(
+    (pageNumber: number, worldX: number, worldY: number, targetDrawingId?: string): SegmentHit | null => {
+      const threshold = 18
+      let closest: SegmentHit | null = null
+      let minDistance = Infinity
+
+      const distanceToSegment = (
+        px: number, py: number,
+        x1: number, y1: number,
+        x2: number, y2: number
+      ) => {
+        const dx = x2 - x1
+        const dy = y2 - y1
+        if (dx === 0 && dy === 0) {
+          return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
+        }
+        const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+        const clampedT = Math.max(0, Math.min(1, t))
+        const closestX = x1 + clampedT * dx
+        const closestY = y1 + clampedT * dy
+        return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
+      }
+
+      drawings.forEach(drawing => {
+        // If targetDrawingId is specified, only check that drawing
+        if (targetDrawingId && drawing.id !== targetDrawingId) return
+        if ((drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') || drawing.pageNumber !== pageNumber) {
+          return
+        }
+
+        const points = drawing.geometry?.points
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) return
+
+        // Check all segments between consecutive points
+        for (let i = 0; i < points.length - 2; i += 2) {
+          const x1 = points[i]
+          const y1 = points[i + 1]
+          const x2 = points[i + 2]
+          const y2 = points[i + 3]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            closest = {
+              drawing,
+              segmentIndex: i / 2, // Index of first point of this segment
+              clickX: worldX,
+              clickY: worldY
+            }
+            minDistance = distance
+          }
+        }
+
+        // For areas, also check the closing segment (last point to first point)
+        if (drawing.type === 'measurement_area' && points.length >= 6) {
+          const x1 = points[points.length - 2]
+          const y1 = points[points.length - 1]
+          const x2 = points[0]
+          const y2 = points[1]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            closest = {
+              drawing,
+              segmentIndex: (points.length - 2) / 2, // Last point index (closing segment)
+              clickX: worldX,
+              clickY: worldY
             }
             minDistance = distance
           }
@@ -1778,6 +2031,7 @@ export default function FastPlanCanvas({
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
     } else if (selectedTool === 'measurement_edit') {
+      // Priority 1: Check if clicking on a handle (vertex point) to drag it
       const existingHandle = getMeasurementHandleAtPoint(pageNumber, baseWorldX, baseWorldY)
       if (existingHandle && existingHandle.drawing.geometry?.points) {
         setEditingMeasurement({
@@ -1791,17 +2045,66 @@ export default function FastPlanCanvas({
         return
       }
 
-      const nearbySegment = getMeasurementSegmentAtPoint(pageNumber, baseWorldX, baseWorldY)
-      if (nearbySegment && nearbySegment.drawing.geometry?.points) {
+      // Priority 2: Check if clicking on a segment/edge
+      const segmentHit = getSegmentAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (segmentHit && segmentHit.drawing.geometry?.points) {
+        // If clicking on the currently selected shape's segment, add a new point
+        if (editingMeasurement && editingMeasurement.id === segmentHit.drawing.id) {
+          const points = [...editingMeasurement.points]
+          const segmentIndex = segmentHit.segmentIndex
+          
+          // Insert new point after segmentIndex
+          // For a segment from point[segmentIndex] to point[segmentIndex+1] (or point[0] for closing segment)
+          const insertPosition = (segmentIndex + 1) * 2
+          
+          // For the closing segment of an area, we need to insert at the end (before wrapping to first)
+          const isClosingSegment = segmentHit.drawing.type === 'measurement_area' && 
+            segmentIndex === (points.length - 2) / 2
+          
+          if (isClosingSegment) {
+            // Insert at the end of the points array
+            points.push(baseWorldX, baseWorldY)
+          } else {
+            // Insert in the middle
+            points.splice(insertPosition, 0, baseWorldX, baseWorldY)
+          }
+          
+          // Update the editing measurement with new point and start dragging it
+          const newHandleIndex = isClosingSegment ? (points.length - 2) / 2 : segmentIndex + 1
+          setEditingMeasurement({
+            ...editingMeasurement,
+            points,
+            handleIndex: newHandleIndex
+          })
+          setIsAdjustingMeasurement(true)
+          return
+        }
+        
+        // Clicking on a different shape's segment - select it
         setEditingMeasurement({
-          id: nearbySegment.drawing.id,
-          type: nearbySegment.drawing.type,
-          pageNumber: nearbySegment.drawing.pageNumber,
-          points: [...nearbySegment.drawing.geometry.points],
-          handleIndex: nearbySegment.handleIndex
+          id: segmentHit.drawing.id,
+          type: segmentHit.drawing.type,
+          pageNumber: segmentHit.drawing.pageNumber,
+          points: [...segmentHit.drawing.geometry.points],
+          handleIndex: segmentHit.segmentIndex
+        })
+        setIsAdjustingMeasurement(false)
+        return
+      }
+
+      // Priority 3: Check if clicking inside an area shape (for selection/deletion)
+      const clickedMeasurement = getMeasurementAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (clickedMeasurement && clickedMeasurement.geometry?.points) {
+        setEditingMeasurement({
+          id: clickedMeasurement.id,
+          type: clickedMeasurement.type,
+          pageNumber: clickedMeasurement.pageNumber,
+          points: [...clickedMeasurement.geometry.points],
+          handleIndex: 0 // Default to first handle
         })
         setIsAdjustingMeasurement(false)
       } else {
+        // Clicked on empty space - deselect
         setEditingMeasurement(null)
         setIsAdjustingMeasurement(false)
       }
@@ -1919,7 +2222,7 @@ export default function FastPlanCanvas({
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
     }
-  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, getMeasurementAtPoint, finalizeMeasurementFromDrawing, selectedMeasurementIds, onSelectedMeasurementsChange])
+  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, getSegmentAtPoint, getMeasurementAtPoint, finalizeMeasurementFromDrawing, selectedMeasurementIds, onSelectedMeasurementsChange, editingMeasurement])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -2324,8 +2627,13 @@ export default function FastPlanCanvas({
                 )
               }}
               onLoadSuccess={(pdf: { numPages: number }) => {
+                // Guard against state updates after unmount
+                if (!componentIsMounted.current) return
+                
                 // Document component's internal PDF is now fully loaded and ready
-                console.log('PDF Document component loaded successfully, pages:', pdf.numPages)
+                // Increment instance ID to ensure stale page renders don't try to access destroyed document
+                documentInstanceId.current += 1
+                console.log('PDF Document component loaded successfully, pages:', pdf.numPages, 'instance:', documentInstanceId.current)
                 
                 // Get page count from the Document component's PDF instance
                 // This avoids loading the PDF twice and prevents worker state conflicts
@@ -2339,6 +2647,14 @@ export default function FastPlanCanvas({
                 setDocumentComponentReady(true)
               }}
               onLoadError={(error: Error) => {
+                // Check for PDF.js cleanup errors (harmless)
+                if (error.message?.includes('messageHandler') || error.message?.includes('sendWithPromise')) {
+                  console.debug('PDF Document cleanup error (harmless during navigation)')
+                  return
+                }
+                // Guard against state updates after unmount
+                if (!componentIsMounted.current) return
+                
                 console.error('PDF Document load error:', error)
                 setPdfError('Failed to load PDF document. You can still use drawing tools on a blank canvas.')
                 setPdfLoaded(true) // Still allow drawing tools
@@ -2380,7 +2696,7 @@ export default function FastPlanCanvas({
                   
                   return (
                     <div 
-                      key={`page-container-${pageNum}`}
+                      key={`page-container-${documentInstanceId.current}-${pageNum}`}
                       style={{ 
                         display: isCurrentPage ? 'block' : 'none',
                         position: isCurrentPage ? 'relative' : 'absolute',
@@ -2388,118 +2704,138 @@ export default function FastPlanCanvas({
                         pointerEvents: isCurrentPage ? 'auto' : 'none',
                       }}
                     >
-                      <Page
-                        key={`page-${pageNum}`}
+                      <PageErrorBoundary 
                         pageNumber={pageNum}
-                        scale={isCurrentPage ? pageScale : scale * 1.5}
-                        width={612}
-                        renderTextLayer={isCurrentPage && shouldRenderTextLayer}
-                        renderAnnotationLayer={false}
-                        className="shadow-lg relative"
-                        style={{ 
-                          display: 'block', 
-                          position: 'relative', 
-                          zIndex: 1,
-                          width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`,
-                          height: 'auto',
-                          backgroundColor: 'white',
-                        }}
-                        loading={isCurrentPage ? (
-                          <div className="bg-white flex items-center justify-center text-gray-400 text-sm" style={{ width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`, backgroundColor: 'white' }}>
-                            Loading page {pageNum}...
+                        fallback={isCurrentPage ? (
+                          <div className="bg-white flex items-center justify-center text-gray-400 text-sm p-4" style={{ width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`, minHeight: '200px', backgroundColor: 'white' }}>
+                            Reloading page {pageNum}...
                           </div>
                         ) : null}
-                        onLoadSuccess={(page: { height: number; width: number }) => {
-                          // Calculate dimensions based on constrained width (612) and PDF aspect ratio
-                          // react-pdf scales the PDF to fit the specified width, so we use that as base
-                          const baseWidth = 612
-                          const aspectRatio = page.height / page.width
-                          const scaledWidth = baseWidth * scale
-                          const scaledHeight = baseWidth * aspectRatio * scale
-                          setPageDimensions((prev: Map<number, { width: number; height: number }>) => {
-                            const newDimensions = new Map(prev)
-                            newDimensions.set(pageNum, { width: scaledWidth, height: scaledHeight })
-                            return newDimensions
-                          })
-                        }}
-                        onLoadError={(error: Error) => {
-                          if (isCurrentPage) {
-                            console.error(`Error loading page ${pageNum}:`, error)
-                          }
-                        }}
-                        onRenderError={(error: Error) => {
-                          if (!isCurrentPage) return // Ignore errors on prefetched pages
-                          console.error(`Error rendering page ${pageNum}:`, error)
-                          // If it's a worker error during quality upgrade, fall back to low quality
-                          if (error.message?.includes('messageHandler') || error.message?.includes('worker') || error.message?.includes('sendWithPromise')) {
-                            console.warn('PDF.js worker error detected')
-                            // Cancel quality upgrade and stay at low quality
-                            if (qualityUpgradeTimeoutRef.current) {
-                              clearTimeout(qualityUpgradeTimeoutRef.current)
+                      >
+                        <Page
+                          key={`page-${documentInstanceId.current}-${pageNum}`}
+                          pageNumber={pageNum}
+                          scale={isCurrentPage ? pageScale : scale * 1.5}
+                          width={612}
+                          renderTextLayer={isCurrentPage && shouldRenderTextLayer}
+                          renderAnnotationLayer={false}
+                          className="shadow-lg relative"
+                          style={{ 
+                            display: 'block', 
+                            position: 'relative', 
+                            zIndex: 1,
+                            width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`,
+                            height: 'auto',
+                            backgroundColor: 'white',
+                          }}
+                          loading={isCurrentPage ? (
+                            <div className="bg-white flex items-center justify-center text-gray-400 text-sm" style={{ width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`, backgroundColor: 'white' }}>
+                              Loading page {pageNum}...
+                            </div>
+                          ) : null}
+                          onLoadSuccess={(page: { height: number; width: number }) => {
+                            // Guard against state updates after unmount
+                            if (!componentIsMounted.current) return
+                            // Calculate dimensions based on constrained width (612) and PDF aspect ratio
+                            // react-pdf scales the PDF to fit the specified width, so we use that as base
+                            const baseWidth = 612
+                            const aspectRatio = page.height / page.width
+                            const scaledWidth = baseWidth * scale
+                            const scaledHeight = baseWidth * aspectRatio * scale
+                            setPageDimensions((prev: Map<number, { width: number; height: number }>) => {
+                              const newDimensions = new Map(prev)
+                              newDimensions.set(pageNum, { width: scaledWidth, height: scaledHeight })
+                              return newDimensions
+                            })
+                          }}
+                          onLoadError={(error: Error) => {
+                            // Ignore errors for destroyed documents (messageHandler null)
+                            // This happens during rapid page changes or document reload
+                            if (error.message?.includes('messageHandler') || error.message?.includes('sendWithPromise')) {
+                              console.debug(`Page ${pageNum} load skipped - document was destroyed (normal during navigation)`)
+                              return
                             }
-                            // If we're at high quality, fall back to low
-                            if (renderQuality === 'high') {
-                              setRenderQuality('low')
+                            if (isCurrentPage) {
+                              console.error(`Error loading page ${pageNum}:`, error)
                             }
-                          }
-                        }}
-                        onRenderSuccess={() => {
-                          if (!isCurrentPage) return // Skip post-render processing for prefetched pages
-                    // Ensure canvas quality settings are applied for crisp rendering
-                    if (typeof window !== 'undefined') {
-                      setTimeout(() => {
-                        const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
-                        if (pageContainer) {
-                          // Ensure container has white background
-                          pageContainer.style.backgroundColor = 'white'
-                          
-                          const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
-                          if (canvas) {
-                            const ctx = canvas.getContext('2d', { willReadFrequently: false })
-                            if (ctx) {
-                              // Fill canvas with white background behind PDF content
-                              // This ensures any transparent areas show white instead of showing through
-                              // Using destination-over to draw white behind existing content
-                              const originalComposite = ctx.globalCompositeOperation
-                              ctx.globalCompositeOperation = 'destination-over'
-                              ctx.fillStyle = 'white'
-                              ctx.fillRect(0, 0, canvas.width, canvas.height)
-                              ctx.globalCompositeOperation = originalComposite
-                              
-                              // Enable image smoothing for better quality when zoomed
-                              // The high-resolution render combined with smoothing gives best results
-                              ctx.imageSmoothingEnabled = true
-                              ctx.imageSmoothingQuality = 'high'
+                          }}
+                          onRenderError={(error: Error) => {
+                            if (!isCurrentPage) return // Ignore errors on prefetched pages
+                            // Silently handle PDF.js cleanup errors
+                            if (error.message?.includes('messageHandler') || error.message?.includes('worker') || error.message?.includes('sendWithPromise')) {
+                              console.debug('PDF.js worker cleanup error (harmless during navigation)')
+                              // Cancel quality upgrade and stay at low quality
+                              if (qualityUpgradeTimeoutRef.current) {
+                                clearTimeout(qualityUpgradeTimeoutRef.current)
+                              }
+                              // If we're at high quality, fall back to low
+                              if (renderQuality === 'high' && componentIsMounted.current) {
+                                setRenderQuality('low')
+                              }
+                              return
                             }
-                            
-                            // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
-                            // but MUST be displayed at base size to match drawing canvas exactly
-                            // CSS transform handles visual zoom, keeping coordinate systems aligned
-                            const dims = pageDimensions.get(currentPage)
-                            const baseDisplayWidth = dims?.width || (PDF_BASE_WIDTH * scale)
-                            // Force exact width to match drawing canvas exactly - critical for alignment
-                            canvas.style.width = `${baseDisplayWidth}px`
-                            canvas.style.height = 'auto'
-                            canvas.style.maxWidth = `${baseDisplayWidth}px`
-                            canvas.style.minWidth = `${baseDisplayWidth}px`
-                            // Ensure no transforms are applied to canvas element itself
-                            canvas.style.transform = 'none'
-                            canvas.style.objectFit = 'contain'
-                            canvas.style.backgroundColor = 'white'
-                            // Use high-quality rendering for better appearance when zoomed
-                            canvas.style.imageRendering = 'auto'
-                            
-                            // Also ensure the canvas element itself has white background via CSS
-                            const canvasStyle = window.getComputedStyle(canvas)
-                            if (canvasStyle.backgroundColor === 'transparent' || canvasStyle.backgroundColor === 'rgba(0, 0, 0, 0)') {
-                              canvas.style.backgroundColor = 'white'
+                            console.error(`Error rendering page ${pageNum}:`, error)
+                          }}
+                          onRenderSuccess={() => {
+                            if (!isCurrentPage) return // Skip post-render processing for prefetched pages
+                            if (!componentIsMounted.current) return // Guard against updates after unmount
+                            // Ensure canvas quality settings are applied for crisp rendering
+                            if (typeof window !== 'undefined') {
+                              setTimeout(() => {
+                                if (!componentIsMounted.current) return // Double-check after timeout
+                                const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
+                                if (pageContainer) {
+                                  // Ensure container has white background
+                                  pageContainer.style.backgroundColor = 'white'
+                                  
+                                  const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
+                                  if (canvas) {
+                                    const ctx = canvas.getContext('2d', { willReadFrequently: false })
+                                    if (ctx) {
+                                      // Fill canvas with white background behind PDF content
+                                      // This ensures any transparent areas show white instead of showing through
+                                      // Using destination-over to draw white behind existing content
+                                      const originalComposite = ctx.globalCompositeOperation
+                                      ctx.globalCompositeOperation = 'destination-over'
+                                      ctx.fillStyle = 'white'
+                                      ctx.fillRect(0, 0, canvas.width, canvas.height)
+                                      ctx.globalCompositeOperation = originalComposite
+                                      
+                                      // Enable image smoothing for better quality when zoomed
+                                      // The high-resolution render combined with smoothing gives best results
+                                      ctx.imageSmoothingEnabled = true
+                                      ctx.imageSmoothingQuality = 'high'
+                                    }
+                                    
+                                    // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
+                                    // but MUST be displayed at base size to match drawing canvas exactly
+                                    // CSS transform handles visual zoom, keeping coordinate systems aligned
+                                    const dims = pageDimensions.get(currentPage)
+                                    const baseDisplayWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+                                    // Force exact width to match drawing canvas exactly - critical for alignment
+                                    canvas.style.width = `${baseDisplayWidth}px`
+                                    canvas.style.height = 'auto'
+                                    canvas.style.maxWidth = `${baseDisplayWidth}px`
+                                    canvas.style.minWidth = `${baseDisplayWidth}px`
+                                    // Ensure no transforms are applied to canvas element itself
+                                    canvas.style.transform = 'none'
+                                    canvas.style.objectFit = 'contain'
+                                    canvas.style.backgroundColor = 'white'
+                                    // Use high-quality rendering for better appearance when zoomed
+                                    canvas.style.imageRendering = 'auto'
+                                    
+                                    // Also ensure the canvas element itself has white background via CSS
+                                    const canvasStyle = window.getComputedStyle(canvas)
+                                    if (canvasStyle.backgroundColor === 'transparent' || canvasStyle.backgroundColor === 'rgba(0, 0, 0, 0)') {
+                                      canvas.style.backgroundColor = 'white'
+                                    }
+                                  }
+                                }
+                              }, 100)
                             }
-                          }
-                        }
-                      }, 100)
-                    }
-                  }}
-                      />
+                          }}
+                        />
+                      </PageErrorBoundary>
                     </div>
                   )
                 })}
@@ -2847,7 +3183,7 @@ export default function FastPlanCanvas({
             <div className="flex items-center gap-2 text-sm text-gray-700">
               <span className="font-medium">Editing</span>
               <span className="text-gray-400">|</span>
-              <span className="text-xs">Drag points to adjust</span>
+              <span className="text-xs">Drag points to adjust • Click edge to add point</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
