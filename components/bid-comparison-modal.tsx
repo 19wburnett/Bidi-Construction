@@ -21,7 +21,8 @@ import {
   Phone,
   Globe,
   Calendar,
-  Search
+  Search,
+  Download
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -414,21 +415,33 @@ export default function BidComparisonModal({
     }
   }
 
+  const [downloadingAttachment, setDownloadingAttachment] = useState<string | null>(null)
+  
   const handleDownloadAttachment = async (path: string, fileName: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    setDownloadingAttachment(path)
+    
     try {
-      const { data, error } = await supabase.storage
-        .from('bid-attachments')
-        .createSignedUrl(path, 60) // 60 seconds validity
-
-      if (error) throw error
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank')
-      }
+      // Use our API endpoint which sets proper Content-Disposition headers
+      const downloadUrl = `/api/download-attachment?path=${encodeURIComponent(path)}&fileName=${encodeURIComponent(fileName)}`
+      
+      // Create a link and trigger download
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = fileName
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      
+      setTimeout(() => {
+        document.body.removeChild(link)
+      }, 100)
     } catch (err: any) {
       console.error('Error downloading attachment:', err)
-      // Ideally show a toast here
+    } finally {
+      // Add a small delay before removing loading state so user sees feedback
+      setTimeout(() => setDownloadingAttachment(null), 500)
     }
   }
 
@@ -489,8 +502,8 @@ export default function BidComparisonModal({
           ) : (
             <>
               {/* Left Sidebar: Bids & Emails List */}
-              <div className="w-[320px] border-r flex flex-col bg-gray-50/50">
-                <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col">
+              <div className="w-[320px] border-r flex flex-col bg-gray-50/50 overflow-hidden">
+                <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
                   <div className="p-3 border-b bg-white">
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
@@ -512,7 +525,7 @@ export default function BidComparisonModal({
                     </TabsList>
                   </div>
                   
-                  <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3">
+                  <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
                     {bids.length === 0 && (
                       <div className="text-center py-8 text-gray-500">
                         <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
@@ -589,7 +602,7 @@ export default function BidComparisonModal({
                     })}
                   </TabsContent>
                   
-                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3">
+                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
                     {allRecipients.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">
                         <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
@@ -912,18 +925,34 @@ export default function BidComparisonModal({
                                 <Card>
                                     <CardContent className="p-4">
                                         <div className="text-sm font-medium text-gray-500 mb-1">Attachments</div>
-                                        <div className="space-y-1">
+                                        <div className="space-y-2">
                                             {selectedBid.bid_attachments.map(att => (
-                                                <div key={att.id} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
-                                                    <FileText className="h-4 w-4 mr-2" />
-                                                    <a
-                                                        href="#"
+                                                <div key={att.id} className="flex items-center justify-between gap-2 text-sm">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                                                        <span className="truncate text-gray-700" title={att.file_name}>
+                                                            {att.file_name}
+                                                        </span>
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 flex-shrink-0"
                                                         onClick={(e) => handleDownloadAttachment(att.file_path, att.file_name, e)}
-                                                        className="underline truncate block max-w-[150px]"
-                                                        title={att.file_name}
+                                                        disabled={downloadingAttachment === att.file_path}
                                                     >
-                                                        {att.file_name}
-                                                    </a>
+                                                        {downloadingAttachment === att.file_path ? (
+                                                          <>
+                                                            <div className="h-3.5 w-3.5 mr-1 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                                            Downloading...
+                                                          </>
+                                                        ) : (
+                                                          <>
+                                                            <Download className="h-3.5 w-3.5 mr-1" />
+                                                            Download
+                                                          </>
+                                                        )}
+                                                    </Button>
                                                 </div>
                                             ))}
                                         </div>
