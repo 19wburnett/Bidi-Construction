@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase'
 
-// Drawing interface - supports comments and measurements
+// Drawing interface - supports comments, measurements, and items
 export interface Drawing {
   id: string
-  type: 'comment' | 'measurement_line' | 'measurement_area'
+  type: 'comment' | 'measurement_line' | 'measurement_area' | 'item'
   geometry: {
     x?: number
     y?: number
@@ -51,6 +51,11 @@ export interface Drawing {
   resolvedAt?: string
   resolvedBy?: string
   resolvedByUsername?: string
+  // Item fields
+  itemType?: string // Type of item (door, window, outlet, fixture, etc.)
+  itemLabel?: string // Optional custom label/name
+  itemNotes?: string // Optional notes about the item
+  itemCategory?: string // Category grouping (e.g., "Electrical", "Plumbing", "HVAC")
 }
 
 // Removed DrawingPersistence class - drawing tools are no longer used, only comments

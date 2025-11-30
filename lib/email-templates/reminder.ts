@@ -175,3 +175,4 @@ export function generateReminderSubject(jobName: string, tradeCategory: string, 
   return `📬 Reminder: ${jobName} - ${tradeCategory} Bid Request`
 }
 
+

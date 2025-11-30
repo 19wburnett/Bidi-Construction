@@ -7,6 +7,7 @@ interface CommentBubbleProps {
   comment: Drawing
   isSelected?: boolean
   isHovered?: boolean
+  scale?: number
   onClick: (e: React.MouseEvent) => void
   onMouseEnter?: () => void
   onMouseLeave?: () => void
@@ -16,6 +17,7 @@ export default function CommentBubble({
   comment,
   isSelected = false,
   isHovered = false,
+  scale = 1.5,
   onClick,
   onMouseEnter,
   onMouseLeave
@@ -35,9 +37,10 @@ export default function CommentBubble({
   const bubbleColor = comment.style?.color || '#3b82f6'
   const bubbleSize = 24 // Base size in world coordinates (will scale with transform)
 
-  // Get world coordinates
-  const worldX = comment.geometry?.x ?? 0
-  const worldY = comment.geometry?.y ?? 0
+  // Get world coordinates - scale them from PDF base space to canvas space
+  // Coordinates are stored in PDF base space (normalized by scale)
+  const worldX = (comment.geometry?.x ?? 0) * scale
+  const worldY = (comment.geometry?.y ?? 0) * scale
 
   return (
     <div

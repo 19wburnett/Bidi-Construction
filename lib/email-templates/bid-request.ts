@@ -180,3 +180,4 @@ export function generateBidRequestSubject(jobName: string, tradeCategory: string
   return `Bid Request: ${jobName} - ${tradeCategory}`
 }
 
+
