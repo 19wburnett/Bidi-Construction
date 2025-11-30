@@ -1,14 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { listJobsForUser } from '@/lib/job-access'
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { 
   Building2, 
   Plus, 
@@ -33,9 +37,12 @@ import {
   Bell,
   FilePlus,
   UserPlus,
-  LayoutDashboard
+  LayoutDashboard,
+  Search,
+  Filter
 } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { staggerContainer, staggerItem, cardHover, pageVariants, skeletonPulse } from '@/lib/animations'
 import { Job } from '@/types/takeoff'
 import logo from '../../public/brand/Bidi Contracting Logo.svg'
@@ -50,15 +57,12 @@ interface DashboardStats {
   pendingBids: number
 }
 
-interface RecentJob {
-  id: string
-  name: string
-  location: string
-  status: string
-  created_at: string
+interface JobWithCounts extends Job {
   plan_count: number
   bid_package_count: number
   bid_count: number
+  membership_role: 'owner' | 'collaborator'
+  last_viewed_at?: string
 }
 
 interface ActivityItem {
@@ -73,12 +77,13 @@ interface ActivityItem {
 
 interface ActionableMetrics {
   pendingBidsCount: number
-  incompleteJobsCount: number // Jobs with 0 plans
+  incompleteJobsCount: number
   draftPackagesCount: number
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
@@ -96,8 +101,8 @@ export default function DashboardPage() {
     totalBids: 0,
     pendingBids: 0
   })
-  const [recentJobs, setRecentJobs] = useState<RecentJob[]>([])
-  const [heroJob, setHeroJob] = useState<RecentJob | null>(null)
+  const [jobs, setJobs] = useState<JobWithCounts[]>([])
+  const [heroJob, setHeroJob] = useState<JobWithCounts | null>(null)
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
   const [actionableMetrics, setActionableMetrics] = useState<ActionableMetrics>({
     pendingBidsCount: 0,
@@ -105,7 +110,25 @@ export default function DashboardPage() {
     draftPackagesCount: 0
   })
 
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('recent')
+
+  useEffect(() => {
+    const status = searchParams.get('status')
+    if (status) {
+      setStatusFilter(status)
+    }
+  }, [searchParams])
+
   const supabase = createClient()
+
+  const getCoverImageUrl = (path: string | null) => {
+    if (!path) return null
+    const { data } = supabase.storage.from('job-covers').getPublicUrl(path)
+    return data.publicUrl
+  }
 
   useEffect(() => {
     if (user) {
@@ -133,9 +156,7 @@ export default function DashboardPage() {
 
       if (error) {
         console.error('Error fetching subscription status:', error)
-        // Fallback: check if user has stripe_customer_id (old logic)
         if (error.code === 'PGRST116' || error.message.includes('subscription_status')) {
-          // Column doesn't exist yet, use old logic
           const { data: fallbackData } = await supabase
             .from('users')
             .select('stripe_customer_id')
@@ -165,7 +186,7 @@ export default function DashboardPage() {
       const memberships = await listJobsForUser(
         supabase,
         user.id,
-        'id, status, created_at, name, location'
+        'id, status, created_at, name, location, description, budget_range, cover_image_path'
       )
 
       const jobsData = memberships.map(({ job, role, last_viewed_at }) => ({
@@ -204,7 +225,6 @@ export default function DashboardPage() {
       const jobIds = jobsData.map(job => job.id)
       let bidsData: { id: string; status: string | null; bid_package_id: string | null; job_id: string | null; created_at: string; raw_email: string; subcontractors: any }[] = []
       
-      // Fetch bids linked through bid packages
       if (bidPackageIds.length > 0) {
         const { data: packageBidsResult, error: packageBidsError } = await supabase
           .from('bids')
@@ -216,7 +236,6 @@ export default function DashboardPage() {
         if (packageBidsResult) bidsData.push(...packageBidsResult)
       }
       
-      // Fetch bids directly linked to jobs via job_id
       if (jobIds.length > 0) {
         const { data: directBidsResult, error: directBidsError } = await supabase
           .from('bids')
@@ -226,7 +245,6 @@ export default function DashboardPage() {
 
         if (directBidsError) throw directBidsError
         if (directBidsResult) {
-          // Merge with existing bids, avoiding duplicates
           const existingIds = new Set(bidsData.map(bid => bid.id))
           const newBids = directBidsResult.filter(bid => !existingIds.has(bid.id))
           bidsData.push(...newBids)
@@ -241,7 +259,6 @@ export default function DashboardPage() {
       const totalBids = bidsData.length
       const pendingBids = bidsData.filter(bid => bid.status === 'pending').length
 
-      // Actionable Metrics
       const incompleteJobsCount = jobsData.filter(job => 
         plansData.filter(p => p.job_id === job.id).length === 0
       ).length
@@ -263,45 +280,40 @@ export default function DashboardPage() {
         pendingBids
       })
 
-      const recentJobsSorted = [...jobsData].sort(
-        (a, b) => {
-          const dateA = new Date(a.last_viewed_at || a.created_at).getTime()
-          const dateB = new Date(b.last_viewed_at || b.created_at).getTime()
-          return dateB - dateA
-        }
-      )
-
-      const formattedRecentJobs = recentJobsSorted.map((job) => {
+      // Format all jobs with counts
+      const formattedJobs: JobWithCounts[] = jobsData.map((job) => {
         const jobPackages = packagesData.filter(pkg => pkg.job_id === job.id)
         const jobPackageIds = jobPackages.map(pkg => pkg.id)
-        // Count bids linked through packages OR directly via job_id
         const jobBids = bidsData.filter(bid =>
           (bid.bid_package_id && jobPackageIds.includes(bid.bid_package_id)) ||
           (bid.job_id === job.id)
         )
 
         return {
-          id: job.id,
-          name: job.name,
-          location: job.location,
-          status: job.status,
-          created_at: job.created_at,
+          ...job,
           plan_count: plansData.filter(plan => plan.job_id === job.id).length,
           bid_package_count: jobPackages.length,
-          bid_count: jobBids.length
+          bid_count: jobBids.length,
+          membership_role: job.membership_role as 'owner' | 'collaborator'
         }
       })
 
-      setRecentJobs(formattedRecentJobs.slice(0, 5))
+      // Sort by last viewed/created
+      const sortedJobs = [...formattedJobs].sort((a, b) => {
+        const dateA = new Date(a.last_viewed_at || a.created_at).getTime()
+        const dateB = new Date(b.last_viewed_at || b.created_at).getTime()
+        return dateB - dateA
+      })
+
+      setJobs(sortedJobs)
       
       // Set Hero Job (First active job, or first job if none active)
-      const firstActive = formattedRecentJobs.find(j => ACTIVE_STATUSES.includes(j.status))
-      setHeroJob(firstActive || formattedRecentJobs[0] || null)
+      const firstActive = sortedJobs.find(j => ACTIVE_STATUSES.includes(j.status))
+      setHeroJob(firstActive || sortedJobs[0] || null)
 
       // --- Activity Feed Generation ---
       const activities: ActivityItem[] = []
 
-      // 1. New Jobs
       jobsData.forEach(job => {
         activities.push({
           id: `job-${job.id}`,
@@ -314,7 +326,6 @@ export default function DashboardPage() {
         })
       })
 
-      // 2. Plans Added
       plansData.forEach(plan => {
         const job = jobsData.find(j => j.id === plan.job_id)
         if (job) {
@@ -330,7 +341,6 @@ export default function DashboardPage() {
         }
       })
 
-      // 3. Bids Received
       bidsData.forEach(bid => {
         const pkg = packagesData.find(p => p.id === bid.bid_package_id)
         if (pkg) {
@@ -350,7 +360,6 @@ export default function DashboardPage() {
         }
       })
 
-      // 4. Packages Created
       packagesData.forEach(pkg => {
         const job = jobsData.find(j => j.id === pkg.job_id)
         if (job) {
@@ -366,7 +375,6 @@ export default function DashboardPage() {
         }
       })
 
-      // Sort and Slice
       activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       setActivityFeed(activities.slice(0, 10))
 
@@ -384,7 +392,6 @@ export default function DashboardPage() {
     setSubscriptionError('')
 
     try {
-      // Create Stripe checkout session for subscription
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: {
@@ -401,7 +408,6 @@ export default function DashboardPage() {
       if (stripeError) {
         setSubscriptionError(stripeError)
       } else if (url) {
-        // Redirect to Stripe checkout
         window.location.href = url
       }
     } catch (err) {
@@ -423,7 +429,7 @@ export default function DashboardPage() {
       case 'waiting_for_bids': return 'bg-purple-100 text-purple-800'
       case 'completed': return 'bg-green-100 text-green-800'
       case 'archived': return 'bg-gray-100 text-gray-600'
-      case 'active': return 'bg-green-100 text-green-800' // Legacy
+      case 'active': return 'bg-green-100 text-green-800'
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -436,6 +442,52 @@ export default function DashboardPage() {
       default: return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')
     }
   }
+
+  const getNextAction = (job: JobWithCounts) => {
+    switch (job.status) {
+      case 'draft':
+        return { label: 'Complete Details', href: `/dashboard/jobs/${job.id}/edit`, variant: 'default' as const }
+      case 'needs_takeoff':
+        return { label: 'Start Takeoff', href: `/dashboard/jobs/${job.id}/plans`, variant: 'default' as const }
+      case 'needs_packages':
+        return { label: 'Create Packages', href: `/dashboard/jobs/${job.id}`, variant: 'default' as const }
+      case 'waiting_for_bids':
+        if (job.bid_count > 0) {
+          return { label: 'Review Bids', href: `/dashboard/jobs/${job.id}`, variant: 'default' as const }
+        }
+        return { label: 'Invite Subs', href: `/dashboard/jobs/${job.id}`, variant: 'outline' as const }
+      case 'active':
+        return { label: 'View Dashboard', href: `/dashboard/jobs/${job.id}`, variant: 'outline' as const }
+      default:
+        return { label: 'View Job', href: `/dashboard/jobs/${job.id}`, variant: 'outline' as const }
+    }
+  }
+
+  // Filter and sort jobs
+  const filteredJobs = jobs
+    .filter(job => {
+      const matchesSearch = 
+        job.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (job.location && job.location.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (job.description && job.description.toLowerCase().includes(searchTerm.toLowerCase()))
+      const matchesStatus = statusFilter === 'all' || job.status === statusFilter
+      return matchesSearch && matchesStatus
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'name':
+          return a.name.localeCompare(b.name)
+        case 'location':
+          return (a.location || '').localeCompare(b.location || '')
+        case 'status':
+          return a.status.localeCompare(b.status)
+        case 'recent':
+        default:
+          const dateA = new Date(a.last_viewed_at || a.created_at).getTime()
+          const dateB = new Date(b.last_viewed_at || b.created_at).getTime()
+          return dateB - dateA
+      }
+    })
 
 
   // Show loading while checking subscription
@@ -588,12 +640,36 @@ export default function DashboardPage() {
             <p className="text-gray-600">Here's what's happening with your projects today.</p>
           </div>
           <div className="flex items-center gap-3">
-             <Link href="/dashboard/jobs/new">
-              <Button className="bg-orange hover:bg-orange/90 text-white">
-                <Plus className="h-4 w-4 mr-2" />
-                New Job
-              </Button>
-            </Link>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button className="bg-orange hover:bg-orange/90 text-white">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create New
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-2" align="end">
+                <div className="flex flex-col space-y-1">
+                  <Link href="/dashboard/jobs/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <Plus className="h-4 w-4 mr-2 text-orange" />
+                      Create Job
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/plans/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <FilePlus className="h-4 w-4 mr-2 text-blue-500" />
+                      Upload Plan
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/contacts">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <UserPlus className="h-4 w-4 mr-2 text-green-500" />
+                      Add Contact
+                    </Button>
+                  </Link>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </motion.div>
 
@@ -619,14 +695,34 @@ export default function DashboardPage() {
                   <CardContent className="p-6">
                     <div className="flex flex-col md:flex-row justify-between gap-6">
                       <div className="space-y-4 flex-1">
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="text-2xl font-bold text-gray-900">{heroJob.name}</h3>
-                            <Badge className={getStatusColor(heroJob.status)}>{formatStatus(heroJob.status)}</Badge>
+                        <div className="flex items-start gap-4">
+                          {/* Hero Job Cover Image */}
+                          <div className="flex-shrink-0">
+                            {heroJob.cover_image_path ? (
+                              <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm">
+                                <Image
+                                  src={getCoverImageUrl(heroJob.cover_image_path) || ''}
+                                  alt={heroJob.name}
+                                  width={64}
+                                  height={64}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center border-2 border-orange-200">
+                                <Building2 className="h-8 w-8 text-orange-500" />
+                              </div>
+                            )}
                           </div>
-                          <div className="flex items-center text-gray-500 text-sm">
-                            <MapPin className="h-4 w-4 mr-1" />
-                            {heroJob.location}
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="text-2xl font-bold text-gray-900">{heroJob.name}</h3>
+                              <Badge className={getStatusColor(heroJob.status)}>{formatStatus(heroJob.status)}</Badge>
+                            </div>
+                            <div className="flex items-center text-gray-500 text-sm">
+                              <MapPin className="h-4 w-4 mr-1" />
+                              {heroJob.location}
+                            </div>
                           </div>
                         </div>
                         
@@ -693,79 +789,262 @@ export default function DashboardPage() {
                 Needs Attention
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="bg-white border-orange/20 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                  <CardContent className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-orange-600">{actionableMetrics.pendingBidsCount}</p>
-                      <p className="text-sm font-medium text-gray-600">Pending Bids</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
-                      <FileText className="h-5 w-5 text-orange-600" />
-                    </div>
-                  </CardContent>
-                </Card>
+                <Link href="/dashboard?status=waiting_for_bids">
+                  <Card className="bg-white border-orange/20 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-2xl font-bold text-orange-600">{actionableMetrics.pendingBidsCount}</p>
+                        <p className="text-sm font-medium text-gray-600">Pending Bids</p>
+                      </div>
+                      <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-orange-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
 
-                 <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                  <CardContent className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900">{actionableMetrics.incompleteJobsCount}</p>
-                      <p className="text-sm font-medium text-gray-600">Jobs w/o Plans</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                      <AlertCircle className="h-5 w-5 text-gray-600" />
-                    </div>
-                  </CardContent>
-                </Card>
+                <Link href="/dashboard?status=needs_takeoff">
+                   <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900">{actionableMetrics.incompleteJobsCount}</p>
+                        <p className="text-sm font-medium text-gray-600">Jobs w/o Plans</p>
+                      </div>
+                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
+                        <AlertCircle className="h-5 w-5 text-gray-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
 
-                <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
-                  <CardContent className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900">{actionableMetrics.draftPackagesCount}</p>
-                      <p className="text-sm font-medium text-gray-600">Draft Packages</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                      <Package className="h-5 w-5 text-gray-600" />
-                    </div>
-                  </CardContent>
-                </Card>
+                <Link href="/dashboard?status=needs_packages">
+                  <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900">{actionableMetrics.draftPackagesCount}</p>
+                        <p className="text-sm font-medium text-gray-600">Draft Packages</p>
+                      </div>
+                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
+                        <Package className="h-5 w-5 text-gray-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
               </div>
             </motion.div>
 
-            {/* 3. Recent Jobs List */}
-             <motion.div variants={staggerItem}>
-                <div className="flex items-center justify-between mb-4">
-                   <h2 className="text-lg font-semibold text-gray-900">Recent Jobs</h2>
-                   <Link href="/dashboard/jobs" className="text-sm text-orange hover:underline flex items-center">
-                     View All <ArrowRight className="h-3 w-3 ml-1" />
-                   </Link>
-                </div>
-                <div className="space-y-3">
-                  {recentJobs.slice(0, 3).map((job) => (
-                    <Link href={`/dashboard/jobs/${job.id}`} key={job.id}>
-                      <Card className="hover:border-orange-300 transition-colors cursor-pointer group">
-                        <CardContent className="p-4 flex items-center justify-between">
-                           <div className="flex items-center gap-4">
-                              <div className="h-10 w-10 rounded bg-gray-100 flex items-center justify-center group-hover:bg-orange-50 transition-colors">
-                                <Building2 className="h-5 w-5 text-gray-500 group-hover:text-orange transition-colors" />
+            {/* 3. All Jobs with Search/Filters */}
+            <motion.div variants={staggerItem}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <Building2 className="h-5 w-5 mr-2 text-orange" />
+                  All Jobs
+                  <Badge variant="secondary" className="ml-2">{stats.totalJobs}</Badge>
+                </h2>
+              </div>
+
+              {/* Search and Filters */}
+              <Card className="mb-4">
+                <CardContent className="p-4">
+                  <div className="flex flex-col space-y-4">
+                    <div className="flex flex-col md:flex-row gap-4">
+                      <div className="flex-1">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <Input
+                            placeholder="Search jobs..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <Select value={sortBy} onValueChange={setSortBy}>
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue placeholder="Sort by" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="recent">Recent</SelectItem>
+                            <SelectItem value="name">Name A-Z</SelectItem>
+                            <SelectItem value="location">Location</SelectItem>
+                            <SelectItem value="status">Status</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    
+                    <Tabs defaultValue="all" value={statusFilter} onValueChange={setStatusFilter} className="w-full">
+                      <TabsList className="w-full justify-start overflow-x-auto bg-transparent p-0 border-b h-auto rounded-none">
+                        <TabsTrigger 
+                          value="all" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          All Jobs
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="active" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Active
+                        </TabsTrigger>
+                         <TabsTrigger 
+                          value="waiting_for_bids" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Bidding
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="draft" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Drafts
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="completed" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Completed
+                        </TabsTrigger>
+                         <TabsTrigger 
+                          value="archived" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Archived
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Jobs Grid */}
+              <AnimatePresence mode="wait">
+                {filteredJobs.length === 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-center py-12"
+                  >
+                    <Building2 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      {searchTerm || statusFilter !== 'all' ? 'No jobs found' : 'No jobs yet'}
+                    </h3>
+                    <p className="text-gray-600 mb-4">
+                      {searchTerm || statusFilter !== 'all' 
+                        ? 'Try adjusting your search or filters'
+                        : 'Create your first job to get started'
+                      }
+                    </p>
+                    {!searchTerm && statusFilter === 'all' && (
+                      <Link href="/dashboard/jobs/new">
+                        <Button>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Create Your First Job
+                        </Button>
+                      </Link>
+                    )}
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    variants={staggerContainer}
+                    initial="initial"
+                    animate="animate"
+                    className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                  >
+                    {filteredJobs.map((job) => (
+                      <motion.div
+                        key={job.id}
+                        variants={staggerItem}
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                      >
+                        <Link href={`/dashboard/jobs/${job.id}`}>
+                          <Card className="cursor-pointer h-full hover:border-orange-300 transition-colors group">
+                            <CardHeader className="pb-3">
+                              <div className="flex items-start gap-3">
+                                {/* Job Cover Image Thumbnail */}
+                                <div className="flex-shrink-0">
+                                  {job.cover_image_path ? (
+                                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200">
+                                      <Image
+                                        src={getCoverImageUrl(job.cover_image_path) || ''}
+                                        alt={job.name}
+                                        width={48}
+                                        height={48}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center">
+                                      <Building2 className="h-6 w-6 text-orange-500" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <CardTitle className="text-base mb-1 truncate">{job.name}</CardTitle>
+                                      {job.location && (
+                                        <CardDescription className="flex items-center text-sm">
+                                          <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
+                                          <span className="truncate">{job.location}</span>
+                                        </CardDescription>
+                                      )}
+                                    </div>
+                                    <Badge className={`${getStatusColor(job.status)} ml-2 flex-shrink-0`}>
+                                      {formatStatus(job.status)}
+                                    </Badge>
+                                  </div>
+                                </div>
                               </div>
-                              <div>
-                                <h4 className="font-medium text-gray-900">{job.name}</h4>
-                                <p className="text-sm text-gray-500">{job.location}</p>
+                            </CardHeader>
+                            <CardContent className="pt-0">
+                              <div className="flex items-center justify-between text-sm">
+                                <div className="flex items-center space-x-4">
+                                  <div className="flex items-center text-gray-500">
+                                    <FileText className="h-4 w-4 mr-1" />
+                                    {job.plan_count}
+                                  </div>
+                                  <div className="flex items-center text-gray-500">
+                                    <Package className="h-4 w-4 mr-1" />
+                                    {job.bid_package_count}
+                                  </div>
+                                  <div className="flex items-center text-gray-500">
+                                    <Users className="h-4 w-4 mr-1" />
+                                    {job.bid_count}
+                                  </div>
+                                </div>
+                                <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-orange transition-colors" />
                               </div>
-                           </div>
-                           <div className="flex items-center gap-4">
-                              <div className="text-right hidden sm:block">
-                                <p className="text-sm font-medium text-gray-900">{job.bid_count} Bids</p>
-                                <p className="text-xs text-gray-500">{formatStatus(job.status)}</p>
+                              
+                              <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                                <span className="text-xs text-gray-500 font-medium">Next Step</span>
+                                {(() => {
+                                  const action = getNextAction(job)
+                                  return (
+                                    <Badge 
+                                      variant="outline" 
+                                      className={`
+                                        bg-gray-50 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-200 transition-colors
+                                        ${action.variant === 'default' ? 'text-orange-700 border-orange-200 bg-orange-50' : 'text-gray-600'}
+                                      `}
+                                    >
+                                      {action.label}
+                                    </Badge>
+                                  )
+                                })()}
                               </div>
-                              <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-orange transition-colors" />
-                           </div>
-                        </CardContent>
-                      </Card>
-                    </Link>
-                  ))}
-                </div>
-             </motion.div>
+                            </CardContent>
+                          </Card>
+                        </Link>
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
 
           </motion.div>
 
@@ -787,26 +1066,33 @@ export default function DashboardPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-6 relative before:absolute before:inset-0 before:ml-2.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-300 before:to-transparent max-h-[400px] overflow-y-auto pr-2">
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
                     {activityFeed.length === 0 ? (
                        <p className="text-sm text-gray-500 text-center py-4">No recent activity.</p>
                     ) : (
                       activityFeed.map((item) => (
-                        <div key={item.id} className="relative flex items-start group">
-                           <div className="absolute left-0 h-5 w-5 rounded-full bg-white border-2 border-orange flex items-center justify-center z-10">
-                              <div className="h-2 w-2 rounded-full bg-orange" />
-                           </div>
-                           <div className="pl-8 w-full">
-                              <p className="text-xs text-gray-500 mb-0.5">
-                                {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                              <Link href={item.link} className="block group-hover:bg-gray-50 p-2 -ml-2 rounded transition-colors">
-                                <p className="text-sm font-medium text-gray-900">{item.title}</p>
-                                <p className="text-xs text-gray-500 line-clamp-1">{item.description}</p>
-                                <p className="text-xs text-gray-400 mt-1">{item.jobName}</p>
-                              </Link>
-                           </div>
-                        </div>
+                        <Link href={item.link} key={item.id} className="block group">
+                          <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100">
+                             <div className="mt-1 h-8 w-8 rounded-full bg-orange-50 flex items-center justify-center flex-shrink-0 group-hover:bg-white group-hover:border group-hover:border-orange-200 transition-all">
+                                {item.type === 'job_created' && <Building2 className="h-4 w-4 text-orange-600" />}
+                                {item.type === 'plan_added' && <FilePlus className="h-4 w-4 text-blue-600" />}
+                                {item.type === 'bid_received' && <DollarSign className="h-4 w-4 text-green-600" />}
+                                {item.type === 'package_created' && <Package className="h-4 w-4 text-purple-600" />}
+                             </div>
+                             <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <p className="text-sm font-medium text-gray-900 truncate pr-2">{item.title}</p>
+                                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                                    {new Date(item.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 line-clamp-1 mb-1">{item.description}</p>
+                                <div className="flex items-center text-xs text-gray-400">
+                                  <span className="truncate max-w-[150px]">{item.jobName}</span>
+                                </div>
+                             </div>
+                          </div>
+                        </Link>
                       ))
                     )}
                   </div>
@@ -826,14 +1112,14 @@ export default function DashboardPage() {
                       <Plus className="h-4 w-4 mr-2" /> Create New Job
                     </Button>
                    </Link>
-                   <Link href="/dashboard/jobs">
-                    <Button variant="ghost" className="w-full justify-start" size="sm">
-                      <Eye className="h-4 w-4 mr-2" /> View All Jobs
-                    </Button>
-                   </Link>
                    <Link href="/dashboard/contacts">
                     <Button variant="ghost" className="w-full justify-start" size="sm">
                       <UserPlus className="h-4 w-4 mr-2" /> Manage Contacts
+                    </Button>
+                   </Link>
+                   <Link href="/dashboard/settings">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <Eye className="h-4 w-4 mr-2" /> Settings
                     </Button>
                    </Link>
                 </CardContent>
@@ -844,5 +1130,20 @@ export default function DashboardPage() {
         </div>
       </div>
     </motion.div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-orange mx-auto mb-4" />
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   )
 }

@@ -56,7 +56,7 @@ export async function PATCH(
 
     // Parse request body
     const body = await request.json()
-    const { name, description, location, budget_range, project_type, status } = body
+    const { name, description, location, budget_range, project_type, cover_image_path, status } = body
 
     // Validate required fields
     if (name !== undefined && !name?.trim()) {
@@ -80,6 +80,7 @@ export async function PATCH(
     if (description !== undefined) updatePayload.description = description?.trim() || null
     if (budget_range !== undefined) updatePayload.budget_range = budget_range?.trim() || null
     if (project_type !== undefined) updatePayload.project_type = project_type?.trim() || null
+    if (cover_image_path !== undefined) updatePayload.cover_image_path = cover_image_path || null
     if (status !== undefined) updatePayload.status = status
 
     // Update job

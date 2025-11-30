@@ -29,7 +29,10 @@ import {
   AlertCircle,
   Contact,
   ChevronsUpDown,
-  Check
+  Check,
+  Upload,
+  Loader2,
+  RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
@@ -112,6 +115,37 @@ interface Contact {
   phone?: string | null
 }
 
+interface ParsedLineItem {
+  description: string
+  category: 'labor' | 'materials' | 'equipment' | 'permits' | 'other' | null
+  quantity: number | null
+  unit: string | null
+  unitPrice: number | null
+  amount: number
+  notes: string | null
+}
+
+interface ParsedInvoiceData {
+  company: {
+    name: string | null
+    email: string | null
+    phone: string | null
+    address: string | null
+  }
+  jobReference: string | null
+  invoiceNumber: string | null
+  invoiceDate: string | null
+  lineItems: ParsedLineItem[]
+  subtotal: number | null
+  tax: number | null
+  total: number
+  timeline: string | null
+  notes: string | null
+  paymentTerms: string | null
+}
+
+type InvoiceParseState = 'idle' | 'uploading' | 'parsing' | 'success' | 'error'
+
 const CATEGORIES = [
   'Concrete',
   'Electrical',
@@ -183,6 +217,25 @@ export default function ManageBidsPage() {
     amount: '',
     notes: ''
   })
+
+  // Invoice Upload Modal State
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false)
+  const [invoiceParseState, setInvoiceParseState] = useState<InvoiceParseState>('idle')
+  const [invoiceError, setInvoiceError] = useState('')
+  const [dragActive, setDragActive] = useState(false)
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
+  const [parsedInvoice, setParsedInvoice] = useState<ParsedInvoiceData | null>(null)
+  const [invoiceLineItems, setInvoiceLineItems] = useState<ParsedLineItem[]>([])
+  const [invoiceJobId, setInvoiceJobId] = useState('')
+  const [invoiceSubId, setInvoiceSubId] = useState('')
+  const [invoiceContactId, setInvoiceContactId] = useState('')
+  const [invoiceNotes, setInvoiceNotes] = useState('')
+  const [invoiceTimeline, setInvoiceTimeline] = useState('')
+  const [createNewSubFromInvoice, setCreateNewSubFromInvoice] = useState(false)
+  const [newSubNameFromInvoice, setNewSubNameFromInvoice] = useState('')
+  const [newSubEmailFromInvoice, setNewSubEmailFromInvoice] = useState('')
+  const [newSubTradeFromInvoice, setNewSubTradeFromInvoice] = useState('')
+  const [savingInvoice, setSavingInvoice] = useState(false)
 
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
@@ -745,6 +798,244 @@ export default function ManageBidsPage() {
     }
   }
 
+  // Invoice Upload Functions
+  const handleInvoiceDrag = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }
+
+  const handleInvoiceDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0]
+      if (file.type === 'application/pdf') {
+        handleInvoiceFileSelect(file)
+      } else {
+        setInvoiceError('Please upload a PDF file')
+        setInvoiceParseState('error')
+      }
+    }
+  }
+
+  const handleInvoiceFileSelect = async (file: File) => {
+    setInvoiceFile(file)
+    setInvoiceParseState('uploading')
+    setInvoiceError('')
+    setParsedInvoice(null)
+
+    try {
+      setInvoiceParseState('parsing')
+      
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch('/api/parse-invoice', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to parse invoice')
+      }
+
+      setParsedInvoice(result.data)
+      setInvoiceLineItems(result.data.lineItems || [])
+      setInvoiceNotes(result.data.notes || '')
+      setInvoiceTimeline(result.data.timeline || '')
+
+      // Try to match subcontractor
+      if (result.data.company?.name) {
+        const matchedSub = subcontractors.find(sub => 
+          sub.name.toLowerCase().includes(result.data.company.name.toLowerCase()) ||
+          result.data.company.name.toLowerCase().includes(sub.name.toLowerCase())
+        )
+        if (matchedSub) {
+          setInvoiceSubId(matchedSub.id)
+        } else {
+          const matchedContact = contacts.find(contact =>
+            contact.name.toLowerCase().includes(result.data.company.name.toLowerCase()) ||
+            result.data.company.name.toLowerCase().includes(contact.name.toLowerCase())
+          )
+          if (matchedContact) {
+            setInvoiceContactId(matchedContact.id)
+          } else {
+            setCreateNewSubFromInvoice(true)
+            setNewSubNameFromInvoice(result.data.company.name || '')
+            setNewSubEmailFromInvoice(result.data.company.email || '')
+          }
+        }
+      }
+
+      // Try to match job
+      if (result.data.jobReference) {
+        const matchedJob = jobs.find(job =>
+          job.name.toLowerCase().includes(result.data.jobReference.toLowerCase()) ||
+          result.data.jobReference.toLowerCase().includes(job.name.toLowerCase())
+        )
+        if (matchedJob) {
+          setInvoiceJobId(matchedJob.id)
+        }
+      }
+
+      setInvoiceParseState('success')
+    } catch (err: any) {
+      console.error('Error parsing invoice:', err)
+      setInvoiceError(err.message || 'Failed to parse invoice')
+      setInvoiceParseState('error')
+    }
+  }
+
+  const updateInvoiceLineItem = (index: number, field: keyof ParsedLineItem, value: any) => {
+    setInvoiceLineItems(prev => {
+      const updated = [...prev]
+      updated[index] = { ...updated[index], [field]: value }
+      return updated
+    })
+  }
+
+  const removeInvoiceLineItem = (index: number) => {
+    setInvoiceLineItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const addInvoiceLineItem = () => {
+    setInvoiceLineItems(prev => [...prev, {
+      description: '',
+      category: null,
+      quantity: null,
+      unit: null,
+      unitPrice: null,
+      amount: 0,
+      notes: null,
+    }])
+  }
+
+  const invoiceTotal = invoiceLineItems.reduce((sum, item) => sum + (item.amount || 0), 0)
+
+  const handleSaveInvoiceBid = async () => {
+    if (!invoiceJobId) {
+      setInvoiceError('Please select a job')
+      return
+    }
+
+    if (!invoiceSubId && !invoiceContactId && !createNewSubFromInvoice) {
+      setInvoiceError('Please select or create a subcontractor')
+      return
+    }
+
+    if (invoiceLineItems.length === 0) {
+      setInvoiceError('Please add at least one line item')
+      return
+    }
+
+    setSavingInvoice(true)
+    setInvoiceError('')
+
+    try {
+      let subcontractorId = invoiceSubId || null
+      let contactId = invoiceContactId || null
+
+      // Create new subcontractor if needed
+      if (createNewSubFromInvoice && newSubNameFromInvoice) {
+        const { data: newSub, error: subError } = await supabase
+          .from('subcontractors')
+          .insert({
+            name: newSubNameFromInvoice,
+            email: newSubEmailFromInvoice || null,
+            trade_category: newSubTradeFromInvoice || 'General',
+          })
+          .select()
+          .single()
+
+        if (subError) throw subError
+        subcontractorId = newSub.id
+        // Refresh subcontractors list
+        await fetchSubcontractors()
+      }
+
+      // Create the bid
+      const { data: bidData, error: bidError } = await supabase
+        .from('bids')
+        .insert({
+          job_id: invoiceJobId,
+          subcontractor_id: subcontractorId,
+          contact_id: contactId,
+          bid_amount: null, // Will be calculated from line items by trigger
+          timeline: invoiceTimeline || null,
+          notes: invoiceNotes || null,
+          status: 'pending',
+          raw_email: `Parsed from invoice: ${invoiceFile?.name || 'Unknown'}`,
+        })
+        .select()
+        .single()
+
+      if (bidError) throw bidError
+
+      // Create line items
+      const lineItemsToInsert = invoiceLineItems
+        .filter(item => item.description.trim() !== '')
+        .map((item, index) => ({
+          bid_id: bidData.id,
+          item_number: index + 1,
+          description: item.description,
+          category: item.category || null,
+          quantity: item.quantity || null,
+          unit: item.unit || null,
+          unit_price: item.unitPrice || null,
+          amount: item.amount,
+          notes: item.notes || null,
+        }))
+
+      if (lineItemsToInsert.length > 0) {
+        const { error: lineItemsError } = await supabase
+          .from('bid_line_items')
+          .insert(lineItemsToInsert)
+
+        if (lineItemsError) throw lineItemsError
+      }
+
+      // Success - close modal and refresh
+      setSuccess('Bid created from invoice successfully!')
+      resetInvoiceModal()
+      await fetchBids()
+      setSelectedBidId(bidData.id)
+      
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err: any) {
+      console.error('Error saving bid from invoice:', err)
+      setInvoiceError(err.message || 'Failed to save bid')
+    } finally {
+      setSavingInvoice(false)
+    }
+  }
+
+  const resetInvoiceModal = () => {
+    setShowInvoiceModal(false)
+    setInvoiceParseState('idle')
+    setInvoiceFile(null)
+    setParsedInvoice(null)
+    setInvoiceLineItems([])
+    setInvoiceJobId('')
+    setInvoiceSubId('')
+    setInvoiceContactId('')
+    setInvoiceNotes('')
+    setInvoiceTimeline('')
+    setCreateNewSubFromInvoice(false)
+    setNewSubNameFromInvoice('')
+    setNewSubEmailFromInvoice('')
+    setNewSubTradeFromInvoice('')
+    setInvoiceError('')
+  }
+
   const filteredBids = bids.filter(bid => {
     const searchLower = searchQuery.toLowerCase()
     const subcontractorName = bid.subcontractors?.name?.toLowerCase() || ''
@@ -835,10 +1126,16 @@ export default function ManageBidsPage() {
                   <CardTitle>Bids</CardTitle>
                   <CardDescription>Select a bid to manage its line items</CardDescription>
                 </div>
-                <Button onClick={openCreateBid} size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Bid
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => setShowInvoiceModal(true)} size="sm" variant="outline">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Invoice
+                  </Button>
+                  <Button onClick={openCreateBid} size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Bid
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -1399,6 +1696,390 @@ export default function ManageBidsPage() {
                 </Button>
               </DialogFooter>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Invoice Upload Modal */}
+        <Dialog open={showInvoiceModal} onOpenChange={(open) => !open && resetInvoiceModal()}>
+          <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-orange-600" />
+                Upload Invoice / Bid PDF
+              </DialogTitle>
+              <DialogDescription>
+                Upload a PDF invoice or bid. AI will extract line items automatically.
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Upload Zone - Show when idle or error */}
+            {(invoiceParseState === 'idle' || invoiceParseState === 'error') && (
+              <div className="space-y-4">
+                <div
+                  className={cn(
+                    "border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer",
+                    dragActive 
+                      ? "border-orange-500 bg-orange-50" 
+                      : "border-gray-300 hover:border-orange-400 hover:bg-gray-50"
+                  )}
+                  onDragEnter={handleInvoiceDrag}
+                  onDragLeave={handleInvoiceDrag}
+                  onDragOver={handleInvoiceDrag}
+                  onDrop={handleInvoiceDrop}
+                  onClick={() => document.getElementById('invoice-file-input')?.click()}
+                >
+                  <input
+                    id="invoice-file-input"
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleInvoiceFileSelect(e.target.files[0])
+                      }
+                    }}
+                  />
+                  <Upload className={cn(
+                    "h-12 w-12 mx-auto mb-3",
+                    dragActive ? "text-orange-500" : "text-gray-400"
+                  )} />
+                  <p className="font-medium text-gray-700 mb-1">
+                    {dragActive ? 'Drop your PDF here' : 'Drop PDF here or click to upload'}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Supports invoice and bid PDFs from subcontractors
+                  </p>
+                </div>
+
+                {invoiceParseState === 'error' && invoiceError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-red-800">Error parsing invoice</p>
+                      <p className="text-sm text-red-600 mt-1">{invoiceError}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Parsing Progress */}
+            {(invoiceParseState === 'uploading' || invoiceParseState === 'parsing') && (
+              <div className="py-12 text-center">
+                <Loader2 className="h-12 w-12 text-orange-600 animate-spin mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  {invoiceParseState === 'uploading' ? 'Uploading...' : 'Parsing Invoice...'}
+                </h3>
+                <p className="text-gray-600">
+                  {invoiceParseState === 'uploading' 
+                    ? 'Uploading your PDF file' 
+                    : 'AI is extracting line items from your invoice'}
+                </p>
+                {invoiceFile && (
+                  <p className="text-sm text-gray-500 mt-4">
+                    File: {invoiceFile.name}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Parsed Data Preview & Edit */}
+            {invoiceParseState === 'success' && parsedInvoice && (
+              <div className="space-y-4">
+                {/* Success Banner */}
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="font-medium text-green-800">Invoice parsed successfully</p>
+                      <p className="text-sm text-green-600">{invoiceLineItems.length} line items extracted</p>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => {
+                    setInvoiceParseState('idle')
+                    setInvoiceFile(null)
+                    setParsedInvoice(null)
+                  }}>
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    Upload Different
+                  </Button>
+                </div>
+
+                {/* Error message */}
+                {invoiceError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                    <p className="text-red-800">{invoiceError}</p>
+                  </div>
+                )}
+
+                {/* Job Selection */}
+                <div className="space-y-2">
+                  <Label>Job *</Label>
+                  {parsedInvoice.jobReference && (
+                    <p className="text-xs text-gray-500">
+                      Extracted reference: "{parsedInvoice.jobReference}"
+                    </p>
+                  )}
+                  <Select value={invoiceJobId} onValueChange={setInvoiceJobId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a job..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jobs.map(job => (
+                        <SelectItem key={job.id} value={job.id}>
+                          {job.name} <span className="text-gray-400 text-xs ml-2">({job.status})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Subcontractor Selection */}
+                <div className="space-y-2">
+                  <Label>Subcontractor *</Label>
+                  {parsedInvoice.company?.name && (
+                    <p className="text-xs text-gray-500">
+                      Extracted: "{parsedInvoice.company.name}" {parsedInvoice.company.email && `• ${parsedInvoice.company.email}`}
+                    </p>
+                  )}
+                  {!createNewSubFromInvoice ? (
+                    <div className="space-y-2">
+                      <Select 
+                        value={invoiceSubId || invoiceContactId} 
+                        onValueChange={(value) => {
+                          // Check if it's a subcontractor or contact
+                          const isSub = subcontractors.some(s => s.id === value)
+                          if (isSub) {
+                            setInvoiceSubId(value)
+                            setInvoiceContactId('')
+                          } else {
+                            setInvoiceContactId(value)
+                            setInvoiceSubId('')
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select subcontractor..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {subcontractors.length > 0 && (
+                            <>
+                              <SelectItem value="__header_subs" disabled className="font-semibold text-gray-500">
+                                Subcontractors
+                              </SelectItem>
+                              {subcontractors.map(sub => (
+                                <SelectItem key={sub.id} value={sub.id}>
+                                  {sub.name} <span className="text-gray-400 text-xs">({sub.email})</span>
+                                </SelectItem>
+                              ))}
+                            </>
+                          )}
+                          {contacts.length > 0 && (
+                            <>
+                              <SelectItem value="__header_contacts" disabled className="font-semibold text-gray-500 mt-2">
+                                Your Contacts
+                              </SelectItem>
+                              {contacts.map(contact => (
+                                <SelectItem key={contact.id} value={contact.id}>
+                                  {contact.name} <span className="text-gray-400 text-xs">({contact.email})</span>
+                                </SelectItem>
+                              ))}
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCreateNewSubFromInvoice(true)
+                          setInvoiceSubId('')
+                          setInvoiceContactId('')
+                          setNewSubNameFromInvoice(parsedInvoice.company?.name || '')
+                          setNewSubEmailFromInvoice(parsedInvoice.company?.email || '')
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Create New Subcontractor
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">New Subcontractor</span>
+                        <Button variant="ghost" size="sm" onClick={() => setCreateNewSubFromInvoice(false)}>
+                          <X className="h-4 w-4 mr-1" />
+                          Cancel
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs">Company Name *</Label>
+                          <Input
+                            value={newSubNameFromInvoice}
+                            onChange={e => setNewSubNameFromInvoice(e.target.value)}
+                            placeholder="Company name"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Email</Label>
+                          <Input
+                            type="email"
+                            value={newSubEmailFromInvoice}
+                            onChange={e => setNewSubEmailFromInvoice(e.target.value)}
+                            placeholder="email@example.com"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Label className="text-xs">Trade Category</Label>
+                          <Select value={newSubTradeFromInvoice} onValueChange={setNewSubTradeFromInvoice}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select trade..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORIES.map(cat => (
+                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Line Items */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Line Items</Label>
+                    <Button variant="outline" size="sm" onClick={addInvoiceLineItem}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Item
+                    </Button>
+                  </div>
+                  <div className="space-y-2 max-h-[250px] overflow-y-auto border rounded-lg p-2">
+                    {invoiceLineItems.map((item, index) => (
+                      <div key={index} className="grid grid-cols-12 gap-2 items-start p-2 bg-gray-50 rounded">
+                        <div className="col-span-5">
+                          <Input
+                            value={item.description}
+                            onChange={e => updateInvoiceLineItem(index, 'description', e.target.value)}
+                            placeholder="Description"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Select
+                            value={item.category || ''}
+                            onValueChange={value => updateInvoiceLineItem(index, 'category', value || null)}
+                          >
+                            <SelectTrigger className="text-sm">
+                              <SelectValue placeholder="Cat." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="labor">Labor</SelectItem>
+                              <SelectItem value="materials">Materials</SelectItem>
+                              <SelectItem value="equipment">Equipment</SelectItem>
+                              <SelectItem value="permits">Permits</SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-1">
+                          <Input
+                            type="number"
+                            value={item.quantity || ''}
+                            onChange={e => updateInvoiceLineItem(index, 'quantity', parseFloat(e.target.value) || null)}
+                            placeholder="Qty"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <Input
+                            value={item.unit || ''}
+                            onChange={e => updateInvoiceLineItem(index, 'unit', e.target.value || null)}
+                            placeholder="Unit"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={item.amount || ''}
+                            onChange={e => updateInvoiceLineItem(index, 'amount', parseFloat(e.target.value) || 0)}
+                            placeholder="Amount"
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="col-span-1 flex justify-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeInvoiceLineItem(index)}
+                            className="text-red-600 hover:text-red-700 h-8 w-8 p-0"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-end pt-2 border-t">
+                    <div className="text-right">
+                      <span className="text-gray-600 mr-2">Total:</span>
+                      <span className="text-xl font-bold text-green-600">
+                        ${invoiceTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional Details */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Timeline</Label>
+                    <Input
+                      value={invoiceTimeline}
+                      onChange={e => setInvoiceTimeline(e.target.value)}
+                      placeholder="e.g., 2-3 weeks"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Notes</Label>
+                    <Input
+                      value={invoiceNotes}
+                      onChange={e => setInvoiceNotes(e.target.value)}
+                      placeholder="Additional notes..."
+                    />
+                  </div>
+                </div>
+
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={resetInvoiceModal}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveInvoiceBid}
+                    disabled={savingInvoice || !invoiceJobId || invoiceLineItems.length === 0}
+                    className="bg-orange-600 hover:bg-orange-700"
+                  >
+                    {savingInvoice ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Create Bid
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>

@@ -53,7 +53,8 @@ const Page = dynamic(
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
-// Inject styles to ensure react-pdf canvas is visible
+// Inject styles to ensure react-pdf canvas is visible and properly constrained
+// CRITICAL: These styles ensure the PDF canvas matches the drawing canvas during quality transitions
 if (typeof window !== 'undefined') {
   // Check if styles already injected
   if (!document.getElementById('react-pdf-canvas-fix')) {
@@ -62,6 +63,7 @@ if (typeof window !== 'undefined') {
     style.textContent = `
       .react-pdf__Page__canvas {
         display: block !important;
+        width: 100% !important;
         max-width: 100% !important;
         height: auto !important;
         visibility: visible !important;
@@ -73,6 +75,8 @@ if (typeof window !== 'undefined') {
         display: block !important;
         position: relative !important;
         background-color: white !important;
+        width: 100% !important;
+        max-width: 100% !important;
       }
       .react-pdf__Page__textContent {
         display: none !important;
@@ -2499,9 +2503,8 @@ export default function FastPlanCanvas({
         deleteMeasurement(editingMeasurement.id)
       } else if (e.key === 'Escape') {
         if (isDrawingMeasurement) {
-          setCurrentMeasurement(null)
-          setIsDrawingMeasurement(false)
-          setIsSnappingToStart(false)
+          // Finalize the measurement if it has enough points, otherwise just clear
+          finalizeMeasurement()
           setSelectedTool('none')
         } else if (selectedTool === 'measurement_edit') {
           setEditingMeasurement(null)
@@ -2671,6 +2674,8 @@ export default function FastPlanCanvas({
                   display: 'block',
                   position: 'relative',
                   flexShrink: 0,
+                  // Prevent canvas overflow during quality transitions
+                  overflow: 'hidden',
                 }}
               >
                 {/* Show loading state while Document component initializes its PDF */}
@@ -2780,9 +2785,11 @@ export default function FastPlanCanvas({
                             if (!isCurrentPage) return // Skip post-render processing for prefetched pages
                             if (!componentIsMounted.current) return // Guard against updates after unmount
                             // Ensure canvas quality settings are applied for crisp rendering
+                            // IMPORTANT: Apply immediately (no delay) to prevent drawing misalignment during quality transitions
                             if (typeof window !== 'undefined') {
-                              setTimeout(() => {
-                                if (!componentIsMounted.current) return // Double-check after timeout
+                              // Use requestAnimationFrame for immediate but safe DOM update
+                              requestAnimationFrame(() => {
+                                if (!componentIsMounted.current) return
                                 const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
                                 if (pageContainer) {
                                   // Ensure container has white background
@@ -2790,6 +2797,24 @@ export default function FastPlanCanvas({
                                   
                                   const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
                                   if (canvas) {
+                                    // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
+                                    // but MUST be displayed at base size to match drawing canvas exactly
+                                    // CSS transform handles visual zoom, keeping coordinate systems aligned
+                                    // CRITICAL: Set width FIRST before any other operations to prevent misalignment
+                                    const dims = pageDimensions.get(currentPage)
+                                    const baseDisplayWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+                                    // Force exact width to match drawing canvas exactly - critical for alignment
+                                    canvas.style.width = `${baseDisplayWidth}px`
+                                    canvas.style.height = 'auto'
+                                    canvas.style.maxWidth = `${baseDisplayWidth}px`
+                                    canvas.style.minWidth = `${baseDisplayWidth}px`
+                                    // Ensure no transforms are applied to canvas element itself
+                                    canvas.style.transform = 'none'
+                                    canvas.style.objectFit = 'contain'
+                                    canvas.style.backgroundColor = 'white'
+                                    // Use high-quality rendering for better appearance when zoomed
+                                    canvas.style.imageRendering = 'auto'
+                                    
                                     const ctx = canvas.getContext('2d', { willReadFrequently: false })
                                     if (ctx) {
                                       // Fill canvas with white background behind PDF content
@@ -2806,32 +2831,9 @@ export default function FastPlanCanvas({
                                       ctx.imageSmoothingEnabled = true
                                       ctx.imageSmoothingQuality = 'high'
                                     }
-                                    
-                                    // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
-                                    // but MUST be displayed at base size to match drawing canvas exactly
-                                    // CSS transform handles visual zoom, keeping coordinate systems aligned
-                                    const dims = pageDimensions.get(currentPage)
-                                    const baseDisplayWidth = dims?.width || (PDF_BASE_WIDTH * scale)
-                                    // Force exact width to match drawing canvas exactly - critical for alignment
-                                    canvas.style.width = `${baseDisplayWidth}px`
-                                    canvas.style.height = 'auto'
-                                    canvas.style.maxWidth = `${baseDisplayWidth}px`
-                                    canvas.style.minWidth = `${baseDisplayWidth}px`
-                                    // Ensure no transforms are applied to canvas element itself
-                                    canvas.style.transform = 'none'
-                                    canvas.style.objectFit = 'contain'
-                                    canvas.style.backgroundColor = 'white'
-                                    // Use high-quality rendering for better appearance when zoomed
-                                    canvas.style.imageRendering = 'auto'
-                                    
-                                    // Also ensure the canvas element itself has white background via CSS
-                                    const canvasStyle = window.getComputedStyle(canvas)
-                                    if (canvasStyle.backgroundColor === 'transparent' || canvasStyle.backgroundColor === 'rgba(0, 0, 0, 0)') {
-                                      canvas.style.backgroundColor = 'white'
-                                    }
                                   }
                                 }
-                              }, 100)
+                              })
                             }
                           }}
                         />
