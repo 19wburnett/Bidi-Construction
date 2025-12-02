@@ -92,6 +92,12 @@ export default function EnhancedPlanViewer() {
   const [itemModalOpen, setItemModalOpen] = useState(false)
   const [itemModalPosition, setItemModalPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
   const [editingItem, setEditingItem] = useState<Drawing | null>(null)
+  const [sidebarHoveredItemId, setSidebarHoveredItemId] = useState<string | null>(null)
+  const [selectedItemType, setSelectedItemType] = useState<{
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null>(null)
   const [isRunningTakeoff, setIsRunningTakeoff] = useState(false)
   const [isGeneratingShare, setIsGeneratingShare] = useState(false)
   
@@ -150,6 +156,7 @@ export default function EnhancedPlanViewer() {
   const [searchMatchCount, setSearchMatchCount] = useState(0)
   const [searchCurrentMatch, setSearchCurrentMatch] = useState(0)
   const [selectedMeasurementIds, setSelectedMeasurementIds] = useState<Set<string>>(new Set())
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
   const [isCalibrating, setIsCalibrating] = useState(false)
   
@@ -991,6 +998,15 @@ export default function EnhancedPlanViewer() {
         }
       }
       
+      // If creating a new item (not editing), set it as the selected type for quick tagging
+      if (!editingItem) {
+        setSelectedItemType({
+          itemType: item.itemType,
+          itemCategory: category,
+          itemLabel: item.itemLabel
+        })
+      }
+      
       setEditingItem(null)
       setItemModalOpen(false)
     } catch (error) {
@@ -1042,37 +1058,57 @@ export default function EnhancedPlanViewer() {
         createdAt: existingItem?.createdAt || new Date().toISOString()
       }
 
-      // Save using item persistence
+      // Optimistically update UI immediately for better UX
+      if (editingItemId) {
+        // Update existing item - show immediately
+        setDrawings(prev => prev.map(d => d.id === editingItemId ? newDrawing : d))
+      } else {
+        // Create new item - show immediately
+        setDrawings(prev => [...prev, newDrawing])
+      }
+      
+      // Save using item persistence (async, but UI already updated)
       if (itemPersistenceRef.current) {
         if (editingItemId) {
           // Update existing item
           const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItemId)
           updatedItems.push(newDrawing)
-          await itemPersistenceRef.current.syncItems(updatedItems)
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+          })
         } else {
           // Create new item
           const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
-          await itemPersistenceRef.current.syncItems(updatedItems)
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+          })
         }
-        // Reload items
-        const items = await itemPersistenceRef.current.loadItems()
-        setDrawings(prev => [...prev.filter(d => d.type !== 'item'), ...items])
       } else {
         // Fallback to old method
         if (editingItemId) {
-          await handleDrawingsChange(drawings.map(d => d.id === editingItemId ? newDrawing : d))
+          handleDrawingsChange(drawings.map(d => d.id === editingItemId ? newDrawing : d))
         } else {
-          await handleDrawingsChange([...drawings, newDrawing])
+          handleDrawingsChange([...drawings, newDrawing])
         }
       }
       
-      setEditingItem(null)
-      setItemModalOpen(false)
+      // If creating a new item (not editing), set it as the selected type for quick tagging
+      if (!editingItemId) {
+        setSelectedItemType({
+          itemType: item.itemType,
+          itemCategory: category,
+          itemLabel: item.itemLabel
+        })
+      }
     } catch (error) {
       console.error('Error saving item:', error)
       alert('Failed to save item. Please try again.')
     }
-  }, [itemModalPosition, drawings, handleDrawingsChange, user, editingItem])
+  }, [drawings, handleDrawingsChange, user])
 
   // Handle item delete
   const handleItemDelete = useCallback(async (itemId: string) => {
@@ -1736,6 +1772,9 @@ export default function EnhancedPlanViewer() {
                 onCommentDelete={handleCommentDelete}
                 onItemPinClick={handleItemPinClick}
                 onItemSave={handleItemSaveWithCoords}
+                selectedItemType={selectedItemType}
+                onSelectedItemTypeChange={setSelectedItemType}
+                sidebarHoveredItemId={sidebarHoveredItemId}
                 goToPage={goToPage}
                 goToCoordinate={goToCoordinate}
                 scale={scale}
@@ -1763,6 +1802,8 @@ export default function EnhancedPlanViewer() {
                 }}
                 selectedMeasurementIds={selectedMeasurementIds}
                 onSelectedMeasurementsChange={setSelectedMeasurementIds}
+                selectedItemIds={selectedItemIds}
+                onSelectedItemsChange={setSelectedItemIds}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -2031,6 +2072,17 @@ export default function EnhancedPlanViewer() {
                           onItemClick={handleItemClick}
                           onItemEdit={handleItemEdit}
                           onItemDelete={handleItemDelete}
+                          onItemHover={setSidebarHoveredItemId}
+                          onAddItemType={(itemType, itemCategory, itemLabel) => {
+                            setSelectedItemType({
+                              itemType,
+                              itemCategory,
+                              itemLabel
+                            })
+                            // Note: The tool will be set to 'item' when user clicks on canvas
+                            // We could add a prop to FastPlanCanvas to set the tool, but for now
+                            // the user can just click on the canvas and it will place the item
+                          }}
                         />
                       </TabsContent>
                     </div>
@@ -2081,6 +2133,14 @@ export default function EnhancedPlanViewer() {
           itemNotes: editingItem.itemNotes,
           itemCategory: editingItem.itemCategory
         } : null}
+        onSetForQuickTagging={(item) => {
+          setSelectedItemType({
+            itemType: item.itemType,
+            itemCategory: item.itemCategory,
+            itemLabel: item.itemLabel
+          })
+          setItemModalOpen(false)
+        }}
       />
 
       {/* Modals */}

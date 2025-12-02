@@ -139,6 +139,16 @@ interface FastPlanCanvasProps {
     itemNotes?: string
     itemCategory?: string
   }, x: number, y: number, pageNumber: number, editingItemId?: string) => void
+  selectedItemType?: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null
+  onSelectedItemTypeChange?: (itemType: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null) => void
   goToPage?: number
   goToCoordinate?: { x: number; y: number; pageNumber: number }
   scale?: number
@@ -156,9 +166,12 @@ interface FastPlanCanvasProps {
   onSearchResults?: (count: number) => void
   selectedMeasurementIds?: Set<string>
   onSelectedMeasurementsChange?: (ids: Set<string>) => void
+  selectedItemIds?: Set<string>
+  onSelectedItemsChange?: (ids: Set<string>) => void
+  sidebarHoveredItemId?: string | null
 }
 
-type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select' | 'item'
+type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select' | 'item' | 'item_select'
 
 // Error Boundary to catch render-phase errors from react-pdf
 // This is necessary because PDF.js can throw errors during the render phase
@@ -280,7 +293,12 @@ export default function FastPlanCanvas({
   currentMatchIndex,
   onSearchResults,
   selectedMeasurementIds,
-  onSelectedMeasurementsChange
+  onSelectedMeasurementsChange,
+  selectedItemIds,
+  onSelectedItemsChange,
+  selectedItemType: externalSelectedItemType,
+  onSelectedItemTypeChange,
+  sidebarHoveredItemId
 }: FastPlanCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -297,6 +315,36 @@ export default function FastPlanCanvas({
   const [itemModalPosition, setItemModalPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
   const [editingItem, setEditingItem] = useState<Drawing | null>(null)
   const [hoveredItem, setHoveredItem] = useState<Drawing | null>(null)
+  // Selected item type for quick tagging (once selected, clicking places items of this type)
+  // Use external state if provided, otherwise use internal state
+  const [internalSelectedItemType, setInternalSelectedItemType] = useState<{
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null>(null)
+  
+  const selectedItemType = externalSelectedItemType !== undefined ? externalSelectedItemType : internalSelectedItemType
+  
+  const setSelectedItemType = useCallback((itemType: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null) => {
+    if (onSelectedItemTypeChange) {
+      onSelectedItemTypeChange(itemType)
+    } else {
+      setInternalSelectedItemType(itemType)
+    }
+  }, [onSelectedItemTypeChange])
+  
+  // Count instances of the selected item type
+  const selectedItemTypeCount = useMemo(() => {
+    if (!selectedItemType) return 0
+    return drawings.filter(d => 
+      d.type === 'item' && 
+      d.itemType === selectedItemType.itemType
+    ).length
+  }, [drawings, selectedItemType])
   // Measurement drawing state
   const [currentMeasurement, setCurrentMeasurement] = useState<Drawing | null>(null)
   const [isDrawingMeasurement, setIsDrawingMeasurement] = useState(false)
@@ -1720,7 +1768,7 @@ export default function FastPlanCanvas({
   }, [currentPage])
 
   // Check if a point intersects with an item (current page only)
-  const isPointInItem = useCallback((worldX: number, worldY: number, drawing: Drawing) => {
+  const isPointInItem = useCallback((worldX: number, worldY: number, drawing: Drawing, strictMode = false) => {
     if (drawing.type !== 'item' || drawing.pageNumber !== currentPage) return false
     
     const geom = drawing.geometry
@@ -1730,8 +1778,9 @@ export default function FastPlanCanvas({
     const drawingX = geom.x
     const drawingY = geom.y
     
-    // Threshold for clicking items (at base scale)
-    const threshold = 24
+    // Use smaller threshold when placing items (strictMode) to avoid accidental clicks
+    // Normal threshold for editing/selecting, smaller for placement
+    const threshold = strictMode ? 12 : 24
     
     const dist = Math.sqrt(Math.pow(worldX - drawingX, 2) + Math.pow(worldY - drawingY, 2))
     return dist <= threshold
@@ -2274,24 +2323,124 @@ export default function FastPlanCanvas({
       // Place new comment pin (only if not calibrating)
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
-    } else if (selectedTool === 'item') {
-      // Check if clicking on an existing item (current page only)
+    } else if (selectedTool === 'item' || selectedTool === 'item_select') {
+      // When placing items (selectedItemType is set), use stricter detection to avoid accidental clicks
+      // When selecting/editing, use normal detection
+      const isPlacingMode = selectedTool === 'item' && selectedItemType !== null
       const clickedItem = drawings.find(d => 
-        d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d)
+        d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d, isPlacingMode)
       )
       
-      if (clickedItem && onItemSave) {
-        // Clicking on existing item - call parent handler to edit
-        // We'll need to pass the item data, but for now just call onItemPinClick with the item's position
-        const itemX = clickedItem.geometry.x || baseWorldX
-        const itemY = clickedItem.geometry.y || baseWorldY
-        if (onItemPinClick) {
-          onItemPinClick(itemX, itemY, pageNumber)
-          // The parent should handle setting editingItem
+      if (clickedItem) {
+        // Handle selection mode
+        if (selectedTool === 'item_select' || (selectedTool === 'item' && (e.shiftKey || e.ctrlKey || e.metaKey))) {
+          // Selection mode - add/remove from selection
+          if (onSelectedItemsChange) {
+            const newSelection = new Set<string>(selectedItemIds ?? [])
+            
+            if (e.shiftKey || e.ctrlKey || e.metaKey) {
+              // Toggle selection with modifier key
+              if (newSelection.has(clickedItem.id)) {
+                newSelection.delete(clickedItem.id)
+              } else {
+                newSelection.add(clickedItem.id)
+              }
+            } else {
+              // Replace selection without modifier
+              newSelection.clear()
+              newSelection.add(clickedItem.id)
+            }
+            
+            onSelectedItemsChange(newSelection)
+          }
+        } else if (onItemSave) {
+          // Clicking on existing item - check if we should edit or use for quick tagging
+          if (e.altKey || e.metaKey) {
+            // Alt/Cmd+Click: Set this item's type for quick tagging (add more of this type)
+            if (setSelectedItemType) {
+              setSelectedItemType({
+                itemType: clickedItem.itemType || '',
+                itemCategory: clickedItem.itemCategory,
+                itemLabel: clickedItem.itemLabel
+              })
+            }
+            // Switch to item tool if not already
+            if (selectedTool !== 'item') {
+              setSelectedTool('item')
+            }
+          } else if (selectedTool === 'item' && !selectedItemType) {
+            // In item tool mode, clicking an item sets it for quick tagging (add more of this type)
+            if (setSelectedItemType) {
+              setSelectedItemType({
+                itemType: clickedItem.itemType || '',
+                itemCategory: clickedItem.itemCategory,
+                itemLabel: clickedItem.itemLabel
+              })
+            }
+          } else if (!selectedItemType) {
+            // Normal click without selected type - edit it
+            const itemX = clickedItem.geometry.x || baseWorldX
+            const itemY = clickedItem.geometry.y || baseWorldY
+            if (onItemPinClick) {
+              onItemPinClick(itemX, itemY, pageNumber)
+              // The parent should handle setting editingItem
+            }
+          } else {
+            // Item type is selected - only edit if we're RIGHT on top of it (strict mode threshold)
+            // Otherwise, place new item nearby
+            // Since strict mode is active, if we detected the item, we're very close
+            // But when placing, prioritize placement - only edit if we're directly on it
+            const itemX = clickedItem.geometry.x || baseWorldX
+            const itemY = clickedItem.geometry.y || baseWorldY
+            const dist = Math.sqrt(Math.pow(baseWorldX - itemX, 2) + Math.pow(baseWorldY - itemY, 2))
+            
+            // Only edit if we're very close (within 8 units), otherwise place new item
+            if (dist < 8) {
+              if (onItemPinClick) {
+                onItemPinClick(itemX, itemY, pageNumber)
+              }
+            } else {
+              // Place new item nearby
+              if (onItemSave) {
+                onItemSave(
+                  {
+                    itemType: selectedItemType.itemType,
+                    itemCategory: selectedItemType.itemCategory,
+                    itemLabel: selectedItemType.itemLabel
+                  },
+                  baseWorldX,
+                  baseWorldY,
+                  pageNumber
+                )
+              }
+            }
+          }
         }
-      } else if (onItemPinClick) {
-        // Place new item - call parent handler with world coordinates
-        onItemPinClick(baseWorldX, baseWorldY, pageNumber)
+      } else {
+        // Clicked on empty space
+        if (selectedTool === 'item_select') {
+          // Clear selection if clicking empty space without modifier
+          if (onSelectedItemsChange && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+            onSelectedItemsChange(new Set())
+          }
+        } else if (selectedItemType) {
+          // If item type is already selected, directly place item without opening modal
+          if (onItemSave) {
+            onItemSave(
+              {
+                itemType: selectedItemType.itemType,
+                itemCategory: selectedItemType.itemCategory,
+                itemLabel: selectedItemType.itemLabel
+              },
+              baseWorldX,
+              baseWorldY,
+              pageNumber
+            )
+          }
+        } else if (onItemPinClick) {
+          // No type selected yet - open modal to select type
+          onItemPinClick(baseWorldX, baseWorldY, pageNumber)
+        }
       }
     } else if (selectedTool === 'measurement_edit') {
       // Priority 1: Check if clicking on a handle (vertex point) to drag it
@@ -2485,7 +2634,7 @@ export default function FastPlanCanvas({
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
     }
-  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, isPointInItem, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, getSegmentAtPoint, getMeasurementAtPoint, finalizeMeasurementFromDrawing, selectedMeasurementIds, onSelectedMeasurementsChange, editingMeasurement, currentPage])
+  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, isPointInItem, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, getSegmentAtPoint, getMeasurementAtPoint, finalizeMeasurementFromDrawing, selectedMeasurementIds, onSelectedMeasurementsChange, selectedItemIds, onSelectedItemsChange, editingMeasurement, currentPage, selectedItemType, onItemSave, onItemPinClick])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -2870,7 +3019,7 @@ export default function FastPlanCanvas({
           cursor: hoveredComment ? 'pointer' :
                  isCalibrating ? 'crosshair' :
                  selectedTool === 'none' ? (isPanning ? 'grabbing' : 'grab') : 
-                 selectedTool === 'measurement_select' ? 'pointer' :
+                 (selectedTool === 'measurement_select' || selectedTool === 'item_select') ? 'pointer' :
                  (selectedTool === 'comment' || selectedTool === 'measurement_line' || selectedTool === 'measurement_area') ? 'crosshair' : 'default'
         }}
       >
@@ -3310,7 +3459,8 @@ export default function FastPlanCanvas({
                   const itemType = getItemTypeById(item.itemType || '')
                   const Icon = itemType?.icon || Tag
                   const color = itemType?.color || '#3b82f6'
-                  const isHovered = hoveredItem?.id === item.id
+                  const isHovered = hoveredItem?.id === item.id || sidebarHoveredItemId === item.id
+                  const isSelected = selectedItemIds?.has(item.id) || false
                   
                   // Convert PDF base coordinates to canvas coordinates (multiply by scale)
                   // Coordinates are stored in PDF base space, but need to be displayed in canvas space
@@ -3326,43 +3476,91 @@ export default function FastPlanCanvas({
                         top: `${canvasY}px`,
                         transform: 'translate(-50%, -50%)',
                         pointerEvents: 'auto',
-                        cursor: 'pointer',
-                        zIndex: isHovered ? 13 : 12,
+                        cursor: (selectedTool === 'item_select' || selectedTool === 'item') ? 'pointer' : 'default',
+                        zIndex: isHovered || isSelected ? 13 : 12,
                       }}
                       onClick={(e) => {
                         e.stopPropagation()
-                        const container = containerRef.current
-                        if (!container) return
-                        
-                        const rect = container.getBoundingClientRect()
-                        const screenX = e.clientX - rect.left
-                        const screenY = e.clientY - rect.top
-                        
-                        setEditingItem(item)
-                        setItemModalPosition({ x: screenX, y: screenY, pageNumber: item.pageNumber })
-                        setItemModalOpen(true)
+                        // Selection is handled in handleMouseDown, but we can still allow direct editing
+                        if (selectedTool !== 'item_select' && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+                          const container = containerRef.current
+                          if (!container) return
+                          
+                          const rect = container.getBoundingClientRect()
+                          const screenX = e.clientX - rect.left
+                          const screenY = e.clientY - rect.top
+                          
+                          setEditingItem(item)
+                          setItemModalPosition({ x: screenX, y: screenY, pageNumber: item.pageNumber })
+                          setItemModalOpen(true)
+                        }
                       }}
                       onMouseEnter={() => setHoveredItem(item)}
                       onMouseLeave={() => setHoveredItem(null)}
                       title={item.itemLabel || itemType?.label || item.itemType || 'Item'}
                     >
+                      {/* Selection ring */}
+                      {isSelected && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            border: '2px solid #f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                            pointerEvents: 'none',
+                            zIndex: 11,
+                          }}
+                        />
+                      )}
+                      {/* Hover ring */}
+                      {isHovered && !isSelected && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            border: `2px solid ${color}`,
+                            backgroundColor: `${color}20`,
+                            pointerEvents: 'none',
+                            zIndex: 11,
+                            transition: 'all 0.2s',
+                          }}
+                        />
+                      )}
                       <div
                         style={{
-                          width: '16px',
-                          height: '16px',
+                          width: '10px',
+                          height: '10px',
                           borderRadius: '50%',
-                          backgroundColor: isHovered ? color : `${color}CC`,
-                          border: `1.5px solid ${color}`,
+                          backgroundColor: isSelected ? '#f97316' : (isHovered ? color : `${color}CC`),
+                          border: `1px solid ${isSelected ? '#f97316' : color}`,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           color: 'white',
                           transition: 'all 0.2s',
-                          transform: isHovered ? 'scale(1.3)' : 'scale(1)',
-                          boxShadow: isHovered ? `0 0 6px ${color}80` : '0 1px 3px rgba(0,0,0,0.2)',
+                          transform: isHovered ? 'scale(1.4)' : (isSelected ? 'scale(1.2)' : 'scale(1)'),
+                          boxShadow: isHovered ? `0 0 6px ${color}80` : (isSelected ? `0 0 4px #f9731680` : '0 1px 2px rgba(0,0,0,0.2)'),
+                          position: 'relative',
+                          zIndex: 12,
                         }}
                       >
-                        <Icon className="h-2 w-2" />
+                        <Icon 
+                          className="h-1.5 w-1.5 transition-all duration-200" 
+                          style={{ 
+                            transform: isHovered ? 'scale(1.2)' : 'scale(1)',
+                            transition: 'transform 0.2s'
+                          }} 
+                        />
                       </div>
                       {isHovered && item.itemLabel && (
                         <div
@@ -3391,6 +3589,57 @@ export default function FastPlanCanvas({
             )
           })()}
         </div>
+
+        {/* Selected Item Type Indicator */}
+        {selectedItemType && selectedTool === 'item' && (
+          <div 
+            className="absolute top-20 left-4 z-50 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="bg-white/95 backdrop-blur-md border border-gray-200 shadow-lg rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const itemType = getItemTypeById(selectedItemType.itemType)
+                  const Icon = itemType?.icon || Tag
+                  const color = itemType?.color || '#3b82f6'
+                  return (
+                    <div 
+                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: `${color}20`, border: `2px solid ${color}` }}
+                    >
+                      <Icon className="h-4 w-4" style={{ color }} />
+                    </div>
+                  )
+                })()}
+                <div className="flex flex-col">
+                  <div className="text-sm font-semibold text-gray-900">
+                    {getItemTypeById(selectedItemType.itemType)?.label || selectedItemType.itemType}
+                    {selectedItemType.itemLabel && (
+                      <span className="text-xs text-gray-500 ml-1">({selectedItemType.itemLabel})</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {selectedItemTypeCount} {selectedItemTypeCount === 1 ? 'instance' : 'instances'} placed
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setSelectedItemType(null)
+                }}
+                className="h-8 w-8 rounded-md hover:bg-gray-100"
+                title="Clear selected item type"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Item Tag Modal - handled by parent component via onItemPinClick */}
 
@@ -3556,19 +3805,42 @@ export default function FastPlanCanvas({
            <div className="w-px h-6 bg-gray-200 mx-1" />
            
            {/* Item Tagging */}
-           <Button 
-             variant={selectedTool === 'item' ? 'default' : 'ghost'}
-             size="icon"
-             onClick={() => {
+           <div className="relative">
+             <Button 
+               variant={selectedTool === 'item' ? 'default' : 'ghost'}
+               size="icon"
+               onClick={() => {
                 if (isDrawingMeasurement) {
                   finalizeMeasurement()
                 }
                 setSelectedTool('item')
              }}
-             title="Tag Item (I)"
+               title={selectedItemType 
+                 ? `Tagging: ${getItemTypeById(selectedItemType.itemType)?.label || selectedItemType.itemType} (${selectedItemTypeCount} placed) - Click to change type`
+                 : "Tag Item (I) - Click to select type, then click on plan to place"}
+               className={`rounded-full h-10 w-10 ${selectedItemType ? 'ring-2 ring-blue-500' : ''}`}
+             >
+               <Tag className="h-5 w-5" />
+             </Button>
+             {selectedItemType && selectedTool === 'item' && (
+               <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] font-bold rounded-full h-5 w-5 flex items-center justify-center border-2 border-white">
+                 {selectedItemTypeCount}
+               </div>
+             )}
+           </div>
+           <Button 
+             variant={selectedTool === 'item_select' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('item_select')
+             }}
+             title="Select Items - Click items to select, Shift/Ctrl+Click to multi-select"
              className="rounded-full h-10 w-10"
            >
-             <Tag className="h-5 w-5" />
+             <MousePointerClick className="h-5 w-5" />
            </Button>
            
            <div className="w-px h-6 bg-gray-200 mx-1" />

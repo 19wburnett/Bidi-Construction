@@ -28,6 +28,11 @@ interface ItemTagModalProps {
     itemNotes?: string
     itemCategory?: string
   } | null
+  onSetForQuickTagging?: (item: {
+    itemType: string
+    itemLabel?: string
+    itemCategory?: string
+  }) => void
 }
 
 export default function ItemTagModal({
@@ -37,7 +42,8 @@ export default function ItemTagModal({
   y,
   pageNumber,
   onSave,
-  editingItem
+  editingItem,
+  onSetForQuickTagging
 }: ItemTagModalProps) {
   const [formData, setFormData] = useState({
     itemType: editingItem?.itemType || '',
@@ -291,6 +297,25 @@ export default function ItemTagModal({
             <Button variant="outline" onClick={handleCancel} className="h-10 md:h-auto w-full md:w-auto">
               Cancel
             </Button>
+            {editingItem && onSetForQuickTagging && (
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  const selectedType = ITEM_TYPES.find(type => type.id === formData.itemType)
+                  const category = selectedType?.category || formData.itemCategory || undefined
+                  onSetForQuickTagging({
+                    itemType: formData.itemType,
+                    itemCategory: category,
+                    itemLabel: formData.itemLabel.trim() || undefined
+                  })
+                  onOpenChange(false)
+                }} 
+                disabled={!formData.itemType}
+                className="h-10 md:h-auto w-full md:w-auto"
+              >
+                Add More of This Type
+              </Button>
+            )}
             <Button onClick={handleSave} disabled={!formData.itemType} className="h-10 md:h-auto w-full md:w-auto">
               {editingItem ? 'Update Item' : 'Tag Item'}
             </Button>

@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Search, MapPin, Pencil, Trash2, Tag } from 'lucide-react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Search, MapPin, Pencil, Trash2, Tag, Plus } from 'lucide-react'
 import { Drawing } from '@/lib/canvas-utils'
 import { ITEM_TYPES, getItemTypeById, CATEGORY_LABELS, type ItemTypeDefinition } from '@/lib/item-types'
 
@@ -14,6 +15,8 @@ interface ItemListProps {
   onItemClick: (item: Drawing) => void
   onItemEdit?: (item: Drawing) => void
   onItemDelete?: (itemId: string) => void
+  onItemHover?: (itemId: string | null) => void
+  onAddItemType?: (itemType: string, itemCategory?: string, itemLabel?: string) => void
 }
 
 type GroupByOption = 'type' | 'category' | 'page' | 'none'
@@ -22,12 +25,16 @@ export default function ItemList({
   items,
   onItemClick,
   onItemEdit,
-  onItemDelete
+  onItemDelete,
+  onItemHover,
+  onAddItemType
 }: ItemListProps) {
   const [searchQuery, setSearchQuery] = useState('')
-  const [groupBy, setGroupBy] = useState<GroupByOption>('category')
+  const [groupBy, setGroupBy] = useState<GroupByOption>('type')
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [filterType, setFilterType] = useState<string>('all')
+  const [filterPage, setFilterPage] = useState<string>('all')
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null)
 
   // Filter items based on search and filters
   const filteredItems = useMemo(() => {
@@ -41,6 +48,14 @@ export default function ItemList({
     // Filter by type
     if (filterType !== 'all') {
       filtered = filtered.filter(item => item.itemType === filterType)
+    }
+
+    // Filter by page
+    if (filterPage !== 'all') {
+      const pageNum = parseInt(filterPage)
+      if (!isNaN(pageNum)) {
+        filtered = filtered.filter(item => item.pageNumber === pageNum)
+      }
     }
 
     // Filter by search query
@@ -63,9 +78,9 @@ export default function ItemList({
     }
 
     return filtered
-  }, [items, searchQuery, filterCategory, filterType])
+  }, [items, searchQuery, filterCategory, filterType, filterPage])
 
-  // Group items
+  // Group items by type (itemType + itemLabel combination for identical items)
   const groupedItems = useMemo(() => {
     if (groupBy === 'none') {
       return { 'All Items': filteredItems }
@@ -79,8 +94,12 @@ export default function ItemList({
       if (groupBy === 'category') {
         key = item.itemCategory || CATEGORY_LABELS.other
       } else if (groupBy === 'type') {
+        // Group by itemType + itemLabel combination to group identical items
         const itemType = getItemTypeById(item.itemType || '')
-        key = itemType?.label || item.itemType || 'Unknown'
+        const typeLabel = itemType?.label || item.itemType || 'Unknown'
+        const itemLabel = item.itemLabel || ''
+        // Create a unique key for items of the same type and label
+        key = itemLabel ? `${typeLabel} - ${itemLabel}` : typeLabel
       } else if (groupBy === 'page') {
         key = `Page ${item.pageNumber}`
       } else {
@@ -101,6 +120,12 @@ export default function ItemList({
           const pageA = parseInt(a.replace('Page ', '')) || 0
           const pageB = parseInt(b.replace('Page ', '')) || 0
           return pageA - pageB
+        }
+        // Sort by count (descending) then alphabetically
+        const countA = grouped[a].length
+        const countB = grouped[b].length
+        if (countA !== countB) {
+          return countB - countA
         }
         return a.localeCompare(b)
       })
@@ -131,6 +156,17 @@ export default function ItemList({
       }
     })
     return Array.from(categories).sort()
+  }, [items])
+
+  // Get unique pages for filter
+  const uniquePages = useMemo(() => {
+    const pages = new Set<number>()
+    items.forEach(item => {
+      if (item.pageNumber) {
+        pages.add(item.pageNumber)
+      }
+    })
+    return Array.from(pages).sort((a, b) => a - b)
   }, [items])
 
   const handleItemClick = (item: Drawing) => {
@@ -205,6 +241,20 @@ export default function ItemList({
           </Select>
         </div>
 
+        <Select value={filterPage} onValueChange={setFilterPage}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue placeholder="All Pages" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Pages</SelectItem>
+            {uniquePages.map(pageNum => (
+              <SelectItem key={pageNum} value={pageNum.toString()}>
+                Page {pageNum}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select value={groupBy} onValueChange={(value) => setGroupBy(value as GroupByOption)}>
           <SelectTrigger className="h-9 text-xs">
             <SelectValue />
@@ -223,103 +273,245 @@ export default function ItemList({
         <div className="text-center py-12">
           <Tag className="h-12 w-12 mx-auto mb-4 text-gray-400" />
           <p className="text-sm text-gray-600 mb-3">
-            {searchQuery || filterCategory !== 'all' || filterType !== 'all'
+            {searchQuery || filterCategory !== 'all' || filterType !== 'all' || filterPage !== 'all'
               ? 'No items match your filters'
               : 'No items tagged yet'}
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {Object.entries(groupedItems).map(([groupKey, groupItems]) => (
-            <div key={groupKey}>
-              {groupBy !== 'none' && (
-                <div className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">
-                  {groupKey} ({groupItems.length})
-                </div>
-              )}
-              <div className="space-y-2">
-                {groupItems.map(item => {
-                  const itemType = getItemTypeById(item.itemType || '')
-                  const Icon = itemType?.icon || Tag
-                  const color = itemType?.color || '#3b82f6'
-                  
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => handleItemClick(item)}
-                      className="p-3 border rounded-lg cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className="flex-shrink-0 p-2 rounded-lg"
-                          style={{ backgroundColor: `${color}20`, color }}
-                        >
-                          <Icon className="h-4 w-4" />
+        <div className="space-y-2">
+          {groupBy === 'none' ? (
+            <div className="space-y-2">
+              {filteredItems.map(item => {
+                const itemType = getItemTypeById(item.itemType || '')
+                const Icon = itemType?.icon || Tag
+                const color = itemType?.color || '#3b82f6'
+                
+                const isHovered = hoveredItemId === item.id
+                
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => handleItemClick(item)}
+                    onMouseEnter={() => {
+                      setHoveredItemId(item.id)
+                      onItemHover?.(item.id)
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredItemId(null)
+                      onItemHover?.(null)
+                    }}
+                    className="p-3 border rounded-lg cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="flex-shrink-0 p-2 rounded-lg transition-all duration-200"
+                        style={{ 
+                          backgroundColor: isHovered ? `${color}30` : `${color}20`, 
+                          color,
+                          transform: isHovered ? 'scale(1.15)' : 'scale(1)'
+                        }}
+                      >
+                        <Icon className="h-4 w-4 transition-all duration-200" style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)' }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-sm text-gray-900">
+                            {item.itemLabel || itemType?.label || item.itemType || 'Unknown Item'}
+                          </span>
+                          {itemType && (
+                            <Badge variant="outline" className="text-xs">
+                              {itemType.label}
+                            </Badge>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm text-gray-900">
-                              {item.itemLabel || itemType?.label || item.itemType || 'Unknown Item'}
-                            </span>
-                            {itemType && (
-                              <Badge variant="outline" className="text-xs">
-                                {itemType.label}
+                        {item.itemNotes && (
+                          <p className="text-xs text-gray-600 mb-1 line-clamp-2">
+                            {item.itemNotes}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <MapPin className="h-3 w-3" />
+                          <span>Page {item.pageNumber}</span>
+                          {item.itemCategory && (
+                            <>
+                              <span>•</span>
+                              <Badge variant="secondary" className="text-xs">
+                                {CATEGORY_LABELS[item.itemCategory as keyof typeof CATEGORY_LABELS] || item.itemCategory}
                               </Badge>
-                            )}
-                          </div>
-                          {item.itemNotes && (
-                            <p className="text-xs text-gray-600 mb-1 line-clamp-2">
-                              {item.itemNotes}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <MapPin className="h-3 w-3" />
-                            <span>Page {item.pageNumber}</span>
-                            {item.itemCategory && (
-                              <>
-                                <span>•</span>
-                                <Badge variant="secondary" className="text-xs">
-                                  {CATEGORY_LABELS[item.itemCategory as keyof typeof CATEGORY_LABELS] || item.itemCategory}
-                                </Badge>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          {onItemEdit && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={(e) => handleEdit(e, item)}
-                              title="Edit item"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                          )}
-                          {onItemDelete && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={(e) => handleDelete(e, item.id)}
-                              title="Delete item"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            </>
                           )}
                         </div>
                       </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {onItemEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={(e) => handleEdit(e, item)}
+                            title="Edit item"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        )}
+                        {onItemDelete && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={(e) => handleDelete(e, item.id)}
+                            title="Delete item"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  )
-                })}
-              </div>
+                  </div>
+                )
+              })}
             </div>
-          ))}
+          ) : (
+            <Accordion type="multiple" className="w-full" defaultValue={Object.keys(groupedItems).slice(0, 5)}>
+              {Object.entries(groupedItems).map(([groupKey, groupItems]) => {
+                const firstItem = groupItems[0]
+                const itemType = getItemTypeById(firstItem.itemType || '')
+                const Icon = itemType?.icon || Tag
+                const color = itemType?.color || '#3b82f6'
+                
+                const handleAddMore = (e: React.MouseEvent) => {
+                  e.stopPropagation()
+                  if (onAddItemType) {
+                    onAddItemType(
+                      firstItem.itemType || '',
+                      firstItem.itemCategory,
+                      firstItem.itemLabel || undefined
+                    )
+                  }
+                }
+                
+                return (
+                  <AccordionItem key={groupKey} value={groupKey} className="border-b">
+                    <div className="flex items-center gap-2">
+                      <AccordionTrigger className="hover:no-underline py-3 flex-1">
+                        <div className="flex items-center gap-3 flex-1 text-left">
+                          <div
+                            className="flex-shrink-0 p-1.5 rounded-md"
+                            style={{ backgroundColor: `${color}20`, color }}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-gray-900">
+                              {groupKey}
+                            </div>
+                          </div>
+                          <Badge variant="secondary" className="text-xs font-semibold">
+                            {groupItems.length} {groupItems.length === 1 ? 'item' : 'items'}
+                          </Badge>
+                        </div>
+                      </AccordionTrigger>
+                      {onAddItemType && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 hover:bg-gray-100 mr-2"
+                          onClick={handleAddMore}
+                          title="Add more of this item type"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    <AccordionContent className="pt-2 pb-3">
+                      <div className="space-y-2 pl-9">
+                        {groupItems.map(item => {
+                          const itemType = getItemTypeById(item.itemType || '')
+                          const Icon = itemType?.icon || Tag
+                          const color = itemType?.color || '#3b82f6'
+                          const isHovered = hoveredItemId === item.id
+                          
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => handleItemClick(item)}
+                              onMouseEnter={() => setHoveredItemId(item.id)}
+                              onMouseLeave={() => setHoveredItemId(null)}
+                              className="p-2.5 border rounded-lg cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                            >
+                              <div className="flex items-start gap-2">
+                                <div
+                                  className="flex-shrink-0 p-1.5 rounded-md transition-all duration-200"
+                                  style={{ 
+                                    backgroundColor: isHovered ? `${color}30` : `${color}20`, 
+                                    color,
+                                    transform: isHovered ? 'scale(1.15)' : 'scale(1)'
+                                  }}
+                                >
+                                  <Icon className="h-3.5 w-3.5 transition-all duration-200" style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)' }} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                {item.itemNotes && (
+                                  <p className="text-xs text-gray-600 mb-1 line-clamp-2">
+                                    {item.itemNotes}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                  <MapPin className="h-3 w-3" />
+                                  <span>Page {item.pageNumber}</span>
+                                  {item.itemCategory && (
+                                    <>
+                                      <span>•</span>
+                                      <Badge variant="secondary" className="text-xs">
+                                        {CATEGORY_LABELS[item.itemCategory as keyof typeof CATEGORY_LABELS] || item.itemCategory}
+                                      </Badge>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                {onItemEdit && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => handleEdit(e, item)}
+                                    title="Edit item"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {onItemDelete && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    onClick={(e) => handleDelete(e, item.id)}
+                                    title="Delete item"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          )
+                        })}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              })}
+            </Accordion>
+          )}
         </div>
       )}
     </div>
   )
 }
+
+
+
 
 

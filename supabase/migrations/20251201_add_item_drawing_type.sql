@@ -15,3 +15,6 @@ COMMENT ON CONSTRAINT plan_drawings_drawing_type_check ON plan_drawings IS
 'Allowed drawing types: line, rectangle, circle, polygon, measurement, annotation, area, item, comment';
 
 
+
+
+
