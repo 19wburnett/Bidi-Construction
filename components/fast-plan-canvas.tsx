@@ -197,18 +197,36 @@ class PageErrorBoundary extends React.Component<PageErrorBoundaryProps, PageErro
   }
 
   static getDerivedStateFromError(error: Error): PageErrorBoundaryState {
+    // Check if this is a harmless PDF.js cleanup error
+    const errorMessage = error.message || ''
+    const errorString = error.toString()
+    if (errorMessage.includes('messageHandler') || 
+        errorMessage.includes('sendWithPromise') ||
+        errorMessage.includes('destroyed') ||
+        errorMessage.includes('is null') ||
+        errorString.includes('messageHandler') ||
+        errorString.includes('sendWithPromise')) {
+      // Don't set error state for cleanup errors - return no error
+      return { hasError: false, error: null }
+    }
     return { hasError: true, error }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Check if this is a PDF.js cleanup error (harmless during navigation)
-    if (error.message?.includes('messageHandler') || 
-        error.message?.includes('sendWithPromise') ||
-        error.message?.includes('destroyed') ||
-        error.message?.includes('is null') ||
-        (error as any).name === 'NullPointerException') {
+    const errorMessage = error.message || ''
+    const errorString = error.toString()
+    if (errorMessage.includes('messageHandler') || 
+        errorMessage.includes('sendWithPromise') ||
+        errorMessage.includes('destroyed') ||
+        errorMessage.includes('is null') ||
+        errorString.includes('messageHandler') ||
+        errorString.includes('sendWithPromise') ||
+        (error as any).name === 'NullPointerException' ||
+        (error as any).messageHandler === null) {
       console.debug(`PDF page ${this.props.pageNumber} render skipped - document was destroyed (normal during navigation)`)
-      // Don't set error state for cleanup errors - just log and continue
+      // Don't set error state for cleanup errors - getDerivedStateFromError already handles this
+      // Don't call setState here as it causes infinite loops
       return
     } else {
       console.error(`Page ${this.props.pageNumber} render error:`, error)
@@ -217,9 +235,17 @@ class PageErrorBoundary extends React.Component<PageErrorBoundaryProps, PageErro
   }
 
   componentDidUpdate(prevProps: PageErrorBoundaryProps) {
-    // Reset error state when page number changes
+    // Reset error state when page number changes or when document instance changes
+    // Check if error is harmless and reset accordingly
     if (prevProps.pageNumber !== this.props.pageNumber && this.state.hasError) {
-      this.setState({ hasError: false, error: null })
+      const isHarmlessError = this.state.error?.message?.includes('messageHandler') ||
+                              this.state.error?.message?.includes('sendWithPromise') ||
+                              this.state.error?.message?.includes('destroyed')
+      
+      if (isHarmlessError || !this.state.error) {
+        // For harmless errors or when page changes, reset error state
+        this.setState({ hasError: false, error: null })
+      }
     }
   }
 
@@ -2324,12 +2350,37 @@ export default function FastPlanCanvas({
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
     } else if (selectedTool === 'item' || selectedTool === 'item_select') {
-      // When placing items (selectedItemType is set), use stricter detection to avoid accidental clicks
-      // When selecting/editing, use normal detection
+      // When placing items (selectedItemType is set), prioritize placement over selection
+      // Only check for existing items if we're not in placement mode, or if we're very close
       const isPlacingMode = selectedTool === 'item' && selectedItemType !== null
-      const clickedItem = drawings.find(d => 
-        d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d, isPlacingMode)
-      )
+      
+      // When placing, use very strict detection (only detect if directly on top)
+      // When selecting/editing, use normal detection
+      let clickedItem: Drawing | null = null
+      if (isPlacingMode) {
+        // In placing mode, only detect items if we're VERY close (within 5 units)
+        // This prevents accidental selection when placing items near existing ones
+        for (const d of drawings) {
+          if (d.type === 'item' && d.pageNumber === pageNumber) {
+            const geom = d.geometry
+            if (geom && typeof geom.x !== 'undefined' && typeof geom.y !== 'undefined') {
+              const itemX = geom.x
+              const itemY = geom.y
+              const dist = Math.sqrt(Math.pow(world.x - itemX, 2) + Math.pow(world.y - itemY, 2))
+              // Very strict threshold when placing - only detect if directly on top
+              if (dist <= 5) {
+                clickedItem = d
+                break
+              }
+            }
+          }
+        }
+      } else {
+        // Normal mode - use standard detection
+        clickedItem = drawings.find(d => 
+          d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d, false)
+        ) || null
+      }
       
       if (clickedItem) {
         // Handle selection mode
@@ -2354,65 +2405,24 @@ export default function FastPlanCanvas({
             onSelectedItemsChange(newSelection)
           }
         } else if (onItemSave) {
-          // Clicking on existing item - check if we should edit or use for quick tagging
-          if (e.altKey || e.metaKey) {
-            // Alt/Cmd+Click: Set this item's type for quick tagging (add more of this type)
-            if (setSelectedItemType) {
-              setSelectedItemType({
-                itemType: clickedItem.itemType || '',
-                itemCategory: clickedItem.itemCategory,
-                itemLabel: clickedItem.itemLabel
-              })
+          // Clicking on existing item - only allow quick tagging if explicitly selected via sidebar
+          // Otherwise, always edit the item or place a new one
+          if (selectedItemType) {
+            // Item type is selected (via sidebar plus button) and we detected an item (very close)
+            // In this case, edit the item since we're directly on top of it
+            const itemX = clickedItem.geometry.x || baseWorldX
+            const itemY = clickedItem.geometry.y || baseWorldY
+            if (onItemPinClick) {
+              onItemPinClick(itemX, itemY, pageNumber)
             }
-            // Switch to item tool if not already
-            if (selectedTool !== 'item') {
-              setSelectedTool('item')
-            }
-          } else if (selectedTool === 'item' && !selectedItemType) {
-            // In item tool mode, clicking an item sets it for quick tagging (add more of this type)
-            if (setSelectedItemType) {
-              setSelectedItemType({
-                itemType: clickedItem.itemType || '',
-                itemCategory: clickedItem.itemCategory,
-                itemLabel: clickedItem.itemLabel
-              })
-            }
-          } else if (!selectedItemType) {
-            // Normal click without selected type - edit it
+          } else {
+            // No item type selected - clicking on existing item should edit it
+            // This allows users to edit items or place new ones without auto-selecting type
             const itemX = clickedItem.geometry.x || baseWorldX
             const itemY = clickedItem.geometry.y || baseWorldY
             if (onItemPinClick) {
               onItemPinClick(itemX, itemY, pageNumber)
               // The parent should handle setting editingItem
-            }
-          } else {
-            // Item type is selected - only edit if we're RIGHT on top of it (strict mode threshold)
-            // Otherwise, place new item nearby
-            // Since strict mode is active, if we detected the item, we're very close
-            // But when placing, prioritize placement - only edit if we're directly on it
-            const itemX = clickedItem.geometry.x || baseWorldX
-            const itemY = clickedItem.geometry.y || baseWorldY
-            const dist = Math.sqrt(Math.pow(baseWorldX - itemX, 2) + Math.pow(baseWorldY - itemY, 2))
-            
-            // Only edit if we're very close (within 8 units), otherwise place new item
-            if (dist < 8) {
-              if (onItemPinClick) {
-                onItemPinClick(itemX, itemY, pageNumber)
-              }
-            } else {
-              // Place new item nearby
-              if (onItemSave) {
-                onItemSave(
-                  {
-                    itemType: selectedItemType.itemType,
-                    itemCategory: selectedItemType.itemCategory,
-                    itemLabel: selectedItemType.itemLabel
-                  },
-                  baseWorldX,
-                  baseWorldY,
-                  pageNumber
-                )
-              }
             }
           }
         }
@@ -3189,7 +3199,7 @@ export default function FastPlanCanvas({
                           </div>
                         ) : null}
                       >
-                        {documentComponentReady && (
+                        {documentComponentReady && workerReady && componentIsMounted.current && (
                           <Page
                             key={`page-${documentInstanceId.current}-${pageNum}`}
                             pageNumber={pageNum}
@@ -3212,8 +3222,10 @@ export default function FastPlanCanvas({
                               </div>
                             ) : null}
                           onLoadSuccess={(page: { height: number; width: number }) => {
-                            // Guard against state updates after unmount
+                            // Guard against state updates after unmount or document change
                             if (!componentIsMounted.current) return
+                            // Verify document instance hasn't changed (prevent stale updates)
+                            const currentInstanceId = documentInstanceId.current
                             // Calculate dimensions based on constrained width (612) and PDF aspect ratio
                             // react-pdf scales the PDF to fit the specified width, so we use that as base
                             const baseWidth = 612
@@ -3221,6 +3233,8 @@ export default function FastPlanCanvas({
                             const scaledWidth = baseWidth * scale
                             const scaledHeight = baseWidth * aspectRatio * scale
                             setPageDimensions((prev: Map<number, { width: number; height: number }>) => {
+                              // Double-check instance hasn't changed during async update
+                              if (documentInstanceId.current !== currentInstanceId) return prev
                               const newDimensions = new Map(prev)
                               newDimensions.set(pageNum, { width: scaledWidth, height: scaledHeight })
                               return newDimensions
@@ -3229,18 +3243,26 @@ export default function FastPlanCanvas({
                           onLoadError={(error: Error) => {
                             // Ignore errors for destroyed documents (messageHandler null)
                             // This happens during rapid page changes or document reload
-                            if (error.message?.includes('messageHandler') || error.message?.includes('sendWithPromise')) {
+                            if (error.message?.includes('messageHandler') || 
+                                error.message?.includes('sendWithPromise') ||
+                                error.message?.includes('destroyed') ||
+                                error.message?.includes('is null')) {
                               console.debug(`Page ${pageNum} load skipped - document was destroyed (normal during navigation)`)
                               return
                             }
-                            if (isCurrentPage) {
+                            // Only log errors if component is still mounted and it's the current page
+                            if (componentIsMounted.current && isCurrentPage) {
                               console.error(`Error loading page ${pageNum}:`, error)
                             }
                           }}
                           onRenderError={(error: Error) => {
                             if (!isCurrentPage) return // Ignore errors on prefetched pages
                             // Silently handle PDF.js cleanup errors
-                            if (error.message?.includes('messageHandler') || error.message?.includes('worker') || error.message?.includes('sendWithPromise')) {
+                            if (error.message?.includes('messageHandler') || 
+                                error.message?.includes('worker') || 
+                                error.message?.includes('sendWithPromise') ||
+                                error.message?.includes('destroyed') ||
+                                error.message?.includes('is null')) {
                               console.debug('PDF.js worker cleanup error (harmless during navigation)')
                               // Cancel quality upgrade and stay at low quality
                               if (qualityUpgradeTimeoutRef.current) {
