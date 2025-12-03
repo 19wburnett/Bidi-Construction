@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
 import { extractTextWithOCR } from '@/lib/ingestion/pdf-ocr-extractor'
 import type { OCRPageText } from '@/lib/ingestion/pdf-ocr-extractor'
+import type { PageText } from '@/types/ingestion'
 
 const DEFAULT_STORAGE_BUCKET = process.env.NEXT_PUBLIC_PLAN_STORAGE_BUCKET || 'job-plans'
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small'

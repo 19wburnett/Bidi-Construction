@@ -146,7 +146,7 @@ export async function diagnosePlanChunks(
     averageChunkLength: Math.round(averageChunkLength),
     chunksByPage,
     sampleChunks,
-    issues: [...new Set(issues)], // Remove duplicates
+    issues: Array.from(new Set(issues)), // Remove duplicates
   }
 }
 
