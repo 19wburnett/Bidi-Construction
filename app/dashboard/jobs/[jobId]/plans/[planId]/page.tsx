@@ -29,7 +29,8 @@ import {
   Pencil,
   Check,
   X,
-  Plus
+  Plus,
+  Tag
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -43,6 +44,8 @@ import { canvasUtils } from '@/lib/canvas-utils'
 import { Drawing } from '@/lib/canvas-utils'
 import { MeasurementPersistence, isMeasurementDrawing } from '@/lib/measurement-persistence'
 import { CommentPersistence } from '@/lib/comment-persistence'
+import { ItemPersistence } from '@/lib/item-persistence'
+import { getItemTypeById } from '@/lib/item-types'
 import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
@@ -52,12 +55,16 @@ import PlanChatPanel from '@/components/plan/plan-chat-panel'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
 import { organizeCommentsIntoThreads, getReplyCount } from '@/lib/comment-utils'
 import { CheckCircle2 } from 'lucide-react'
+import ItemList from '@/components/item-list'
+import ItemTagModal from '@/components/item-tag-modal'
 import ScaleSettingsModal, { ScaleSetting } from '@/components/scale-settings-modal'
 import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-scope-review'
 import { getJobForUser } from '@/lib/job-access'
+import PDFSearch from '@/components/pdf-search'
+import MeasurementSummaryPanel from '@/components/measurement-summary-panel'
 
 
-type AnalysisMode = 'takeoff' | 'chat' | 'comments'
+type AnalysisMode = 'takeoff' | 'chat' | 'comments' | 'items'
 
 type TradeScopeStatus = 'complete' | 'partial' | 'missing'
 
@@ -82,6 +89,15 @@ export default function EnhancedPlanViewer() {
   const [planUrl, setPlanUrl] = useState<string>('')
   const [commentFormOpen, setCommentFormOpen] = useState(false)
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
+  const [itemModalOpen, setItemModalOpen] = useState(false)
+  const [itemModalPosition, setItemModalPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
+  const [editingItem, setEditingItem] = useState<Drawing | null>(null)
+  const [sidebarHoveredItemId, setSidebarHoveredItemId] = useState<string | null>(null)
+  const [selectedItemType, setSelectedItemType] = useState<{
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null>(null)
   const [isRunningTakeoff, setIsRunningTakeoff] = useState(false)
   const [isGeneratingShare, setIsGeneratingShare] = useState(false)
   
@@ -102,12 +118,28 @@ export default function EnhancedPlanViewer() {
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number; timeEstimate?: string }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
+  const [goToCoordinate, setGoToCoordinate] = useState<{ x: number; y: number; pageNumber: number } | undefined>(undefined)
   
   // Handle page navigation from takeoff items
   const handlePageNavigate = useCallback((page: number) => {
     setGoToPage(page)
+    setGoToCoordinate(undefined)
     // Reset after navigation so it can be triggered again
-    setTimeout(() => setGoToPage(undefined), 100)
+    setTimeout(() => {
+      setGoToPage(undefined)
+      setGoToCoordinate(undefined)
+    }, 100)
+  }, [])
+  
+  // Handle navigation to a specific coordinate
+  const handleNavigateToCoordinate = useCallback((x: number, y: number, pageNumber: number) => {
+    setGoToPage(pageNumber)
+    setGoToCoordinate({ x, y, pageNumber })
+    // Reset after navigation so it can be triggered again
+    setTimeout(() => {
+      setGoToPage(undefined)
+      setGoToCoordinate(undefined)
+    }, 100)
   }, [])
   
   // PDF quality settings
@@ -118,6 +150,13 @@ export default function EnhancedPlanViewer() {
   const [scaleSettingsModalOpen, setScaleSettingsModalOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null)
+  const [hasRestoredPage, setHasRestoredPage] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatchCount, setSearchMatchCount] = useState(0)
+  const [searchCurrentMatch, setSearchCurrentMatch] = useState(0)
+  const [selectedMeasurementIds, setSelectedMeasurementIds] = useState<Set<string>>(new Set())
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
   const [isCalibrating, setIsCalibrating] = useState(false)
   
@@ -169,10 +208,47 @@ export default function EnhancedPlanViewer() {
   
   const commentPersistenceRef = useRef<CommentPersistence | null>(null)
   const measurementPersistenceRef = useRef<MeasurementPersistence | null>(null)
+  const itemPersistenceRef = useRef<ItemPersistence | null>(null)
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isSyncingRef = useRef(false)
+  const pendingSyncRef = useRef<Drawing[] | null>(null)
   const supabase = createClient()
 
   const jobId = params.jobId as string
   const planId = params.planId as string
+
+  // Restore saved page from localStorage on mount
+  useEffect(() => {
+    if (planId && !hasRestoredPage) {
+      const storageKey = `bidi-plan-page-${planId}`
+      try {
+        const savedPage = localStorage.getItem(storageKey)
+        if (savedPage) {
+          const pageNum = parseInt(savedPage, 10)
+          if (!isNaN(pageNum) && pageNum >= 1) {
+            setCurrentPage(pageNum)
+          }
+        }
+      } catch (e) {
+        // localStorage may be unavailable in some contexts
+        console.warn('Could not restore saved page:', e)
+      }
+      setHasRestoredPage(true)
+    }
+  }, [planId, hasRestoredPage])
+
+  // Save current page to localStorage when it changes
+  useEffect(() => {
+    if (planId && hasRestoredPage && currentPage >= 1) {
+      const storageKey = `bidi-plan-page-${planId}`
+      try {
+        localStorage.setItem(storageKey, currentPage.toString())
+      } catch (e) {
+        // localStorage may be unavailable or full
+        console.warn('Could not save page to localStorage:', e)
+      }
+    }
+  }, [planId, currentPage, hasRestoredPage])
 
   // Track current takeoff analysis row id for updates
   const [takeoffAnalysisRowId, setTakeoffAnalysisRowId] = useState<string | null>(null)
@@ -215,6 +291,34 @@ export default function EnhancedPlanViewer() {
     }
     
     initializeAndLoadComments()
+    return () => {
+      // Cleanup if needed
+    }
+  }, [user, planId])
+
+  // Initialize item persistence and load items
+  useEffect(() => {
+    const initializeAndLoadItems = async () => {
+      if (user && planId) {
+        // Initialize item persistence
+        itemPersistenceRef.current = new ItemPersistence(planId, user.id)
+        
+        // Load items immediately after initialization
+        try {
+          const items = await itemPersistenceRef.current.loadItems()
+          console.log('Loaded items:', items.length)
+          setDrawings(prev => {
+            // Merge with existing non-item drawings
+            const nonItemDrawings = prev.filter(d => d.type !== 'item')
+            return [...nonItemDrawings, ...items]
+          })
+        } catch (error) {
+          console.error('Error loading items:', error)
+        }
+      }
+    }
+    
+    initializeAndLoadItems()
     return () => {
       // Cleanup if needed
     }
@@ -304,8 +408,9 @@ export default function EnhancedPlanViewer() {
       const deltaX = e.clientX - startX
       const newWidth = startWidth - deltaX
       
-      // Clamp width between 420px and 640px
-      const clampedWidth = Math.max(420, Math.min(640, newWidth))
+      // Clamp width between 420px and 80% of viewport width
+      const maxWidth = Math.floor(window.innerWidth * 0.8)
+      const clampedWidth = Math.max(420, Math.min(maxWidth, newWidth))
       setSidebarWidth(clampedWidth)
     }
 
@@ -635,8 +740,9 @@ export default function EnhancedPlanViewer() {
     }, 100)
   }, [plan])
 
-  // Handle drawings change and save
+  // Handle drawings change and save with debouncing to prevent race conditions
   const handleDrawingsChange = useCallback(async (newDrawings: Drawing[]) => {
+    // Always update local state immediately for responsive UI
     setDrawings(newDrawings)
 
     const persistence = measurementPersistenceRef.current
@@ -644,23 +750,65 @@ export default function EnhancedPlanViewer() {
       return
     }
 
-    try {
-      const measurementDrawings = newDrawings.filter(isMeasurementDrawing)
-      const syncedMeasurements = await persistence.syncMeasurements(measurementDrawings)
-
-      setDrawings(current => {
-        const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
-        return [...nonMeasurements, ...syncedMeasurements]
-      })
-    } catch (error) {
-      console.error('Failed to sync measurements:', error)
+    // Clear any pending sync timeout
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current)
     }
+
+    // If a sync is in progress, store the latest drawings to sync after current completes
+    if (isSyncingRef.current) {
+      pendingSyncRef.current = newDrawings
+      return
+    }
+
+    // Debounce the sync to batch rapid changes (300ms delay)
+    syncTimeoutRef.current = setTimeout(async () => {
+      const performSync = async (drawingsToSync: Drawing[]) => {
+        isSyncingRef.current = true
+        try {
+          const measurementDrawings = drawingsToSync.filter(isMeasurementDrawing)
+          const syncedMeasurements = await persistence.syncMeasurements(measurementDrawings)
+
+          // Merge synced measurements with current state (not the state at sync start)
+          setDrawings(current => {
+            const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
+            // Keep any local measurements that weren't in the sync (newly added during sync)
+            const syncedIds = new Set(syncedMeasurements.map(m => m.id))
+            const currentMeasurements = current.filter(isMeasurementDrawing)
+            const localOnlyMeasurements = currentMeasurements.filter(m => !syncedIds.has(m.id))
+            return [...nonMeasurements, ...syncedMeasurements, ...localOnlyMeasurements]
+          })
+        } catch (error) {
+          console.error('Failed to sync measurements:', error)
+        } finally {
+          isSyncingRef.current = false
+          
+          // If there were changes during sync, process them now
+          if (pendingSyncRef.current) {
+            const pendingDrawings = pendingSyncRef.current
+            pendingSyncRef.current = null
+            // Use the latest state for the next sync
+            performSync(pendingDrawings)
+          }
+        }
+      }
+
+      // Use the latest drawings from ref to ensure we sync the most recent state
+      performSync(drawingsRef.current)
+    }, 300)
   }, [])
 
   // Handle comment pin click (to place new comment)
   const handleCommentPinClick = useCallback((x: number, y: number, pageNumber: number) => {
     setCommentPosition({ x, y, pageNumber })
     setCommentFormOpen(true)
+  }, [])
+
+  // Handle item pin click (to place new item)
+  const handleItemPinClick = useCallback((x: number, y: number, pageNumber: number) => {
+    setItemModalPosition({ x, y, pageNumber })
+    setEditingItem(null)
+    setItemModalOpen(true)
   }, [])
 
   // Handle add comment from comments tab
@@ -675,6 +823,26 @@ export default function EnhancedPlanViewer() {
     // Comment popup is now handled directly in FastPlanCanvas component
     // No additional action needed here
   }, [])
+
+  // Handle comment delete
+  const handleCommentDelete = useCallback(async (commentId: string) => {
+    try {
+      // Delete from Supabase using comment persistence
+      if (commentPersistenceRef.current) {
+        await commentPersistenceRef.current.deleteComment(commentId)
+        // Reload comments to ensure state is in sync
+        const comments = await commentPersistenceRef.current.loadComments()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'comment'), ...comments])
+      } else {
+        // Fallback: just remove from local state
+        const updatedDrawings = drawings.filter(d => d.id !== commentId)
+        await handleDrawingsChange(updatedDrawings)
+      }
+    } catch (error) {
+      console.error('Error deleting comment:', error)
+      throw error // Re-throw so FastPlanCanvas can show error message
+    }
+  }, [drawings, handleDrawingsChange])
 
   // Handle comment save
   const handleCommentSave = useCallback(async (comment: {
@@ -769,6 +937,218 @@ export default function EnhancedPlanViewer() {
       alert('Failed to save reply. Please try again.')
     }
   }, [drawings, handleDrawingsChange, user])
+
+  // Handle item save
+  const handleItemSave = useCallback(async (item: {
+    itemType: string
+    itemLabel?: string
+    itemNotes?: string
+    itemCategory?: string
+  }) => {
+    try {
+      const itemType = getItemTypeById(item.itemType)
+      const category = item.itemCategory || itemType?.category || 'other'
+      
+      const newDrawing: Drawing = {
+        id: editingItem?.id || Date.now().toString(),
+        type: 'item',
+        geometry: {
+          x: itemModalPosition.x,
+          y: itemModalPosition.y,
+        },
+        style: {
+          color: itemType?.color || '#3b82f6',
+          strokeWidth: 2,
+          opacity: 1
+        },
+        pageNumber: itemModalPosition.pageNumber,
+        itemType: item.itemType,
+        itemLabel: item.itemLabel,
+        itemNotes: item.itemNotes,
+        itemCategory: category,
+        layerName: 'items',
+        isVisible: true,
+        isLocked: false,
+        userId: user?.id,
+        userName: user?.email,
+        createdAt: editingItem?.createdAt || new Date().toISOString()
+      }
+
+      // Save using item persistence
+      if (itemPersistenceRef.current) {
+        if (editingItem) {
+          // Update existing item
+          const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItem.id)
+          updatedItems.push(newDrawing)
+          await itemPersistenceRef.current.syncItems(updatedItems)
+        } else {
+          // Create new item
+          const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
+          await itemPersistenceRef.current.syncItems(updatedItems)
+        }
+        // Reload items
+        const items = await itemPersistenceRef.current.loadItems()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'item'), ...items])
+      } else {
+        // Fallback to old method
+        if (editingItem) {
+          await handleDrawingsChange(drawings.map(d => d.id === editingItem.id ? newDrawing : d))
+        } else {
+          await handleDrawingsChange([...drawings, newDrawing])
+        }
+      }
+      
+      // If creating a new item (not editing), set it as the selected type for quick tagging
+      if (!editingItem) {
+        setSelectedItemType({
+          itemType: item.itemType,
+          itemCategory: category,
+          itemLabel: item.itemLabel
+        })
+      }
+      
+      setEditingItem(null)
+      setItemModalOpen(false)
+    } catch (error) {
+      console.error('Error saving item:', error)
+      alert('Failed to save item. Please try again.')
+    }
+  }, [itemModalPosition, drawings, handleDrawingsChange, user, editingItem])
+
+  // Handle item save from canvas (with coordinates)
+  const handleItemSaveWithCoords = useCallback(async (
+    item: {
+      itemType: string
+      itemLabel?: string
+      itemNotes?: string
+      itemCategory?: string
+    },
+    x: number,
+    y: number,
+    pageNumber: number,
+    editingItemId?: string
+  ) => {
+    try {
+      const itemType = getItemTypeById(item.itemType)
+      const category = item.itemCategory || itemType?.category || 'other'
+      const existingItem = editingItemId ? drawings.find(d => d.id === editingItemId) : null
+      
+      const newDrawing: Drawing = {
+        id: editingItemId || Date.now().toString(),
+        type: 'item',
+        geometry: {
+          x,
+          y,
+        },
+        style: {
+          color: itemType?.color || '#3b82f6',
+          strokeWidth: 2,
+          opacity: 1
+        },
+        pageNumber,
+        itemType: item.itemType,
+        itemLabel: item.itemLabel,
+        itemNotes: item.itemNotes,
+        itemCategory: category,
+        layerName: 'items',
+        isVisible: true,
+        isLocked: false,
+        userId: user?.id,
+        userName: user?.email,
+        createdAt: existingItem?.createdAt || new Date().toISOString()
+      }
+
+      // Optimistically update UI immediately for better UX
+      if (editingItemId) {
+        // Update existing item - show immediately
+        setDrawings(prev => prev.map(d => d.id === editingItemId ? newDrawing : d))
+      } else {
+        // Create new item - show immediately
+        setDrawings(prev => [...prev, newDrawing])
+      }
+      
+      // Save using item persistence (async, but UI already updated)
+      if (itemPersistenceRef.current) {
+        if (editingItemId) {
+          // Update existing item
+          const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItemId)
+          updatedItems.push(newDrawing)
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+          })
+        } else {
+          // Create new item
+          const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+          })
+        }
+      } else {
+        // Fallback to old method
+        if (editingItemId) {
+          handleDrawingsChange(drawings.map(d => d.id === editingItemId ? newDrawing : d))
+        } else {
+          handleDrawingsChange([...drawings, newDrawing])
+        }
+      }
+      
+      // If creating a new item (not editing), set it as the selected type for quick tagging
+      if (!editingItemId) {
+        setSelectedItemType({
+          itemType: item.itemType,
+          itemCategory: category,
+          itemLabel: item.itemLabel
+        })
+      }
+    } catch (error) {
+      console.error('Error saving item:', error)
+      alert('Failed to save item. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange, user])
+
+  // Handle item delete
+  const handleItemDelete = useCallback(async (itemId: string) => {
+    try {
+      if (itemPersistenceRef.current) {
+        await itemPersistenceRef.current.deleteItem(itemId)
+        // Reload items
+        const items = await itemPersistenceRef.current.loadItems()
+        setDrawings(prev => [...prev.filter(d => d.type !== 'item'), ...items])
+      } else {
+        // Fallback to old method
+        await handleDrawingsChange(drawings.filter(d => d.id !== itemId))
+      }
+    } catch (error) {
+      console.error('Error deleting item:', error)
+      alert('Failed to delete item. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange])
+
+  // Handle item edit
+  const handleItemEdit = useCallback((item: Drawing) => {
+    setEditingItem(item)
+    setItemModalPosition({ 
+      x: item.geometry.x || 0, 
+      y: item.geometry.y || 0, 
+      pageNumber: item.pageNumber 
+    })
+    setItemModalOpen(true)
+  }, [])
+
+  // Handle item click (navigate to item location)
+  const handleItemClick = useCallback((item: Drawing) => {
+    if (item.geometry && typeof item.geometry.x !== 'undefined' && typeof item.geometry.y !== 'undefined') {
+      // Navigate to the item's specific location
+      handleNavigateToCoordinate(item.geometry.x, item.geometry.y, item.pageNumber)
+    } else {
+      // Fallback to just navigating to the page
+      handlePageNavigate(item.pageNumber)
+    }
+  }, [handlePageNavigate, handleNavigateToCoordinate])
 
   // Handle comment resolution
   const handleCommentResolve = useCallback(async (commentId: string) => {
@@ -1209,6 +1589,37 @@ export default function EnhancedPlanViewer() {
     setEditingTitle('')
   }
 
+  // Search handlers
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query)
+    setSearchCurrentMatch(0) // Reset to first match when query changes
+  }, [])
+
+  const handleSearchNext = useCallback(() => {
+    if (searchMatchCount > 0) {
+      setSearchCurrentMatch(prev => (prev + 1) % searchMatchCount)
+    }
+  }, [searchMatchCount])
+
+  const handleSearchPrevious = useCallback(() => {
+    if (searchMatchCount > 0) {
+      setSearchCurrentMatch(prev => (prev - 1 + searchMatchCount) % searchMatchCount)
+    }
+  }, [searchMatchCount])
+
+  // Keyboard shortcut for search (Ctrl+F / Cmd+F)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1358,7 +1769,14 @@ export default function EnhancedPlanViewer() {
                 onRightSidebarToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
                 onCommentPinClick={handleCommentPinClick}
                 onCommentClick={handleCommentClick}
+                onCommentDelete={handleCommentDelete}
+                onItemPinClick={handleItemPinClick}
+                onItemSave={handleItemSaveWithCoords}
+                selectedItemType={selectedItemType}
+                onSelectedItemTypeChange={setSelectedItemType}
+                sidebarHoveredItemId={sidebarHoveredItemId}
                 goToPage={goToPage}
+                goToCoordinate={goToCoordinate}
                 scale={scale}
                 onClearCache={handleClearCache}
                 measurementScaleSettings={measurementScaleSettings}
@@ -1378,6 +1796,15 @@ export default function EnhancedPlanViewer() {
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
                 fileType={plan?.file_type}
+                searchQuery={searchQuery}
+                currentMatchIndex={searchCurrentMatch}
+                onSearchResults={(count) => {
+                  setSearchMatchCount(count)
+                }}
+                selectedMeasurementIds={selectedMeasurementIds}
+                onSelectedMeasurementsChange={setSelectedMeasurementIds}
+                selectedItemIds={selectedItemIds}
+                onSelectedItemsChange={setSelectedItemIds}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -1477,7 +1904,7 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="grid w-full grid-cols-3 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
+                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
                       <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-3">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden xl:inline">Takeoff</span>
@@ -1489,6 +1916,10 @@ export default function EnhancedPlanViewer() {
                       <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-3">
                         <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden xl:inline">Comments</span>
+                      </TabsTrigger>
+                      <TabsTrigger value="items" className="text-xs md:text-sm px-2 md:px-3">
+                        <Tag className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
+                        <span className="hidden xl:inline">Items</span>
                       </TabsTrigger>
                     </TabsList>
                     
@@ -1635,6 +2066,26 @@ export default function EnhancedPlanViewer() {
                           })()}
                         </div>
                       </TabsContent>
+                      
+                      <TabsContent value="items" className="h-full">
+                        <ItemList
+                          items={drawings.filter(d => d.type === 'item')}
+                          onItemClick={handleItemClick}
+                          onItemEdit={handleItemEdit}
+                          onItemDelete={handleItemDelete}
+                          onItemHover={setSidebarHoveredItemId}
+                          onAddItemType={(itemType, itemCategory, itemLabel) => {
+                            setSelectedItemType({
+                              itemType,
+                              itemCategory,
+                              itemLabel
+                            })
+                            // Note: The tool will be set to 'item' when user clicks on canvas
+                            // We could add a prop to FastPlanCanvas to set the tool, but for now
+                            // the user can just click on the canvas and it will place the item
+                          }}
+                        />
+                      </TabsContent>
                     </div>
                   </Tabs>
                 </div>
@@ -1667,6 +2118,30 @@ export default function EnhancedPlanViewer() {
         y={commentPosition.y}
         pageNumber={commentPosition.pageNumber}
         onSave={handleCommentSave}
+      />
+
+      {/* Item Tag Modal */}
+      <ItemTagModal
+        open={itemModalOpen}
+        onOpenChange={setItemModalOpen}
+        x={itemModalPosition.x}
+        y={itemModalPosition.y}
+        pageNumber={itemModalPosition.pageNumber}
+        onSave={handleItemSave}
+        editingItem={editingItem ? {
+          itemType: editingItem.itemType || '',
+          itemLabel: editingItem.itemLabel,
+          itemNotes: editingItem.itemNotes,
+          itemCategory: editingItem.itemCategory
+        } : null}
+        onSetForQuickTagging={(item) => {
+          setSelectedItemType({
+            itemType: item.itemType,
+            itemCategory: item.itemCategory,
+            itemLabel: item.itemLabel
+          })
+          setItemModalOpen(false)
+        }}
       />
 
       {/* Modals */}
@@ -1832,6 +2307,34 @@ export default function EnhancedPlanViewer() {
           setIsCalibrating(false)
           setCalibrationPoints([])
         }}
+      />
+
+      {/* PDF Search Component */}
+      <PDFSearch
+        isOpen={searchOpen}
+        onSearch={handleSearch}
+        onNext={handleSearchNext}
+        onPrevious={handleSearchPrevious}
+        onClose={() => {
+          setSearchOpen(false)
+          setSearchQuery('')
+          setSearchMatchCount(0)
+          setSearchCurrentMatch(0)
+        }}
+        matchCount={searchMatchCount}
+        currentMatch={searchCurrentMatch}
+      />
+
+      {/* Measurement Selection Summary Panel */}
+      <MeasurementSummaryPanel
+        selectedMeasurements={drawings.filter(d => selectedMeasurementIds.has(d.id))}
+        onClearSelection={() => setSelectedMeasurementIds(new Set())}
+        onDeleteSelected={() => {
+          const newDrawings = drawings.filter(d => !selectedMeasurementIds.has(d.id))
+          handleDrawingsChange(newDrawings)
+          setSelectedMeasurementIds(new Set())
+        }}
+        unit={measurementScaleSettings[currentPage]?.unit || 'ft'}
       />
     </div>
   )

@@ -8,7 +8,8 @@ import {
   Ruler, 
   Square, 
   Move, 
-  MousePointer2 
+  MousePointer2,
+  MousePointerClick
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -19,7 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-export type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit'
+export type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select'
 
 interface FloatingToolDockProps {
   selectedTool: DrawingTool
@@ -70,6 +71,12 @@ export function FloatingToolDock({
       icon: Move,
       label: 'Adjust',
       shortcut: 'E'
+    },
+    {
+      id: 'measurement_select',
+      icon: MousePointerClick,
+      label: 'Select Measurements',
+      shortcut: 'S'
     }
   ] as const
 

@@ -6,42 +6,31 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
   Building2, 
-  Settings, 
   Users, 
   Zap, 
   Search, 
   UserPlus, 
   FileText,
   DollarSign,
-  BarChart3,
-  Activity,
   ArrowRight,
-  ArrowLeft,
-  PlayCircle,
-  User,
-  Layers
+  Layers,
+  Mail,
+  Grid3X3
 } from 'lucide-react'
 import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import NotificationBell from '@/components/notification-bell'
-import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+import UserMasqueradeSelector from '@/components/admin/user-masquerade-selector'
 
 export default function AdminDashboardPage() {
   const [demoMode, setDemoMode] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-  const [stats, setStats] = useState({
-    totalBids: 0,
-    totalPlans: 0,
-    totalSubcontractors: 0,
-    pendingAnalyses: 0
-  })
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -163,8 +152,7 @@ export default function AdminDashboardPage() {
       description: 'Review and complete takeoff and quality analyses for uploaded plans',
       icon: FileText,
       href: '/admin/analyze-plans',
-      color: 'blue',
-      badge: stats.pendingAnalyses > 0 ? stats.pendingAnalyses : undefined
+      color: 'blue'
     },
     {
       title: 'Manage Bids',
@@ -188,18 +176,18 @@ export default function AdminDashboardPage() {
       color: 'orange'
     },
     {
-      title: 'Workflow Demo',
-      description: 'Demonstrate the complete bid collection workflow',
-      icon: PlayCircle,
-      href: '/admin/workflow-demo',
+      title: 'Team Invitations',
+      description: 'Manage team invitations and onboard new members',
+      icon: Mail,
+      href: '/admin/invitations',
       color: 'indigo'
     },
     {
-      title: 'AI Plan Demo',
-      description: 'Showcase AI-powered plan analysis and bid generation',
-      icon: Zap,
-      href: '/admin/ai-plan-demo',
-      color: 'yellow'
+      title: 'Test Multi Takeoff',
+      description: 'Test multi-page takeoff analysis across plan sheets',
+      icon: Grid3X3,
+      href: '/admin/test-multi-takeoff',
+      color: 'teal'
     }
   ]
 
@@ -217,6 +205,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <UserMasqueradeSelector />
               <NotificationBell />
               <ProfileDropdown />
             </div>
@@ -231,65 +220,6 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Total Bids</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalBids.toLocaleString()}</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                  <DollarSign className="h-6 w-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Total Plans</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalPlans.toLocaleString()}</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
-                  <FileText className="h-6 w-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Subcontractors</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.totalSubcontractors.toLocaleString()}</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-green-100 flex items-center justify-center">
-                  <Users className="h-6 w-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Pending Analyses</p>
-                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.pendingAnalyses.toLocaleString()}</p>
-                </div>
-                <div className="h-12 w-12 rounded-full bg-orange-100 flex items-center justify-center">
-                  <Activity className="h-6 w-6 text-orange-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Admin Features Grid */}
         <div className="mb-8">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Admin Tools</h2>
@@ -300,15 +230,8 @@ export default function AdminDashboardPage() {
                 <Link key={feature.href} href={feature.href}>
                   <Card className="h-full hover:shadow-lg transition-all cursor-pointer border-2 hover:border-orange-300">
                     <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div className={`h-12 w-12 rounded-lg bg-${feature.color}-100 flex items-center justify-center mb-3`}>
-                          <Icon className={`h-6 w-6 text-${feature.color}-600`} />
-                        </div>
-                        {feature.badge && (
-                          <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                            {feature.badge}
-                          </span>
-                        )}
+                      <div className={`h-12 w-12 rounded-lg bg-${feature.color}-100 flex items-center justify-center mb-3`}>
+                        <Icon className={`h-6 w-6 text-${feature.color}-600`} />
                       </div>
                       <CardTitle className="text-lg">{feature.title}</CardTitle>
                       <CardDescription className="text-sm">{feature.description}</CardDescription>
@@ -328,73 +251,6 @@ export default function AdminDashboardPage() {
 
         {/* Settings */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Demo Mode */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Zap className="h-5 w-5 text-orange-600" />
-                <span>AI Plan Analysis Demo</span>
-              </CardTitle>
-              <CardDescription>
-                Upload construction plans, select trades, and see AI-powered bid generation in action.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  This demo showcases AI-powered plan analysis:
-                </p>
-                <ul className="text-sm text-gray-600 space-y-1 ml-4">
-                  <li>• Upload PDF construction plans</li>
-                  <li>• Select trade categories for analysis</li>
-                  <li>• AI generates detailed bid estimates</li>
-                  <li>• View materials, labor, and timeline breakdowns</li>
-                  <li>• Identify potential issues and recommendations</li>
-                </ul>
-                <Link href="/admin/ai-plan-demo">
-                  <Button className="w-full" variant="orange">
-                    <Zap className="h-4 w-4 mr-2" />
-                    Launch AI Plan Demo
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Workflow Demo */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Users className="h-5 w-5 text-purple-600" />
-                <span>Interactive Workflow Demo</span>
-              </CardTitle>
-              <CardDescription>
-                Experience the complete Bidi workflow from email to bid report in an interactive demo.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">
-                  This demo simulates the entire process of how Bidi works:
-                </p>
-                <ul className="text-sm text-gray-600 space-y-1 ml-4">
-                  <li>• General contractor sends email with job details</li>
-                  <li>• Bidi processes and extracts job information</li>
-                  <li>• System notifies qualified subcontractors</li>
-                  <li>• Subcontractors respond with bids (simulated)</li>
-                  <li>• Bidi analyzes and compares all bids</li>
-                  <li>• Final report is generated and sent to GC</li>
-                </ul>
-                <Link href="/admin/workflow-demo">
-                  <Button className="w-full">
-                    <Users className="h-4 w-4 mr-2" />
-                    Launch Interactive Demo
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Plan Text Ingestion */}
           <Card>
             <CardHeader>

@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { createClient } from '@/lib/supabase'
-import { Plus, User, FileText, DollarSign, Calendar, MapPin, Mail, Briefcase, Check, ChevronsUpDown, Trash2 } from 'lucide-react'
+import { useAuth } from '@/app/providers'
+import { Plus, User, FileText, DollarSign, Calendar, MapPin, Mail, Briefcase, Check, ChevronsUpDown, Trash2, Contact } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AddBidModalProps {
@@ -23,6 +24,16 @@ interface Subcontractor {
   name: string
   email: string
   trade_category: string
+}
+
+interface Contact {
+  id: string
+  name: string
+  email: string
+  trade_category: string
+  location: string
+  company?: string | null
+  phone?: string | null
 }
 
 interface BidPackage {
@@ -42,16 +53,19 @@ interface LineItem {
 
 export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddBidModalProps) {
   const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
   const [bidPackages, setBidPackages] = useState<BidPackage[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   
   // Form State
   const [selectedSubId, setSelectedSubId] = useState<string>('')
+  const [selectedContactId, setSelectedContactId] = useState<string>('')
   const [isSubComboboxOpen, setIsSubComboboxOpen] = useState(false)
   const [selectedPackageId, setSelectedPackageId] = useState<string>('none')
   const [timeline, setTimeline] = useState('')
   const [notes, setNotes] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [lineItems, setLineItems] = useState<LineItem[]>([])
   
   // New Subcontractor State
@@ -60,6 +74,7 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
   const [newSubTrade, setNewSubTrade] = useState('')
   const [newSubLocation, setNewSubLocation] = useState('')
 
+  const { user } = useAuth()
   const supabase = createClient()
 
   useEffect(() => {
@@ -68,17 +83,29 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
       // Initialize with one empty line item
       setLineItems([{ id: crypto.randomUUID(), description: '', quantity: '', unit: '', unit_price: '', amount: 0 }])
     }
-  }, [isOpen, jobId])
+  }, [isOpen, jobId, user?.id])
 
   async function loadData() {
     setLoading(true)
     try {
+      // Fetch subcontractors from Bidi network
       const { data: subsData } = await supabase
         .from('subcontractors')
         .select('id, name, email, trade_category')
         .order('name')
 
       setSubcontractors(subsData || [])
+
+      // Fetch user's contacts
+      if (user) {
+        const { data: contactsData } = await supabase
+          .from('gc_contacts')
+          .select('id, name, email, trade_category, location, company, phone')
+          .eq('gc_id', user.id)
+          .order('name')
+
+        setContacts(contactsData || [])
+      }
 
       const { data: packagesData } = await supabase
         .from('bid_packages')
@@ -129,10 +156,28 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
     setSubmitting(true)
 
     try {
-      let subcontractorId = selectedSubId
+      let subcontractorId: string | null = null
+      let contactId: string | null = null
+      let rawEmail = ''
 
+      // Validate that at least one recipient is selected
+      if (!selectedContactId && !selectedSubId) {
+        alert('Please select a subcontractor or contact')
+        setSubmitting(false)
+        return
+      }
+
+      // Handle contact selection - use contact_id directly
+      if (selectedContactId) {
+        const contact = contacts.find(c => c.id === selectedContactId)
+        if (contact) {
+          rawEmail = contact.email
+          contactId = contact.id
+          subcontractorId = null // Clear subcontractor_id when using contact
+        }
+      }
       // Create new subcontractor if needed
-      if (selectedSubId === 'new') {
+      else if (selectedSubId === 'new') {
         const { data: newSub, error: subError } = await supabase
           .from('subcontractors')
           .insert({
@@ -146,10 +191,13 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
 
         if (subError) throw subError
         subcontractorId = newSub.id
-      } else if (!selectedSubId) {
-        alert('Please select a subcontractor')
-        setSubmitting(false)
-        return
+        contactId = null // Clear contact_id when using subcontractor
+        rawEmail = newSubEmail
+      } else if (selectedSubId) {
+        const selectedSub = subcontractors.find(s => s.id === selectedSubId)
+        rawEmail = selectedSub?.email || ''
+        subcontractorId = selectedSubId
+        contactId = null // Clear contact_id when using subcontractor
       }
 
       // Create bid
@@ -158,12 +206,13 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
         .insert({
           job_id: jobId,
           subcontractor_id: subcontractorId,
+          contact_id: contactId,
           bid_package_id: selectedPackageId === 'none' ? null : selectedPackageId,
           bid_amount: null, // Calculated from line items
           timeline: timeline || null,
           notes: notes || null,
           status: 'pending',
-          raw_email: selectedSubId === 'new' ? newSubEmail : subcontractors.find(s => s.id === selectedSubId)?.email || '',
+          raw_email: rawEmail,
         })
         .select()
         .single()
@@ -193,6 +242,35 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
         }
       }
 
+      // Handle File Uploads
+      if (bidData && selectedFiles.length > 0 && user) {
+        const uploadPromises = selectedFiles.map(async (file) => {
+          const fileExt = file.name.split('.').pop()
+          const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+          const filePath = `${user.id}/${fileName}`
+
+          const { error: uploadError } = await supabase.storage
+            .from('bid-attachments')
+            .upload(filePath, file)
+
+          if (uploadError) throw new Error(`Upload failed for ${file.name}: ${uploadError.message}`)
+
+          const { error: attachmentError } = await supabase
+            .from('bid_attachments')
+            .insert({
+              bid_id: bidData.id,
+              file_name: file.name,
+              file_path: filePath,
+              file_size: file.size,
+              file_type: file.type
+            })
+          
+          if (attachmentError) throw new Error(`Attachment record failed for ${file.name}: ${attachmentError.message}`)
+        })
+
+        await Promise.all(uploadPromises)
+      }
+
       onBidAdded()
       handleClose()
     } catch (error) {
@@ -205,6 +283,7 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
 
   function handleClose() {
     setSelectedSubId('')
+    setSelectedContactId('')
     setIsSubComboboxOpen(false)
     setSelectedPackageId('none')
     setTimeline('')
@@ -213,6 +292,7 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
     setNewSubEmail('')
     setNewSubTrade('')
     setNewSubLocation('')
+    setSelectedFiles([])
     setLineItems([])
     onClose()
   }
@@ -498,6 +578,32 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
                   rows={4}
                   className="bg-white resize-none"
                 />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="file" className="text-sm font-medium">Attach Original Bid(s) (PDF)</Label>
+                <Input
+                  id="file"
+                  type="file"
+                  accept=".pdf"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      setSelectedFiles(Array.from(e.target.files))
+                    }
+                  }}
+                  className="bg-white"
+                />
+                {selectedFiles.length > 0 && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    <p className="font-medium mb-1">Selected files:</p>
+                    <ul className="list-disc list-inside">
+                      {selectedFiles.map((file, index) => (
+                        <li key={index}>{file.name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           </div>

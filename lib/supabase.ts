@@ -240,6 +240,7 @@ export interface Database {
           id: string
           job_id: string | null
           subcontractor_id: string | null
+          contact_id: string | null
           bid_amount: number | null
           timeline: string | null
           notes: string | null
@@ -258,6 +259,7 @@ export interface Database {
           id?: string
           job_id?: string | null
           subcontractor_id?: string | null
+          contact_id?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null
@@ -276,6 +278,7 @@ export interface Database {
           id?: string
           job_id?: string | null
           subcontractor_id?: string | null
+          contact_id?: string | null
           bid_amount?: number | null
           timeline?: string | null
           notes?: string | null

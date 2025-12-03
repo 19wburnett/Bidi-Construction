@@ -19,6 +19,7 @@ export interface Job {
   location: string
   budget_range: string | null
   project_type: string | null
+  cover_image_path: string | null
   status: JobStatus
   created_at: string
   updated_at: string

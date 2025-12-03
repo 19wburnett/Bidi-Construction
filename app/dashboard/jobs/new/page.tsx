@@ -17,9 +17,14 @@ import {
   CheckCircle,
   MapPin,
   DollarSign,
-  FileText
+  FileText,
+  Camera,
+  X,
+  ImageIcon
 } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
+import { createClient } from '@/lib/supabase'
 import { pageVariants, formField, successCheck } from '@/lib/animations'
 
 const PROJECT_TYPES = [
@@ -39,15 +44,47 @@ export default function NewJobPage() {
     budget_range: '',
     project_type: ''
   })
+  const [coverImage, setCoverImage] = useState<File | null>(null)
+  const [coverImagePreview, setCoverImagePreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
+  const supabase = createClient()
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     setError('') // Clear error on input change
+  }
+
+  const handleCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setError('Please select an image file')
+        return
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image must be less than 5MB')
+        return
+      }
+      setCoverImage(file)
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file)
+      setCoverImagePreview(previewUrl)
+      setError('')
+    }
+  }
+
+  const removeCoverImage = () => {
+    setCoverImage(null)
+    if (coverImagePreview) {
+      URL.revokeObjectURL(coverImagePreview)
+      setCoverImagePreview(null)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,6 +95,26 @@ export default function NewJobPage() {
     setError('')
 
     try {
+      let cover_image_path: string | null = null
+
+      // Upload cover image if selected
+      if (coverImage) {
+        const fileExt = coverImage.name.split('.').pop()
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+        // We'll use a temp folder first since we don't have the job ID yet
+        const tempPath = `${user.id}/temp/${fileName}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('job-covers')
+          .upload(tempPath, coverImage)
+
+        if (uploadError) {
+          throw new Error(`Failed to upload cover image: ${uploadError.message}`)
+        }
+
+        cover_image_path = tempPath
+      }
+
       // Use API route to create job (ensures proper server-side authentication)
       const response = await fetch('/api/jobs', {
         method: 'POST',
@@ -70,6 +127,7 @@ export default function NewJobPage() {
           location: formData.location,
           budget_range: formData.budget_range || null,
           project_type: formData.project_type || null,
+          cover_image_path,
           status: 'needs_takeoff'
         }),
       })
@@ -81,6 +139,31 @@ export default function NewJobPage() {
       }
 
       const data = result.data
+
+      // If we uploaded to temp, move to proper location with job ID
+      if (cover_image_path && data.id) {
+        const fileExt = coverImage!.name.split('.').pop()
+        const finalPath = `${user.id}/${data.id}/cover.${fileExt}`
+        
+        // Copy to final location
+        const { error: copyError } = await supabase.storage
+          .from('job-covers')
+          .copy(cover_image_path, finalPath)
+
+        if (!copyError) {
+          // Delete temp file
+          await supabase.storage
+            .from('job-covers')
+            .remove([cover_image_path])
+
+          // Update job with final path
+          await fetch(`/api/jobs/${data.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cover_image_path: finalPath })
+          })
+        }
+      }
 
       // Show success animation
       setSuccess(true)
@@ -158,6 +241,59 @@ export default function NewJobPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Cover Image */}
+              <motion.div
+                variants={formField}
+                whileFocus="focus"
+                className="space-y-2"
+              >
+                <Label className="flex items-center">
+                  <Camera className="h-4 w-4 mr-1" />
+                  Project Photo
+                </Label>
+                <div className="flex items-start gap-4">
+                  {coverImagePreview ? (
+                    <div className="relative">
+                      <div className="w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200">
+                        <Image
+                          src={coverImagePreview}
+                          alt="Cover preview"
+                          width={96}
+                          height={96}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeCoverImage}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="cover-image"
+                      className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                    >
+                      <ImageIcon className="h-6 w-6 text-gray-400" />
+                      <span className="text-xs text-gray-500 mt-1">Add Photo</span>
+                    </label>
+                  )}
+                  <div className="flex-1 text-sm text-gray-500">
+                    <p>Upload a photo to help identify this project at a glance.</p>
+                    <p className="text-xs mt-1">JPG, PNG or WebP, max 5MB</p>
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  id="cover-image"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleCoverImageChange}
+                  className="hidden"
+                />
+              </motion.div>
+
               {/* Job Name */}
               <motion.div
                 variants={formField}

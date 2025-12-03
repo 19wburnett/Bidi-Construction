@@ -3,6 +3,10 @@ import { Drawing } from '@/lib/canvas-utils'
 
 const MEASUREMENT_TYPES = new Set<Drawing['type']>(['measurement_line', 'measurement_area'])
 
+// Coordinates are stored directly as received from the canvas component.
+// The canvas component stores coordinates in PDF coordinate space (actual PDF units).
+// No migration or transformation is needed - coordinates persist as-is.
+
 const isUuid = (value?: string | null): boolean => {
   if (!value) return false
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(value)
@@ -106,6 +110,7 @@ export class MeasurementPersistence {
     }>(row.measurement_data)
 
     const type = this.measurementTypeFromRow(row)
+    // Convert points to numbers - coordinates are stored as-is in PDF space
     const points = (geometry.points || []).map(point => Number(point))
 
     const measurements =

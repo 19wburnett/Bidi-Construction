@@ -6,6 +6,17 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import ProfileDropdown from '@/components/profile-dropdown'
 import CreditsDisplay from '@/components/credits-display'
 import {
@@ -13,7 +24,6 @@ import {
   Building2,
   Users,
   Settings,
-  CreditCard,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -24,7 +34,9 @@ import {
   FileText,
   Package,
   Bell,
-  Bot
+  Bot,
+  FilePlus,
+  UserPlus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
@@ -48,13 +60,6 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [stats, setStats] = useState({
-    activeJobs: 0,
-    unreadNotifications: 0,
-    pendingAnalyses: 0,
-    activePlans: 0,
-    pendingBids: 0
-  })
 
   const supabase = createClient()
 
@@ -81,10 +86,6 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       subscription.unsubscribe()
     }
   }, [supabase])
-
-  useEffect(() => {
-    loadStats()
-  }, [isAdmin])
 
   async function checkAdminStatus() {
     try {
@@ -120,61 +121,11 @@ export default function DashboardSidebar({ className }: SidebarProps) {
     }
   }
 
-  async function loadStats() {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      // Load active jobs count
-      const { count: jobsCount } = await supabase
-        .from('jobs')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-
-      // Load unread notifications count
-      // Note: This assumes notifications table exists with 'read' column
-      // If table doesn't exist, this will fail gracefully
-      let notificationsCount = 0
-      try {
-        const { count } = await supabase
-          .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('read', false)
-        notificationsCount = count || 0
-      } catch (notifError) {
-        // Notifications table may not exist, silently fail
-        console.warn('Could not load notifications count:', notifError)
-      }
-
-      setStats({
-        activeJobs: jobsCount || 0,
-        unreadNotifications: notificationsCount || 0,
-        pendingAnalyses: 0,
-        activePlans: 0,
-        pendingBids: 0
-      })
-    } catch (error) {
-      console.error('Error loading stats:', error)
-    }
-  }
-
   const navItems: NavItem[] = [
     {
       label: 'Dashboard',
       href: '/dashboard',
       icon: Home
-    },
-    {
-      label: 'Jobs',
-      href: '/dashboard/jobs',
-      icon: Building2,
-      badge: stats.activeJobs > 0 ? stats.activeJobs : undefined,
-      subItems: [
-        { label: 'All Jobs', href: '/dashboard/jobs' },
-        { label: 'New Job', href: '/dashboard/jobs/new' }
-      ]
     },
     {
       label: 'Contacts',
@@ -200,11 +151,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       href: '/admin/demo-settings',
       icon: Building2,
       subItems: [
-        { 
-          label: 'Analyze Plans', 
-          href: '/admin/analyze-plans',
-          badge: stats.pendingAnalyses > 0 ? stats.pendingAnalyses : undefined
-        },
+        { label: 'Analyze Plans', href: '/admin/analyze-plans' },
         { label: 'Test Multi Takeoff', href: '/admin/test-multi-takeoff' },
         { label: 'Crawler', href: '/admin/crawler' },
         { label: 'Subcontractors', href: '/admin/manage-subcontractors' },
@@ -216,7 +163,6 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   ] : []
 
   function isActiveLink(href: string): boolean {
-    // Remove hash from href for comparison
     const cleanHref = href.split('#')[0]
     
     if (cleanHref === '/dashboard') {
@@ -225,172 +171,264 @@ export default function DashboardSidebar({ className }: SidebarProps) {
     return pathname.startsWith(cleanHref)
   }
 
-  return (
-    <div
-      className={cn(
-        'flex flex-col h-full bg-white dark:bg-black border-r border-gray-200 dark:border-gray-800 transition-all duration-300',
-        isCollapsed ? 'w-20' : 'w-64',
-        className
-      )}
-    >
-      {/* Sidebar Header */}
-      <div className="border-b border-gray-200 dark:border-gray-800">
-        <div className="flex items-center justify-between p-4">
+  // Nav item component with tooltip support for collapsed state
+  const NavItemComponent = ({ item, index }: { item: NavItem; index: number }) => {
+    const Icon = item.icon
+    const isActive = isActiveLink(item.href)
+    const hasSubItems = item.subItems && item.subItems.length > 0
+
+    const navContent = (
+      <div
+        className={cn(
+          'flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 ease-out cursor-pointer group',
+          isActive
+            ? 'bg-gradient-to-r from-orange-500/10 to-orange-400/5 text-orange-600 dark:text-orange-400 font-medium shadow-sm shadow-orange-500/10'
+            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-gray-200',
+          !isCollapsed && 'hover:translate-x-0.5'
+        )}
+      >
+        <div className={cn(
+          'flex items-center min-w-0',
+          !isCollapsed && 'space-x-3'
+        )}>
+          <Icon
+            className={cn(
+              'h-5 w-5 flex-shrink-0 transition-colors duration-200',
+              isActive 
+                ? 'text-orange-500 dark:text-orange-400' 
+                : 'text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300'
+            )}
+          />
           {!isCollapsed && (
-            <Link href="/dashboard" className="flex items-center space-x-2">
-              <img 
-                src="/brand/Bidi Contracting Logo.svg" 
-                alt="Bidi" 
-                className="h-8 w-8"
-              />
-              <span className="text-xl font-bold font-bidi dark:text-white">BIDI</span>
-            </Link>
-          )}
-          {isCollapsed && (
-            <Link href="/dashboard" className="mx-auto">
-              <img 
-                src="/brand/Bidi Contracting Logo.svg" 
-                alt="Bidi" 
-                className="h-8 w-8"
-              />
-            </Link>
+            <span className="truncate text-sm">{item.label}</span>
           )}
         </div>
-        
-        {/* User Actions (Credits, Profile with Notifications) */}
-        {!isCollapsed && (
-          <div className="px-4 pb-4 space-y-3">
-            <CreditsDisplay />
-            <ProfileDropdown />
+        {!isCollapsed && item.badge && (
+          <Badge 
+            variant={isActive ? "default" : "secondary"}
+            className={cn(
+              "ml-auto flex-shrink-0 text-xs",
+              isActive && "bg-orange-500 hover:bg-orange-600"
+            )}
+          >
+            {item.badge}
+          </Badge>
+        )}
+      </div>
+    )
+
+    return (
+      <div key={`${item.href}-${index}`}>
+        {isCollapsed ? (
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Link href={item.href}>
+                {navContent}
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="font-medium">
+              {item.label}
+              {item.badge && ` (${item.badge})`}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Link href={item.href}>
+            {navContent}
+          </Link>
+        )}
+
+        {/* Sub-items */}
+        {!isCollapsed && hasSubItems && isActive && (
+          <div className="ml-8 mt-1.5 space-y-0.5 border-l-2 border-gray-200 dark:border-gray-700 pl-3">
+            {item.subItems?.map((subItem) => (
+              <Link key={subItem.href} href={subItem.href}>
+                <div
+                  className={cn(
+                    'px-3 py-1.5 rounded-lg text-sm transition-all duration-200 cursor-pointer',
+                    pathname === subItem.href
+                      ? 'text-orange-600 dark:text-orange-400 font-medium bg-orange-50/50 dark:bg-orange-950/30'
+                      : 'text-gray-500 dark:text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/30'
+                  )}
+                >
+                  {subItem.label}
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </div>
+    )
+  }
 
-      {/* Quick Actions */}
-      {!isCollapsed && (
-        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="space-y-2">
-            <Link href="/dashboard/plans/new" className="block">
-              <Button className="w-full justify-start" size="sm" variant="default">
-                <Plus className="h-4 w-4 mr-2" />
-                Upload Plan
-              </Button>
+  return (
+    <TooltipProvider>
+      <div
+        className={cn(
+          'flex flex-col h-full bg-white dark:bg-gray-950 border-r border-gray-200/80 dark:border-gray-800/50 transition-all duration-300 ease-out',
+          isCollapsed ? 'w-[72px]' : 'w-64',
+          className
+        )}
+      >
+        {/* Header - Logo and User Section */}
+        <div className="p-4 space-y-4">
+          {/* Logo */}
+          <div className={cn(
+            'flex items-center',
+            isCollapsed ? 'justify-center' : 'space-x-2.5'
+          )}>
+            <Link href="/dashboard" className={cn(
+              'flex items-center transition-transform duration-200 hover:scale-105',
+              !isCollapsed && 'space-x-2.5'
+            )}>
+              <img 
+                src="/brand/Bidi Contracting Logo.svg" 
+                alt="Bidi" 
+                className="h-9 w-9"
+              />
+              {!isCollapsed && (
+                <span className="text-xl font-bold tracking-tight dark:text-white">BIDI</span>
+              )}
             </Link>
           </div>
-        </div>
-      )}
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-1">
-          {[...navItems, ...adminNavItems].map((item, index) => {
-            const Icon = item.icon
-            const isActive = isActiveLink(item.href)
-            const hasSubItems = item.subItems && item.subItems.length > 0
-
-            return (
-              <div key={`${item.href}-${index}`}>
-                <Link href={item.href}>
-                  <div
-                    className={cn(
-                      'flex items-center justify-between px-3 py-2 rounded-lg transition-colors cursor-pointer group',
-                      isActive
-                        ? 'bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 font-medium'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900'
-                    )}
-                  >
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <Icon
-                        className={cn(
-                          'h-5 w-5 flex-shrink-0',
-                          isActive ? 'text-orange-600' : 'text-gray-500 group-hover:text-gray-700'
-                        )}
-                      />
-                      {!isCollapsed && (
-                        <span className="truncate">{item.label}</span>
-                      )}
-                    </div>
-                    {!isCollapsed && item.badge && (
-                      <Badge 
-                        variant={isActive ? "default" : "secondary"}
-                        className="ml-auto flex-shrink-0"
-                      >
-                        {item.badge}
-                      </Badge>
-                    )}
-                  </div>
-                </Link>
-
-                {/* Sub-items */}
-                {!isCollapsed && hasSubItems && isActive && (
-                  <div className="ml-8 mt-1 space-y-1">
-                    {item.subItems?.map((subItem) => (
-                      <Link key={subItem.href} href={subItem.href}>
-                        <div
-                          className={cn(
-                            'px-3 py-1.5 rounded text-sm transition-colors cursor-pointer',
-                            pathname === subItem.href
-                              ? 'text-orange-600 dark:text-orange-400 font-medium'
-                              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-900'
-                          )}
-                        >
-                          {subItem.label}
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </nav>
-
-      {/* Stats Summary (when not collapsed) */}
-      {!isCollapsed && (
-        <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Active Jobs</span>
-              <span className="font-semibold dark:text-white">{stats.activeJobs}</span>
+          
+          {/* User Actions (Credits, Profile) */}
+          {!isCollapsed && (
+            <div className="space-y-2.5 pt-2">
+              <CreditsDisplay />
+              <ProfileDropdown />
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Active Plans</span>
-              <span className="font-semibold dark:text-white">{stats.activePlans}</span>
-            </div>
-            {stats.pendingBids > 0 && (
-              <div className="flex items-center justify-between text-orange-600 dark:text-orange-400">
-                <span>Pending Bids</span>
-                <span className="font-semibold">{stats.pendingBids}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Collapse Button */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-800 space-y-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            const newCollapsed = !isCollapsed
-            setIsCollapsed(newCollapsed)
-            localStorage.setItem('dashboard-sidebar-collapsed', String(newCollapsed))
-          }}
-          className="w-full dark:text-gray-300 dark:hover:text-white"
-        >
-          {isCollapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <>
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              Collapse
-            </>
           )}
-        </Button>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-4 h-px bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-800 to-transparent" />
+
+        {/* Quick Actions - Create New Popover */}
+        {!isCollapsed && (
+          <div className="p-4">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button 
+                  className="w-full justify-center bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 transition-all duration-200 hover:scale-[1.02]" 
+                  size="sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create New
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-52 p-2" align="start" side="right">
+                <div className="flex flex-col space-y-1">
+                  <Link href="/dashboard/jobs/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <Plus className="h-4 w-4 mr-2 text-orange-500" />
+                      Create Job
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/plans/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <FilePlus className="h-4 w-4 mr-2 text-blue-500" />
+                      Upload Plan
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/contacts">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <UserPlus className="h-4 w-4 mr-2 text-green-500" />
+                      Add Contact
+                    </Button>
+                  </Link>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
+
+        {/* Collapsed Create New Button */}
+        {isCollapsed && (
+          <div className="px-3 pb-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button 
+                  className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-md shadow-orange-500/25" 
+                  size="icon"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-52 p-2" align="start" side="right">
+                <div className="flex flex-col space-y-1">
+                  <Link href="/dashboard/jobs/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <Plus className="h-4 w-4 mr-2 text-orange-500" />
+                      Create Job
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/plans/new">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <FilePlus className="h-4 w-4 mr-2 text-blue-500" />
+                      Upload Plan
+                    </Button>
+                  </Link>
+                  <Link href="/dashboard/contacts">
+                    <Button variant="ghost" className="w-full justify-start" size="sm">
+                      <UserPlus className="h-4 w-4 mr-2 text-green-500" />
+                      Add Contact
+                    </Button>
+                  </Link>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
+
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto px-3 py-2">
+          <div className="space-y-1">
+            {[...navItems, ...adminNavItems].map((item, index) => (
+              <NavItemComponent key={`${item.href}-${index}`} item={item} index={index} />
+            ))}
+          </div>
+        </nav>
+
+        {/* Collapse Button */}
+        <div className="p-3">
+          <div className="h-px bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-800 to-transparent mb-3" />
+          {isCollapsed ? (
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    const newCollapsed = !isCollapsed
+                    setIsCollapsed(newCollapsed)
+                    localStorage.setItem('dashboard-sidebar-collapsed', String(newCollapsed))
+                  }}
+                  className="w-full text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/50"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="font-medium">
+                Expand Sidebar
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const newCollapsed = !isCollapsed
+                setIsCollapsed(newCollapsed)
+                localStorage.setItem('dashboard-sidebar-collapsed', String(newCollapsed))
+              }}
+              className="w-full justify-start text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/50"
+            >
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              <span className="text-sm">Collapse</span>
+            </Button>
+          )}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
-

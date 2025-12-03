@@ -38,9 +38,12 @@ import {
   Pencil,
   Check,
   X,
-  Search
+  Search,
+  Camera,
+  ImageIcon
 } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { staggerContainer, staggerItem, cardHover, skeletonPulse } from '@/lib/animations'
 import { Job, Plan, BidPackage, JobReport } from '@/types/takeoff'
 import { getJobForUser } from '@/lib/job-access'
@@ -79,6 +82,7 @@ type EditFormState = {
   project_type: string
   description: string
   status: Job['status']
+  cover_image_path: string | null
 }
 
 type Activity = {
@@ -131,8 +135,11 @@ export default function JobDetailPage() {
     budget_range: '',
     project_type: '',
     description: '',
-    status: 'draft'
+    status: 'draft',
+    cover_image_path: null
   })
+  const [editCoverImage, setEditCoverImage] = useState<File | null>(null)
+  const [editCoverImagePreview, setEditCoverImagePreview] = useState<string | null>(null)
   const supabase = createClient()
 
   const jobId = params.jobId as string
@@ -230,10 +237,10 @@ export default function JobDetailPage() {
       if (packagesError) throw packagesError
       setBidPackages(packagesData || [])
 
-      // Load bids for this job with bid package info
+      // Load bids for this job with bid package info, subcontractors, and contacts
       const { data: bidsData, error: bidsError } = await supabase
         .from('bids')
-        .select('*, subcontractors (id, name, email), bid_packages (id, trade_category, description, minimum_line_items, status)')
+        .select('*, subcontractors (id, name, email, trade_category), gc_contacts (id, name, email, trade_category, location, company, phone), bid_packages (id, trade_category, description, minimum_line_items, status)')
         .eq('job_id', jobId)
         .order('created_at', { ascending: false })
 
@@ -418,7 +425,7 @@ export default function JobDetailPage() {
       activities.push({
         id: `bid-${bid.id}`,
         type: 'bid',
-        message: `New bid received from ${bid.subcontractors?.name || 'Unknown Subcontractor'}`,
+        message: `New bid received from ${bid.subcontractors?.name || bid.gc_contacts?.name || 'Unknown Subcontractor'}`,
         date: bid.created_at
       })
     })
@@ -438,10 +445,50 @@ export default function JobDetailPage() {
       budget_range: job.budget_range || '',
       project_type: job.project_type || '',
       description: job.description || '',
-      status: job.status
+      status: job.status,
+      cover_image_path: job.cover_image_path || null
     })
+    setEditCoverImage(null)
+    setEditCoverImagePreview(null)
     setEditError(null)
     setIsEditDialogOpen(true)
+  }
+
+  const handleEditCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setEditError('Please select an image file')
+        return
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setEditError('Image must be less than 5MB')
+        return
+      }
+      setEditCoverImage(file)
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file)
+      setEditCoverImagePreview(previewUrl)
+      setEditError(null)
+    }
+  }
+
+  const removeEditCoverImage = () => {
+    setEditCoverImage(null)
+    if (editCoverImagePreview) {
+      URL.revokeObjectURL(editCoverImagePreview)
+      setEditCoverImagePreview(null)
+    }
+    // Mark for removal by setting to empty string (will become null on save)
+    setEditForm(prev => ({ ...prev, cover_image_path: '' }))
+  }
+
+  const getCoverImageUrl = (path: string | null) => {
+    if (!path) return null
+    const { data } = supabase.storage.from('job-covers').getPublicUrl(path)
+    return data.publicUrl
   }
 
   const handleEditChange = <K extends keyof EditFormState>(field: K, value: EditFormState[K]) => {
@@ -460,6 +507,42 @@ export default function JobDetailPage() {
     setEditError(null)
 
     try {
+      let cover_image_path = editForm.cover_image_path
+
+      // Upload new cover image if selected
+      if (editCoverImage) {
+        const fileExt = editCoverImage.name.split('.').pop()
+        const fileName = `cover.${fileExt}`
+        const filePath = `${user.id}/${job.id}/${fileName}`
+
+        // Delete old image if exists
+        if (job.cover_image_path) {
+          await supabase.storage
+            .from('job-covers')
+            .remove([job.cover_image_path])
+        }
+
+        const { error: uploadError } = await supabase.storage
+          .from('job-covers')
+          .upload(filePath, editCoverImage, { upsert: true })
+
+        if (uploadError) {
+          setEditError(`Failed to upload cover image: ${uploadError.message}`)
+          setSaving(false)
+          return
+        }
+
+        cover_image_path = filePath
+      } else if (editForm.cover_image_path === '') {
+        // User removed the image
+        if (job.cover_image_path) {
+          await supabase.storage
+            .from('job-covers')
+            .remove([job.cover_image_path])
+        }
+        cover_image_path = null
+      }
+
       const response = await fetch(`/api/jobs/${job.id}`, {
         method: 'PATCH',
         headers: {
@@ -471,7 +554,8 @@ export default function JobDetailPage() {
           budget_range: editForm.budget_range.trim() || null,
           project_type: editForm.project_type.trim() || null,
           description: editForm.description.trim() || null,
-          status: editForm.status
+          status: editForm.status,
+          cover_image_path
         })
       })
 
@@ -484,6 +568,8 @@ export default function JobDetailPage() {
 
       await loadJobData()
       setIsEditDialogOpen(false)
+      setEditCoverImage(null)
+      setEditCoverImagePreview(null)
     } catch (error) {
       console.error('Unexpected error updating job:', error)
       setEditError('Something went wrong while updating. Please try again.')
@@ -843,22 +929,42 @@ export default function JobDetailPage() {
               </Button>
             </Link>
             <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">{job.name}</h1>
-                <div className="flex items-center space-x-4 text-sm text-gray-600">
-                  <div className="flex items-center">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    {job.location}
-                  </div>
-                  {job.budget_range && (
-                    <div className="flex items-center">
-                      <DollarSign className="h-4 w-4 mr-1" />
-                      {job.budget_range}
+              <div className="flex items-center gap-4">
+                {/* Job Cover Image Thumbnail */}
+                <div className="flex-shrink-0">
+                  {job.cover_image_path ? (
+                    <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm">
+                      <Image
+                        src={getCoverImageUrl(job.cover_image_path) || ''}
+                        alt={job.name}
+                        width={64}
+                        height={64}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center border-2 border-orange-200">
+                      <Building2 className="h-8 w-8 text-orange-500" />
                     </div>
                   )}
-                  <div className="flex items-center">
-                    <Calendar className="h-4 w-4 mr-1" />
-                    {new Date(job.created_at).toLocaleDateString()}
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900 mb-2">{job.name}</h1>
+                  <div className="flex items-center space-x-4 text-sm text-gray-600">
+                    <div className="flex items-center">
+                      <MapPin className="h-4 w-4 mr-1" />
+                      {job.location}
+                    </div>
+                    {job.budget_range && (
+                      <div className="flex items-center">
+                        <DollarSign className="h-4 w-4 mr-1" />
+                        {job.budget_range}
+                      </div>
+                    )}
+                    <div className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-1" />
+                      {new Date(job.created_at).toLocaleDateString()}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1411,6 +1517,85 @@ export default function JobDetailPage() {
                 animate="animate"
                 className="space-y-6"
               >
+                {/* Received Bids Section */}
+                <motion.div variants={staggerItem}>
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center">
+                            <Users className="h-5 w-5 mr-2 text-orange-600" />
+                            Received Bids
+                          </CardTitle>
+                          <CardDescription>
+                            View and manage bids from subcontractors
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" onClick={() => setShowAddBidModal(true)}>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Manually Add Bid
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {bids.length === 0 ? (
+                        <div className="text-center py-12">
+                          <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
+                          <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {bids.map((bid) => {
+                            const subcontractor = (bid.subcontractors as any)
+                            const contact = (bid.gc_contacts as any)
+                            const bidPackage = (bid.bid_packages as any)
+                            return (
+                              <div 
+                                key={bid.id} 
+                                className="flex items-center justify-between p-4 border rounded-lg cursor-pointer hover:shadow-md hover:border-orange-200 transition-all"
+                                onClick={() => setShowBidsModal(true)}
+                              >
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-2 mb-1">
+                                    <span className="font-semibold">{subcontractor?.name || contact?.name || 'Unknown'}</span>
+                                    {subcontractor?.trade_category && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {subcontractor.trade_category}
+                                      </Badge>
+                                    )}
+                                    {!subcontractor?.trade_category && contact?.trade_category && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {contact.trade_category}
+                                      </Badge>
+                                    )}
+                                    {!subcontractor?.trade_category && !contact?.trade_category && bidPackage && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {bidPackage.trade_category}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {bid.bid_amount && (
+                                    <p className="text-sm text-gray-600">${Number(bid.bid_amount).toLocaleString()}</p>
+                                  )}
+                                  {bid.timeline && (
+                                    <p className="text-xs text-gray-500 mt-1">Timeline: {bid.timeline}</p>
+                                  )}
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-200">
+                                    Click to view
+                                  </Badge>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
                 {/* Bid Packages Section */}
                 <motion.div variants={staggerItem}>
                   <Card>
@@ -1519,78 +1704,6 @@ export default function JobDetailPage() {
                     </CardContent>
                   </Card>
                 </motion.div>
-
-                {/* Received Bids Section */}
-                <motion.div variants={staggerItem}>
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle className="flex items-center">
-                            <Users className="h-5 w-5 mr-2 text-orange-600" />
-                            Received Bids
-                          </CardTitle>
-                          <CardDescription>
-                            View and manage bids from subcontractors
-                          </CardDescription>
-                        </div>
-                        <Button variant="outline" onClick={() => setShowAddBidModal(true)}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Manually Add Bid
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {bids.length === 0 ? (
-                        <div className="text-center py-12">
-                          <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
-                          <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {bids.map((bid) => {
-                            const subcontractor = (bid.subcontractors as any)
-                            const bidPackage = (bid.bid_packages as any)
-                            return (
-                              <div key={bid.id} className="flex items-center justify-between p-4 border rounded-lg">
-                                <div className="flex-1">
-                                  <div className="flex items-center space-x-2 mb-1">
-                                    <span className="font-semibold">{subcontractor?.name || 'Unknown'}</span>
-                                    <Badge className={bid.status === 'accepted' ? 'bg-green-100 text-green-800' : bid.status === 'declined' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}>
-                                      {bid.status || 'pending'}
-                                    </Badge>
-                                    {bidPackage && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {bidPackage.trade_category}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  {bid.bid_amount && (
-                                    <p className="text-sm text-gray-600">${Number(bid.bid_amount).toLocaleString()}</p>
-                                  )}
-                                  {bid.timeline && (
-                                    <p className="text-xs text-gray-500 mt-1">Timeline: {bid.timeline}</p>
-                                  )}
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm"
-                                    onClick={() => setShowBidsModal(true)}
-                                  >
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    View
-                                  </Button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </motion.div>
               </motion.div>
             </TabsContent>
           </Tabs>
@@ -1612,6 +1725,55 @@ export default function JobDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpdateJob} className="px-6 py-6 space-y-5">
+            {/* Cover Image */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center">
+                <Camera className="h-4 w-4 mr-1" />
+                Project Photo
+              </Label>
+              <div className="flex items-start gap-4">
+                {editCoverImagePreview || (editForm.cover_image_path && editForm.cover_image_path !== '') ? (
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-200">
+                      <Image
+                        src={editCoverImagePreview || getCoverImageUrl(editForm.cover_image_path) || ''}
+                        alt="Cover preview"
+                        width={80}
+                        height={80}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={removeEditCoverImage}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor="edit-cover-image"
+                    className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                  >
+                    <ImageIcon className="h-5 w-5 text-gray-400" />
+                    <span className="text-xs text-gray-500 mt-1">Add</span>
+                  </label>
+                )}
+                <div className="flex-1 text-sm text-gray-500">
+                  <p>Upload a photo to help identify this project.</p>
+                  <p className="text-xs mt-1">JPG, PNG or WebP, max 5MB</p>
+                </div>
+              </div>
+              <input
+                type="file"
+                id="edit-cover-image"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleEditCoverImageChange}
+                className="hidden"
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="edit-name" className="text-sm font-medium">Job Name</Label>
               <Input

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2, FolderInput } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -68,6 +68,9 @@ export default function TakeoffSpreadsheet({
   const [showNewSubcontractorInput, setShowNewSubcontractorInput] = useState<string | null>(null)
   const [subcontractorSearchQuery, setSubcontractorSearchQuery] = useState<string>('')
   const [allTrades, setAllTrades] = useState<string[]>([])
+  const [showAddItemMenu, setShowAddItemMenu] = useState(false)
+  const addItemMenuRef = useRef<HTMLDivElement>(null)
+  const [movingItemId, setMovingItemId] = useState<string | null>(null)
   const [columnVisibility, setColumnVisibility] = useState({
     costCode: true,
     description: true,
@@ -508,6 +511,18 @@ export default function TakeoffSpreadsheet({
       updated.subcontractor = editValue === '__unassigned__' ? undefined : (editValue || undefined)
     } else if (editingCell.field === 'location') {
       updated.location = editValue.trim() || undefined
+    } else if (editingCell.field === 'page') {
+      const pageNum = parseInt(editValue, 10)
+      if (!isNaN(pageNum) && pageNum > 0) {
+        // Update or create bounding_box with the new page number
+        updated.bounding_box = {
+          ...(item.bounding_box || { x: 0, y: 0, width: 0, height: 0 }),
+          page: pageNum
+        }
+      } else if (!editValue.trim()) {
+        // Clear the bounding box if page is cleared
+        updated.bounding_box = undefined
+      }
     }
 
     const updatedItems = normalizedItems.map(i => (i.id === editingCell.rowId ? updated : i))
@@ -547,11 +562,125 @@ export default function TakeoffSpreadsheet({
     }
   }, [editingCell, cancelEdit])
 
+  // Close add item menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        showAddItemMenu &&
+        addItemMenuRef.current &&
+        !addItemMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowAddItemMenu(false)
+      }
+    }
+
+    if (showAddItemMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside)
+      }
+    }
+  }, [showAddItemMenu])
+
+  // Close move item menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (movingItemId) {
+        setMovingItemId(null)
+      }
+    }
+
+    if (movingItemId) {
+      // Delay to prevent immediate close on the same click
+      const timer = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside)
+      }, 0)
+      return () => {
+        clearTimeout(timer)
+        document.removeEventListener('click', handleClickOutside)
+      }
+    }
+  }, [movingItemId])
+
+  // Add new item
+  const addItem = useCallback((categoryKey?: string, subcontractor?: string) => {
+    if (!onItemsChange) return
+    
+    // Use provided category/subcontractor or defaults
+    const targetCategory = categoryKey || 'other'
+    const targetSubcontractor = subcontractor || undefined
+    
+    // Create a new item with sensible defaults
+    const newItem: TakeoffItem = {
+      id: crypto.randomUUID(),
+      name: 'New Item',
+      description: '',
+      quantity: 1,
+      unit: 'unit',
+      unit_cost: 0,
+      total_cost: 0,
+      category: targetCategory,
+      subcontractor: targetSubcontractor,
+      user_created: true
+    }
+    
+    const updatedItems = [...normalizedItems, newItem]
+    onItemsChange(updatedItems)
+    
+    // Expand the target category and subcontractor to show the new item
+    const categoryId = `category-${targetCategory}`
+    const subcontractorId = `${categoryId}-sub-${targetSubcontractor || 'Unassigned'}`
+    setExpandedCategories(prev => {
+      const next = new Set(prev)
+      next.add(categoryId)
+      return next
+    })
+    setExpandedSubcontractors(prev => {
+      const next = new Set(prev)
+      next.add(subcontractorId)
+      return next
+    })
+    
+    // Scroll to the new item after a brief delay to allow rendering
+    setTimeout(() => {
+      const row = categoryRefs.current[categoryId]
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 100)
+  }, [normalizedItems, onItemsChange])
+
   // Delete item
   const deleteItem = useCallback((itemId: string) => {
     if (!onItemsChange) return
     const updatedItems = normalizedItems.filter(i => i.id !== itemId && i.parent_id !== itemId)
     onItemsChange(updatedItems)
+  }, [normalizedItems, onItemsChange])
+
+  // Move item to different category
+  const moveItemToCategory = useCallback((itemId: string, newCategory: string) => {
+    if (!onItemsChange) return
+    const item = normalizedItems.find(i => i.id === itemId)
+    if (!item) return
+    
+    const updated = { ...item, category: newCategory, user_modified: true }
+    const updatedItems = normalizedItems.map(i => (i.id === itemId ? updated : i))
+    onItemsChange(updatedItems)
+    setMovingItemId(null)
+    
+    // Expand the target category to show where the item moved
+    const categoryId = `category-${newCategory}`
+    const subcontractorId = `${categoryId}-sub-${item.subcontractor || 'Unassigned'}`
+    setExpandedCategories(prev => {
+      const next = new Set(prev)
+      next.add(categoryId)
+      return next
+    })
+    setExpandedSubcontractors(prev => {
+      const next = new Set(prev)
+      next.add(subcontractorId)
+      return next
+    })
   }, [normalizedItems, onItemsChange])
 
   // Add new subcontractor
@@ -666,7 +795,7 @@ export default function TakeoffSpreadsheet({
       return (
         <React.Fragment key={row.id}>
           <tr
-            className="bg-gray-50/50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+            className="bg-gray-50/50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors group"
             onClick={() => toggleSubcontractor(row.id)}
           >
             <td className="py-2 px-4 pl-8 border-l border-gray-100">
@@ -691,6 +820,24 @@ export default function TakeoffSpreadsheet({
             <td className="py-2 px-4"></td>
             <td className="py-2 px-4"></td>
             <td className="py-2 px-4"></td>
+            <td className="py-2 px-4">
+              {editable && (
+                <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6 text-gray-400 hover:text-orange-600"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const subcontractorName = row.subcontractor === 'Unassigned' ? undefined : row.subcontractor
+                      addItem(row.categoryKey, subcontractorName)
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </td>
           </tr>
           {isExpanded && row.children?.map(child => renderRow(child))}
         </React.Fragment>
@@ -991,24 +1138,99 @@ export default function TakeoffSpreadsheet({
           )}
         </td>
         <td className="py-2 px-4 text-center">
-          {item.bounding_box && (
+          {isEditing && editingCell?.field === 'page' ? (
+            <Input
+              type="number"
+              min="1"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={saveEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveEdit()
+                if (e.key === 'Escape') cancelEdit()
+              }}
+              autoFocus
+              className="h-7 w-16 text-center text-sm mx-auto"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : item.bounding_box?.page ? (
             <Badge
               variant="outline"
-              className="text-[10px] h-5 px-1.5 bg-gray-50 hover:bg-orange-50 cursor-pointer transition-colors border-gray-200"
+              className={`text-[10px] h-5 px-1.5 bg-gray-50 hover:bg-orange-50 cursor-pointer transition-colors border-gray-200 ${editable ? 'hover:border-orange-300' : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
-                onPageNavigate?.(item.bounding_box!.page)
+                if (editable) {
+                  startEdit(row.id, 'page', item.bounding_box?.page || '')
+                } else {
+                  onPageNavigate?.(item.bounding_box!.page)
+                }
               }}
             >
               <MapPin className="h-3 w-3 mr-1 text-orange-500" />
               {item.bounding_box.page}
             </Badge>
-          )}
+          ) : editable ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] h-5 px-1.5 bg-gray-50 hover:bg-orange-50 cursor-pointer transition-colors border-gray-200 hover:border-orange-300 text-gray-400"
+              onClick={(e) => {
+                e.stopPropagation()
+                startEdit(row.id, 'page', '')
+              }}
+            >
+              <Plus className="h-3 w-3 mr-0.5" />
+              Page
+            </Badge>
+          ) : null}
         </td>
         <td className="py-2 px-4">
           <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
             {editable && (
               <>
+                <div className="relative">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6 text-gray-400 hover:text-blue-600"
+                    title="Move to category"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMovingItemId(movingItemId === row.id ? null : row.id)
+                    }}
+                  >
+                    <FolderInput className="h-3 w-3" />
+                  </Button>
+                  {movingItemId === row.id && (
+                    <div 
+                      className="absolute z-50 right-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="py-1">
+                        <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                          Move to Category
+                        </div>
+                        {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
+                          <button
+                            key={key}
+                            disabled={key === row.categoryKey}
+                            className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors ${
+                              key === row.categoryKey 
+                                ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
+                                : 'hover:bg-gray-50'
+                            }`}
+                            onClick={() => moveItemToCategory(row.id, key)}
+                          >
+                            <div className={`w-2 h-2 rounded-full ${config.bgColor} ${config.color.replace('text-', 'border-')} border-2`} />
+                            <span className={key === row.categoryKey ? 'text-gray-400' : config.color}>
+                              {config.label}
+                              {key === row.categoryKey && ' (current)'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
                  <Button
                   size="icon"
                   variant="ghost"
@@ -1049,6 +1271,7 @@ export default function TakeoffSpreadsheet({
     saveEdit,
     cancelEdit,
     deleteItem,
+    addItem,
     calculateItemCost,
     onItemHighlight,
     onPageNavigate,
@@ -1056,7 +1279,9 @@ export default function TakeoffSpreadsheet({
     normalizedItems,
     onItemsChange,
     subcontractorSearchQuery,
-    allTrades
+    allTrades,
+    movingItemId,
+    moveItemToCategory
   ])
 
   // Get category list for navigation
@@ -1095,6 +1320,41 @@ export default function TakeoffSpreadsheet({
               className="pl-10"
             />
           </div>
+          {editable && (
+            <div className="relative" ref={addItemMenuRef}>
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={() => setShowAddItemMenu(!showAddItemMenu)} 
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                <Plus className="h-4 w-4 mr-1" /> Add Item
+                <ChevronDown className={`h-3 w-3 ml-1 transition-transform ${showAddItemMenu ? 'rotate-180' : ''}`} />
+              </Button>
+              {showAddItemMenu && (
+                <div className="absolute z-50 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                  <div className="py-1">
+                    <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Select Category
+                    </div>
+                    {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
+                      <button
+                        key={key}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors`}
+                        onClick={() => {
+                          addItem(key)
+                          setShowAddItemMenu(false)
+                        }}
+                      >
+                        <div className={`w-2 h-2 rounded-full ${config.bgColor} ${config.color.replace('text-', 'border-')} border-2`} />
+                        <span className={config.color}>{config.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={expandAll}>
             <Expand className="h-4 w-4 mr-1" /> Expand All
           </Button>
@@ -1109,29 +1369,6 @@ export default function TakeoffSpreadsheet({
           </Button>
         </div>
       </div>
-
-      {/* Category Navigation Sidebar */}
-      {categoryList.length > 0 && (
-        <div className="bg-white border rounded-lg p-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-gray-700">Quick Navigation:</span>
-            {categoryList.map(cat => {
-              const config = cat.categoryKey ? CATEGORY_CONFIG[cat.categoryKey] : null
-              return (
-                <Button
-                  key={cat.id}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => scrollToCategory(cat.id)}
-                  className={`text-xs ${config?.color || 'text-gray-800'} ${config?.bgColor || 'bg-gray-100'} hover:opacity-80`}
-                >
-                  {cat.name} ({formatCurrency(cat.total)})
-                </Button>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Table */}
       <div ref={tableRef} className="border rounded-xl overflow-hidden bg-white shadow-sm">

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { X, CheckCircle2 } from 'lucide-react'
+import { X, CheckCircle2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,6 +11,7 @@ interface CommentPopupProps {
   comment: Drawing
   position: { x: number; y: number }
   onClose: () => void
+  onDelete?: (commentId: string) => void
   onResolve?: (commentId: string) => void
   onReply?: (parentId: string, content: string) => void
   currentUserId?: string
@@ -22,6 +23,7 @@ export default function CommentPopup({
   comment, 
   position, 
   onClose,
+  onDelete,
   onResolve,
   onReply,
   currentUserId,
@@ -55,6 +57,16 @@ export default function CommentPopup({
     
     if (confirm('Mark this comment as resolved?')) {
       onResolve(comment.id)
+    }
+  }
+
+  const handleDelete = () => {
+    if (!onDelete) {
+      return
+    }
+    
+    if (confirm('Are you sure you want to delete this comment? This action cannot be undone.')) {
+      onDelete(comment.id)
     }
   }
 
@@ -124,7 +136,7 @@ export default function CommentPopup({
       )}
 
       {/* Action buttons */}
-      {(onResolve || onReply) && (
+      {(onResolve || onReply || onDelete) && (
         <div className="flex gap-2 mb-3">
           {onReply && !comment.isResolved && (
             <Button
@@ -146,6 +158,18 @@ export default function CommentPopup({
             >
               <CheckCircle2 className="h-3 w-3 mr-1" />
               Mark Resolved
+            </Button>
+          )}
+
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleDelete}
+              className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              Delete
             </Button>
           )}
         </div>

@@ -25,12 +25,16 @@ import {
   Move,
   Trash2,
   PanelRightOpen,
-  PanelRightClose
+  PanelRightClose,
+  MousePointerClick,
+  Tag
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
 import CommentPopup from '@/components/comment-popup'
 import CommentBubble from '@/components/comment-bubble'
+import ItemTagModal from '@/components/item-tag-modal'
+import { getItemTypeById } from '@/lib/item-types'
 
 // Dynamically import react-pdf to avoid SSR issues
 const Document = dynamic(
@@ -52,7 +56,8 @@ const Page = dynamic(
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
-// Inject styles to ensure react-pdf canvas is visible
+// Inject styles to ensure react-pdf canvas is visible and properly constrained
+// CRITICAL: These styles ensure the PDF canvas matches the drawing canvas during quality transitions
 if (typeof window !== 'undefined') {
   // Check if styles already injected
   if (!document.getElementById('react-pdf-canvas-fix')) {
@@ -61,6 +66,7 @@ if (typeof window !== 'undefined') {
     style.textContent = `
       .react-pdf__Page__canvas {
         display: block !important;
+        width: 100% !important;
         max-width: 100% !important;
         height: auto !important;
         visibility: visible !important;
@@ -72,6 +78,8 @@ if (typeof window !== 'undefined') {
         display: block !important;
         position: relative !important;
         background-color: white !important;
+        width: 100% !important;
+        max-width: 100% !important;
       }
       .react-pdf__Page__textContent {
         display: none !important;
@@ -84,10 +92,19 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// Standard PDF dimensions (72 DPI)
+// Coordinates are stored in this normalized space to ensure persistence across zoom/scale changes
+const PDF_BASE_WIDTH = 612  // 8.5 inches * 72 DPI
+const PDF_BASE_HEIGHT = 792 // 11 inches * 72 DPI
+
 // Helper functions for measurements (pure functions, can be outside component)
 const calculatePixelDistance = (x1: number, y1: number, x2: number, y2: number): number => {
   return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2))
 }
+
+// Snap threshold for closing polygon shapes (in PDF base coordinates)
+// Keep small since users often work at 200-400% zoom
+const SNAP_TO_CLOSE_THRESHOLD = 8
 
 const calculatePolygonArea = (points: number[]): number => {
   if (points.length < 6) return 0 // Need at least 3 points (6 numbers)
@@ -114,7 +131,26 @@ interface FastPlanCanvasProps {
   onRightSidebarToggle: () => void
   onCommentPinClick: (x: number, y: number, pageNumber: number) => void
   onCommentClick?: (comment: Drawing) => void
+  onCommentDelete?: (commentId: string) => Promise<void> | void
+  onItemPinClick?: (x: number, y: number, pageNumber: number) => void
+  onItemSave?: (item: {
+    itemType: string
+    itemLabel?: string
+    itemNotes?: string
+    itemCategory?: string
+  }, x: number, y: number, pageNumber: number, editingItemId?: string) => void
+  selectedItemType?: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null
+  onSelectedItemTypeChange?: (itemType: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null) => void
   goToPage?: number
+  goToCoordinate?: { x: number; y: number; pageNumber: number }
   scale?: number
   onClearCache?: () => void
   measurementScaleSettings?: Record<number, { ratio: string; pixelsPerUnit: number; unit: 'ft' | 'in' | 'm' | 'cm' | 'mm' }>
@@ -127,9 +163,116 @@ interface FastPlanCanvasProps {
   onSetCalibrating?: (calibrating: boolean) => void
   /** Optional MIME type (e.g., 'image/png') for reliable image detection with signed URLs */
   fileType?: string
+  searchQuery?: string
+  currentMatchIndex?: number
+  onSearchResults?: (count: number) => void
+  selectedMeasurementIds?: Set<string>
+  onSelectedMeasurementsChange?: (ids: Set<string>) => void
+  selectedItemIds?: Set<string>
+  onSelectedItemsChange?: (ids: Set<string>) => void
+  sidebarHoveredItemId?: string | null
 }
 
-type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit'
+type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select' | 'item' | 'item_select'
+
+// Error Boundary to catch render-phase errors from react-pdf
+// This is necessary because PDF.js can throw errors during the render phase
+// when the document is destroyed while pages are still rendering
+import React from 'react'
+
+interface PageErrorBoundaryState {
+  hasError: boolean
+  error: Error | null
+}
+
+interface PageErrorBoundaryProps {
+  children: React.ReactNode
+  pageNumber: number
+  onError?: (error: Error) => void
+  fallback?: React.ReactNode
+}
+
+class PageErrorBoundary extends React.Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
+  constructor(props: PageErrorBoundaryProps) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error): PageErrorBoundaryState {
+    // Check if this is a harmless PDF.js cleanup error
+    const errorMessage = error.message || ''
+    const errorString = error.toString()
+    if (errorMessage.includes('messageHandler') || 
+        errorMessage.includes('sendWithPromise') ||
+        errorMessage.includes('destroyed') ||
+        errorMessage.includes('is null') ||
+        errorString.includes('messageHandler') ||
+        errorString.includes('sendWithPromise')) {
+      // Don't set error state for cleanup errors - return no error
+      return { hasError: false, error: null }
+    }
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Check if this is a PDF.js cleanup error (harmless during navigation)
+    const errorMessage = error.message || ''
+    const errorString = error.toString()
+    if (errorMessage.includes('messageHandler') || 
+        errorMessage.includes('sendWithPromise') ||
+        errorMessage.includes('destroyed') ||
+        errorMessage.includes('is null') ||
+        errorString.includes('messageHandler') ||
+        errorString.includes('sendWithPromise') ||
+        (error as any).name === 'NullPointerException' ||
+        (error as any).messageHandler === null) {
+      console.debug(`PDF page ${this.props.pageNumber} render skipped - document was destroyed (normal during navigation)`)
+      // Don't set error state for cleanup errors - getDerivedStateFromError already handles this
+      // Don't call setState here as it causes infinite loops
+      return
+    } else {
+      console.error(`Page ${this.props.pageNumber} render error:`, error)
+    }
+    this.props.onError?.(error)
+  }
+
+  componentDidUpdate(prevProps: PageErrorBoundaryProps) {
+    // Reset error state when page number changes or when document instance changes
+    // Check if error is harmless and reset accordingly
+    if (prevProps.pageNumber !== this.props.pageNumber && this.state.hasError) {
+      const isHarmlessError = this.state.error?.message?.includes('messageHandler') ||
+                              this.state.error?.message?.includes('sendWithPromise') ||
+                              this.state.error?.message?.includes('destroyed')
+      
+      if (isHarmlessError || !this.state.error) {
+        // For harmless errors or when page changes, reset error state
+        this.setState({ hasError: false, error: null })
+      }
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Check if it's a harmless PDF.js error
+      const isHarmlessError = this.state.error?.message?.includes('messageHandler') ||
+                              this.state.error?.message?.includes('sendWithPromise') ||
+                              this.state.error?.message?.includes('destroyed')
+      
+      if (isHarmlessError) {
+        // Return null for harmless errors - the page will re-render when document is ready
+        return null
+      }
+      
+      return this.props.fallback || (
+        <div className="flex items-center justify-center p-4 bg-red-50 text-red-600 text-sm">
+          Failed to render page {this.props.pageNumber}
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
 
 interface EditingMeasurementState {
   id: string
@@ -144,6 +287,13 @@ interface MeasurementHandleHit {
   handleIndex: number
 }
 
+interface SegmentHit {
+  drawing: Drawing
+  segmentIndex: number // Index of the first point of the segment (0-based)
+  clickX: number
+  clickY: number
+}
+
 export default function FastPlanCanvas({
   pdfUrl,
   drawings,
@@ -152,7 +302,11 @@ export default function FastPlanCanvas({
   onRightSidebarToggle,
   onCommentPinClick,
   onCommentClick,
+  onCommentDelete,
+  onItemPinClick,
+  onItemSave,
   goToPage,
+  goToCoordinate,
   scale = 1.5,
   onClearCache,
   measurementScaleSettings,
@@ -163,7 +317,17 @@ export default function FastPlanCanvas({
   calibrationPoints: externalCalibrationPoints,
   isCalibrating: externalIsCalibrating,
   onSetCalibrating,
-  fileType
+  fileType,
+  searchQuery,
+  currentMatchIndex,
+  onSearchResults,
+  selectedMeasurementIds,
+  onSelectedMeasurementsChange,
+  selectedItemIds,
+  onSelectedItemsChange,
+  selectedItemType: externalSelectedItemType,
+  onSelectedItemTypeChange,
+  sidebarHoveredItemId
 }: FastPlanCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -175,14 +339,58 @@ export default function FastPlanCanvas({
   const [showCommentPopup, setShowCommentPopup] = useState(false)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
   const [hoveredComment, setHoveredComment] = useState<Drawing | null>(null)
+  // Item tagging state
+  const [itemModalOpen, setItemModalOpen] = useState(false)
+  const [itemModalPosition, setItemModalPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
+  const [editingItem, setEditingItem] = useState<Drawing | null>(null)
+  const [hoveredItem, setHoveredItem] = useState<Drawing | null>(null)
+  // Selected item type for quick tagging (once selected, clicking places items of this type)
+  // Use external state if provided, otherwise use internal state
+  const [internalSelectedItemType, setInternalSelectedItemType] = useState<{
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null>(null)
+  
+  const selectedItemType = externalSelectedItemType !== undefined ? externalSelectedItemType : internalSelectedItemType
+  
+  const setSelectedItemType = useCallback((itemType: {
+    itemType: string
+    itemCategory?: string
+    itemLabel?: string
+  } | null) => {
+    if (onSelectedItemTypeChange) {
+      onSelectedItemTypeChange(itemType)
+    } else {
+      setInternalSelectedItemType(itemType)
+    }
+  }, [onSelectedItemTypeChange])
+  
+  // Count instances of the selected item type
+  const selectedItemTypeCount = useMemo(() => {
+    if (!selectedItemType) return 0
+    return drawings.filter(d => 
+      d.type === 'item' && 
+      d.itemType === selectedItemType.itemType
+    ).length
+  }, [drawings, selectedItemType])
   // Measurement drawing state
   const [currentMeasurement, setCurrentMeasurement] = useState<Drawing | null>(null)
   const [isDrawingMeasurement, setIsDrawingMeasurement] = useState(false)
   const [editingMeasurement, setEditingMeasurement] = useState<EditingMeasurementState | null>(null)
   const [isAdjustingMeasurement, setIsAdjustingMeasurement] = useState(false)
+  const [isSnappingToStart, setIsSnappingToStart] = useState(false)
+  const [hoveredMeasurementId, setHoveredMeasurementId] = useState<string | null>(null)
   // Calibration mode state
   const [internalIsCalibrating, setInternalIsCalibrating] = useState(false)
   const [internalCalibrationPoints, setInternalCalibrationPoints] = useState<{ x: number; y: number }[]>([])
+  // Visibility settings state
+  const [visibilitySettings, setVisibilitySettings] = useState({
+    showComments: true,
+    showItems: true,
+    showMeasurementLines: true,
+    showMeasurementAreas: true
+  })
   
   // Use external calibration points if provided, otherwise use internal state
   const calibrationPoints = externalCalibrationPoints || internalCalibrationPoints
@@ -212,45 +420,221 @@ export default function FastPlanCanvas({
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageInputValue, setPageInputValue] = useState('1')
-  const [pageHeights, setPageHeights] = useState<Map<number, number>>(new Map())
+  // Track actual PDF page dimensions (stored at base scale, i.e., multiplied by scale prop)
+  const [pageDimensions, setPageDimensions] = useState<Map<number, { width: number; height: number }>>(new Map())
+  // Legacy pageHeights for backwards compatibility - derived from pageDimensions
+  const pageHeights = useMemo(() => {
+    const heights = new Map<number, number>()
+    pageDimensions.forEach((dims, pageNum) => {
+      heights.set(pageNum, dims.height)
+    })
+    return heights
+  }, [pageDimensions])
   const [documentReady, setDocumentReady] = useState(false) // Track if PDF is ready for rendering
+  const [documentComponentReady, setDocumentComponentReady] = useState(false) // Track if Document component's internal PDF is loaded
+  const documentInstanceId = useRef(0) // Unique ID for each document load to prevent stale page renders
+  const componentIsMounted = useRef(true) // Track component lifecycle to prevent state updates after unmount
   const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set([1])) // Track visible pages for lazy loading
   const hasAutoFitted = useRef(false) // Track if we've already auto-fitted
+  const [searchMatches, setSearchMatches] = useState<Array<{ page: number; index: number }>>([])
+  
+  // Page cache for faster navigation (LRU with max 5 pages)
+  const pageCacheRef = useRef<Map<number, { timestamp: number; rendered: boolean }>>(new Map())
+  const MAX_CACHED_PAGES = 5
+  
+  // Pages to render: current page + next 2 for prefetching
+  const [pagesToRender, setPagesToRender] = useState<Set<number>>(new Set([1]))
+  
+  // Progressive rendering state - start with low quality, upgrade on idle
+  const [renderQuality, setRenderQuality] = useState<'low' | 'high'>('low')
+  const qualityUpgradeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Track if text layer should be enabled (only when search is active)
+  const shouldRenderTextLayer = Boolean(searchQuery && searchQuery.trim())
+  
+  // Handle search query changes
+  useEffect(() => {
+    if (!searchQuery || !searchQuery.trim()) {
+      setSearchMatches([])
+      if (onSearchResults) {
+        onSearchResults(0)
+      }
+      // Clear highlights
+      const textLayer = document.querySelector(`[data-page-num="${currentPage}"] .react-pdf__Page__textContent`)
+      if (textLayer) {
+        const spans = textLayer.querySelectorAll('span')
+        spans.forEach(span => {
+          span.style.backgroundColor = 'transparent'
+        })
+      }
+      return
+    }
+
+    // Search through text layer
+    const performSearch = () => {
+      const textLayer = document.querySelector(`[data-page-num="${currentPage}"] .react-pdf__Page__textContent`)
+      if (!textLayer) {
+        // Text layer not ready yet, try again
+        setTimeout(performSearch, 200)
+        return
+      }
+
+      const query = searchQuery.toLowerCase()
+      const spans = Array.from(textLayer.querySelectorAll('span'))
+      let matches: number[] = []
+      
+      spans.forEach((span, index) => {
+        const text = span.textContent?.toLowerCase() || ''
+        span.style.backgroundColor = 'transparent'
+        
+        if (text.includes(query)) {
+          matches.push(index)
+        }
+      })
+
+      // Update matches for current page
+      const pageMatches = matches.map(index => ({ page: currentPage, index }))
+      setSearchMatches(pageMatches)
+      
+      if (onSearchResults) {
+        onSearchResults(pageMatches.length)
+      }
+    }
+
+    performSearch()
+  }, [searchQuery, currentPage, onSearchResults])
+
+  // Handle match navigation and highlighting
+  useEffect(() => {
+    if (!searchQuery || !searchQuery.trim() || searchMatches.length === 0) return
+
+    const textLayer = document.querySelector(`[data-page-num="${currentPage}"] .react-pdf__Page__textContent`)
+    if (!textLayer) return
+
+    const spans = Array.from(textLayer.querySelectorAll('span'))
+    const matchIndex = currentMatchIndex !== undefined ? currentMatchIndex : 0
+    
+    // Reset all highlights
+    searchMatches.forEach(match => {
+      const span = spans[match.index]
+      if (span) {
+        span.style.backgroundColor = 'rgba(255, 255, 0, 0.3)'
+      }
+    })
+
+    // Highlight current match
+    if (matchIndex < searchMatches.length && matchIndex >= 0) {
+      const currentMatch = searchMatches[matchIndex]
+      const currentMatchSpan = spans[currentMatch.index]
+      if (currentMatchSpan) {
+        currentMatchSpan.style.backgroundColor = 'rgba(255, 255, 0, 0.6)'
+        // Scroll to match
+        currentMatchSpan.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }, [currentMatchIndex, searchMatches, searchQuery, currentPage])
 
   // Configure PDF.js worker on mount - only needed for getting page count
   const [workerReady, setWorkerReady] = useState(false)
   
-  // Render PDF at fixed high resolution for consistent coordinate system
-  // Always use the same render scale regardless of zoom to ensure comments stay aligned
+  // Render PDF at variable resolution based on quality mode
+  // Low quality for fast initial paint, high quality after idle
   // CSS transform handles visual zoom, so we don't need to include zoom in render scale
   const pageScale = useMemo(() => {
     const BASE_WIDTH = 612
     const BASE_HEIGHT = 792
     const MAX_CANVAS_DIMENSION = 8192
-    const MIN_EFFECTIVE_DPR = 2
 
-    const rawDevicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : MIN_EFFECTIVE_DPR
-    const effectiveDevicePixelRatio = Math.max(MIN_EFFECTIVE_DPR, rawDevicePixelRatio)
-    const desiredScale = scale * 3 * effectiveDevicePixelRatio
-    const minQualityScale = scale * 2
-
-    const baselineScale = Math.max(minQualityScale, desiredScale)
-    const maxScaleByWidth = MAX_CANVAS_DIMENSION / BASE_WIDTH
-    const maxScaleByHeight = MAX_CANVAS_DIMENSION / BASE_HEIGHT
-    const cappedScale = Math.min(baselineScale, maxScaleByWidth, maxScaleByHeight)
-
-    if (typeof window !== 'undefined' && cappedScale < desiredScale - 0.01) {
-      console.warn('Capping PDF render scale to avoid canvas error state', {
-        desiredScale,
-        cappedScale,
-        maxScaleByWidth,
-        maxScaleByHeight,
-        effectiveDevicePixelRatio
-      })
+    // Low quality: render at 1.5x scale for fast initial load
+    // High quality: render at 2x devicePixelRatio for crisp display
+    if (renderQuality === 'low') {
+      return scale * 1.5 // Fast initial render
     }
 
+    const rawDevicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 2
+    const effectiveDevicePixelRatio = Math.min(2, rawDevicePixelRatio) // Cap at 2x for performance
+    const desiredScale = scale * 2 * effectiveDevicePixelRatio // Reduced from scale * 3
+
+    const maxScaleByWidth = MAX_CANVAS_DIMENSION / BASE_WIDTH
+    const maxScaleByHeight = MAX_CANVAS_DIMENSION / BASE_HEIGHT
+    const cappedScale = Math.min(desiredScale, maxScaleByWidth, maxScaleByHeight)
+
     return cappedScale
-  }, [scale])
+  }, [scale, renderQuality])
+  
+  // Suppress PDF.js messageHandler errors that occur during navigation/cleanup
+  // These are harmless race conditions that don't affect functionality
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const handleError = (event: ErrorEvent) => {
+      if (event.message?.includes('messageHandler') || 
+          event.message?.includes('sendWithPromise') ||
+          event.error?.message?.includes('messageHandler') ||
+          event.error?.message?.includes('sendWithPromise')) {
+        event.preventDefault()
+        console.debug('Suppressed PDF.js worker cleanup error (harmless during navigation)')
+        return true
+      }
+    }
+    
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const errorMessage = event.reason?.message || String(event.reason)
+      if (errorMessage?.includes('messageHandler') || 
+          errorMessage?.includes('sendWithPromise')) {
+        event.preventDefault()
+        console.debug('Suppressed PDF.js unhandled rejection (harmless during navigation)')
+        return
+      }
+    }
+    
+    window.addEventListener('error', handleError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+    
+    return () => {
+      window.removeEventListener('error', handleError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [])
+
+  // Track component mount state to prevent state updates after unmount
+  useEffect(() => {
+    componentIsMounted.current = true
+    return () => {
+      componentIsMounted.current = false
+    }
+  }, [])
+
+  // Load visibility settings from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    try {
+      const saved = localStorage.getItem('fast-plan-visibility-settings')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setVisibilitySettings({
+          showComments: parsed.showComments !== false,
+          showItems: parsed.showItems !== false,
+          showMeasurementLines: parsed.showMeasurementLines !== false,
+          showMeasurementAreas: parsed.showMeasurementAreas !== false
+        })
+      }
+    } catch (error) {
+      console.warn('Failed to load visibility settings from localStorage:', error)
+    }
+  }, [])
+
+  // Save visibility settings to localStorage when they change
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    try {
+      localStorage.setItem('fast-plan-visibility-settings', JSON.stringify(visibilitySettings))
+    } catch (error) {
+      console.warn('Failed to save visibility settings to localStorage:', error)
+    }
+  }, [visibilitySettings])
   
   useEffect(() => {
     if (typeof window !== 'undefined' && !workerReady) {
@@ -263,19 +647,20 @@ export default function FastPlanCanvas({
               '/pdf.worker.min.js',
               window.location.origin
             ).toString()
-            console.log('PDF.js worker configured:', pdfjs.pdfjs.GlobalWorkerOptions.workerSrc)
             
-            // Give the worker more time to initialize properly
-            // Increased delay to ensure worker is fully ready (especially for slower systems)
-            await new Promise(resolve => setTimeout(resolve, 1500))
+            // Allow worker time to initialize - increased to 2000ms to prevent "messageHandler is null" errors
+            // This ensures the worker is fully ready before any Page components try to use it
+            await new Promise(resolve => setTimeout(resolve, 2000))
             
-            // Verify worker is actually ready
+            // Verify worker is actually configured before marking as ready
             if (pdfjs.pdfjs.GlobalWorkerOptions.workerSrc) {
-              console.log('PDF.js worker ready')
+              // Additional verification: check if worker message handler is available
+              // This prevents race conditions where workerSrc is set but worker isn't ready
+              await new Promise(resolve => setTimeout(resolve, 200))
               setWorkerReady(true)
             } else {
-              console.warn('PDF.js worker not properly configured, retrying...')
-              setTimeout(() => setWorkerReady(true), 500)
+              // Retry with longer delay
+              setTimeout(() => setWorkerReady(true), 1000)
             }
           }
         } catch (error) {
@@ -285,8 +670,7 @@ export default function FastPlanCanvas({
             const pdfjs = await import('react-pdf')
             if (pdfjs.pdfjs) {
               pdfjs.pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.pdfjs.version}/pdf.worker.min.js`
-              console.log('PDF.js worker configured with CDN fallback')
-              await new Promise(resolve => setTimeout(resolve, 1500))
+              await new Promise(resolve => setTimeout(resolve, 2000))
               setWorkerReady(true)
             }
           } catch (fallbackError) {
@@ -362,50 +746,95 @@ export default function FastPlanCanvas({
     loadImage()
   }, [pdfUrl, isImageFile, imageLoaded, onNumPagesChange])
 
-  // Load PDF to get page count only, then destroy PDF object
+  // Reset document component ready state when PDF URL changes (skip for images)
   useEffect(() => {
-    if (!pdfUrl || !workerReady || pdfLoaded || isImageFile) return
+    if (isImageFile) return
+    setDocumentComponentReady(false)
+    // Reset related states for fresh PDF load
+    setDocumentReady(false)
+    setPdfLoaded(false)
+    setPdfError(null)
+    // Reset pages to render to prevent stale page loads
+    setPagesToRender(new Set([1]))
+    setCurrentPage(1)
+  }, [pdfUrl, isImageFile])
 
-    const loadPageCount = async () => {
-      try {
-        const pdfjs = await import('react-pdf')
-        if (!pdfjs.pdfjs) {
-          throw new Error('PDF.js not available')
-        }
+  // Mark document as ready once worker is ready and we have a URL
+  // The actual PDF loading is handled by the Document component
+  useEffect(() => {
+    if (pdfUrl && workerReady && !documentReady) {
+      // Add a small delay to ensure worker is fully initialized before Document renders
+      // This prevents "messageHandler is null" errors
+      const timer = setTimeout(() => {
+        setDocumentReady(true)
+      }, 200)
+      return () => clearTimeout(timer)
+    }
+  }, [pdfUrl, workerReady, documentReady])
 
-        // Load PDF just to get page count
-        const pdf = await pdfjs.pdfjs.getDocument(pdfUrl).promise
-        const loadedPages = pdf.numPages
-        console.log('PDF loaded successfully, pages:', loadedPages)
-        
-        setNumPages(loadedPages)
-        if (onNumPagesChange) {
-          onNumPagesChange(loadedPages)
-        }
-        setPdfLoaded(true)
-        setPdfError(null)
-        
-        // Add a longer delay before marking document as ready to ensure worker is fully stable
-        // This prevents "messageHandler is null" errors when Page components render
-        // Increased delay to handle slower systems
-        setTimeout(() => {
-          setDocumentReady(true)
-        }, 800)
-
-        // Clean up document resources without tearing down the shared worker
-        if (typeof pdf.cleanup === 'function') {
-          await pdf.cleanup()
-          console.log('PDF resources cleaned up after page count extraction')
-        }
-      } catch (error) {
-        console.error('PDF loading failed:', error)
-        setPdfError('PDF could not be loaded. You can still use drawing tools on a blank canvas.')
-        setPdfLoaded(true) // Still allow drawing
+  // Progressive rendering: upgrade to high quality after initial render settles
+  useEffect(() => {
+    // Only reset quality if document is ready (worker is stable)
+    if (!documentReady) return
+    
+    // Reset to low quality when page changes for fast initial paint
+    setRenderQuality('low')
+    
+    // Clear any pending upgrade
+    if (qualityUpgradeTimeoutRef.current) {
+      clearTimeout(qualityUpgradeTimeoutRef.current)
+    }
+    
+    // Schedule upgrade to high quality after page settles
+    qualityUpgradeTimeoutRef.current = setTimeout(() => {
+      // Guard against state updates after unmount
+      if (componentIsMounted.current) {
+        setRenderQuality('high')
+      }
+    }, 500) // Upgrade after 500ms of idle (increased for stability)
+    
+    return () => {
+      if (qualityUpgradeTimeoutRef.current) {
+        clearTimeout(qualityUpgradeTimeoutRef.current)
       }
     }
-
-    loadPageCount()
-  }, [pdfUrl, workerReady, pdfLoaded, onNumPagesChange, isImageFile])
+  }, [currentPage, documentReady])
+  
+  // Update which pages to render: current + next 2 for prefetching (skip for images)
+  useEffect(() => {
+    if (!documentReady || numPages === 0 || isImageFile) return
+    
+    const pagesToLoad = new Set<number>()
+    
+    // Always load current page
+    pagesToLoad.add(currentPage)
+    
+    // Prefetch next 2 pages (if they exist)
+    if (currentPage + 1 <= numPages) pagesToLoad.add(currentPage + 1)
+    if (currentPage + 2 <= numPages) pagesToLoad.add(currentPage + 2)
+    
+    // Also keep previous page for back navigation
+    if (currentPage - 1 >= 1) pagesToLoad.add(currentPage - 1)
+    
+    setPagesToRender(pagesToLoad)
+    
+    // Update cache
+    const cache = pageCacheRef.current
+    cache.set(currentPage, { timestamp: Date.now(), rendered: true })
+    
+    // Evict pages far from current view to save memory
+    if (cache.size > MAX_CACHED_PAGES) {
+      const pagesToKeep = new Set([
+        currentPage - 1, currentPage, currentPage + 1, currentPage + 2
+      ])
+      
+      cache.forEach((_, pageNum) => {
+        if (!pagesToKeep.has(pageNum)) {
+          cache.delete(pageNum)
+        }
+      })
+    }
+  }, [currentPage, documentReady, numPages, isImageFile])
 
   // Notify parent on current page changes
   useEffect(() => {
@@ -750,20 +1179,31 @@ export default function FastPlanCanvas({
 
     // Get drawings for current page only (paginated view)
     const currentPageComments = drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
-    const currentPageMeasurements = drawings.filter(d => (d.type === 'measurement_line' || d.type === 'measurement_area') && d.pageNumber === currentPage)
+    const currentPageMeasurements = drawings.filter(d => {
+      if (d.pageNumber !== currentPage) return false
+      if (d.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return false
+      if (d.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return false
+      return d.type === 'measurement_line' || d.type === 'measurement_area'
+    })
     
     // Draw measurement lines for current page
     const isEditMode = selectedTool === 'measurement_edit'
 
     currentPageMeasurements.forEach(drawing => {
       const isEditingThis = editingMeasurement?.id === drawing.id
-      const points = (isEditingThis ? editingMeasurement?.points : drawing.geometry?.points) || []
-      if (drawing.type === 'measurement_line' && points.length < 4) {
+      const isSelected = selectedMeasurementIds?.has(drawing.id) || false
+      // Get raw points (stored in PDF base coordinates)
+      const rawPoints = (isEditingThis ? editingMeasurement?.points : drawing.geometry?.points) || []
+      if (drawing.type === 'measurement_line' && rawPoints.length < 4) {
         return
       }
-      if (drawing.type === 'measurement_area' && points.length < 6) {
+      if (drawing.type === 'measurement_area' && rawPoints.length < 6) {
         return
       }
+      
+      // Convert PDF-space coordinates to canvas-space coordinates for rendering
+      // Points are stored in PDF base space (612x792) and need to be scaled to canvas space
+      const points = rawPoints.map((coord, i) => coord * scale)
 
       const scaleSetting = getScaleSetting(drawing.pageNumber)
       let measurementData = drawing.measurements
@@ -780,12 +1220,44 @@ export default function FastPlanCanvas({
         (measurementData && 'unit' in measurementData && measurementData.unit) ||
         scaleSetting?.unit ||
         'ft'
-      const color = drawing.style?.color || '#3b82f6'
+      const baseColor = drawing.style?.color || '#3b82f6'
+      // Use orange highlight for selected measurements
+      const color = isSelected ? '#f97316' : baseColor
 
       ctx.save()
+      
+      // Draw selection glow effect for selected measurements
+      if (isSelected) {
+        ctx.save()
+        ctx.strokeStyle = '#f97316'
+        ctx.lineWidth = (drawing.style?.strokeWidth || 2) + 6
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.globalAlpha = 0.3
+        
+        if (drawing.type === 'measurement_line') {
+          ctx.beginPath()
+          ctx.moveTo(points[0], points[1])
+          for (let i = 2; i < points.length; i += 2) {
+            ctx.lineTo(points[i], points[i + 1])
+          }
+          ctx.stroke()
+        } else if (drawing.type === 'measurement_area') {
+          ctx.beginPath()
+          ctx.moveTo(points[0], points[1])
+          for (let i = 2; i < points.length; i += 2) {
+            ctx.lineTo(points[i], points[i + 1])
+          }
+          ctx.closePath()
+          ctx.stroke()
+          ctx.fill()
+        }
+        ctx.restore()
+      }
+      
       ctx.strokeStyle = color
       ctx.fillStyle = color
-      ctx.lineWidth = drawing.style?.strokeWidth || 2
+      ctx.lineWidth = isSelected ? (drawing.style?.strokeWidth || 2) + 1 : (drawing.style?.strokeWidth || 2)
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       ctx.setLineDash(isEditingThis ? [6, 4] : [])
@@ -800,8 +1272,9 @@ export default function FastPlanCanvas({
         ctx.stroke()
         ctx.setLineDash([])
         
-        // Draw labels for each segment
-        if (measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
+        // Draw labels for each segment (only when hovered, selected, or editing)
+        const showLabels = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        if (showLabels && measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
           const segmentLengths = (measurementData as any).segmentLengths as number[]
           for (let i = 0; i < points.length - 2; i += 2) {
             const x1 = points[i]
@@ -814,14 +1287,14 @@ export default function FastPlanCanvas({
             
             // Draw label background
             const label = formatMeasurement(length, unit)
-            ctx.font = '12px Arial'
+            ctx.font = '10px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 6, textWidth + padding * 2, 12)
             
             // Draw label text
             try {
@@ -837,17 +1310,17 @@ export default function FastPlanCanvas({
             const lastX = points[points.length - 2]
             const lastY = points[points.length - 1]
             const label = `Total: ${formatMeasurement((measurementData as any).totalLength, unit)}`
-            ctx.font = '14px Arial'
+            ctx.font = '11px Arial'
             ctx.textAlign = 'left'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(lastX + 10, lastY - 10, textWidth + padding * 2, 20)
+            ctx.fillRect(lastX + 8, lastY - 8, textWidth + padding * 2, 16)
             
             try {
               ctx.fillStyle = '#1f2937'
-              ctx.fillText(label, lastX + 10 + padding, lastY)
+              ctx.fillText(label, lastX + 8 + padding, lastY)
             } catch (error) {
               console.warn('Error drawing text, skipping:', error)
             }
@@ -883,8 +1356,9 @@ export default function FastPlanCanvas({
         ctx.fill()
         ctx.stroke()
         
-        // Draw area label at centroid
-        if (measurementData && 'area' in (measurementData as any) && scaleSetting) {
+        // Draw area label at centroid (only when hovered, selected, or editing)
+        const showAreaLabel = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        if (showAreaLabel && measurementData && 'area' in (measurementData as any) && scaleSetting) {
           // Calculate centroid
           let sumX = 0, sumY = 0
           for (let i = 0; i < points.length; i += 2) {
@@ -898,14 +1372,14 @@ export default function FastPlanCanvas({
           let area = (measurementData as any).area
           const areaLabel = formatArea(area, unit)
           
-          ctx.font = '14px Arial'
+          ctx.font = '11px Arial'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           const textWidth = ctx.measureText(areaLabel).width
-          const padding = 6
+          const padding = 4
           
           ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
+          ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 7, textWidth + padding * 2, 14)
           
           try {
             ctx.fillStyle = '#1f2937'
@@ -914,14 +1388,34 @@ export default function FastPlanCanvas({
             console.warn('Error drawing text, skipping:', error)
           }
         }
+
+        // Draw edit handles for area measurements (same as lines)
+        const shouldShowAreaHandles = isEditMode && (isEditingThis || !editingMeasurement)
+        if (shouldShowAreaHandles) {
+          ctx.save()
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2
+          for (let i = 0; i < points.length; i += 2) {
+            const handleX = points[i]
+            const handleY = points[i + 1]
+            const radius = isEditingThis ? 6 : 5
+            ctx.fillStyle = isEditingThis ? '#ffffff' : 'rgba(255,255,255,0.75)'
+            ctx.beginPath()
+            ctx.arc(handleX, handleY, radius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
       }
       ctx.restore()
     })
     
     // Draw current measurement being drawn (only if on current page)
     if (currentMeasurement && currentMeasurement.geometry?.points && currentMeasurement.pageNumber === currentPage) {
-      // Use points directly at base scale (zoom is handled by transform)
-      const points = currentMeasurement.geometry.points
+      // Raw points are stored in PDF base coordinates - scale them for canvas rendering
+      const rawPoints = currentMeasurement.geometry.points
+      const points = rawPoints.map((coord) => coord * scale)
       const scaleSetting = getScaleSetting(currentMeasurement.pageNumber)
       const unit = scaleSetting?.unit || 'ft'
       
@@ -940,27 +1434,29 @@ export default function FastPlanCanvas({
         ctx.stroke()
         
         // Show live measurement for last segment
-        if (points.length >= 4 && scaleSetting) {
-          const x1 = points[points.length - 4]
-          const y1 = points[points.length - 3]
-          const x2 = points[points.length - 2]
-          const y2 = points[points.length - 1]
+        // Use raw (PDF-space) points for distance calculation since scale settings are in PDF space
+        if (rawPoints.length >= 4 && scaleSetting) {
+          const x1 = rawPoints[rawPoints.length - 4]
+          const y1 = rawPoints[rawPoints.length - 3]
+          const x2 = rawPoints[rawPoints.length - 2]
+          const y2 = rawPoints[rawPoints.length - 1]
           const pixelDist = calculatePixelDistance(x1, y1, x2, y2)
           const realDist = calculateRealWorldDistance(pixelDist, currentMeasurement.pageNumber)
           
           if (realDist !== null) {
-            const midX = (x1 + x2) / 2
-            const midY = (y1 + y2) / 2
+            // Use scaled points for rendering position
+            const midX = (points[points.length - 4] + points[points.length - 2]) / 2
+            const midY = (points[points.length - 3] + points[points.length - 1]) / 2
             const label = formatMeasurement(realDist, unit)
             
-            ctx.font = '12px Arial'
+            ctx.font = '10px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(label).width
-            const padding = 4
+            const padding = 3
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-            ctx.fillRect(midX - textWidth / 2 - padding, midY - 8, textWidth + padding * 2, 16)
+            ctx.fillRect(midX - textWidth / 2 - padding, midY - 6, textWidth + padding * 2, 12)
             
             try {
               ctx.fillStyle = '#1f2937'
@@ -980,12 +1476,58 @@ export default function FastPlanCanvas({
         ctx.fill()
         ctx.stroke()
         
-        // Show live area if closed
+        // Draw snap-to-close indicator at start point
+        const startX = points[0]
+        const startY = points[1]
+        const snapRadius = SNAP_TO_CLOSE_THRESHOLD * scale
+        
+        // Always draw a subtle indicator at start point
+        ctx.save()
+        ctx.strokeStyle = isSnappingToStart ? '#22c55e' : 'rgba(59, 130, 246, 0.5)'
+        ctx.lineWidth = isSnappingToStart ? 3 : 2
+        ctx.setLineDash(isSnappingToStart ? [] : [4, 4])
+        ctx.beginPath()
+        ctx.arc(startX, startY, snapRadius, 0, Math.PI * 2)
+        ctx.stroke()
+        
+        // Draw filled circle at start point when snapping
+        if (isSnappingToStart) {
+          ctx.fillStyle = 'rgba(34, 197, 94, 0.3)'
+          ctx.fill()
+          
+          // Draw inner solid circle
+          ctx.fillStyle = '#22c55e'
+          ctx.beginPath()
+          ctx.arc(startX, startY, 4, 0, Math.PI * 2)
+          ctx.fill()
+          
+          // Draw "Click to close" tooltip
+          ctx.font = 'bold 9px Arial'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'bottom'
+          const tooltipText = 'Click to close'
+          const tooltipWidth = ctx.measureText(tooltipText).width
+          const tooltipPadding = 4
+          const tooltipX = startX
+          const tooltipY = startY - snapRadius - 6
+          
+          ctx.fillStyle = '#22c55e'
+          ctx.beginPath()
+          ctx.roundRect(tooltipX - tooltipWidth / 2 - tooltipPadding, tooltipY - 12, tooltipWidth + tooltipPadding * 2, 14, 3)
+          ctx.fill()
+          
+          ctx.fillStyle = 'white'
+          ctx.fillText(tooltipText, tooltipX, tooltipY)
+        }
+        ctx.restore()
+        
+        // Show live area if closed - use raw points for calculation
         if (scaleSetting) {
-          const pixelArea = calculatePolygonArea(points)
+          const pixelArea = calculatePolygonArea(rawPoints)
           const realArea = calculateRealWorldArea(pixelArea, currentMeasurement.pageNumber)
           
           if (realArea !== null) {
+            // Use scaled points for rendering position
             let sumX = 0, sumY = 0
             for (let i = 0; i < points.length; i += 2) {
               sumX += points[i]
@@ -996,14 +1538,14 @@ export default function FastPlanCanvas({
             
             const areaLabel = formatArea(realArea, unit)
             
-            ctx.font = '14px Arial'
+            ctx.font = '11px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             const textWidth = ctx.measureText(areaLabel).width
-            const padding = 6
+            const padding = 4
             
             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
-            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 10, textWidth + padding * 2, 20)
+            ctx.fillRect(centroidX - textWidth / 2 - padding, centroidY - 7, textWidth + padding * 2, 14)
             
             try {
               ctx.fillStyle = '#1f2937'
@@ -1017,14 +1559,18 @@ export default function FastPlanCanvas({
     }
 
     // Draw calibration points if in calibration mode
+    // Points are stored in PDF space, scale to canvas space for rendering
     if (isCalibrating && calibrationPoints.length > 0) {
       calibrationPoints.forEach((point, index) => {
+        const canvasX = point.x * scale
+        const canvasY = point.y * scale
+        
         ctx.fillStyle = '#ef4444'
         ctx.strokeStyle = 'white'
         ctx.lineWidth = 2
         
         ctx.beginPath()
-        ctx.arc(point.x, point.y, 8, 0, Math.PI * 2)
+        ctx.arc(canvasX, canvasY, 8, 0, Math.PI * 2)
         ctx.fill()
         ctx.stroke()
         
@@ -1033,7 +1579,7 @@ export default function FastPlanCanvas({
         ctx.textAlign = 'center'
         ctx.textBaseline = 'bottom'
         ctx.fillStyle = '#1f2937'
-        ctx.fillText(`Point ${index + 1}`, point.x, point.y - 12)
+        ctx.fillText(`Point ${index + 1}`, canvasX, canvasY - 12)
       })
       
       // Draw line between points if we have 2
@@ -1042,15 +1588,15 @@ export default function FastPlanCanvas({
         ctx.lineWidth = 2
         ctx.setLineDash([5, 5])
         ctx.beginPath()
-        ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y)
-        ctx.lineTo(calibrationPoints[1].x, calibrationPoints[1].y)
+        ctx.moveTo(calibrationPoints[0].x * scale, calibrationPoints[0].y * scale)
+        ctx.lineTo(calibrationPoints[1].x * scale, calibrationPoints[1].y * scale)
         ctx.stroke()
         ctx.setLineDash([])
       }
     }
 
     // Comments are now rendered as HTML elements, not on canvas
-  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool])
+  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool, selectedMeasurementIds, isSnappingToStart, hoveredMeasurementId, visibilitySettings])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
@@ -1061,10 +1607,11 @@ export default function FastPlanCanvas({
     }
 
     const resizeCanvas = () => {
-      // Size canvas to match current PDF page at base scale (zoom is handled by transform)
-      // Use the same dimensions as the PDF container to ensure perfect alignment
-      const pageHeight = pageHeights.get(currentPage) || (792 * scale)
-      const pageWidth = 612 * scale
+      // Size canvas to match current PDF page at display scale (zoom is handled by transform)
+      // Use actual PDF dimensions to ensure perfect alignment
+      const dims = pageDimensions.get(currentPage)
+      const pageWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+      const pageHeight = dims?.height || (PDF_BASE_HEIGHT * scale)
       
       // Ensure we have valid dimensions
       if (pageWidth <= 0 || pageHeight <= 0) {
@@ -1096,7 +1643,7 @@ export default function FastPlanCanvas({
     resizeCanvas()
     window.addEventListener('resize', resizeCanvas)
     return () => window.removeEventListener('resize', resizeCanvas)
-  }, [currentPage, pageHeights, scale, renderDrawings])
+  }, [currentPage, pageDimensions, scale, renderDrawings])
 
   // Auto-fit zoom on first page load (fit to first page width)
   useEffect(() => {
@@ -1151,40 +1698,51 @@ export default function FastPlanCanvas({
   
 
   // Convert screen coordinates to world coordinates (for centered page view)
-  // Note: Zoom is applied via CSS transform, so coordinates are stored at base scale
-  // The canvas and PDF both use base scale coordinates, then CSS transform handles zoom
+  // IMPORTANT: Coordinates are stored in PDF coordinate space (actual PDF dimensions divided by scale)
+  // This ensures measurements persist correctly across zoom/scale changes and page refreshes
   const screenToWorld = useCallback((screenX: number, screenY: number) => {
     const container = containerRef.current
     if (!container) return { x: 0, y: 0 }
     
     const containerRect = container.getBoundingClientRect()
-    const pageWidth = 612 * scale
-    const pageHeight = pageHeights.get(currentPage) || (792 * scale)
+    // Get actual PDF page dimensions at display scale
+    const dims = pageDimensions.get(currentPage)
+    const canvasWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+    const canvasHeight = dims?.height || (PDF_BASE_HEIGHT * scale)
     
     // Calculate center offset (page is centered in container via flexbox)
     const centerX = containerRect.width / 2
     const centerY = containerRect.height / 2
     
-    // Convert screen coordinates to world coordinates (page top-left is origin at 0,0)
+    // Convert screen coordinates to canvas coordinates (accounting for pan and zoom)
     // The transform is: translate(panX, panY) scale(zoom) with origin at center
-    // To reverse: (screen - center - pan) / zoom gives coordinates relative to center
-    // Then add pageWidth/2 and pageHeight/2 to get coordinates relative to page top-left
-    const worldX = (screenX - centerX - viewport.panX) / viewport.zoom + (pageWidth / 2)
-    const worldY = (screenY - centerY - viewport.panY) / viewport.zoom + (pageHeight / 2)
+    const canvasX = (screenX - centerX - viewport.panX) / viewport.zoom + (canvasWidth / 2)
+    const canvasY = (screenY - centerY - viewport.panY) / viewport.zoom + (canvasHeight / 2)
     
-    return { x: worldX, y: worldY }
-  }, [viewport, scale, currentPage, pageHeights])
+    // Convert canvas coordinates to PDF base coordinates (normalize by scale)
+    // This ensures coordinates are stored in a consistent space regardless of scale
+    const pdfX = canvasX / scale
+    const pdfY = canvasY / scale
+    
+    return { x: pdfX, y: pdfY }
+  }, [viewport, scale, currentPage, pageDimensions])
 
   // Get page number from Y coordinate
-  const getPageNumber = useCallback((y: number) => {
+  // Returns null if the y coordinate is outside the document bounds
+  const getPageNumber = useCallback((y: number): number | null => {
     const positions = calculatePagePositions()
+    if (positions.length === 0) return null
+    
+    // If scrolled above the document, return null (don't change page)
+    if (y < 0) return null
+    
     for (let i = positions.length - 1; i >= 0; i--) {
       if (positions[i] && y >= positions[i].y) {
         return i + 1
       }
     }
-    // If no position found or all pages not loaded yet, return 1
-    return 1
+    // If no position found, return null to indicate we shouldn't change the page
+    return null
   }, [calculatePagePositions])
 
   // Handle goToPage prop to scroll to a specific page
@@ -1199,19 +1757,49 @@ export default function FastPlanCanvas({
         if (container) {
           const containerRect = container.getBoundingClientRect()
           const containerCenterY = containerRect.height / 2
-          // Calculate panY to center the target page in the viewport
-          const targetY = targetPosition.y + targetPosition.height / 2
-          const newPanY = containerCenterY / viewport.zoom - targetY
+          const containerCenterX = containerRect.width / 2
           
-          setViewport(prev => ({
-            ...prev,
-            panY: newPanY
-          }))
+          // If goToCoordinate is provided, pan to that specific coordinate
+          if (goToCoordinate && goToCoordinate.pageNumber === goToPage) {
+            // Convert PDF base coordinates to canvas coordinates
+            const canvasX = goToCoordinate.x * scale
+            const canvasY = goToCoordinate.y * scale
+            
+            // Calculate pan to center the coordinate in the viewport
+            const newPanX = containerCenterX / viewport.zoom - canvasX
+            const newPanY = containerCenterY / viewport.zoom - canvasY
+            
+            setViewport(prev => ({
+              ...prev,
+              panX: newPanX,
+              panY: newPanY
+            }))
+          } else {
+            // Just center the page
+            const targetY = targetPosition.y + targetPosition.height / 2
+            const newPanY = containerCenterY / viewport.zoom - targetY
+            
+            setViewport(prev => ({
+              ...prev,
+              panY: newPanY
+            }))
+          }
+          
           setCurrentPage(goToPage)
         }
       }
     }
-  }, [goToPage, numPages, pageHeights.size, calculatePagePositions, viewport.zoom])
+  }, [
+    goToPage, 
+    goToCoordinate?.x, 
+    goToCoordinate?.y, 
+    goToCoordinate?.pageNumber, 
+    numPages, 
+    pageHeights.size, 
+    calculatePagePositions, 
+    viewport.zoom, 
+    scale
+  ])
 
   // Handle wheel events for zoom and pan (natural scrolling)
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -1240,10 +1828,10 @@ export default function FastPlanCanvas({
       setViewport(prev => {
         const newPanY = prev.panY - e.deltaY * panSpeed
         // Update current page based on scroll position
-        const positions = calculatePagePositions()
         const scrollY = -newPanY / prev.zoom
         const newPage = getPageNumber(scrollY)
-        if (newPage !== currentPage) {
+        // Only update page if we got a valid page number (not scrolled outside document)
+        if (newPage !== null && newPage !== currentPage) {
           setCurrentPage(newPage)
         }
         return {
@@ -1274,6 +1862,25 @@ export default function FastPlanCanvas({
     return dist <= threshold
   }, [currentPage])
 
+  // Check if a point intersects with an item (current page only)
+  const isPointInItem = useCallback((worldX: number, worldY: number, drawing: Drawing, strictMode = false) => {
+    if (drawing.type !== 'item' || drawing.pageNumber !== currentPage) return false
+    
+    const geom = drawing.geometry
+    if (!geom || typeof geom.x === 'undefined' || typeof geom.y === 'undefined') return false
+    
+    // Coordinates are at base scale (zoom is handled by transform)
+    const drawingX = geom.x
+    const drawingY = geom.y
+    
+    // Use smaller threshold when placing items (strictMode) to avoid accidental clicks
+    // Normal threshold for editing/selecting, smaller for placement
+    const threshold = strictMode ? 12 : 24
+    
+    const dist = Math.sqrt(Math.pow(worldX - drawingX, 2) + Math.pow(worldY - drawingY, 2))
+    return dist <= threshold
+  }, [currentPage])
+
   const getMeasurementHandleAtPoint = useCallback(
     (pageNumber: number, worldX: number, worldY: number): MeasurementHandleHit | null => {
       const threshold = 24
@@ -1281,12 +1888,16 @@ export default function FastPlanCanvas({
       let minDistance = Infinity
 
       drawings.forEach(drawing => {
-        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
-          return
-        }
+        // Check both line and area measurements
+        if (drawing.pageNumber !== pageNumber) return
+        if (drawing.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return
+        if (drawing.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return
+        if (drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') return
 
         const points = drawing.geometry?.points
-        if (!points || points.length < 4) {
+        // Lines need at least 4 coordinates (2 points), areas need at least 6 (3 points)
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) {
           return
         }
 
@@ -1307,7 +1918,7 @@ export default function FastPlanCanvas({
 
       return closest
     },
-    [drawings]
+    [drawings, visibilitySettings]
   )
 
   const getMeasurementSegmentAtPoint = useCallback(
@@ -1337,15 +1948,20 @@ export default function FastPlanCanvas({
       }
 
       drawings.forEach(drawing => {
-        if (drawing.type !== 'measurement_line' || drawing.pageNumber !== pageNumber) {
-          return
-        }
+        // Check both line and area measurements
+        if (drawing.pageNumber !== pageNumber) return
+        if (drawing.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return
+        if (drawing.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return
+        if (drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') return
 
         const points = drawing.geometry?.points
-        if (!points || points.length < 4) {
+        // Lines need at least 4 coordinates (2 points), areas need at least 6 (3 points)
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) {
           return
         }
 
+        // Check all segments between consecutive points
         for (let i = 0; i < points.length - 2; i += 2) {
           const x1 = points[i]
           const y1 = points[i + 1]
@@ -1364,11 +1980,305 @@ export default function FastPlanCanvas({
             minDistance = distance
           }
         }
+
+        // For areas, also check the closing segment (last point to first point)
+        if (drawing.type === 'measurement_area' && points.length >= 6) {
+          const x1 = points[points.length - 2]
+          const y1 = points[points.length - 1]
+          const x2 = points[0]
+          const y2 = points[1]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            const distToStart = Math.sqrt(Math.pow(worldX - x1, 2) + Math.pow(worldY - y1, 2))
+            const distToEnd = Math.sqrt(Math.pow(worldX - x2, 2) + Math.pow(worldY - y2, 2))
+            // For closing segment: last point index or first point index (0)
+            const handleIndex = distToStart <= distToEnd ? (points.length - 2) / 2 : 0
+            closest = {
+              drawing,
+              handleIndex
+            }
+            minDistance = distance
+          }
+        }
       })
 
       return closest
     },
-    [drawings]
+    [drawings, visibilitySettings]
+  )
+
+  // Get exact segment that was clicked (for adding new points)
+  const getSegmentAtPoint = useCallback(
+    (pageNumber: number, worldX: number, worldY: number, targetDrawingId?: string): SegmentHit | null => {
+      const threshold = 18
+      let closest: SegmentHit | null = null
+      let minDistance = Infinity
+
+      const distanceToSegment = (
+        px: number, py: number,
+        x1: number, y1: number,
+        x2: number, y2: number
+      ) => {
+        const dx = x2 - x1
+        const dy = y2 - y1
+        if (dx === 0 && dy === 0) {
+          return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
+        }
+        const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+        const clampedT = Math.max(0, Math.min(1, t))
+        const closestX = x1 + clampedT * dx
+        const closestY = y1 + clampedT * dy
+        return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
+      }
+
+      drawings.forEach(drawing => {
+        // If targetDrawingId is specified, only check that drawing
+        if (targetDrawingId && drawing.id !== targetDrawingId) return
+        if (drawing.pageNumber !== pageNumber) return
+        if (drawing.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return
+        if (drawing.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return
+        if (drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') return
+
+        const points = drawing.geometry?.points
+        const minPoints = drawing.type === 'measurement_line' ? 4 : 6
+        if (!points || points.length < minPoints) return
+
+        // Check all segments between consecutive points
+        for (let i = 0; i < points.length - 2; i += 2) {
+          const x1 = points[i]
+          const y1 = points[i + 1]
+          const x2 = points[i + 2]
+          const y2 = points[i + 3]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            closest = {
+              drawing,
+              segmentIndex: i / 2, // Index of first point of this segment
+              clickX: worldX,
+              clickY: worldY
+            }
+            minDistance = distance
+          }
+        }
+
+        // For areas, also check the closing segment (last point to first point)
+        if (drawing.type === 'measurement_area' && points.length >= 6) {
+          const x1 = points[points.length - 2]
+          const y1 = points[points.length - 1]
+          const x2 = points[0]
+          const y2 = points[1]
+
+          const distance = distanceToSegment(worldX, worldY, x1, y1, x2, y2)
+          if (distance <= threshold && distance < minDistance) {
+            closest = {
+              drawing,
+              segmentIndex: (points.length - 2) / 2, // Last point index (closing segment)
+              clickX: worldX,
+              clickY: worldY
+            }
+            minDistance = distance
+          }
+        }
+      })
+
+      return closest
+    },
+    [drawings, visibilitySettings]
+  )
+
+  // Get any measurement (line or area) at a point for selection
+  const getMeasurementAtPoint = useCallback(
+    (pageNumber: number, worldX: number, worldY: number): Drawing | null => {
+      const threshold = 20
+      
+      // Helper: distance from point to line segment
+      const distanceToSegment = (
+        px: number, py: number,
+        x1: number, y1: number,
+        x2: number, y2: number
+      ) => {
+        const dx = x2 - x1
+        const dy = y2 - y1
+        if (dx === 0 && dy === 0) {
+          return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2))
+        }
+        const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+        const clampedT = Math.max(0, Math.min(1, t))
+        const closestX = x1 + clampedT * dx
+        const closestY = y1 + clampedT * dy
+        return Math.sqrt(Math.pow(px - closestX, 2) + Math.pow(py - closestY, 2))
+      }
+      
+      // Helper: check if point is inside polygon
+      const isPointInPolygon = (px: number, py: number, points: number[]) => {
+        let inside = false
+        const n = points.length / 2
+        for (let i = 0, j = n - 1; i < n; j = i++) {
+          const xi = points[i * 2], yi = points[i * 2 + 1]
+          const xj = points[j * 2], yj = points[j * 2 + 1]
+          
+          if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+            inside = !inside
+          }
+        }
+        return inside
+      }
+      
+      let closestMeasurement: Drawing | null = null
+      let minDistance = Infinity
+      
+      drawings.forEach(drawing => {
+        if (drawing.pageNumber !== pageNumber) return
+        if (drawing.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return
+        if (drawing.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return
+        if (drawing.type !== 'measurement_line' && drawing.type !== 'measurement_area') return
+        
+        const points = drawing.geometry?.points
+        if (!points || points.length < 4) return
+        
+        if (drawing.type === 'measurement_line') {
+          // Check distance to any segment
+          for (let i = 0; i < points.length - 2; i += 2) {
+            const dist = distanceToSegment(
+              worldX, worldY,
+              points[i], points[i + 1],
+              points[i + 2], points[i + 3]
+            )
+            if (dist < threshold && dist < minDistance) {
+              minDistance = dist
+              closestMeasurement = drawing
+            }
+          }
+        } else if (drawing.type === 'measurement_area') {
+          // Check if point is inside polygon or near edges
+          if (isPointInPolygon(worldX, worldY, points)) {
+            closestMeasurement = drawing
+            minDistance = 0
+          } else {
+            // Check distance to edges
+            for (let i = 0; i < points.length; i += 2) {
+              const nextI = (i + 2) % points.length
+              const dist = distanceToSegment(
+                worldX, worldY,
+                points[i], points[i + 1],
+                points[nextI], points[nextI + 1]
+              )
+              if (dist < threshold && dist < minDistance) {
+                minDistance = dist
+                closestMeasurement = drawing
+              }
+            }
+          }
+        }
+      })
+      
+      return closestMeasurement
+    },
+    [drawings, visibilitySettings]
+  )
+
+  // Check if a measurement overlaps with existing measurements (duplicate detection)
+  const isMeasurementDuplicate = useCallback(
+    (newMeasurement: Drawing, existingDrawings: Drawing[]): boolean => {
+      const newPoints = newMeasurement.geometry?.points
+      if (!newPoints || newPoints.length < 4) return false
+
+      const pageMeasurements = existingDrawings.filter(
+        d => (d.type === 'measurement_line' || d.type === 'measurement_area') && 
+             d.pageNumber === newMeasurement.pageNumber
+      )
+
+      if (pageMeasurements.length === 0) return false
+
+      // Threshold for considering measurements as duplicates (in PDF base coordinates)
+      const DUPLICATE_THRESHOLD = 10 // pixels at base scale
+
+      // Helper: calculate average distance between corresponding points
+      const calculateAveragePointDistance = (points1: number[], points2: number[]): number => {
+        if (points1.length !== points2.length) return Infinity
+        
+        let totalDist = 0
+        let count = 0
+        for (let i = 0; i < points1.length; i += 2) {
+          const dist = calculatePixelDistance(
+            points1[i], points1[i + 1],
+            points2[i], points2[i + 1]
+          )
+          totalDist += dist
+          count++
+        }
+        return count > 0 ? totalDist / count : Infinity
+      }
+
+      // Helper: check if two line measurements are similar
+      const areLinesSimilar = (points1: number[], points2: number[]): boolean => {
+        if (points1.length !== points2.length) return false
+        
+        // Check forward order
+        const forwardDist = calculateAveragePointDistance(points1, points2)
+        if (forwardDist <= DUPLICATE_THRESHOLD) return true
+        
+        // Check reverse order (line could be drawn in opposite direction)
+        const reversed2: number[] = []
+        for (let i = points2.length - 2; i >= 0; i -= 2) {
+          reversed2.push(points2[i], points2[i + 1])
+        }
+        const reverseDist = calculateAveragePointDistance(points1, reversed2)
+        return reverseDist <= DUPLICATE_THRESHOLD
+      }
+
+      // Helper: check if two area measurements are similar
+      const areAreasSimilar = (points1: number[], points2: number[]): boolean => {
+        if (points1.length !== points2.length || points1.length < 6) return false
+        
+        // Try all rotations of points2 (polygon could start at different vertex)
+        const numPoints = points1.length / 2
+        for (let rotation = 0; rotation < numPoints; rotation++) {
+          const rotated2: number[] = []
+          for (let i = 0; i < numPoints; i++) {
+            const idx = ((i + rotation) % numPoints) * 2
+            rotated2.push(points2[idx], points2[idx + 1])
+          }
+          
+          const dist = calculateAveragePointDistance(points1, rotated2)
+          if (dist <= DUPLICATE_THRESHOLD) return true
+          
+          // Also try reversed order (polygon could be drawn in opposite direction)
+          const reversedRotated2: number[] = []
+          for (let i = rotated2.length - 2; i >= 0; i -= 2) {
+            reversedRotated2.push(rotated2[i], rotated2[i + 1])
+          }
+          const reverseDist = calculateAveragePointDistance(points1, reversedRotated2)
+          if (reverseDist <= DUPLICATE_THRESHOLD) return true
+        }
+        
+        return false
+      }
+
+      // Check against all existing measurements on the same page
+      for (const existing of pageMeasurements) {
+        const existingPoints = existing.geometry?.points
+        if (!existingPoints || existingPoints.length < 4) continue
+
+        // Only compare measurements of the same type
+        if (existing.type !== newMeasurement.type) continue
+
+        if (newMeasurement.type === 'measurement_line') {
+          if (areLinesSimilar(newPoints, existingPoints)) {
+            return true
+          }
+        } else if (newMeasurement.type === 'measurement_area') {
+          if (areAreasSimilar(newPoints, existingPoints)) {
+            return true
+          }
+        }
+      }
+
+      return false
+    },
+    []
   )
 
   const finalizeMeasurementFromDrawing = useCallback(
@@ -1393,6 +2303,15 @@ export default function FastPlanCanvas({
       })()
 
       if (sanitizedPoints.length < 4) {
+        return null
+      }
+
+      // Check for duplicates before finalizing
+      if (isMeasurementDuplicate(
+        { ...measurement, geometry: { ...measurement.geometry, points: sanitizedPoints } },
+        drawings
+      )) {
+        console.warn('Duplicate measurement detected - not adding')
         return null
       }
 
@@ -1432,7 +2351,7 @@ export default function FastPlanCanvas({
 
       return null
     },
-    [computeAreaMeasurementData, computeLineMeasurementData]
+    [computeAreaMeasurementData, computeLineMeasurementData, isMeasurementDuplicate, drawings]
   )
 
   // Handle mouse events
@@ -1499,7 +2418,111 @@ export default function FastPlanCanvas({
       // Place new comment pin (only if not calibrating)
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
+    } else if (selectedTool === 'item' || selectedTool === 'item_select') {
+      // When placing items (selectedItemType is set), prioritize placement over selection
+      // Only check for existing items if we're not in placement mode, or if we're very close
+      const isPlacingMode = selectedTool === 'item' && selectedItemType !== null
+      
+      // When placing, use very strict detection (only detect if directly on top)
+      // When selecting/editing, use normal detection
+      let clickedItem: Drawing | null = null
+      if (isPlacingMode) {
+        // In placing mode, only detect items if we're VERY close (within 5 units)
+        // This prevents accidental selection when placing items near existing ones
+        for (const d of drawings) {
+          if (d.type === 'item' && d.pageNumber === pageNumber) {
+            const geom = d.geometry
+            if (geom && typeof geom.x !== 'undefined' && typeof geom.y !== 'undefined') {
+              const itemX = geom.x
+              const itemY = geom.y
+              const dist = Math.sqrt(Math.pow(world.x - itemX, 2) + Math.pow(world.y - itemY, 2))
+              // Very strict threshold when placing - only detect if directly on top
+              if (dist <= 5) {
+                clickedItem = d
+                break
+              }
+            }
+          }
+        }
+      } else {
+        // Normal mode - use standard detection
+        clickedItem = drawings.find(d => 
+          d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d, false)
+        ) || null
+      }
+      
+      if (clickedItem) {
+        // Handle selection mode
+        if (selectedTool === 'item_select' || (selectedTool === 'item' && (e.shiftKey || e.ctrlKey || e.metaKey))) {
+          // Selection mode - add/remove from selection
+          if (onSelectedItemsChange) {
+            const newSelection = new Set<string>(selectedItemIds ?? [])
+            
+            if (e.shiftKey || e.ctrlKey || e.metaKey) {
+              // Toggle selection with modifier key
+              if (newSelection.has(clickedItem.id)) {
+                newSelection.delete(clickedItem.id)
+              } else {
+                newSelection.add(clickedItem.id)
+              }
+            } else {
+              // Replace selection without modifier
+              newSelection.clear()
+              newSelection.add(clickedItem.id)
+            }
+            
+            onSelectedItemsChange(newSelection)
+          }
+        } else if (onItemSave) {
+          // Clicking on existing item - only allow quick tagging if explicitly selected via sidebar
+          // Otherwise, always edit the item or place a new one
+          if (selectedItemType) {
+            // Item type is selected (via sidebar plus button) and we detected an item (very close)
+            // In this case, edit the item since we're directly on top of it
+            const itemX = clickedItem.geometry.x || baseWorldX
+            const itemY = clickedItem.geometry.y || baseWorldY
+            if (onItemPinClick) {
+              onItemPinClick(itemX, itemY, pageNumber)
+            }
+          } else {
+            // No item type selected - clicking on existing item should edit it
+            // This allows users to edit items or place new ones without auto-selecting type
+            const itemX = clickedItem.geometry.x || baseWorldX
+            const itemY = clickedItem.geometry.y || baseWorldY
+            if (onItemPinClick) {
+              onItemPinClick(itemX, itemY, pageNumber)
+              // The parent should handle setting editingItem
+            }
+          }
+        }
+      } else {
+        // Clicked on empty space
+        if (selectedTool === 'item_select') {
+          // Clear selection if clicking empty space without modifier
+          if (onSelectedItemsChange && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+            onSelectedItemsChange(new Set())
+          }
+        } else if (selectedItemType) {
+          // If item type is already selected, directly place item without opening modal
+          if (onItemSave) {
+            onItemSave(
+              {
+                itemType: selectedItemType.itemType,
+                itemCategory: selectedItemType.itemCategory,
+                itemLabel: selectedItemType.itemLabel
+              },
+              baseWorldX,
+              baseWorldY,
+              pageNumber
+            )
+          }
+        } else if (onItemPinClick) {
+          // No type selected yet - open modal to select type
+          onItemPinClick(baseWorldX, baseWorldY, pageNumber)
+        }
+      }
     } else if (selectedTool === 'measurement_edit') {
+      // Priority 1: Check if clicking on a handle (vertex point) to drag it
       const existingHandle = getMeasurementHandleAtPoint(pageNumber, baseWorldX, baseWorldY)
       if (existingHandle && existingHandle.drawing.geometry?.points) {
         setEditingMeasurement({
@@ -1513,17 +2536,66 @@ export default function FastPlanCanvas({
         return
       }
 
-      const nearbySegment = getMeasurementSegmentAtPoint(pageNumber, baseWorldX, baseWorldY)
-      if (nearbySegment && nearbySegment.drawing.geometry?.points) {
+      // Priority 2: Check if clicking on a segment/edge
+      const segmentHit = getSegmentAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (segmentHit && segmentHit.drawing.geometry?.points) {
+        // If clicking on the currently selected shape's segment, add a new point
+        if (editingMeasurement && editingMeasurement.id === segmentHit.drawing.id) {
+          const points = [...editingMeasurement.points]
+          const segmentIndex = segmentHit.segmentIndex
+          
+          // Insert new point after segmentIndex
+          // For a segment from point[segmentIndex] to point[segmentIndex+1] (or point[0] for closing segment)
+          const insertPosition = (segmentIndex + 1) * 2
+          
+          // For the closing segment of an area, we need to insert at the end (before wrapping to first)
+          const isClosingSegment = segmentHit.drawing.type === 'measurement_area' && 
+            segmentIndex === (points.length - 2) / 2
+          
+          if (isClosingSegment) {
+            // Insert at the end of the points array
+            points.push(baseWorldX, baseWorldY)
+          } else {
+            // Insert in the middle
+            points.splice(insertPosition, 0, baseWorldX, baseWorldY)
+          }
+          
+          // Update the editing measurement with new point and start dragging it
+          const newHandleIndex = isClosingSegment ? (points.length - 2) / 2 : segmentIndex + 1
+          setEditingMeasurement({
+            ...editingMeasurement,
+            points,
+            handleIndex: newHandleIndex
+          })
+          setIsAdjustingMeasurement(true)
+          return
+        }
+        
+        // Clicking on a different shape's segment - select it
         setEditingMeasurement({
-          id: nearbySegment.drawing.id,
-          type: nearbySegment.drawing.type,
-          pageNumber: nearbySegment.drawing.pageNumber,
-          points: [...nearbySegment.drawing.geometry.points],
-          handleIndex: nearbySegment.handleIndex
+          id: segmentHit.drawing.id,
+          type: segmentHit.drawing.type,
+          pageNumber: segmentHit.drawing.pageNumber,
+          points: [...segmentHit.drawing.geometry.points],
+          handleIndex: segmentHit.segmentIndex
+        })
+        setIsAdjustingMeasurement(false)
+        return
+      }
+
+      // Priority 3: Check if clicking inside an area shape (for selection/deletion)
+      const clickedMeasurement = getMeasurementAtPoint(pageNumber, baseWorldX, baseWorldY)
+      if (clickedMeasurement && clickedMeasurement.geometry?.points) {
+        setEditingMeasurement({
+          id: clickedMeasurement.id,
+          type: clickedMeasurement.type,
+          pageNumber: clickedMeasurement.pageNumber,
+          points: [...clickedMeasurement.geometry.points],
+          handleIndex: 0 // Default to first handle
         })
         setIsAdjustingMeasurement(false)
       } else {
+        // Clicked on empty space - deselect
         setEditingMeasurement(null)
         setIsAdjustingMeasurement(false)
       }
@@ -1556,6 +2628,41 @@ export default function FastPlanCanvas({
           return
         }
 
+        // For area measurements with 3+ points, check if clicking near start point to close the shape
+        if (selectedTool === 'measurement_area' && existingPoints.length >= 6) {
+          const startX = existingPoints[0]
+          const startY = existingPoints[1]
+          const distToStart = calculatePixelDistance(baseWorldX, baseWorldY, startX, startY)
+          
+          if (distToStart <= SNAP_TO_CLOSE_THRESHOLD) {
+            // Snap to start point and finalize the measurement
+            const updatedPoints = [...existingPoints]
+            const lastIndex = updatedPoints.length - 2
+            // Set the last preview point to the start point (closing the shape)
+            updatedPoints[lastIndex] = startX
+            updatedPoints[lastIndex + 1] = startY
+            
+            const closedMeasurement: Drawing = {
+              ...currentMeasurement,
+              geometry: {
+                ...currentMeasurement.geometry,
+                points: updatedPoints
+              }
+            }
+            
+            // Finalize the closed measurement
+            const finalized = finalizeMeasurementFromDrawing(closedMeasurement)
+            if (finalized) {
+              onDrawingsChange([...drawings, finalized])
+            }
+            
+            setCurrentMeasurement(null)
+            setIsDrawingMeasurement(false)
+            setIsSnappingToStart(false)
+            return
+          }
+        }
+
         const updatedPoints = [...existingPoints]
         const lastIndex = updatedPoints.length - 2
         updatedPoints[lastIndex] = baseWorldX
@@ -1571,32 +2678,42 @@ export default function FastPlanCanvas({
         }
 
         setCurrentMeasurement(updatedMeasurement)
-
-        if (selectedTool === 'measurement_line' && !e.shiftKey) {
-          const sanitizedPoints = updatedPoints.slice(0, Math.max(updatedPoints.length - 2, 0))
-          if (sanitizedPoints.length >= 4) {
-            const measurementToFinalize: Drawing = {
-              ...updatedMeasurement,
-              geometry: {
-                ...updatedMeasurement.geometry,
-                points: sanitizedPoints
-              }
-            }
-            const finalized = finalizeMeasurementFromDrawing(measurementToFinalize)
-            if (finalized) {
-              onDrawingsChange([...drawings, finalized])
-              setCurrentMeasurement(null)
-              setIsDrawingMeasurement(false)
-            }
+        // Line measurement now works like area: click to add points, double-click to finalize
+      }
+    } else if (selectedTool === 'measurement_select') {
+      // Find measurement at click point
+      const clickedMeasurement = getMeasurementAtPoint(pageNumber, baseWorldX, baseWorldY)
+      
+      if (clickedMeasurement && onSelectedMeasurementsChange && selectedMeasurementIds) {
+        const newSelection = new Set(selectedMeasurementIds)
+        
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          // Toggle selection with modifier key
+          if (newSelection.has(clickedMeasurement.id)) {
+            newSelection.delete(clickedMeasurement.id)
+          } else {
+            newSelection.add(clickedMeasurement.id)
           }
+        } else {
+          // Replace selection without modifier
+          newSelection.clear()
+          newSelection.add(clickedMeasurement.id)
         }
+        
+        onSelectedMeasurementsChange(newSelection)
+      } else if (clickedMeasurement && onSelectedMeasurementsChange) {
+        // No existing selection, start new one
+        onSelectedMeasurementsChange(new Set([clickedMeasurement.id]))
+      } else if (!clickedMeasurement && onSelectedMeasurementsChange && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+        // Clicked on empty space without modifier - clear selection
+        onSelectedMeasurementsChange(new Set())
       }
     } else if (selectedTool === 'none') {
       // Start panning
       setIsPanning(true)
       setLastPanPoint({ x: screenX, y: screenY })
     }
-  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, finalizeMeasurementFromDrawing])
+  }, [selectedTool, screenToWorld, getPageNumber, onCommentPinClick, drawings, onDrawingsChange, isPointInComment, isPointInItem, onCommentClick, currentMeasurement, isDrawingMeasurement, getScaleSetting, onOpenScaleSettings, isCalibrating, calibrationPoints, setCalibrationPoints, getMeasurementHandleAtPoint, getMeasurementSegmentAtPoint, getSegmentAtPoint, getMeasurementAtPoint, finalizeMeasurementFromDrawing, selectedMeasurementIds, onSelectedMeasurementsChange, selectedItemIds, onSelectedItemsChange, editingMeasurement, currentPage, selectedItemType, onItemSave, onItemPinClick])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -1656,12 +2773,30 @@ export default function FastPlanCanvas({
       const world = screenToWorld(screenX, screenY)
       
       // screenToWorld already returns base scale coordinates (zoom is handled by transform)
-      const baseWorldX = world.x
-      const baseWorldY = world.y
+      let baseWorldX = world.x
+      let baseWorldY = world.y
       
       // Update last point in measurement for preview (store at base scale)
       const points = currentMeasurement.geometry.points || []
       if (points.length >= 2) {
+        // For area measurements with 3+ points, check if near start point to snap
+        if (currentMeasurement.type === 'measurement_area' && points.length >= 6) {
+          const startX = points[0]
+          const startY = points[1]
+          const distToStart = calculatePixelDistance(baseWorldX, baseWorldY, startX, startY)
+          
+          if (distToStart <= SNAP_TO_CLOSE_THRESHOLD) {
+            // Snap to start point
+            baseWorldX = startX
+            baseWorldY = startY
+            setIsSnappingToStart(true)
+          } else {
+            setIsSnappingToStart(false)
+          }
+        } else {
+          setIsSnappingToStart(false)
+        }
+        
         const updatedPoints = [...points]
         updatedPoints[updatedPoints.length - 2] = baseWorldX
         updatedPoints[updatedPoints.length - 1] = baseWorldY
@@ -1674,8 +2809,26 @@ export default function FastPlanCanvas({
         })
       }
     }
+    
+    // Always check for measurement hover (unless actively panning or drawing)
+    // This runs regardless of tool selection to enable hover labels
+    if (!isPanning && !isDrawingMeasurement && !isAdjustingMeasurement) {
+      const container = containerRef.current
+      if (container) {
+        const rect = container.getBoundingClientRect()
+        const screenX = e.clientX - rect.left
+        const screenY = e.clientY - rect.top
+        const world = screenToWorld(screenX, screenY)
+        
+        const hoveredMeasurement = getMeasurementAtPoint(currentPage, world.x, world.y)
+        setHoveredMeasurementId(hoveredMeasurement?.id || null)
+      }
+    } else if (isPanning || isDrawingMeasurement) {
+      // Clear hover when panning or drawing
+      setHoveredMeasurementId(null)
+    }
     // Comment hover detection is now handled by HTML elements via onMouseEnter/onMouseLeave
-  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement])
+  }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement, currentPage, getMeasurementAtPoint])
 
   const finalizeEditingMeasurement = useCallback(() => {
     if (!editingMeasurement) {
@@ -1738,6 +2891,16 @@ export default function FastPlanCanvas({
 
   const deleteMeasurement = useCallback(
     (id: string) => {
+      // Find the measurement to verify it exists
+      const measurementToDelete = drawings.find(
+        d => (d.type === 'measurement_line' || d.type === 'measurement_area') && d.id === id
+      )
+      
+      if (!measurementToDelete) {
+        console.warn('Measurement not found for deletion:', id)
+        return
+      }
+
       const nextDrawings = drawings.filter(drawing => {
         if (drawing.type === 'measurement_line' || drawing.type === 'measurement_area') {
           return drawing.id !== id
@@ -1745,16 +2908,55 @@ export default function FastPlanCanvas({
         return true
       })
 
+      // Verify the measurement was actually removed
       if (nextDrawings.length === drawings.length) {
+        console.warn('Failed to remove measurement - length unchanged:', id)
         return
       }
 
-      onDrawingsChange(nextDrawings)
+      // Update state first, then call onDrawingsChange
       setEditingMeasurement(null)
       setIsAdjustingMeasurement(false)
+      
+      // Call onDrawingsChange - handle both sync and async cases
+      const result = onDrawingsChange(nextDrawings)
+      if (result instanceof Promise) {
+        result.catch(error => {
+          console.error('Error updating drawings after deletion:', error)
+        })
+      }
     },
     [drawings, onDrawingsChange]
   )
+
+  // Clear all drawings (measurements and comments) on the current page
+  const clearAllDrawingsOnPage = useCallback(() => {
+    if (!window.confirm(`Are you sure you want to clear all drawings (measurements and comments) on page ${currentPage}?`)) {
+      return
+    }
+
+    const nextDrawings = drawings.filter(drawing => drawing.pageNumber !== currentPage)
+    
+    // Clear editing state if the edited measurement was on this page
+    if (editingMeasurement && editingMeasurement.pageNumber === currentPage) {
+      setEditingMeasurement(null)
+      setIsAdjustingMeasurement(false)
+    }
+    
+    // Clear current measurement if it's on this page
+    if (currentMeasurement && currentMeasurement.pageNumber === currentPage) {
+      setCurrentMeasurement(null)
+      setIsDrawingMeasurement(false)
+    }
+    
+    // Call onDrawingsChange - handle both sync and async cases
+    const result = onDrawingsChange(nextDrawings)
+    if (result instanceof Promise) {
+      result.catch(error => {
+        console.error('Error clearing drawings:', error)
+      })
+    }
+  }, [drawings, currentPage, onDrawingsChange, editingMeasurement, currentMeasurement])
 
   useEffect(() => {
     if (selectedTool !== 'measurement_edit') {
@@ -1785,6 +2987,7 @@ export default function FastPlanCanvas({
 
     setCurrentMeasurement(null)
     setIsDrawingMeasurement(false)
+    setIsSnappingToStart(false)
   }, [currentMeasurement, isDrawingMeasurement, finalizeMeasurementFromDrawing, drawings, onDrawingsChange])
 
   // Handle double-click to finish measurement
@@ -1817,15 +3020,33 @@ export default function FastPlanCanvas({
         }
         setCurrentMeasurement(null)
         setIsDrawingMeasurement(false)
+        setIsSnappingToStart(false)
         setSelectedTool('measurement_edit')
+        e.preventDefault()
+      } else if (e.key === 's' || e.key === 'S') {
+        // Ignore if typing in an input or pressing Ctrl/Cmd+S (save)
+        if (e.ctrlKey || e.metaKey) return
+        if (isDrawingMeasurement) {
+          finalizeMeasurement()
+        }
+        setCurrentMeasurement(null)
+        setIsDrawingMeasurement(false)
+        setIsSnappingToStart(false)
+        setSelectedTool('measurement_select')
+        e.preventDefault()
+      } else if (e.key === 'i' || e.key === 'I') {
+        if (isDrawingMeasurement) {
+          finalizeMeasurement()
+        }
+        setSelectedTool('item')
         e.preventDefault()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTool === 'measurement_edit' && editingMeasurement) {
         e.preventDefault()
         deleteMeasurement(editingMeasurement.id)
       } else if (e.key === 'Escape') {
         if (isDrawingMeasurement) {
-          setCurrentMeasurement(null)
-          setIsDrawingMeasurement(false)
+          // Finalize the measurement if it has enough points, otherwise just clear
+          finalizeMeasurement()
           setSelectedTool('none')
         } else if (selectedTool === 'measurement_edit') {
           setEditingMeasurement(null)
@@ -1877,6 +3098,7 @@ export default function FastPlanCanvas({
           cursor: hoveredComment ? 'pointer' :
                  isCalibrating ? 'crosshair' :
                  selectedTool === 'none' ? (isPanning ? 'grabbing' : 'grab') : 
+                 (selectedTool === 'measurement_select' || selectedTool === 'item_select') ? 'pointer' :
                  (selectedTool === 'comment' || selectedTool === 'measurement_line' || selectedTool === 'measurement_area') ? 'crosshair' : 'default'
         }}
       >
@@ -1978,7 +3200,7 @@ export default function FastPlanCanvas({
         )}
 
         {/* PDF Page - Paginated view (single page) */}
-        {!pdfError && pdfUrl && !isImageFile && documentReady && numPages > 0 && workerReady ? (
+        {!pdfError && pdfUrl && !isImageFile && documentReady && workerReady ? (
           <div
             className="absolute inset-0 flex items-center justify-center"
             style={{
@@ -1989,6 +3211,7 @@ export default function FastPlanCanvas({
             }}
           >
             <Document
+              key={`document-${pdfUrl}`}
               file={pdfUrl}
               loading={
                 <div className="flex items-center justify-center p-8">
@@ -2007,129 +3230,241 @@ export default function FastPlanCanvas({
                   </div>
                 )
               }}
-              onLoadSuccess={() => {
-                // Document is fully loaded, ensure worker is ready
-                console.log('PDF Document loaded successfully')
+              onLoadSuccess={(pdf: { numPages: number }) => {
+                // Guard against state updates after unmount
+                if (!componentIsMounted.current) return
+                
+                // Document component's internal PDF is now fully loaded and ready
+                // Increment instance ID to ensure stale page renders don't try to access destroyed document
+                documentInstanceId.current += 1
+                console.log('PDF Document component loaded successfully, pages:', pdf.numPages, 'instance:', documentInstanceId.current)
+                
+                // Get page count from the Document component's PDF instance
+                // This avoids loading the PDF twice and prevents worker state conflicts
+                const loadedPages = pdf.numPages
+                setNumPages(loadedPages)
+                if (onNumPagesChange) {
+                  onNumPagesChange(loadedPages)
+                }
+                setPdfLoaded(true)
+                setPdfError(null)
+                setDocumentComponentReady(true)
               }}
               onLoadError={(error: Error) => {
+                // Check for PDF.js cleanup errors (harmless)
+                if (error.message?.includes('messageHandler') || error.message?.includes('sendWithPromise')) {
+                  console.debug('PDF Document cleanup error (harmless during navigation)')
+                  return
+                }
+                // Guard against state updates after unmount
+                if (!componentIsMounted.current) return
+                
                 console.error('PDF Document load error:', error)
-                setPdfError('Failed to load PDF document')
+                setPdfError('Failed to load PDF document. You can still use drawing tools on a blank canvas.')
+                setPdfLoaded(true) // Still allow drawing tools
               }}
             >
               <div 
                 className="relative shadow-lg bg-white" 
                 data-page-num={currentPage} 
                 style={{ 
-                  width: `${612 * scale}px`,
+                  width: `${pageDimensions.get(currentPage)?.width || (PDF_BASE_WIDTH * scale)}px`,
                   backgroundColor: 'white',
                   // Ensure exact positioning to match drawing canvas
                   margin: '0 auto',
                   display: 'block',
                   position: 'relative',
                   flexShrink: 0,
+                  // Prevent canvas overflow during quality transitions
+                  overflow: 'hidden',
                 }}
               >
-                <Page
-                  key={`page-${currentPage}`}
-                  pageNumber={currentPage}
-                  scale={pageScale}
-                  width={612}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                  className="shadow-lg relative"
-                  style={{ 
-                    display: 'block', 
-                    position: 'relative', 
-                    zIndex: 1,
-                    width: `${612 * scale}px`,
-                    height: 'auto',
-                    backgroundColor: 'white',
-                  }}
-                  loading={
-                    <div className="bg-white flex items-center justify-center text-gray-400 text-sm" style={{ width: `${612 * scale}px`, backgroundColor: 'white' }}>
-                      Loading page {currentPage}...
+                {/* Show loading state while Document component initializes its PDF */}
+                {!documentComponentReady && (
+                  <div 
+                    className="flex items-center justify-center bg-white"
+                    style={{ 
+                      width: `${pageDimensions.get(currentPage)?.width || (PDF_BASE_WIDTH * scale)}px`,
+                      minHeight: `${pageDimensions.get(currentPage)?.height || (PDF_BASE_WIDTH * scale * 1.3)}px`,
+                    }}
+                  >
+                    <div className="text-center text-gray-400 text-sm">
+                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                      Preparing page...
                     </div>
-                  }
-                  onLoadSuccess={(page: { height: number; width: number }) => {
-                    // Calculate height using display scale (zoom is handled by transform)
-                    const height = page.height * scale
-                    setPageHeights((prev: Map<number, number>) => {
-                      const newHeights = new Map(prev)
-                      newHeights.set(currentPage, height)
-                      return newHeights
-                    })
-                  }}
-                  onLoadError={(error: Error) => {
-                    console.error(`Error loading page ${currentPage}:`, error)
-                    // Don't crash the app, just log the error
-                  }}
-                  onRenderError={(error: Error) => {
-                    console.error(`Error rendering page ${currentPage}:`, error)
-                    // If it's a worker error, reset document ready state to force re-initialization
-                    if (error.message?.includes('messageHandler') || error.message?.includes('worker') || error.message?.includes('sendWithPromise')) {
-                      console.warn('PDF.js worker error detected, resetting document ready state')
-                      setDocumentReady(false)
-                      // Wait a bit then try again
-                      setTimeout(() => {
-                        setDocumentReady(true)
-                      }, 1000)
-                    }
-                  }}
-                  onRenderSuccess={() => {
-                    // Ensure canvas quality settings are applied for crisp rendering
-                    if (typeof window !== 'undefined') {
-                      setTimeout(() => {
-                        const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
-                        if (pageContainer) {
-                          // Ensure container has white background
-                          pageContainer.style.backgroundColor = 'white'
-                          
-                          const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
-                          if (canvas) {
-                            const ctx = canvas.getContext('2d', { willReadFrequently: false })
-                            if (ctx) {
-                              // Fill canvas with white background behind PDF content
-                              // This ensures any transparent areas show white instead of showing through
-                              // Using destination-over to draw white behind existing content
-                              const originalComposite = ctx.globalCompositeOperation
-                              ctx.globalCompositeOperation = 'destination-over'
-                              ctx.fillStyle = 'white'
-                              ctx.fillRect(0, 0, canvas.width, canvas.height)
-                              ctx.globalCompositeOperation = originalComposite
-                              
-                              // Enable image smoothing for better quality when zoomed
-                              // The high-resolution render combined with smoothing gives best results
-                              ctx.imageSmoothingEnabled = true
-                              ctx.imageSmoothingQuality = 'high'
-                            }
-                            
-                            // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
-                            // but MUST be displayed at base size (612 * scale) to match drawing canvas exactly
-                            // CSS transform handles visual zoom, keeping coordinate systems aligned
-                            const baseDisplayWidth = 612 * scale
-                            // Force exact width to match drawing canvas exactly - critical for alignment
-                            canvas.style.width = `${baseDisplayWidth}px`
-                            canvas.style.height = 'auto'
-                            canvas.style.maxWidth = `${baseDisplayWidth}px`
-                            canvas.style.minWidth = `${baseDisplayWidth}px`
-                            // Ensure no transforms are applied to canvas element itself
-                            canvas.style.transform = 'none'
-                            canvas.style.objectFit = 'contain'
-                            canvas.style.backgroundColor = 'white'
-                            // Use high-quality rendering for better appearance when zoomed
-                            canvas.style.imageRendering = 'auto'
-                            
-                            // Also ensure the canvas element itself has white background via CSS
-                            const canvasStyle = window.getComputedStyle(canvas)
-                            if (canvasStyle.backgroundColor === 'transparent' || canvasStyle.backgroundColor === 'rgba(0, 0, 0, 0)') {
-                              canvas.style.backgroundColor = 'white'
-                            }
+                  </div>
+                )}
+                {/* Render current page + prefetch adjacent pages - only when Document is ready AND worker is ready */}
+                {documentComponentReady && workerReady && numPages > 0 && Array.from(new Set([currentPage, ...Array.from(pagesToRender)]))
+                  .filter(pageNum => pageNum >= 1 && pageNum <= numPages)
+                  .map(pageNum => {
+                  const isCurrentPage = pageNum === currentPage
+                  
+                  return (
+                    <div 
+                      key={`page-container-${documentInstanceId.current}-${pageNum}`}
+                      style={{ 
+                        display: isCurrentPage ? 'block' : 'none',
+                        position: isCurrentPage ? 'relative' : 'absolute',
+                        visibility: isCurrentPage ? 'visible' : 'hidden',
+                        pointerEvents: isCurrentPage ? 'auto' : 'none',
+                      }}
+                    >
+                      <PageErrorBoundary 
+                        pageNumber={pageNum}
+                        onError={(error) => {
+                          // Silently handle PDF.js cleanup errors
+                          if (error.message?.includes('messageHandler') || 
+                              error.message?.includes('sendWithPromise') ||
+                              error.message?.includes('destroyed') ||
+                              error.message?.includes('is null')) {
+                            return
                           }
-                        }
-                      }, 100)
-                    }
-                  }}
-                />
+                        }}
+                        fallback={isCurrentPage ? (
+                          <div className="bg-white flex items-center justify-center text-gray-400 text-sm p-4" style={{ width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`, minHeight: '200px', backgroundColor: 'white' }}>
+                            Reloading page {pageNum}...
+                          </div>
+                        ) : null}
+                      >
+                        {documentComponentReady && workerReady && componentIsMounted.current && (
+                          <Page
+                            key={`page-${documentInstanceId.current}-${pageNum}`}
+                            pageNumber={pageNum}
+                            scale={isCurrentPage ? pageScale : scale * 1.5}
+                            width={612}
+                            renderTextLayer={isCurrentPage && shouldRenderTextLayer}
+                            renderAnnotationLayer={false}
+                            className="shadow-lg relative"
+                            style={{ 
+                              display: 'block', 
+                              position: 'relative', 
+                              zIndex: 1,
+                              width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`,
+                              height: 'auto',
+                              backgroundColor: 'white',
+                            }}
+                            loading={isCurrentPage ? (
+                              <div className="bg-white flex items-center justify-center text-gray-400 text-sm" style={{ width: `${pageDimensions.get(pageNum)?.width || (PDF_BASE_WIDTH * scale)}px`, backgroundColor: 'white' }}>
+                                Loading page {pageNum}...
+                              </div>
+                            ) : null}
+                          onLoadSuccess={(page: { height: number; width: number }) => {
+                            // Guard against state updates after unmount or document change
+                            if (!componentIsMounted.current) return
+                            // Verify document instance hasn't changed (prevent stale updates)
+                            const currentInstanceId = documentInstanceId.current
+                            // Calculate dimensions based on constrained width (612) and PDF aspect ratio
+                            // react-pdf scales the PDF to fit the specified width, so we use that as base
+                            const baseWidth = 612
+                            const aspectRatio = page.height / page.width
+                            const scaledWidth = baseWidth * scale
+                            const scaledHeight = baseWidth * aspectRatio * scale
+                            setPageDimensions((prev: Map<number, { width: number; height: number }>) => {
+                              // Double-check instance hasn't changed during async update
+                              if (documentInstanceId.current !== currentInstanceId) return prev
+                              const newDimensions = new Map(prev)
+                              newDimensions.set(pageNum, { width: scaledWidth, height: scaledHeight })
+                              return newDimensions
+                            })
+                          }}
+                          onLoadError={(error: Error) => {
+                            // Ignore errors for destroyed documents (messageHandler null)
+                            // This happens during rapid page changes or document reload
+                            if (error.message?.includes('messageHandler') || 
+                                error.message?.includes('sendWithPromise') ||
+                                error.message?.includes('destroyed') ||
+                                error.message?.includes('is null')) {
+                              console.debug(`Page ${pageNum} load skipped - document was destroyed (normal during navigation)`)
+                              return
+                            }
+                            // Only log errors if component is still mounted and it's the current page
+                            if (componentIsMounted.current && isCurrentPage) {
+                              console.error(`Error loading page ${pageNum}:`, error)
+                            }
+                          }}
+                          onRenderError={(error: Error) => {
+                            if (!isCurrentPage) return // Ignore errors on prefetched pages
+                            // Silently handle PDF.js cleanup errors
+                            if (error.message?.includes('messageHandler') || 
+                                error.message?.includes('worker') || 
+                                error.message?.includes('sendWithPromise') ||
+                                error.message?.includes('destroyed') ||
+                                error.message?.includes('is null')) {
+                              console.debug('PDF.js worker cleanup error (harmless during navigation)')
+                              // Cancel quality upgrade and stay at low quality
+                              if (qualityUpgradeTimeoutRef.current) {
+                                clearTimeout(qualityUpgradeTimeoutRef.current)
+                              }
+                              // If we're at high quality, fall back to low
+                              if (renderQuality === 'high' && componentIsMounted.current) {
+                                setRenderQuality('low')
+                              }
+                              return
+                            }
+                            console.error(`Error rendering page ${pageNum}:`, error)
+                          }}
+                          onRenderSuccess={() => {
+                            if (!isCurrentPage) return // Skip post-render processing for prefetched pages
+                            if (!componentIsMounted.current) return // Guard against updates after unmount
+                            // Ensure canvas quality settings are applied for crisp rendering
+                            // IMPORTANT: Apply immediately (no delay) to prevent drawing misalignment during quality transitions
+                            if (typeof window !== 'undefined') {
+                              // Use requestAnimationFrame for immediate but safe DOM update
+                              requestAnimationFrame(() => {
+                                if (!componentIsMounted.current) return
+                                const pageContainer = document.querySelector(`[data-page-num="${currentPage}"]`) as HTMLElement
+                                if (pageContainer) {
+                                  // Ensure container has white background
+                                  pageContainer.style.backgroundColor = 'white'
+                                  
+                                  const canvas = pageContainer.querySelector('canvas') as HTMLCanvasElement
+                                  if (canvas) {
+                                    // Canvas is rendered at high resolution (scale * zoom * devicePixelRatio)
+                                    // but MUST be displayed at base size to match drawing canvas exactly
+                                    // CSS transform handles visual zoom, keeping coordinate systems aligned
+                                    // CRITICAL: Set width FIRST before any other operations to prevent misalignment
+                                    const dims = pageDimensions.get(currentPage)
+                                    const baseDisplayWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+                                    // Force exact width to match drawing canvas exactly - critical for alignment
+                                    canvas.style.width = `${baseDisplayWidth}px`
+                                    canvas.style.height = 'auto'
+                                    canvas.style.maxWidth = `${baseDisplayWidth}px`
+                                    canvas.style.minWidth = `${baseDisplayWidth}px`
+                                    // Ensure no transforms are applied to canvas element itself
+                                    canvas.style.transform = 'none'
+                                    canvas.style.objectFit = 'contain'
+                                    canvas.style.backgroundColor = 'white'
+                                    // Use high-quality rendering for better appearance when zoomed
+                                    canvas.style.imageRendering = 'auto'
+                                    
+                                    const ctx = canvas.getContext('2d', { willReadFrequently: false })
+                                    if (ctx) {
+                                      // Fill canvas with white background behind PDF content
+                                      // This ensures any transparent areas show white instead of showing through
+                                      // Using destination-over to draw white behind existing content
+                                      const originalComposite = ctx.globalCompositeOperation
+                                      ctx.globalCompositeOperation = 'destination-over'
+                                      ctx.fillStyle = 'white'
+                                      ctx.fillRect(0, 0, canvas.width, canvas.height)
+                                      ctx.globalCompositeOperation = originalComposite
+                                      
+                                      // Enable image smoothing for better quality when zoomed
+                                      // The high-resolution render combined with smoothing gives best results
+                                      ctx.imageSmoothingEnabled = true
+                                      ctx.imageSmoothingQuality = 'high'
+                                    }
+                                  }
+                                }
+                              })
+                            }
+                          }}
+                        />
+                        )}
+                      </PageErrorBoundary>
+                    </div>
+                  )
+                })}
               </div>
             </Document>
           </div>
@@ -2203,9 +3538,15 @@ export default function FastPlanCanvas({
           
           {/* Comment Bubbles - HTML elements that automatically follow CSS transforms */}
           {(() => {
-            const currentPageComments = drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
-            const pageHeight = pageHeights.get(currentPage) || (792 * scale)
-            const pageWidth = 612 * scale
+            const currentPageComments = visibilitySettings.showComments 
+              ? drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
+              : []
+            const currentPageItems = visibilitySettings.showItems
+              ? drawings.filter(d => d.type === 'item' && d.pageNumber === currentPage)
+              : []
+            const dims = pageDimensions.get(currentPage)
+            const pageWidth = dims?.width || (PDF_BASE_WIDTH * scale)
+            const pageHeight = dims?.height || (PDF_BASE_HEIGHT * scale)
             
             return (
               <div 
@@ -2235,6 +3576,7 @@ export default function FastPlanCanvas({
                       comment={comment}
                       isSelected={selectedComment?.id === comment.id}
                       isHovered={hoveredComment?.id === comment.id}
+                      scale={scale}
                       onClick={(e) => {
                         e.stopPropagation()
                         const container = containerRef.current
@@ -2256,10 +3598,200 @@ export default function FastPlanCanvas({
                     />
                   )
                 })}
+                
+                {/* Item Markers */}
+                {currentPageItems.map((item) => {
+                  // Check if geometry has valid x and y values
+                  if (!item.geometry || typeof item.geometry.x === 'undefined' || typeof item.geometry.y === 'undefined') {
+                    return null
+                  }
+                  
+                  const itemType = getItemTypeById(item.itemType || '')
+                  const Icon = itemType?.icon || Tag
+                  const color = itemType?.color || '#3b82f6'
+                  const isHovered = hoveredItem?.id === item.id || sidebarHoveredItemId === item.id
+                  const isSelected = selectedItemIds?.has(item.id) || false
+                  
+                  // Convert PDF base coordinates to canvas coordinates (multiply by scale)
+                  // Coordinates are stored in PDF base space, but need to be displayed in canvas space
+                  const canvasX = item.geometry.x * scale
+                  const canvasY = item.geometry.y * scale
+                  
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        position: 'absolute',
+                        left: `${canvasX}px`,
+                        top: `${canvasY}px`,
+                        transform: 'translate(-50%, -50%)',
+                        pointerEvents: 'auto',
+                        cursor: (selectedTool === 'item_select' || selectedTool === 'item') ? 'pointer' : 'default',
+                        zIndex: isHovered || isSelected ? 13 : 12,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // Selection is handled in handleMouseDown, but we can still allow direct editing
+                        if (selectedTool !== 'item_select' && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+                          const container = containerRef.current
+                          if (!container) return
+                          
+                          const rect = container.getBoundingClientRect()
+                          const screenX = e.clientX - rect.left
+                          const screenY = e.clientY - rect.top
+                          
+                          setEditingItem(item)
+                          setItemModalPosition({ x: screenX, y: screenY, pageNumber: item.pageNumber })
+                          setItemModalOpen(true)
+                        }
+                      }}
+                      onMouseEnter={() => setHoveredItem(item)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      title={item.itemLabel || itemType?.label || item.itemType || 'Item'}
+                    >
+                      {/* Selection ring */}
+                      {isSelected && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            border: '2px solid #f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                            pointerEvents: 'none',
+                            zIndex: 11,
+                          }}
+                        />
+                      )}
+                      {/* Hover ring */}
+                      {isHovered && !isSelected && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            border: `2px solid ${color}`,
+                            backgroundColor: `${color}20`,
+                            pointerEvents: 'none',
+                            zIndex: 11,
+                            transition: 'all 0.2s',
+                          }}
+                        />
+                      )}
+                      <div
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: isSelected ? '#f97316' : (isHovered ? color : `${color}CC`),
+                          border: `1px solid ${isSelected ? '#f97316' : color}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          transition: 'all 0.2s',
+                          transform: isHovered ? 'scale(1.4)' : (isSelected ? 'scale(1.2)' : 'scale(1)'),
+                          boxShadow: isHovered ? `0 0 6px ${color}80` : (isSelected ? `0 0 4px #f9731680` : '0 1px 2px rgba(0,0,0,0.2)'),
+                          position: 'relative',
+                          zIndex: 12,
+                        }}
+                      >
+                        <Icon 
+                          className="h-1.5 w-1.5 transition-all duration-200" 
+                          style={{ 
+                            transform: isHovered ? 'scale(1.2)' : 'scale(1)',
+                            transition: 'transform 0.2s'
+                          }} 
+                        />
+                      </div>
+                      {isHovered && item.itemLabel && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '28px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            color: 'white',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            whiteSpace: 'nowrap',
+                            pointerEvents: 'none',
+                            zIndex: 14,
+                          }}
+                        >
+                          {item.itemLabel}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           })()}
         </div>
+
+        {/* Selected Item Type Indicator */}
+        {selectedItemType && selectedTool === 'item' && (
+          <div 
+            className="absolute top-20 left-4 z-50 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="bg-white/95 backdrop-blur-md border border-gray-200 shadow-lg rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const itemType = getItemTypeById(selectedItemType.itemType)
+                  const Icon = itemType?.icon || Tag
+                  const color = itemType?.color || '#3b82f6'
+                  return (
+                    <div 
+                      className="w-8 h-8 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: `${color}20`, border: `2px solid ${color}` }}
+                    >
+                      <Icon className="h-4 w-4" style={{ color }} />
+                    </div>
+                  )
+                })()}
+                <div className="flex flex-col">
+                  <div className="text-sm font-semibold text-gray-900">
+                    {getItemTypeById(selectedItemType.itemType)?.label || selectedItemType.itemType}
+                    {selectedItemType.itemLabel && (
+                      <span className="text-xs text-gray-500 ml-1">({selectedItemType.itemLabel})</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {selectedItemTypeCount} {selectedItemTypeCount === 1 ? 'instance' : 'instances'} placed
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setSelectedItemType(null)
+                }}
+                className="h-8 w-8 rounded-md hover:bg-gray-100"
+                title="Clear selected item type"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Item Tag Modal - handled by parent component via onItemPinClick */}
 
         {/* Comment Popup */}
         {showCommentPopup && selectedComment && (
@@ -2267,6 +3799,27 @@ export default function FastPlanCanvas({
             comment={selectedComment}
             position={popupPosition}
             onClose={() => {
+              setShowCommentPopup(false)
+              setSelectedComment(null)
+            }}
+            onDelete={async (commentId) => {
+              // If there's a dedicated delete handler, use it (for Supabase persistence)
+              if (onCommentDelete) {
+                try {
+                  await onCommentDelete(commentId)
+                  // After successful deletion, remove from local state
+                  const updatedDrawings = drawings.filter(d => d.id !== commentId)
+                  onDrawingsChange(updatedDrawings)
+                } catch (error) {
+                  console.error('Error deleting comment:', error)
+                  alert('Failed to delete comment. Please try again.')
+                  return
+                }
+              } else {
+                // Fallback: just remove from local state (no persistence)
+                const updatedDrawings = drawings.filter(d => d.id !== commentId)
+                onDrawingsChange(updatedDrawings)
+              }
               setShowCommentPopup(false)
               setSelectedComment(null)
             }}
@@ -2285,6 +3838,69 @@ export default function FastPlanCanvas({
             <span>{pdfError}</span>
           </div>
         )}
+        
+        {/* Clear All Drawings Button */}
+        {(() => {
+          const pageDrawings = drawings.filter(d => d.pageNumber === currentPage)
+          if (pageDrawings.length === 0) return null
+          
+          return (
+            <div className="pointer-events-auto">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={clearAllDrawingsOnPage}
+                className="h-9 px-3 rounded-full shadow-md bg-white/90 hover:bg-white backdrop-blur-sm border border-gray-200 text-xs font-medium"
+                title={`Clear all drawings on page ${currentPage}`}
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Clear Page
+              </Button>
+            </div>
+          )
+        })()}
+
+        {/* Visibility Toggles */}
+        <div className="pointer-events-auto">
+          <div className="bg-white/90 backdrop-blur-md border border-gray-200 shadow-lg rounded-lg p-2 flex flex-col gap-1">
+            <Button
+              variant={visibilitySettings.showComments ? "default" : "ghost"}
+              size="icon"
+              onClick={() => setVisibilitySettings(prev => ({ ...prev, showComments: !prev.showComments }))}
+              className="h-8 w-8 rounded-md"
+              title={visibilitySettings.showComments ? "Hide Comments" : "Show Comments"}
+            >
+              <MessageSquare className={`h-4 w-4 ${visibilitySettings.showComments ? '' : 'opacity-50'}`} />
+            </Button>
+            <Button
+              variant={visibilitySettings.showItems ? "default" : "ghost"}
+              size="icon"
+              onClick={() => setVisibilitySettings(prev => ({ ...prev, showItems: !prev.showItems }))}
+              className="h-8 w-8 rounded-md"
+              title={visibilitySettings.showItems ? "Hide Items" : "Show Items"}
+            >
+              <Tag className={`h-4 w-4 ${visibilitySettings.showItems ? '' : 'opacity-50'}`} />
+            </Button>
+            <Button
+              variant={visibilitySettings.showMeasurementLines ? "default" : "ghost"}
+              size="icon"
+              onClick={() => setVisibilitySettings(prev => ({ ...prev, showMeasurementLines: !prev.showMeasurementLines }))}
+              className="h-8 w-8 rounded-md"
+              title={visibilitySettings.showMeasurementLines ? "Hide Line Measurements" : "Show Line Measurements"}
+            >
+              <Ruler className={`h-4 w-4 ${visibilitySettings.showMeasurementLines ? '' : 'opacity-50'}`} />
+            </Button>
+            <Button
+              variant={visibilitySettings.showMeasurementAreas ? "default" : "ghost"}
+              size="icon"
+              onClick={() => setVisibilitySettings(prev => ({ ...prev, showMeasurementAreas: !prev.showMeasurementAreas }))}
+              className="h-8 w-8 rounded-md"
+              title={visibilitySettings.showMeasurementAreas ? "Hide Area Measurements" : "Show Area Measurements"}
+            >
+              <Square className={`h-4 w-4 ${visibilitySettings.showMeasurementAreas ? '' : 'opacity-50'}`} />
+            </Button>
+          </div>
+        </div>
         
         {/* Right Sidebar Toggle */}
         <div className="pointer-events-auto">
@@ -2338,6 +3954,47 @@ export default function FastPlanCanvas({
            
            <div className="w-px h-6 bg-gray-200 mx-1" />
            
+           {/* Item Tagging */}
+           <div className="relative">
+             <Button 
+               variant={selectedTool === 'item' ? 'default' : 'ghost'}
+               size="icon"
+               onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('item')
+             }}
+               title={selectedItemType 
+                 ? `Tagging: ${getItemTypeById(selectedItemType.itemType)?.label || selectedItemType.itemType} (${selectedItemTypeCount} placed) - Click to change type`
+                 : "Tag Item (I) - Click to select type, then click on plan to place"}
+               className={`rounded-full h-10 w-10 ${selectedItemType ? 'ring-2 ring-blue-500' : ''}`}
+             >
+               <Tag className="h-5 w-5" />
+             </Button>
+             {selectedItemType && selectedTool === 'item' && (
+               <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] font-bold rounded-full h-5 w-5 flex items-center justify-center border-2 border-white">
+                 {selectedItemTypeCount}
+               </div>
+             )}
+           </div>
+           <Button 
+             variant={selectedTool === 'item_select' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setSelectedTool('item_select')
+             }}
+             title="Select Items - Click items to select, Shift/Ctrl+Click to multi-select"
+             className="rounded-full h-10 w-10"
+           >
+             <MousePointerClick className="h-5 w-5" />
+           </Button>
+           
+           <div className="w-px h-6 bg-gray-200 mx-1" />
+           
            {/* Measurements */}
            <Button 
              variant={selectedTool === 'measurement_line' ? 'default' : 'ghost'}
@@ -2348,7 +4005,7 @@ export default function FastPlanCanvas({
                 }
                 setSelectedTool('measurement_line')
              }}
-             title="Measure Line (M)"
+             title="Measure Line (M) - Click to add points, double-click to finish"
              className="rounded-full h-10 w-10"
            >
              <Ruler className="h-5 w-5" />
@@ -2382,6 +4039,22 @@ export default function FastPlanCanvas({
              className="rounded-full h-10 w-10"
            >
              <Move className="h-5 w-5" />
+           </Button>
+           <Button 
+             variant={selectedTool === 'measurement_select' ? 'default' : 'ghost'}
+             size="icon"
+             onClick={() => {
+                if (isDrawingMeasurement) {
+                  finalizeMeasurement()
+                }
+                setCurrentMeasurement(null)
+                setIsDrawingMeasurement(false)
+                setSelectedTool('measurement_select')
+             }}
+             title="Select Measurements (S)"
+             className="rounded-full h-10 w-10"
+           >
+             <MousePointerClick className="h-5 w-5" />
            </Button>
         </div>
       </div>
@@ -2457,14 +4130,20 @@ export default function FastPlanCanvas({
             <div className="flex items-center gap-2 text-sm text-gray-700">
               <span className="font-medium">Editing</span>
               <span className="text-gray-400">|</span>
-              <span className="text-xs">Drag points to adjust</span>
+              <span className="text-xs">Drag points to adjust • Click edge to add point</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="destructive"
                 size="sm"
                 className="h-7 text-xs rounded-full px-3"
-                onClick={() => deleteMeasurement(editingMeasurement.id)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (editingMeasurement?.id) {
+                    deleteMeasurement(editingMeasurement.id)
+                  }
+                }}
               >
                 <Trash2 className="h-3 w-3 mr-1.5" />
                 Delete

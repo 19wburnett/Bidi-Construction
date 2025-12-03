@@ -115,6 +115,23 @@ export class CommentPersistence {
     }
   }
 
+  async deleteComment(commentId: string): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('plan_comments')
+        .delete()
+        .eq('id', commentId)
+
+      if (error) {
+        console.error('Error deleting comment:', error)
+        throw error
+      }
+    } catch (error) {
+      console.error('Error deleting comment:', error)
+      throw error
+    }
+  }
+
   private drawingToComment(drawing: Drawing): any {
     const isGuest = !this.userId && this.guestUser
     

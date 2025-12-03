@@ -92,7 +92,7 @@ export default function PastRequestsPage() {
         return
       }
 
-      // Then get bid counts for each job through bid_packages
+      // Then get bid counts for each job through bid_packages AND directly via job_id
       const jobsWithBidCounts = await Promise.all(
         (jobsData || []).map(async (job) => {
           // First get bid packages for this job
@@ -101,28 +101,44 @@ export default function PastRequestsPage() {
             .select('id')
             .eq('job_id', job.id)
           
-          if (packagesError) {
-            console.error('Error fetching bid packages:', packagesError)
-            return { ...job, bidCount: 0 }
+          const packageIds = packagesError ? [] : (bidPackages?.map(pkg => pkg.id) || [])
+          
+          // Fetch all bids for this job (both via packages and directly) to avoid double counting
+          const bidQueries = []
+          
+          // Query bids linked through bid packages
+          if (packageIds.length > 0) {
+            bidQueries.push(
+              supabase
+                .from('bids')
+                .select('id')
+                .in('bid_package_id', packageIds)
+            )
           }
           
-          const packageIds = bidPackages?.map(pkg => pkg.id) || []
-          if (packageIds.length === 0) {
-            return { ...job, bidCount: 0 }
-          }
+          // Query bids directly linked to the job via job_id
+          bidQueries.push(
+            supabase
+              .from('bids')
+              .select('id')
+              .eq('job_id', job.id)
+          )
           
-          // Then get bid count for these packages
-          const { count, error: countError } = await supabase
-            .from('bids')
-            .select('*', { count: 'exact', head: true })
-            .in('bid_package_id', packageIds)
+          // Execute all queries and deduplicate by bid ID
+          const bidResults = await Promise.all(bidQueries)
+          const uniqueBidIds = new Set<string>()
+          
+          bidResults.forEach(result => {
+            if (result.data) {
+              result.data.forEach(bid => {
+                uniqueBidIds.add(bid.id)
+              })
+            }
+          })
+          
+          const bidCount = uniqueBidIds.size
 
-          if (countError) {
-            console.error('Error counting bids:', countError)
-            return { ...job, bidCount: 0 }
-          }
-
-          return { ...job, bidCount: count || 0 }
+          return { ...job, bids_count: bidCount }
         })
       )
 

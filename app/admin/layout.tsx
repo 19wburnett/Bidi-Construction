@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import DashboardLayout from '@/components/dashboard-layout'
+import MasqueradeBanner from '@/components/admin/masquerade-banner'
 
 export default function AdminRootLayout({
   children,
@@ -15,9 +16,19 @@ export default function AdminRootLayout({
                           pathname?.split('/').length > 3
   
   if (isFullscreenPage) {
-    return <>{children}</>
+    return (
+      <>
+        <MasqueradeBanner />
+        {children}
+      </>
+    )
   }
   
-  return <DashboardLayout>{children}</DashboardLayout>
+  return (
+    <DashboardLayout>
+      <MasqueradeBanner />
+      {children}
+    </DashboardLayout>
+  )
 }
 
