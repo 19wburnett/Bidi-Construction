@@ -176,7 +176,7 @@ Plumbing: Fixture locations per plan. Water lines 3/4" supply, 1/2" branch.`,
     chunk_index: 0,
     character_count: 487,
   },
-  embedding: [0.123, -0.456, ...], // 1536 numbers
+  embedding: [0.123, -0.456, 0.789], // 1536 numbers (truncated for example)
   created_at: '2024-01-15T10:30:00Z',
 }
 
@@ -204,5 +204,7 @@ export const BAD_CHUNK_EXAMPLES = {
     snippet_text: '...', // > 1000 chars - may lose semantic meaning
   },
 }
+
+
 
 
