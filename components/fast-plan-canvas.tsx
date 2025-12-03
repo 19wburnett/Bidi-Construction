@@ -3175,13 +3175,14 @@ export default function FastPlanCanvas({
                 }}
                 onLoad={() => {
                   console.log('Image rendered in viewer')
-                  // Calculate and store height for drawing canvas alignment
+                  // Calculate and store dimensions for drawing canvas alignment
                   const aspectRatio = imageDimensions.height / imageDimensions.width
-                  const height = 612 * scale * aspectRatio
-                  setPageHeights((prev: Map<number, number>) => {
-                    const newHeights = new Map(prev)
-                    newHeights.set(1, height)
-                    return newHeights
+                  const width = 612 * scale
+                  const height = width * aspectRatio
+                  setPageDimensions((prev: Map<number, { width: number; height: number }>) => {
+                    const newDimensions = new Map(prev)
+                    newDimensions.set(1, { width, height })
+                    return newDimensions
                   })
                 }}
               />
