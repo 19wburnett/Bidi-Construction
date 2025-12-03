@@ -125,6 +125,8 @@ interface FastPlanCanvasProps {
   calibrationPoints?: { x: number; y: number }[]
   isCalibrating?: boolean
   onSetCalibrating?: (calibrating: boolean) => void
+  /** Optional MIME type (e.g., 'image/png') for reliable image detection with signed URLs */
+  fileType?: string
 }
 
 type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit'
@@ -160,7 +162,8 @@ export default function FastPlanCanvas({
   onCalibrationPointsChange,
   calibrationPoints: externalCalibrationPoints,
   isCalibrating: externalIsCalibrating,
-  onSetCalibrating
+  onSetCalibrating,
+  fileType
 }: FastPlanCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -203,6 +206,10 @@ export default function FastPlanCanvas({
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
   const [numPages, setNumPages] = useState(0) // Start at 0, will be set when PDF loads
+  // Image file support (PNG, JPG, etc.)
+  const [isImageFile, setIsImageFile] = useState(false)
+  const [imageLoaded, setImageLoaded] = useState(false)
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageInputValue, setPageInputValue] = useState('1')
   const [pageHeights, setPageHeights] = useState<Map<number, number>>(new Map())
@@ -294,9 +301,70 @@ export default function FastPlanCanvas({
     }
   }, [workerReady])
 
+  // Helper to detect if URL is an image file
+  const isImageUrl = useCallback((url: string, mimeType?: string): boolean => {
+    // First check MIME type if provided (most reliable)
+    if (mimeType) {
+      const isImageMime = mimeType.startsWith('image/')
+      console.log('Checking MIME type:', mimeType, 'isImage:', isImageMime)
+      return isImageMime
+    }
+    
+    if (!url) return false
+    const lowerUrl = url.toLowerCase()
+    // Check common image extensions - handle both direct URLs and signed URLs with query params
+    const urlWithoutParams = lowerUrl.split('?')[0]
+    return /\.(png|jpg|jpeg|gif|webp|bmp|tiff|tif|svg)$/.test(urlWithoutParams)
+  }, [])
+
+  // Check if URL is an image on mount/URL change
+  useEffect(() => {
+    if (!pdfUrl) return
+    const isImg = isImageUrl(pdfUrl, fileType)
+    console.log('Checking file type:', pdfUrl, 'fileType:', fileType, 'isImage:', isImg)
+    setIsImageFile(isImg)
+    
+    // Reset state when URL changes
+    if (isImg) {
+      setPdfLoaded(false)
+      setImageLoaded(false)
+      setImageDimensions(null)
+    }
+  }, [pdfUrl, fileType, isImageUrl])
+
+  // Load image file
+  useEffect(() => {
+    if (!pdfUrl || !isImageFile || imageLoaded) return
+
+    const loadImage = () => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        console.log('Image loaded successfully:', img.width, 'x', img.height)
+        setImageDimensions({ width: img.width, height: img.height })
+        setNumPages(1)
+        if (onNumPagesChange) {
+          onNumPagesChange(1)
+        }
+        setImageLoaded(true)
+        setPdfLoaded(true)
+        setDocumentReady(true)
+        setPdfError(null)
+      }
+      img.onerror = (error) => {
+        console.error('Image loading failed:', error)
+        setPdfError('Image could not be loaded. You can still use drawing tools on a blank canvas.')
+        setPdfLoaded(true)
+      }
+      img.src = pdfUrl
+    }
+
+    loadImage()
+  }, [pdfUrl, isImageFile, imageLoaded, onNumPagesChange])
+
   // Load PDF to get page count only, then destroy PDF object
   useEffect(() => {
-    if (!pdfUrl || !workerReady || pdfLoaded) return
+    if (!pdfUrl || !workerReady || pdfLoaded || isImageFile) return
 
     const loadPageCount = async () => {
       try {
@@ -337,7 +405,7 @@ export default function FastPlanCanvas({
     }
 
     loadPageCount()
-  }, [pdfUrl, workerReady, pdfLoaded, onNumPagesChange])
+  }, [pdfUrl, workerReady, pdfLoaded, onNumPagesChange, isImageFile])
 
   // Notify parent on current page changes
   useEffect(() => {
@@ -1850,8 +1918,67 @@ export default function FastPlanCanvas({
           </div>
         )}
 
+        {/* Image Viewer - For PNG, JPG, etc. */}
+        {!pdfError && pdfUrl && isImageFile && imageLoaded && imageDimensions && (
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            style={{
+              transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})`,
+              transformOrigin: 'center center',
+              willChange: 'transform',
+              pointerEvents: 'none',
+            }}
+          >
+            <div 
+              className="relative shadow-lg bg-white" 
+              data-page-num={1}
+              style={{ 
+                width: `${612 * scale}px`,
+                backgroundColor: 'white',
+                margin: '0 auto',
+                display: 'block',
+                position: 'relative',
+                flexShrink: 0,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pdfUrl}
+                alt="Plan"
+                style={{
+                  width: `${612 * scale}px`,
+                  height: 'auto',
+                  display: 'block',
+                  backgroundColor: 'white',
+                }}
+                onLoad={() => {
+                  console.log('Image rendered in viewer')
+                  // Calculate and store height for drawing canvas alignment
+                  const aspectRatio = imageDimensions.height / imageDimensions.width
+                  const height = 612 * scale * aspectRatio
+                  setPageHeights((prev: Map<number, number>) => {
+                    const newHeights = new Map(prev)
+                    newHeights.set(1, height)
+                    return newHeights
+                  })
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Loading state for images */}
+        {!pdfError && pdfUrl && isImageFile && !imageLoaded && (
+          <div className="flex items-center justify-center p-8">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading image...</p>
+            </div>
+          </div>
+        )}
+
         {/* PDF Page - Paginated view (single page) */}
-        {!pdfError && pdfUrl && documentReady && numPages > 0 && workerReady ? (
+        {!pdfError && pdfUrl && !isImageFile && documentReady && numPages > 0 && workerReady ? (
           <div
             className="absolute inset-0 flex items-center justify-center"
             style={{
@@ -2007,7 +2134,7 @@ export default function FastPlanCanvas({
             </Document>
           </div>
         ) : (
-          !pdfError && pdfUrl && (
+          !pdfError && pdfUrl && !isImageFile && (
             <div className="flex items-center justify-center p-8">
               <div className="text-center">
                 <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
@@ -2020,7 +2147,7 @@ export default function FastPlanCanvas({
         )}
 
 
-        {/* Fallback Drawing Area - Show when PDF fails */}
+        {/* Fallback Drawing Area - Show when PDF/image fails */}
         {pdfError && (
           <div
             className="absolute"

@@ -1377,6 +1377,7 @@ export default function EnhancedPlanViewer() {
                 calibrationPoints={calibrationPoints}
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
+                fileType={plan?.file_type}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
