@@ -183,7 +183,7 @@ export async function generateAnswer(
       if (hasBlueprintData) {
         // We have blueprint data - construct a helpful fallback
         const chunks = context.blueprint_context.chunks
-        const pages = [...new Set(chunks.map((c: any) => c.page_number).filter(Boolean))]
+        const pages = Array.from(new Set(chunks.map((c: any) => c.page_number).filter(Boolean)))
         if (pages.length > 0) {
           answer = `I found content on page${pages.length > 1 ? 's' : ''} ${pages.join(', ')}. The text includes notes about ${chunks[0]?.text?.substring(0, 100)}... Would you like me to summarize a specific aspect?`
         } else {
