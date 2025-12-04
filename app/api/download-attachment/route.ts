@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient()
 
+    // Log the path for debugging
+    console.log('Downloading attachment with path:', path)
+
     // Download the file from Supabase storage
     const { data, error } = await supabase.storage
       .from('bid-attachments')
@@ -21,7 +24,13 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Supabase download error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      // Extract a clean error message
+      let errorMessage = error.message || 'Failed to download file'
+      // If error contains a URL (like Supabase sometimes does), extract just the message
+      if (errorMessage.includes('http')) {
+        errorMessage = 'File not found or access denied. Please check the file path and permissions.'
+      }
+      return NextResponse.json({ error: errorMessage }, { status: 500 })
     }
 
     if (!data) {
@@ -50,21 +59,33 @@ export async function GET(request: NextRequest) {
 
     // Set Content-Disposition based on view mode
     // 'inline' allows viewing in browser/iframe, 'attachment' forces download
+    // Properly encode filename for Safari/Mac compatibility
+    const safeFileName = fileName || 'download'
+    const encodedFileName = encodeURIComponent(safeFileName)
+    
     const contentDisposition = view
-      ? `inline; filename="${fileName || 'download'}"`
-      : `attachment; filename="${fileName || 'download'}"`
+      ? `inline; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`
+      : `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`
 
     // Create response with proper headers
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Content-Disposition': contentDisposition,
+      'Content-Length': arrayBuffer.byteLength.toString(),
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'X-Content-Type-Options': 'nosniff',
+    }
+
+    // Add CORS headers for iframe embedding (important for Safari/Mac)
+    if (view) {
+      headers['Access-Control-Allow-Origin'] = '*'
+      headers['Access-Control-Allow-Methods'] = 'GET'
+      headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    }
+
     const response = new NextResponse(arrayBuffer, {
       status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': contentDisposition,
-        'Content-Length': arrayBuffer.byteLength.toString(),
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        // Add CORS headers for iframe embedding
-        'X-Content-Type-Options': 'nosniff',
-      },
+      headers,
     })
 
     return response

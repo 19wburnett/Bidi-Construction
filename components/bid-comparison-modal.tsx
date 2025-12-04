@@ -418,6 +418,7 @@ export default function BidComparisonModal({
 
   const [downloadingAttachment, setDownloadingAttachment] = useState<string | null>(null)
   const [viewingAttachment, setViewingAttachment] = useState<{ path: string; fileName: string } | null>(null)
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   
   const handleDownloadAttachment = async (path: string, fileName: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -425,8 +426,18 @@ export default function BidComparisonModal({
     setDownloadingAttachment(path)
     
     try {
+      // Extract path from URL if path is a full URL
+      let filePath = path
+      if (filePath.includes('supabase.co/storage/v1/object/')) {
+        // Extract path after 'bid-attachments/'
+        const match = filePath.match(/bid-attachments\/(.+)$/)
+        if (match) {
+          filePath = match[1]
+        }
+      }
+      
       // Use our API endpoint which sets proper Content-Disposition headers
-      const downloadUrl = `/api/download-attachment?path=${encodeURIComponent(path)}&fileName=${encodeURIComponent(fileName)}`
+      const downloadUrl = `/api/download-attachment?path=${encodeURIComponent(filePath)}&fileName=${encodeURIComponent(fileName)}`
       
       // Create a link and trigger download
       const link = document.createElement('a')
@@ -448,6 +459,127 @@ export default function BidComparisonModal({
   }
 
   const simplifiedMetrics = calculateSimplifiedMetrics()
+
+  const [pdfError, setPdfError] = useState<string | null>(null)
+
+  // Load PDF as blob for Safari/Mac compatibility
+  useEffect(() => {
+    if (viewingAttachment) {
+      setPdfError(null)
+      setPdfBlobUrl(null)
+      const loadPdfBlob = async () => {
+        try {
+          // Extract path from URL if path is a full URL
+          let filePath = viewingAttachment.path
+          if (filePath.includes('supabase.co/storage/v1/object/')) {
+            // Extract path after 'bid-attachments/'
+            const match = filePath.match(/bid-attachments\/(.+)$/)
+            if (match) {
+              filePath = match[1]
+            }
+          }
+          
+          const response = await fetch(
+            `/api/download-attachment?path=${encodeURIComponent(filePath)}&fileName=${encodeURIComponent(viewingAttachment.fileName)}&view=true`
+          )
+          
+          if (!response.ok) {
+            // Try to parse error message
+            const errorData = await response.json().catch(() => ({ error: 'Failed to load PDF' }))
+            throw new Error(errorData.error || `HTTP ${response.status}: Failed to load PDF`)
+          }
+
+          // Check if response is actually a PDF
+          const contentType = response.headers.get('content-type')
+          if (contentType && !contentType.includes('application/pdf')) {
+            // If it's JSON, parse the error
+            if (contentType.includes('application/json')) {
+              const errorData = await response.json()
+              throw new Error(errorData.error || 'Server returned JSON instead of PDF')
+            }
+            throw new Error(`Unexpected content type: ${contentType}`)
+          }
+
+          const blob = await response.blob()
+          
+          // Verify it's actually a PDF by checking the first few bytes
+          // PDFs start with %PDF- (hex: 25 50 44 46 2D)
+          const firstBytes = await blob.slice(0, 4).text()
+          
+          // Check if it's JSON by trying to parse the beginning
+          if (firstBytes.trim().startsWith('{') || firstBytes.trim().startsWith('[')) {
+            // It's likely JSON, read the full content
+            const text = await blob.text()
+            try {
+              const json = JSON.parse(text)
+              // Handle nested error objects
+              let errorMsg = json.error
+              if (typeof errorMsg === 'string') {
+                try {
+                  const nestedError = JSON.parse(errorMsg)
+                  errorMsg = nestedError.error || nestedError.message || errorMsg
+                } catch {
+                  // Not nested JSON, use as is
+                }
+              }
+              throw new Error(errorMsg || 'Server returned JSON instead of PDF')
+            } catch (parseErr: any) {
+              if (parseErr.message && parseErr.message !== text) {
+                throw parseErr
+              }
+              throw new Error('Server returned invalid response (expected PDF, got JSON)')
+            }
+          }
+          
+          // Verify it's a PDF by checking the magic bytes
+          if (!firstBytes.includes('%PDF')) {
+            // Not a PDF, try to see if it's an error message
+            const text = await blob.text()
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              try {
+                const json = JSON.parse(text)
+                let errorMsg = json.error
+                if (typeof errorMsg === 'string') {
+                  try {
+                    const nestedError = JSON.parse(errorMsg)
+                    errorMsg = nestedError.error || nestedError.message || errorMsg
+                  } catch {
+                    // Not nested JSON
+                  }
+                }
+                throw new Error(errorMsg || 'Server returned JSON instead of PDF')
+              } catch {
+                throw new Error('Invalid PDF file format')
+              }
+            }
+            throw new Error('Invalid PDF file format')
+          }
+
+          const url = URL.createObjectURL(blob)
+          setPdfBlobUrl(url)
+        } catch (err: any) {
+          console.error('Error loading PDF blob:', err)
+          setPdfError(err.message || 'Failed to load PDF')
+          setPdfBlobUrl(null)
+        }
+      }
+      loadPdfBlob()
+    } else {
+      // Clean up blob URL when modal closes
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl)
+        setPdfBlobUrl(null)
+      }
+      setPdfError(null)
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl)
+      }
+    }
+  }, [viewingAttachment])
 
   if (!isOpen) return null
 
@@ -951,11 +1083,20 @@ export default function BidComparisonModal({
                                                             variant="ghost"
                                                             size="sm"
                                                             className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
-                                                            onClick={(e) => {
-                                                                e.preventDefault()
-                                                                e.stopPropagation()
-                                                                setViewingAttachment({ path: att.file_path, fileName: att.file_name })
-                                                            }}
+                                                        onClick={(e) => {
+                                                            e.preventDefault()
+                                                            e.stopPropagation()
+                                                            // Extract path from URL if file_path is a full URL
+                                                            let filePath = att.file_path
+                                                            if (filePath.includes('supabase.co/storage/v1/object/')) {
+                                                                // Extract path after 'bid-attachments/'
+                                                                const match = filePath.match(/bid-attachments\/(.+)$/)
+                                                                if (match) {
+                                                                    filePath = match[1]
+                                                                }
+                                                            }
+                                                            setViewingAttachment({ path: filePath, fileName: att.file_name })
+                                                        }}
                                                         >
                                                             <Eye className="h-3.5 w-3.5 mr-1" />
                                                             View
@@ -1353,11 +1494,69 @@ export default function BidComparisonModal({
 
               {/* PDF Viewer Content */}
               <div className="flex-1 overflow-hidden bg-gray-100">
-                <iframe
-                  src={`/api/download-attachment?path=${encodeURIComponent(viewingAttachment.path)}&fileName=${encodeURIComponent(viewingAttachment.fileName)}&view=true`}
-                  className="w-full h-full border-0"
-                  title={viewingAttachment.fileName}
-                />
+                {pdfError ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="flex flex-col items-center gap-3 text-center max-w-md px-4">
+                      <AlertCircle className="h-12 w-12 text-red-500" />
+                      <p className="text-red-600 font-medium">Error loading PDF</p>
+                      <p className="text-sm text-gray-600">{pdfError}</p>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setPdfError(null)
+                          // Retry loading
+                          const loadPdfBlob = async () => {
+                            try {
+                              // Extract path from URL if path is a full URL
+                              let filePath = viewingAttachment.path
+                              if (filePath.includes('supabase.co/storage/v1/object/')) {
+                                const match = filePath.match(/bid-attachments\/(.+)$/)
+                                if (match) {
+                                  filePath = match[1]
+                                }
+                              }
+                              
+                              const response = await fetch(
+                                `/api/download-attachment?path=${encodeURIComponent(filePath)}&fileName=${encodeURIComponent(viewingAttachment.fileName)}&view=true`
+                              )
+                              if (!response.ok) {
+                                const errorData = await response.json().catch(() => ({ error: 'Failed to load PDF' }))
+                                throw new Error(errorData.error || 'Failed to load PDF')
+                              }
+                              const contentType = response.headers.get('content-type')
+                              if (contentType && !contentType.includes('application/pdf') && contentType.includes('application/json')) {
+                                const errorData = await response.json()
+                                throw new Error(errorData.error || 'Server returned JSON instead of PDF')
+                              }
+                              const blob = await response.blob()
+                              const url = URL.createObjectURL(blob)
+                              setPdfBlobUrl(url)
+                              setPdfError(null)
+                            } catch (err: any) {
+                              setPdfError(err.message || 'Failed to load PDF')
+                            }
+                          }
+                          loadPdfBlob()
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : pdfBlobUrl ? (
+                  <iframe
+                    src={pdfBlobUrl}
+                    className="w-full h-full border-0"
+                    title={viewingAttachment.fileName}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                      <p className="text-gray-500 font-medium">Loading PDF...</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>
