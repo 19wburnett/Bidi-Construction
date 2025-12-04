@@ -22,7 +22,8 @@ import {
   Globe,
   Calendar,
   Search,
-  Download
+  Download,
+  Eye
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -416,6 +417,7 @@ export default function BidComparisonModal({
   }
 
   const [downloadingAttachment, setDownloadingAttachment] = useState<string | null>(null)
+  const [viewingAttachment, setViewingAttachment] = useState<{ path: string; fileName: string } | null>(null)
   
   const handleDownloadAttachment = async (path: string, fileName: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -938,31 +940,46 @@ export default function BidComparisonModal({
                                         <div className="space-y-2">
                                             {selectedBid.bid_attachments.map(att => (
                                                 <div key={att.id} className="flex items-center justify-between gap-2 text-sm">
-                                                    <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="flex items-center gap-2 min-w-0 flex-1">
                                                         <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
                                                         <span className="truncate text-gray-700" title={att.file_name}>
                                                             {att.file_name}
                                                         </span>
                                                     </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 flex-shrink-0"
-                                                        onClick={(e) => handleDownloadAttachment(att.file_path, att.file_name, e)}
-                                                        disabled={downloadingAttachment === att.file_path}
-                                                    >
-                                                        {downloadingAttachment === att.file_path ? (
-                                                          <>
-                                                            <div className="h-3.5 w-3.5 mr-1 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                                                            Downloading...
-                                                          </>
-                                                        ) : (
-                                                          <>
-                                                            <Download className="h-3.5 w-3.5 mr-1" />
-                                                            Download
-                                                          </>
-                                                        )}
-                                                    </Button>
+                                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                                            onClick={(e) => {
+                                                                e.preventDefault()
+                                                                e.stopPropagation()
+                                                                setViewingAttachment({ path: att.file_path, fileName: att.file_name })
+                                                            }}
+                                                        >
+                                                            <Eye className="h-3.5 w-3.5 mr-1" />
+                                                            View
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                                            onClick={(e) => handleDownloadAttachment(att.file_path, att.file_name, e)}
+                                                            disabled={downloadingAttachment === att.file_path}
+                                                        >
+                                                            {downloadingAttachment === att.file_path ? (
+                                                              <>
+                                                                <div className="h-3.5 w-3.5 mr-1 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                                                Downloading...
+                                                              </>
+                                                            ) : (
+                                                              <>
+                                                                <Download className="h-3.5 w-3.5 mr-1" />
+                                                                Download
+                                                              </>
+                                                            )}
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
@@ -1273,6 +1290,79 @@ export default function BidComparisonModal({
           )}
         </div>
       </motion.div>
+
+      {/* PDF Viewer Modal */}
+      <AnimatePresence>
+        {viewingAttachment && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
+            onClick={() => setViewingAttachment(null)}
+            style={{ pointerEvents: 'auto' }}
+          >
+            <motion.div
+              variants={modalContent}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="bg-white rounded-xl shadow-2xl w-[95vw] h-[95vh] overflow-hidden flex flex-col border border-gray-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* PDF Viewer Header */}
+              <div className="flex-shrink-0 border-b bg-white px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FileText className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">{viewingAttachment.fileName}</h2>
+                    <p className="text-sm text-gray-500">PDF Viewer</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleDownloadAttachment(viewingAttachment.path, viewingAttachment.fileName, e as any)
+                    }}
+                    disabled={downloadingAttachment === viewingAttachment.path}
+                  >
+                    {downloadingAttachment === viewingAttachment.path ? (
+                      <>
+                        <div className="h-4 w-4 mr-2 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
+                        Downloading...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => setViewingAttachment(null)} className="rounded-full hover:bg-gray-100">
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* PDF Viewer Content */}
+              <div className="flex-1 overflow-hidden bg-gray-100">
+                <iframe
+                  src={`/api/download-attachment?path=${encodeURIComponent(viewingAttachment.path)}&fileName=${encodeURIComponent(viewingAttachment.fileName)}&view=true`}
+                  className="w-full h-full border-0"
+                  title={viewingAttachment.fileName}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
