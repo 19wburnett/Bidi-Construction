@@ -1795,6 +1795,7 @@ export default function EnhancedPlanViewer() {
                 calibrationPoints={calibrationPoints}
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
+                fileType={plan?.file_type}
                 searchQuery={searchQuery}
                 currentMatchIndex={searchCurrentMatch}
                 onSearchResults={(count) => {

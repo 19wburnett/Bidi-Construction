@@ -70,6 +70,8 @@ export interface Plan {
   title: string | null
   file_name: string
   file_path: string
+  file_type?: string // MIME type (e.g., 'application/pdf', 'image/png')
+  file_size?: number
   status: string
   num_pages: number
   project_name: string | null

@@ -147,12 +147,13 @@ export async function generateAnswer(
     const requestConfig: any = {
       model: OPENAI_MODEL,
       messages: messages as any,
-      max_completion_tokens: mode === 'TAKEOFF' ? 400 : 1200, // Increased for copilot mode to allow longer answers
+      max_completion_tokens: mode === 'TAKEOFF' ? 500 : 1500, // Generous limits for natural responses
     }
 
     // Only add temperature for models that support custom values
     if (supportsCustomTemperature) {
-      requestConfig.temperature = mode === 'TAKEOFF' ? 0.1 : 0.7 // Lower temperature for deterministic mode
+      // Use moderate temperature for conversational responses
+      requestConfig.temperature = mode === 'TAKEOFF' ? 0.3 : 0.6
     }
     // Models without custom temperature support will use default (1.0)
 
@@ -164,58 +165,35 @@ export async function generateAnswer(
     if (process.env.NODE_ENV === 'development' || process.env.PLAN_CHAT_V3_DEBUG === 'true') {
       console.log('[PlanChatV3] LLM response:', {
         answerLength: answer?.length || 0,
-        answerPreview: answer?.substring(0, 100) || 'empty',
+        answerPreview: answer?.substring(0, 200) || 'empty',
         hasBlueprint: context.blueprint_context.chunks.length > 0,
         hasTakeoff: context.takeoff_context.items.length > 0,
+        mode,
       })
     }
 
-    // Fallback if answer is empty or too short (but be less aggressive)
-    // Only trigger fallback if answer is truly empty or just whitespace/punctuation
-    const isEmptyAnswer = !answer || answer.trim().length < 10 || answer.trim().match(/^[.,!?\s]+$/)
+    // Only use fallback if answer is truly empty - trust the LLM otherwise
+    const isEmptyAnswer = !answer || answer.trim().length < 5
 
     if (isEmptyAnswer) {
-      // Check if we have any context to work with
+      // Check what context we have
       const hasTakeoffData = context.takeoff_context.items.length > 0
       const hasBlueprintData = context.blueprint_context.chunks.length > 0
-      const hasProjectMetadata = context.project_metadata !== null
 
-      if (mode === 'TAKEOFF') {
-        if (hasTakeoffData) {
-          const totalQty = context.takeoff_context.summary.total_quantity
-          const totalCost = context.takeoff_context.summary.total_cost
-          if (totalQty) {
-            answer = `Found ${totalQty.toLocaleString('en-US')} units in the takeoff.`
-          } else if (totalCost) {
-            answer = `Total cost: $${totalCost.toLocaleString('en-US', { maximumFractionDigits: 2 })}.`
-          } else {
-            answer = `Found ${context.takeoff_context.items.length} matching item${
-              context.takeoff_context.items.length === 1 ? '' : 's'
-            } in the takeoff.`
-          }
+      if (hasBlueprintData) {
+        // We have blueprint data - construct a helpful fallback
+        const chunks = context.blueprint_context.chunks
+        const pages = [...new Set(chunks.map((c: any) => c.page_number).filter(Boolean))]
+        if (pages.length > 0) {
+          answer = `I found content on page${pages.length > 1 ? 's' : ''} ${pages.join(', ')}. The text includes notes about ${chunks[0]?.text?.substring(0, 100)}... Would you like me to summarize a specific aspect?`
         } else {
-          answer = "I don't see any matching items in the takeoff data for that question. Make sure takeoff analysis has been run for this plan."
+          answer = `I found ${chunks.length} text snippet${chunks.length === 1 ? '' : 's'} from the plans. What specific information are you looking for?`
         }
+      } else if (hasTakeoffData) {
+        const items = context.takeoff_context.items
+        answer = `I found ${items.length} item${items.length === 1 ? '' : 's'} in the takeoff. What would you like to know about them?`
       } else {
-        // COPILOT mode - provide more helpful fallback
-        if (hasTakeoffData || hasBlueprintData || hasProjectMetadata) {
-          // We have context but LLM didn't generate answer - try to provide something useful
-          const contextParts: string[] = []
-          
-          if (hasTakeoffData) {
-            contextParts.push(`${context.takeoff_context.items.length} takeoff item${context.takeoff_context.items.length === 1 ? '' : 's'}`)
-          }
-          if (hasBlueprintData) {
-            contextParts.push(`${context.blueprint_context.chunks.length} blueprint snippet${context.blueprint_context.chunks.length === 1 ? '' : 's'}`)
-          }
-          if (hasProjectMetadata && context.project_metadata?.plan_title) {
-            contextParts.push(`project "${context.project_metadata.plan_title}"`)
-          }
-
-          answer = `I found ${contextParts.join(' and ')}, but I'm having trouble generating a specific answer. Could you rephrase your question or ask about something more specific?`
-        } else {
-          answer = "I don't have takeoff or blueprint data for this plan yet. Please run the takeoff analysis or plan ingestion first, then try again."
-        }
+        answer = "I don't see any extracted text or takeoff data for this plan yet. The plan may need to be processed first."
       }
     }
 

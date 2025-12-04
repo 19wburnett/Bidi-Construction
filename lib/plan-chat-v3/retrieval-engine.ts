@@ -475,8 +475,38 @@ export async function retrieveContext(
   targets: string[],
   pages?: number[]
 ): Promise<RetrievalResult> {
-  // A. Semantic RAG
-  const semanticChunks = await retrieveSemanticChunks(supabase, planId, query, 12)
+  // A. Page-based or Semantic RAG retrieval
+  let semanticChunks: PlanTextChunkRecord[] = []
+  
+  // If specific pages are requested, fetch chunks from those pages FIRST
+  // This is critical for "what is on page X" questions
+  if (pages && pages.length > 0) {
+    try {
+      // Fetch all chunks from the requested pages
+      const pageChunks = await fetchPlanTextChunksByPage(supabase, planId, pages, 20)
+      semanticChunks = pageChunks
+      
+      console.log(`[RetrievalEngine] Fetched ${pageChunks.length} chunks from pages ${pages.join(', ')}`)
+      
+      // If we didn't get enough from page-specific, supplement with semantic search
+      if (semanticChunks.length < 3) {
+        const additionalChunks = await retrieveSemanticChunks(supabase, planId, query, 8)
+        // Add semantic chunks that aren't already included
+        const existingIds = new Set(semanticChunks.map(c => c.id))
+        for (const chunk of additionalChunks) {
+          if (!existingIds.has(chunk.id)) {
+            semanticChunks.push(chunk)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[RetrievalEngine] Page-based retrieval failed, falling back to semantic:', error)
+      semanticChunks = await retrieveSemanticChunks(supabase, planId, query, 12)
+    }
+  } else {
+    // No specific pages requested - use semantic RAG
+    semanticChunks = await retrieveSemanticChunks(supabase, planId, query, 12)
+  }
 
   // B. Target-based retrieval - pass jobId for proper querying
   const takeoffItems = await findTakeoffItemsByTarget(supabase, planId, userId, targets, jobId)

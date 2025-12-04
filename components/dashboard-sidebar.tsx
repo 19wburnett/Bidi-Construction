@@ -27,6 +27,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  MessageSquare,
+  TrendingUp,
+  Clock,
+  Archive,
+  FileText,
+  Package,
+  Bell,
+  Bot,
   FilePlus,
   UserPlus,
   FileText,
@@ -162,6 +170,11 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       href: '/dashboard/quotes',
       icon: FileText
     }] : []),
+    {
+      label: 'Blueprint Chat',
+      href: '/dashboard/chat',
+      icon: Bot
+    },
     {
       label: 'Settings',
       href: '/dashboard/settings',

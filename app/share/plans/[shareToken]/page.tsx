@@ -450,6 +450,7 @@ export default function GuestPlanViewer() {
                 onRightSidebarToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
                 onCommentPinClick={canComment ? handleCommentPinClick : () => {}}
                 goToPage={undefined}
+                fileType={plan?.file_type}
               />
             ) : (
               <div className="flex items-center justify-center h-full">
