@@ -37,7 +37,6 @@ import {
   Bot,
   FilePlus,
   UserPlus,
-  FileText,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
