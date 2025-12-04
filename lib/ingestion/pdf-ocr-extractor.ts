@@ -142,7 +142,7 @@ function parseOCRResponse(ocrData: any): OCRPageText[] {
     if (pageBreaks && pageBreaks.length > 0) {
       // Split by detected page breaks
       const parts = text.split(pageBreakPattern)
-      parts.forEach((part, index) => {
+      parts.forEach((part: string, index: number) => {
         const trimmed = part.trim()
         if (trimmed.length > 20) { // Only include substantial text
           pages.push({
