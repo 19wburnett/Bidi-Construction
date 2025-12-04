@@ -13,6 +13,8 @@ export default function SubscriptionPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showCanceledMessage, setShowCanceledMessage] = useState(false)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [subscriptionType, setSubscriptionType] = useState<'gc' | 'sub'>('gc')
   const { user } = useAuth()
   const router = useRouter()
   const supabase = createClient()
@@ -23,8 +25,33 @@ export default function SubscriptionPage() {
       return
     }
 
-    // Check for canceled parameter from Stripe
+    // Check URL params for subscription type
     const urlParams = new URLSearchParams(window.location.search)
+    const typeParam = urlParams.get('type')
+    if (typeParam === 'sub') {
+      setSubscriptionType('sub')
+    }
+
+    // Fetch user role
+    const fetchUserRole = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+      
+      if (!error && data) {
+        setUserRole(data.role)
+        // If user is already a subcontractor, default to sub subscription
+        if (data.role === 'sub') {
+          setSubscriptionType('sub')
+        }
+      }
+    }
+    
+    fetchUserRole()
+
+    // Check for canceled parameter from Stripe
     if (urlParams.get('canceled') === 'true') {
       setShowCanceledMessage(true)
       // Remove canceled parameter from URL
@@ -35,7 +62,7 @@ export default function SubscriptionPage() {
         setShowCanceledMessage(false)
       }, 5000)
     }
-  }, [user, router])
+  }, [user, router, supabase])
 
   const handleSubscribe = async () => {
     if (!user) return
@@ -53,6 +80,7 @@ export default function SubscriptionPage() {
         body: JSON.stringify({
           userId: user.id,
           email: user.email,
+          subscriptionType: subscriptionType,
         }),
       })
 
@@ -91,7 +119,9 @@ export default function SubscriptionPage() {
           </div>
           <CardTitle className="text-2xl sm:text-3xl dark:text-white">Subscribe to Bidi</CardTitle>
           <CardDescription className="text-base sm:text-lg dark:text-gray-300">
-            AI-Powered Estimating & Takeoff for General Contractors
+            {subscriptionType === 'sub' 
+              ? 'Quote Generation Service for Subcontractors'
+              : 'AI-Powered Estimating & Takeoff for General Contractors'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
@@ -107,46 +137,89 @@ export default function SubscriptionPage() {
 
           {/* Plan Selection */}
           <div className="flex justify-center">
-            {/* Monthly Subscription Option */}
-            <div className="border-2 border-orange rounded-lg p-6 w-full max-w-lg bg-orange-50 dark:bg-orange-950/30 shadow-lg">
-              <div className="text-center mb-6">
-                <div className="flex justify-center mb-2">
-                  <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">
-                    Most Popular
-                  </span>
+            {subscriptionType === 'sub' ? (
+              /* Subcontractor Subscription Option */
+              <div className="border-2 border-orange rounded-lg p-6 w-full max-w-lg bg-orange-50 dark:bg-orange-950/30 shadow-lg">
+                <div className="text-center mb-6">
+                  <div className="flex justify-center mb-2">
+                    <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">
+                      Quote Service
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
+                  <div className="text-3xl font-bold text-orange mb-2">$200<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
+                  <p className="text-gray-600 dark:text-gray-300">Professional quote generation service</p>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
-                <div className="text-3xl font-bold text-orange mb-2">$300<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
-                <p className="text-gray-600 dark:text-gray-300">Complete AI-powered estimating solution</p>
-              </div>
-              
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Automated plan analysis & takeoff</span>
+                
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Upload plans for quote generation</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Describe work and add known pricing</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Receive PDF quotes ready to send</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">1 business day turnaround</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Easy-to-use interface</span>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">AI-powered cost estimating</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Automatic subcontractor outreach</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Complete bid collection & leveling</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <Check className="h-4 w-4 text-green-600" />
-                  <span className="text-sm dark:text-gray-300">Priority support & training</span>
-                </div>
-              </div>
 
-              <div className="text-center">
-                <div className="w-4 h-4 mx-auto rounded-full border-2 border-orange bg-orange"></div>
+                <div className="text-center">
+                  <div className="w-4 h-4 mx-auto rounded-full border-2 border-orange bg-orange"></div>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* General Contractor Subscription Option */
+              <div className="border-2 border-orange rounded-lg p-6 w-full max-w-lg bg-orange-50 dark:bg-orange-950/30 shadow-lg">
+                <div className="text-center mb-6">
+                  <div className="flex justify-center mb-2">
+                    <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium">
+                      Most Popular
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
+                  <div className="text-3xl font-bold text-orange mb-2">$300<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
+                  <p className="text-gray-600 dark:text-gray-300">Complete AI-powered estimating solution</p>
+                </div>
+                
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Automated plan analysis & takeoff</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">AI-powered cost estimating</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Automatic subcontractor outreach</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Complete bid collection & leveling</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Check className="h-4 w-4 text-green-600" />
+                    <span className="text-sm dark:text-gray-300">Priority support & training</span>
+                  </div>
+                </div>
+
+                <div className="text-center">
+                  <div className="w-4 h-4 mx-auto rounded-full border-2 border-orange bg-orange"></div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Button */}

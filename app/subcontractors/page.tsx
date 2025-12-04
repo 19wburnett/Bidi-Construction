@@ -22,8 +22,347 @@ import {
   DollarSign,
   MapPin,
   Briefcase,
-  Shield
+  Shield,
+  Upload,
+  Sparkles,
+  Download,
+  Loader2
 } from 'lucide-react'
+
+// Quote Demo Animation Component
+function QuoteDemoAnimation() {
+  const [currentStep, setCurrentStep] = useState(-1) // -1 = not started
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isComplete, setIsComplete] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
+
+  const startDemo = async () => {
+    setIsRunning(true)
+    setCurrentStep(0)
+    setUploadProgress(0)
+    setIsProcessing(false)
+    setIsComplete(false)
+
+    // Step 1: Upload animation
+    for (let i = 0; i <= 100; i += 10) {
+      setUploadProgress(i)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    // Step 2: AI Processing
+    setCurrentStep(1)
+    setIsProcessing(true)
+    await new Promise(resolve => setTimeout(resolve, 2500))
+    setIsProcessing(false)
+
+    // Step 3: Complete
+    setCurrentStep(2)
+    setIsComplete(true)
+    setIsRunning(false)
+  }
+
+  const resetDemo = () => {
+    setCurrentStep(-1)
+    setUploadProgress(0)
+    setIsProcessing(false)
+    setIsComplete(false)
+    setIsRunning(false)
+  }
+
+  return (
+    <div className="relative">
+      {/* Start Button */}
+      <div className="text-center mb-8">
+        {currentStep === -1 ? (
+          <Button
+            onClick={startDemo}
+            size="lg"
+            variant="orange"
+            className="text-lg px-8 py-6 font-bold shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
+          >
+            <Sparkles className="h-5 w-5 mr-2" />
+            Watch Demo
+          </Button>
+        ) : (
+          <Button
+            onClick={resetDemo}
+            size="lg"
+            variant="outline"
+            className="text-lg px-8 py-6 font-bold"
+            disabled={isRunning}
+          >
+            <ArrowRight className="h-5 w-5 mr-2 rotate-180" />
+            Reset Demo
+          </Button>
+        )}
+      </div>
+
+      {/* Desktop Layout */}
+      <div className="hidden md:flex items-center justify-center gap-4 lg:gap-8">
+        {/* Step 1: Upload Plans */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 0 ? 'scale-105' : currentStep > 0 ? 'opacity-60 scale-95' : currentStep === -1 ? 'opacity-40' : 'opacity-40'
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 0 
+              ? 'border-orange-500 shadow-lg shadow-orange-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 0 
+                  ? 'bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 scale-110' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {currentStep === 0 && uploadProgress < 100 ? (
+                  <Upload className="h-8 w-8 animate-bounce" />
+                ) : (
+                  <FileText className="h-8 w-8" />
+                )}
+              </div>
+              {currentStep === 0 && uploadProgress < 100 && (
+                <div className="mb-2">
+                  <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{uploadProgress}%</div>
+                </div>
+              )}
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">1. Upload Plans</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Upload your construction plans
+              </p>
+              {currentStep === 0 && uploadProgress < 100 && (
+                <div className="mt-4 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-orange-500 h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Arrow 1 */}
+        <div className={`transition-all duration-500 ${
+          currentStep >= 1 ? 'opacity-100 translate-x-0' : 'opacity-30 -translate-x-4'
+        }`}>
+          <ArrowRight className="h-8 w-8 text-orange-500" />
+        </div>
+
+        {/* Step 2: AI Processing */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 1 ? 'scale-105' : currentStep > 1 ? 'opacity-60 scale-95' : currentStep < 1 ? 'opacity-40' : currentStep === -1 ? 'opacity-40' : ''
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 1 
+              ? 'border-orange-500 shadow-lg shadow-orange-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 1 
+                  ? 'bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 scale-110' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {isProcessing ? (
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                ) : (
+                  <Sparkles className="h-8 w-8" />
+                )}
+              </div>
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">2. AI Creates Quote</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Our AI analyzes and generates your quote
+              </p>
+              {isProcessing && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-orange-600 dark:text-orange-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-xs font-medium">Processing...</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Arrow 2 */}
+        <div className={`transition-all duration-500 ${
+          currentStep >= 2 ? 'opacity-100 translate-x-0' : 'opacity-30 -translate-x-4'
+        }`}>
+          <ArrowRight className="h-8 w-8 text-orange-500" />
+        </div>
+
+        {/* Step 3: Receive Quote */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 2 ? 'scale-105' : currentStep < 2 ? 'opacity-40' : currentStep === -1 ? 'opacity-40' : ''
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 2 
+              ? 'border-green-500 shadow-lg shadow-green-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 2 
+                  ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 scale-110 animate-pulse' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {isComplete ? (
+                  <div className="relative">
+                    <FileText className="h-8 w-8" />
+                    <CheckCircle className="h-5 w-5 absolute -top-1 -right-1 text-green-600 bg-white dark:bg-gray-950 rounded-full" />
+                  </div>
+                ) : (
+                  <Download className="h-8 w-8" />
+                )}
+              </div>
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">3. Get Your Quote</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Download your professional PDF quote
+              </p>
+              {isComplete && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-green-600 dark:text-green-400">
+                  <CheckCircle className="h-4 w-4" />
+                  <span className="text-xs font-medium">Ready!</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Mobile Layout */}
+      <div className="md:hidden space-y-6">
+        {/* Step 1: Upload Plans */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 0 ? 'scale-105' : currentStep > 0 ? 'opacity-60 scale-95' : currentStep === -1 ? 'opacity-40' : 'opacity-40'
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 0 
+              ? 'border-orange-500 shadow-lg shadow-orange-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 0 
+                  ? 'bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 scale-110' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {currentStep === 0 && uploadProgress < 100 ? (
+                  <Upload className="h-8 w-8 animate-bounce" />
+                ) : (
+                  <FileText className="h-8 w-8" />
+                )}
+              </div>
+              {currentStep === 0 && uploadProgress < 100 && (
+                <div className="mb-2">
+                  <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{uploadProgress}%</div>
+                </div>
+              )}
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">1. Upload Plans</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Upload your construction plans
+              </p>
+              {currentStep === 0 && uploadProgress < 100 && (
+                <div className="mt-4 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-orange-500 h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={`flex justify-center transition-all duration-500 ${
+          currentStep >= 1 ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'
+        }`}>
+          <ArrowRight className="h-6 w-6 text-orange-500 rotate-90" />
+        </div>
+
+        {/* Step 2: AI Processing */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 1 ? 'scale-105' : currentStep > 1 ? 'opacity-60 scale-95' : currentStep < 1 ? 'opacity-40' : currentStep === -1 ? 'opacity-40' : ''
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 1 
+              ? 'border-orange-500 shadow-lg shadow-orange-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 1 
+                  ? 'bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 scale-110' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {isProcessing ? (
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                ) : (
+                  <Sparkles className="h-8 w-8" />
+                )}
+              </div>
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">2. AI Creates Quote</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Our AI analyzes and generates your quote
+              </p>
+              {isProcessing && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-orange-600 dark:text-orange-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-xs font-medium">Processing...</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={`flex justify-center transition-all duration-500 ${
+          currentStep >= 2 ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'
+        }`}>
+          <ArrowRight className="h-6 w-6 text-orange-500 rotate-90" />
+        </div>
+
+        {/* Step 3: Receive Quote */}
+        <div className={`relative transition-all duration-500 ${
+          currentStep === 2 ? 'scale-105' : currentStep < 2 ? 'opacity-40' : currentStep === -1 ? 'opacity-40' : ''
+        }`}>
+          <Card className={`border-2 transition-all duration-500 ${
+            currentStep === 2 
+              ? 'border-green-500 shadow-lg shadow-green-500/20' 
+              : 'border-gray-200 dark:border-gray-700'
+          }`}>
+            <CardContent className="p-6 text-center">
+              <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center transition-all duration-500 ${
+                currentStep === 2 
+                  ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 scale-110 animate-pulse' 
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              }`}>
+                {isComplete ? (
+                  <div className="relative">
+                    <FileText className="h-8 w-8" />
+                    <CheckCircle className="h-5 w-5 absolute -top-1 -right-1 text-green-600 bg-white dark:bg-gray-950 rounded-full" />
+                  </div>
+                ) : (
+                  <Download className="h-8 w-8" />
+                )}
+              </div>
+              <h3 className="font-semibold text-lg mb-2 dark:text-white">3. Get Your Quote</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Download your professional PDF quote
+              </p>
+              {isComplete && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-green-600 dark:text-green-400">
+                  <CheckCircle className="h-4 w-4" />
+                  <span className="text-xs font-medium">Ready!</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function SubcontractorsPage() {
   const [isVisible, setIsVisible] = useState(false)
@@ -155,9 +494,124 @@ export default function SubcontractorsPage() {
 
       <Navbar />
 
-      {/* Hero Section */}
+      {/* Quote Service Hero Section */}
+      <section className="bg-gradient-to-br from-orange-50 to-white dark:from-orange-950/30 dark:to-black py-16 sm:py-24 transition-colors duration-300 relative overflow-hidden">
+        <div className="absolute inset-0 construction-grid opacity-20 -z-10"></div>
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-12">
+              <div className={`inline-flex items-center justify-center mb-4 transition-all duration-1000 delay-300 ${
+                isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+              }`}>
+                <div className="bg-orange-100 dark:bg-orange-900/50 border-2 border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-300 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm">
+                  <FileText className="h-4 w-4 inline mr-2" />
+                  Quote Generation Service
+                </div>
+              </div>
+              <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-500 ${
+                isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+              }`}>
+                Get Professional Quotes
+                <span className="block bidi-orange-text">Ready to Send</span>
+              </h1>
+              <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto font-medium transition-all duration-1000 delay-700 ${
+                isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+              }`}>
+                Upload your plans, describe the work, and receive PDF quotes ready to send to your clients.
+              </p>
+            </div>
+
+            <Card className={`border-2 border-orange-200 dark:border-orange-900 bg-white dark:bg-gray-950 shadow-xl transition-all duration-1000 delay-900 ${
+              isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+            }`}>
+              <CardHeader className="text-center pb-6 pt-8">
+                <div className="flex justify-center mb-4">
+                  <div className="bg-orange-100 dark:bg-orange-900/50 text-orange-800 dark:text-orange-300 px-4 py-2 rounded-full text-sm font-bold">
+                    $200/month
+                  </div>
+                </div>
+                <CardTitle className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-3">
+                  Bidi Quote Service
+                </CardTitle>
+                <CardDescription className="text-lg text-gray-600 dark:text-gray-300">
+                  Professional quote generation for subcontractors
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-8 pb-8">
+                <div className="space-y-4 mb-8">
+                  <div className="flex items-start space-x-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Upload Plans</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">Upload construction plans in PDF or image format</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Describe Your Work</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">Tell us what work you need an estimate for</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Add Known Pricing</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">Include any pricing you already know</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white">Receive PDF Quote</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">Get a professional PDF quote ready to send to clients within 1 business day</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
+                  <p className="text-sm text-blue-800 dark:text-blue-300">
+                    <strong>Note:</strong> Our AI estimator is currently being finalized. Your quote requests will be processed by our team within 1 business day.
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <Link href="/auth/signup?type=sub">
+                    <Button 
+                      size="lg" 
+                      variant="orange"
+                      className="text-lg px-8 py-6 font-bold w-full sm:w-auto shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group"
+                    >
+                      Get Started - $200/month
+                      <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform duration-200" />
+                    </Button>
+                  </Link>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+                    Cancel anytime. Secure payment processing by Stripe.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* Demo Section */}
+      <section className="container mx-auto px-4 py-12 sm:py-20 relative z-10">
+        <div className="max-w-5xl mx-auto">
+          <h2 className={`text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-black dark:text-white mb-12 tracking-tight transition-all duration-1000 delay-1000 ${
+            isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+          }`}>
+            See How It Works
+          </h2>
+          
+          <QuoteDemoAnimation />
+        </div>
+      </section>
+
+      {/* Get More Jobs Section */}
       <section className="container mx-auto px-4 py-16 sm:py-24 text-center relative z-10">
-        <div className={`flex justify-center mb-8 transition-all duration-1000 delay-300 ${
+        <div className={`flex justify-center mb-8 transition-all duration-1000 delay-1100 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           <div className="bg-gray-100 border-2 border-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm flex items-center space-x-2">
@@ -166,27 +620,27 @@ export default function SubcontractorsPage() {
           </div>
         </div>
         
-        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-500 ${
+        <h2 className={`text-3xl sm:text-4xl lg:text-5xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-1300 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           Get More Jobs
           <span className="block bidi-orange-text">
             Automatically
           </span>
-        </h1>
+        </h2>
         
-        <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto font-medium transition-all duration-1000 delay-700 ${
+        <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto font-medium transition-all duration-1000 delay-1500 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           Join our network of subcontractors and get jobs sent to your inbox.<strong className="bidi-orange-text"> No software needed, just reply to our emails with your bid.</strong>
         </p>
         
-        <div className={`flex justify-center transition-all duration-1000 delay-1000 ${
+        <div className={`flex justify-center transition-all duration-1000 delay-1700 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           <Button 
             size="lg" 
-            variant="orange"
+            variant="outline"
             className="text-lg sm:text-xl px-8 sm:px-12 py-4 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 group font-bold"
             onClick={() => document.getElementById('signup-form')?.scrollIntoView({ behavior: 'smooth' })}
           >
@@ -198,7 +652,7 @@ export default function SubcontractorsPage() {
 
       {/* How It Works Section */}
       <section className="container mx-auto px-4 py-12 sm:py-20 relative z-10">
-        <h2 className={`text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-black dark:text-white mb-12 sm:mb-16 tracking-tight transition-all duration-1000 delay-1200 ${
+        <h2 className={`text-2xl sm:text-3xl lg:text-4xl font-bold text-center text-black dark:text-white mb-12 sm:mb-16 tracking-tight transition-all duration-1000 delay-1900 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           How It Works for Subcontractors

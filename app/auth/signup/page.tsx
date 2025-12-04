@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,14 +12,23 @@ import { Building2, ArrowLeft } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import logo from '../../../public/brand/Bidi Contracting Logo.svg'
 
-export default function SignupPage() {
+function SignupForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [subscriptionType, setSubscriptionType] = useState<'gc' | 'sub'>('gc')
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  useEffect(() => {
+    const type = searchParams.get('type')
+    if (type === 'sub') {
+      setSubscriptionType('sub')
+    }
+  }, [searchParams])
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,14 +56,53 @@ export default function SignupPage() {
       if (error) {
         setError(error.message)
       } else if (data.user) {
-        // User record will be created automatically by database trigger
+        // Store subscription type in localStorage for callback handling
+        if (subscriptionType === 'sub') {
+          localStorage.setItem('pending_subscription_type', 'sub')
+        }
+
+        // Wait for user record to be created by database trigger, then update role
+        let attempts = 0
+        while (attempts < 5) {
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('id, role')
+            .eq('id', data.user.id)
+            .single()
+
+          if (!userError && userData) {
+            // User record exists, update role if needed
+            if (subscriptionType === 'sub' && userData.role !== 'sub') {
+              const { error: updateError } = await supabase
+                .from('users')
+                .update({ role: 'sub' })
+                .eq('id', data.user.id)
+
+              if (updateError) {
+                console.error('Error updating user role:', updateError)
+              } else {
+                console.log('User role set to subcontractor')
+              }
+            }
+            break
+          }
+          
+          // If user doesn't exist yet, wait and retry
+          if (userError?.code === 'PGRST116') {
+            attempts++
+            await new Promise(resolve => setTimeout(resolve, 500))
+            continue
+          }
+          
+          // Other error, break and continue anyway
+          break
+        }
+
         console.log('User created successfully, redirecting to subscription...')
         
-        // Wait a moment for the trigger to complete
-        setTimeout(() => {
-          router.push('/subscription')
-          router.refresh()
-        }, 1000)
+        // Redirect to subscription page
+        router.push(`/subscription${subscriptionType === 'sub' ? '?type=sub' : ''}`)
+        router.refresh()
       }
     } catch (err) {
       setError('An unexpected error occurred')
@@ -66,6 +114,11 @@ export default function SignupPage() {
   const handleGoogleSignup = async () => {
     setLoading(true)
     setError('')
+
+    // Store subscription type in localStorage for callback handling
+    if (subscriptionType === 'sub') {
+      localStorage.setItem('pending_subscription_type', 'sub')
+    }
 
     try {
       const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL || window.location.origin}/auth/callback`
@@ -211,5 +264,17 @@ export default function SignupPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center">
+        <FallingBlocksLoader text="Loading..." />
+      </div>
+    }>
+      <SignupForm />
+    </Suspense>
   )
 }

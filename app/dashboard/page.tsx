@@ -55,6 +55,11 @@ interface DashboardStats {
   totalBidPackages: number
   totalBids: number
   pendingBids: number
+  // Quote stats for subcontractors
+  totalQuotes?: number
+  pendingQuotes?: number
+  processingQuotes?: number
+  completedQuotes?: number
 }
 
 interface JobWithCounts extends Job {
@@ -99,8 +104,13 @@ function DashboardContent() {
     totalPlans: 0,
     totalBidPackages: 0,
     totalBids: 0,
-    pendingBids: 0
+    pendingBids: 0,
+    totalQuotes: 0,
+    pendingQuotes: 0,
+    processingQuotes: 0,
+    completedQuotes: 0
   })
+  const [userRole, setUserRole] = useState<string | null>(null)
   const [jobs, setJobs] = useState<JobWithCounts[]>([])
   const [heroJob, setHeroJob] = useState<JobWithCounts | null>(null)
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
@@ -133,8 +143,27 @@ function DashboardContent() {
   useEffect(() => {
     if (user) {
       fetchUserSubscription()
+      fetchUserRole()
     }
   }, [user])
+
+  const fetchUserRole = async () => {
+    if (!user) return
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (!error && data) {
+        setUserRole(data.role)
+      }
+    } catch (error) {
+      console.error('Error fetching user role:', error)
+    }
+  }
 
   useEffect(() => {
     if (user && subscriptionStatus === 'active' && !checkingSubscription) {
@@ -270,6 +299,30 @@ function DashboardContent() {
         draftPackagesCount
       })
 
+      // Load quote stats for subcontractors
+      let quoteStats = {
+        totalQuotes: 0,
+        pendingQuotes: 0,
+        processingQuotes: 0,
+        completedQuotes: 0
+      }
+
+      if (userRole === 'sub') {
+        const { data: quotesData, error: quotesError } = await supabase
+          .from('quote_requests')
+          .select('id, status')
+          .eq('user_id', user.id)
+
+        if (!quotesError && quotesData) {
+          quoteStats = {
+            totalQuotes: quotesData.length,
+            pendingQuotes: quotesData.filter(q => q.status === 'pending').length,
+            processingQuotes: quotesData.filter(q => q.status === 'processing').length,
+            completedQuotes: quotesData.filter(q => q.status === 'completed').length
+          }
+        }
+      }
+
       setStats({
         totalJobs,
         activeJobs,
@@ -277,7 +330,8 @@ function DashboardContent() {
         totalPlans,
         totalBidPackages,
         totalBids,
-        pendingBids
+        pendingBids,
+        ...quoteStats
       })
 
       // Format all jobs with counts
@@ -833,15 +887,91 @@ function DashboardContent() {
               </div>
             </motion.div>
 
-            {/* 3. All Jobs with Search/Filters */}
-            <motion.div variants={staggerItem}>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
-                  <Building2 className="h-5 w-5 mr-2 text-orange" />
-                  All Jobs
-                  <Badge variant="secondary" className="ml-2">{stats.totalJobs}</Badge>
+            {/* Quote Stats for Subcontractors */}
+            {userRole === 'sub' && (
+              <motion.div variants={staggerItem}>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <FileText className="h-5 w-5 mr-2 text-orange" />
+                  Quote Requests
                 </h2>
-              </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                  <Link href="/dashboard/quotes">
+                    <Card className="bg-white border-orange/20 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-2xl font-bold text-orange-600">{stats.totalQuotes || 0}</p>
+                          <p className="text-sm font-medium text-gray-600">Total Quotes</p>
+                        </div>
+                        <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
+                          <FileText className="h-5 w-5 text-orange-600" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+
+                  <Link href="/dashboard/quotes?status=pending">
+                    <Card className="bg-white border-yellow-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-2xl font-bold text-yellow-600">{stats.pendingQuotes || 0}</p>
+                          <p className="text-sm font-medium text-gray-600">Pending</p>
+                        </div>
+                        <div className="h-10 w-10 rounded-full bg-yellow-50 flex items-center justify-center">
+                          <Clock className="h-5 w-5 text-yellow-600" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+
+                  <Link href="/dashboard/quotes?status=processing">
+                    <Card className="bg-white border-blue-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-2xl font-bold text-blue-600">{stats.processingQuotes || 0}</p>
+                          <p className="text-sm font-medium text-gray-600">Processing</p>
+                        </div>
+                        <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center">
+                          <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+
+                  <Link href="/dashboard/quotes?status=completed">
+                    <Card className="bg-white border-green-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-2xl font-bold text-green-600">{stats.completedQuotes || 0}</p>
+                          <p className="text-sm font-medium text-gray-600">Completed</p>
+                        </div>
+                        <div className="h-10 w-10 rounded-full bg-green-50 flex items-center justify-center">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                </div>
+                <div className="mb-6">
+                  <Link href="/dashboard/quotes/new">
+                    <Button className="bg-orange-500 hover:bg-orange-600">
+                      <Plus className="h-4 w-4 mr-2" />
+                      New Quote Request
+                    </Button>
+                  </Link>
+                </div>
+              </motion.div>
+            )}
+
+            {/* 3. All Jobs with Search/Filters */}
+            {userRole !== 'sub' && (
+              <motion.div variants={staggerItem}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                    <Building2 className="h-5 w-5 mr-2 text-orange" />
+                    All Jobs
+                    <Badge variant="secondary" className="ml-2">{stats.totalJobs}</Badge>
+                  </h2>
+                </div>
 
               {/* Search and Filters */}
               <Card className="mb-4">
@@ -1045,6 +1175,7 @@ function DashboardContent() {
                 )}
               </AnimatePresence>
             </motion.div>
+            )}
 
           </motion.div>
 

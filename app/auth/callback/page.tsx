@@ -26,6 +26,10 @@ function AuthCallbackContent() {
         }
 
         if (data.session?.user) {
+          // Check for pending subscription type from localStorage (for OAuth signups)
+          const pendingSubscriptionType = localStorage.getItem('pending_subscription_type')
+          const isSubcontractor = pendingSubscriptionType === 'sub'
+
           // Wait for user record to be created by database trigger
           let attempts = 0
           let userData = null
@@ -33,7 +37,7 @@ function AuthCallbackContent() {
           while (attempts < 5) {
             const { data: userResult, error: userError } = await supabase
               .from('users')
-              .select('subscription_status, stripe_customer_id')
+              .select('subscription_status, stripe_customer_id, role')
               .eq('id', data.session.user.id)
               .single()
 
@@ -86,6 +90,23 @@ function AuthCallbackContent() {
             return
           }
 
+          // Update user role if this is a subcontractor signup and role isn't set yet
+          if (isSubcontractor && userData.role !== 'sub') {
+            const { error: updateError } = await supabase
+              .from('users')
+              .update({ role: 'sub' })
+              .eq('id', data.session.user.id)
+
+            if (updateError) {
+              console.error('Error updating user role:', updateError)
+            } else {
+              console.log('User role set to subcontractor')
+              userData.role = 'sub'
+            }
+            // Clear the pending subscription type
+            localStorage.removeItem('pending_subscription_type')
+          }
+
           // Check subscription status
           let hasActiveSubscription = false
           if (userData?.subscription_status === 'active') {
@@ -99,7 +120,8 @@ function AuthCallbackContent() {
             router.push('/dashboard')
             router.refresh()
           } else {
-            router.push('/subscription')
+            // Redirect to subscription with type parameter if subcontractor
+            router.push(`/subscription${isSubcontractor ? '?type=sub' : ''}`)
             router.refresh()
           }
         } else {

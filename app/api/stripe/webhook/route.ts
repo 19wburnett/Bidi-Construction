@@ -187,20 +187,29 @@ export async function POST(request: NextRequest) {
               console.log('Subscription ID not available in checkout session, will be updated by subscription.created event')
             }
 
+            // Check if this is a subcontractor subscription
+            const subscriptionType = session.metadata?.subscriptionType || 'gc'
+            const updateData: any = { 
+              stripe_customer_id: session.customer as string,
+              subscription_status: 'active',
+              stripe_subscription_id: subscriptionId,
+              subscription_updated_at: new Date().toISOString()
+            }
+            
+            // Set role to 'sub' if this is a subcontractor subscription
+            if (subscriptionType === 'sub') {
+              updateData.role = 'sub'
+            }
+
             const { error: updateSubscriptionError } = await supabaseAdmin
               .from('users')
-              .update({ 
-                stripe_customer_id: session.customer as string,
-                subscription_status: 'active',
-                stripe_subscription_id: subscriptionId,
-                subscription_updated_at: new Date().toISOString()
-              })
+              .update(updateData)
               .eq('id', userId)
             
             if (updateSubscriptionError) {
               console.error('Error updating user subscription:', updateSubscriptionError)
             } else {
-              console.log(`✅ Subscription activated for user: ${userId}${subscriptionId ? ` with subscription ID: ${subscriptionId}` : ''}`)
+              console.log(`✅ Subscription activated for user: ${userId}${subscriptionId ? ` with subscription ID: ${subscriptionId}` : ''} (type: ${subscriptionType})`)
             }
           }
         } else {

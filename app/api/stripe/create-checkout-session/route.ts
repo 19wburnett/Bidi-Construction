@@ -11,7 +11,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId, email } = await request.json()
+    const { userId, email, subscriptionType = 'gc' } = await request.json()
 
     if (!userId || !email) {
       return NextResponse.json(
@@ -45,6 +45,14 @@ export async function POST(request: NextRequest) {
       .update({ stripe_customer_id: customer.id })
       .eq('id', userId)
 
+    // Determine price and product details based on subscription type
+    const isSubcontractor = subscriptionType === 'sub'
+    const unitAmount = isSubcontractor ? 20000 : 30000 // $200 for subs, $300 for GCs
+    const productName = isSubcontractor ? 'Bidi Quote Service' : 'Bidi Professional Plan'
+    const productDescription = isSubcontractor 
+      ? 'Monthly subscription for subcontractors - quote generation service'
+      : 'Monthly subscription for general contractors'
+
     // Create checkout session
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
@@ -54,10 +62,10 @@ export async function POST(request: NextRequest) {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: 'Bidi Professional Plan',
-              description: 'Monthly subscription for general contractors',
+              name: productName,
+              description: productDescription,
             },
-            unit_amount: 30000, // $300.00
+            unit_amount: unitAmount,
             recurring: {
               interval: 'month',
             },
@@ -70,6 +78,7 @@ export async function POST(request: NextRequest) {
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/subscription?canceled=true`,
       metadata: {
         userId: userId,
+        subscriptionType: subscriptionType,
       },
     })
 

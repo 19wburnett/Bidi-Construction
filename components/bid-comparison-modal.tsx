@@ -642,10 +642,20 @@ export default function BidComparisonModal({
                                     <h4 className="font-medium text-sm text-gray-900 truncate max-w-[180px]">
                                       {recipient.subcontractor_name || recipient.subcontractors?.name || recipient.subcontractor_email}
                                     </h4>
-                                    {recipient.has_clarifying_questions && (
-                                      <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" />
-                                    )}
+                                    <div className="flex items-center gap-1">
+                                      {recipient.has_clarifying_questions && (
+                                        <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" />
+                                      )}
+                                      {recipient.response_text && (
+                                        <Badge variant="default" className="h-2 w-2 p-0 rounded-full bg-orange-500" title="Has response" />
+                                      )}
+                                    </div>
                                   </div>
+                                  {recipient.response_text && (
+                                    <div className="text-xs text-gray-600 mt-1 mb-2 line-clamp-2 italic">
+                                      "{recipient.response_text.substring(0, 80)}{recipient.response_text.length > 80 ? '...' : ''}"
+                                    </div>
+                                  )}
                                   <div className="flex items-center justify-between mt-2">
                                     <Badge variant="outline" className={`
                                       text-[10px] px-1.5 py-0 h-5 capitalize border-0

@@ -29,6 +29,7 @@ import {
   Plus,
   FilePlus,
   UserPlus,
+  FileText,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
@@ -52,6 +53,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
   const pathname = usePathname()
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [userRole, setUserRole] = useState<string | null>(null)
 
   const supabase = createClient()
 
@@ -63,21 +65,51 @@ export default function DashboardSidebar({ className }: SidebarProps) {
     }
   }, [])
 
-  // Check admin status on mount and listen to auth changes
+  // Check admin status and user role on mount and listen to auth changes
   useEffect(() => {
     checkAdminStatus()
+    checkUserRole()
 
-    // Listen for auth state changes to re-check admin status
+    // Listen for auth state changes to re-check admin status and role
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(() => {
       checkAdminStatus()
+      checkUserRole()
     })
 
     return () => {
       subscription.unsubscribe()
     }
   }, [supabase])
+
+  async function checkUserRole() {
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      
+      if (userError || !user) {
+        setUserRole(null)
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (error) {
+        console.error('Error fetching user role:', error)
+        setUserRole(null)
+        return
+      }
+
+      setUserRole(data?.role || null)
+    } catch (error) {
+      console.error('Error checking user role:', error)
+      setUserRole(null)
+    }
+  }
 
   async function checkAdminStatus() {
     try {
@@ -124,6 +156,12 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       href: '/dashboard/contacts',
       icon: Users
     },
+    // Add Quotes menu item for subcontractors
+    ...(userRole === 'sub' ? [{
+      label: 'Quotes',
+      href: '/dashboard/quotes',
+      icon: FileText
+    }] : []),
     {
       label: 'Settings',
       href: '/dashboard/settings',
@@ -139,6 +177,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       icon: Building2,
       subItems: [
         { label: 'Analyze Plans', href: '/admin/analyze-plans' },
+        { label: 'Quote Requests', href: '/admin/quotes' },
         { label: 'Test Multi Takeoff', href: '/admin/test-multi-takeoff' },
         { label: 'Crawler', href: '/admin/crawler' },
         { label: 'Subcontractors', href: '/admin/manage-subcontractors' },

@@ -62,8 +62,8 @@ export default function NotificationBell() {
               name,
               email
             ),
-            job_requests!inner(
-              trade_category
+            jobs!inner(
+              name
             )
           )
         `)
@@ -91,8 +91,8 @@ export default function NotificationBell() {
         const notifications = notificationData.map((notif: any) => ({
           id: notif.bids.id,
           notification_id: notif.id,
-          job_id: notif.bids.job_request_id,
-          job_title: notif.bids.job_requests.trade_category,
+          job_id: notif.bids.job_id,
+          job_title: notif.bids.jobs?.name || 'Job',
           subcontractor_name: notif.bids.subcontractors?.name || notif.bids.subcontractor_email || 'Unknown Subcontractor',
           bid_amount: notif.bids.bid_amount,
           created_at: notif.bids.created_at,
@@ -122,7 +122,7 @@ export default function NotificationBell() {
         .from('bids')
         .select(`
           id,
-          job_request_id,
+          job_id,
           bid_amount,
           seen,
           created_at,
@@ -132,13 +132,13 @@ export default function NotificationBell() {
             name,
             email
           ),
-          job_requests!inner(
+          jobs!inner(
             id,
-            trade_category,
-            gc_id
+            name,
+            user_id
           )
         `)
-        .eq('job_requests.gc_id', userId)
+        .eq('jobs.user_id', userId)
         .order('created_at', { ascending: false })
         .limit(10)
 
@@ -151,8 +151,8 @@ export default function NotificationBell() {
       // Transform the data into notification format
       const notifications = (bidsData || []).map((bid: any) => ({
         id: bid.id,
-        job_id: bid.job_request_id,
-        job_title: bid.job_requests.trade_category,
+        job_id: bid.job_id,
+        job_title: bid.jobs?.name || 'Job',
           subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,

@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
           to: [sub.email],
           subject: emailSubject,
           html: emailBody,
-          reply_to: `bids+${bidPackageId}@bidicontracting.com`
+          reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
         }
 
         const { data: resendData, error: resendError } = await resend.emails.send(emailData)

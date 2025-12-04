@@ -78,6 +78,40 @@ export async function POST(
       )
     }
 
+    // Get plans for this job to include plan links
+    const jobId = Array.isArray(bidPackage.jobs) ? bidPackage.jobs[0]?.id : (bidPackage.jobs as any).id
+    let planLinks: string[] = []
+
+    if (jobId) {
+      try {
+        const { data: plans, error: plansError } = await supabase
+          .from('plans')
+          .select('id, file_name, file_path')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false })
+
+        if (!plansError && plans && plans.length > 0) {
+          for (const plan of plans) {
+            if (plan.file_path) {
+              try {
+                const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+                  .from('plans')
+                  .createSignedUrl(plan.file_path, 30 * 24 * 60 * 60) // 30 days
+                
+                if (!signedUrlError && signedUrlData?.signedUrl) {
+                  planLinks.push(signedUrlData.signedUrl)
+                }
+              } catch (error) {
+                console.error('Error generating signed URL for plan:', error)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading plans:', error)
+      }
+    }
+
     // Get quick reply template if provided
     let emailSubject = `Re: ${bidPackage.jobs.name} - Bid Request: ${bidPackage.trade_category}`
     let emailBody = responseText
@@ -96,13 +130,45 @@ export async function POST(
       }
     }
 
+    // Format email body with plan links if available
+    let formattedEmailBody = emailBody.replace(/\n/g, '<br>')
+    
+    if (planLinks.length > 0) {
+      // If there's only one plan, show a single button. If multiple, show them in a list.
+      let planLinksHtml = ''
+      if (planLinks.length === 1) {
+        planLinksHtml = `
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="${planLinks[0]}" style="display: inline-block; background-color: #EB5023; color: #FFFFFF; text-decoration: none; font-weight: 600; padding: 12px 24px; border-radius: 6px; font-size: 14px;">
+              📐 View Project Plans
+            </a>
+          </div>
+        `
+      } else {
+        planLinksHtml = `
+          <div style="margin: 24px 0; padding: 16px; background-color: #F9FAFB; border-radius: 8px;">
+            <p style="margin: 0 0 12px 0; font-weight: 600; color: #111827; font-size: 14px;">Project Plans:</p>
+            ${planLinks.map((link, index) => 
+              `<div style="margin: 8px 0;">
+                <a href="${link}" style="display: inline-block; background-color: #EB5023; color: #FFFFFF; text-decoration: none; font-weight: 600; padding: 10px 20px; border-radius: 6px; font-size: 13px;">
+                  📐 View Plan ${index + 1}
+                </a>
+              </div>`
+            ).join('')}
+          </div>
+        `
+      }
+      
+      formattedEmailBody = `${formattedEmailBody}<br><br>${planLinksHtml}`
+    }
+
     // Send response email
     const { data: resendData, error: resendError } = await resend.emails.send({
       from: 'Bidi <noreply@bidicontracting.com>',
       to: [recipient.subcontractor_email],
       subject: emailSubject,
-      html: emailBody.replace(/\n/g, '<br>'),
-      reply_to: `bids+${bidPackageId}@bidicontracting.com`
+      html: formattedEmailBody,
+      reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
     })
 
     if (resendError) {

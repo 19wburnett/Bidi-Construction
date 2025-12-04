@@ -144,18 +144,18 @@ export default function NotificationsPage() {
         .from('bids')
         .select(`
           id,
-          job_request_id,
+          job_id,
           subcontractor_name,
           bid_amount,
           seen,
           created_at,
-          job_requests!inner(
+          jobs!inner(
             id,
-            trade_category,
-            gc_id
+            name,
+            user_id
           )
         `)
-        .eq('job_requests.gc_id', userId)
+        .eq('jobs.user_id', userId)
         .order('created_at', { ascending: false })
         .limit(50)
 
@@ -167,8 +167,8 @@ export default function NotificationsPage() {
       // Transform the data into notification format
       const notifications = (bidsData || []).map((bid: any) => ({
         id: bid.id,
-        job_id: bid.job_request_id,
-        job_title: bid.job_requests.trade_category,
+        job_id: bid.job_id,
+        job_title: bid.jobs?.name || 'Job',
         subcontractor_name: bid.subcontractor_name || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,

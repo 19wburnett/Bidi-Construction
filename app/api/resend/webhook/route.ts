@@ -11,28 +11,53 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
+    // Log request details for debugging
+    const url = request.nextUrl.toString()
+    const method = request.method
+    console.log('📧 Resend webhook received:', { method, url, pathname: request.nextUrl.pathname })
+    
     const body = await request.json()
-    console.log('📧 Resend webhook received:', JSON.stringify(body, null, 2))
+    console.log('📧 Resend webhook payload:', JSON.stringify(body, null, 2))
     console.log('Event type:', body.type)
 
     const eventType = body.type
 
     // Handle outbound status events
     if (['email.sent', 'email.delivered', 'email.opened', 'email.bounced', 'email.failed'].includes(eventType)) {
-      return await handleOutboundEvent(body)
+      const result = await handleOutboundEvent(body)
+      console.log('✅ Outbound event processed:', eventType)
+      return result
     }
 
     // Handle inbound email events
     if (eventType === 'email.received') {
-      return await handleInboundEmail(body)
+      try {
+        const result = await handleInboundEmail(body)
+        console.log('✅ Inbound email processed successfully')
+        return result
+      } catch (error: any) {
+        console.error('❌ Error in handleInboundEmail:', error)
+        console.error('❌ Error stack:', error?.stack)
+        return NextResponse.json(
+          { error: 'Failed to process inbound email', details: error?.message },
+          { status: 200 } // Return 200 to prevent retries
+        )
+      }
     }
 
-    return NextResponse.json({ message: 'Event type not handled' })
-  } catch (error) {
-    console.error('Error processing Resend webhook:', error)
+    console.log('⚠️ Unhandled event type:', eventType)
+    return NextResponse.json({ message: 'Event type not handled' }, { status: 200 })
+  } catch (error: any) {
+    console.error('❌ Error processing Resend webhook:', error)
+    console.error('Error details:', {
+      message: error?.message,
+      stack: error?.stack,
+      name: error?.name
+    })
+    // Return 200 to prevent Resend from retrying invalid requests
     return NextResponse.json(
-      { error: 'Failed to process webhook' },
-      { status: 500 }
+      { error: 'Failed to process webhook', details: error?.message },
+      { status: 200 }
     )
   }
 }
@@ -89,42 +114,58 @@ async function handleOutboundEvent(body: any) {
       break
   }
 
-  await supabase
+  const { error: updateError } = await supabase
     .from('bid_package_recipients')
     .update(updateData)
     .eq('id', recipient.id)
 
-  return NextResponse.json({ message: 'Event processed successfully' })
+  if (updateError) {
+    console.error('❌ Error updating recipient:', updateError)
+    return NextResponse.json(
+      { error: 'Failed to update recipient', details: updateError.message },
+      { status: 200 } // Return 200 to prevent retries
+    )
+  }
+
+  console.log('✅ Recipient updated successfully for event:', eventType)
+  return NextResponse.json({ message: 'Event processed successfully' }, { status: 200 })
 }
 
 async function handleInboundEmail(body: any) {
   console.log('📥 Processing inbound email...')
+  console.log('📥 Full webhook body structure:', JSON.stringify(body, null, 2))
+  
   const supabase = await createServerSupabaseClient()
   const email = body.data
   
   if (!email) {
     console.error('❌ No email data in webhook body')
-    return NextResponse.json({ error: 'No email data' }, { status: 400 })
+    console.error('❌ Body structure:', JSON.stringify(body, null, 2))
+    return NextResponse.json({ error: 'No email data' }, { status: 200 }) // Return 200 to prevent retries
   }
   
   const { from, to, subject, html, text, headers, attachments } = email
   console.log('📧 Email details:', { 
-    from: from?.email, 
+    from: from?.email || from, 
     subject, 
     hasHtml: !!html, 
     hasText: !!text,
-    headers: Object.keys(headers || {})
+    headers: headers ? Object.keys(headers) : 'no headers',
+    to: Array.isArray(to) ? to : [to],
+    emailKeys: Object.keys(email)
   })
 
-  // Extract bid_package_id from reply-to address (bids+{bidPackageId}@bidicontracting.com)
+  // Extract bid_package_id from reply-to address (bids+{bidPackageId}@bids.bidicontracting.com)
   let bidPackageId: string | null = null
   
   // Try multiple ways to get the reply-to address
   const replyTo = headers?.['reply-to'] || headers?.['Reply-To'] || headers?.['Reply-To'] || to?.[0] || email['reply-to']
   console.log('🔍 Reply-To header:', replyTo)
+  console.log('🔍 All headers:', JSON.stringify(headers, null, 2))
+  console.log('🔍 To field:', JSON.stringify(to, null, 2))
   
   if (replyTo) {
-    const replyToMatch = replyTo.match(/bids\+([a-f0-9-]+)@bidicontracting\.com/)
+    const replyToMatch = replyTo.match(/bids\+([a-f0-9-]+)@bids\.bidicontracting\.com/)
     if (replyToMatch) {
       bidPackageId = replyToMatch[1]
       console.log('✅ Extracted bid package ID:', bidPackageId)
@@ -136,7 +177,7 @@ async function handleInboundEmail(body: any) {
   // Also check the 'to' field - sometimes replies go to the original 'to' address
   if (!bidPackageId && to && Array.isArray(to)) {
     for (const toAddr of to) {
-      const toMatch = toAddr.match(/bids\+([a-f0-9-]+)@bidicontracting\.com/)
+      const toMatch = toAddr.match(/bids\+([a-f0-9-]+)@bids\.bidicontracting\.com/)
       if (toMatch) {
         bidPackageId = toMatch[1]
         console.log('✅ Extracted bid package ID from "to" field:', bidPackageId)
@@ -150,12 +191,16 @@ async function handleInboundEmail(body: any) {
       subject, 
       headers: JSON.stringify(headers, null, 2), 
       replyTo,
-      to: JSON.stringify(to, null, 2)
+      to: JSON.stringify(to, null, 2),
+      emailKeys: Object.keys(email || {})
     })
+    // Don't return error - log it but continue to see what data we have
+    console.error('⚠️ Continuing without bid package ID to debug...')
+    // Return success to prevent Resend from retrying, but log the issue
     return NextResponse.json({ 
       message: 'Could not determine bid package ID',
-      debug: { replyTo, to, headers: Object.keys(headers || {}) }
-    })
+      debug: { replyTo, to, headers: Object.keys(headers || {}), emailKeys: Object.keys(email || {}) }
+    }, { status: 200 })
   }
 
   // Get bid package and job details

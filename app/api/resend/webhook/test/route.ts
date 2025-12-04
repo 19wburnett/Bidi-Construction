@@ -36,12 +36,12 @@ export async function POST(request: NextRequest) {
           email: fromEmail,
           name: 'Test Subcontractor'
         },
-        to: [`bids+${bidPackageId}@bidicontracting.com`],
+        to: [`bids+${bidPackageId}@bids.bidicontracting.com`],
         subject: subject || 'Re: Bid Request',
         html: `<p>${content}</p>`,
         text: content,
         headers: {
-          'reply-to': `bids+${bidPackageId}@bidicontracting.com`
+          'reply-to': `bids+${bidPackageId}@bids.bidicontracting.com`
         },
         attachments: []
       }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -127,124 +127,124 @@ export default function BidPackageViewModal({ bidPackageId, isOpen, onClose }: B
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center">
-            <Package className="h-5 w-5 mr-2 text-orange-600" />
+      <DialogContent className="relative w-[60vw] max-w-none max-h-[90vh] overflow-y-auto p-8">
+        <DialogClose onClick={onClose} />
+        <DialogHeader className="pb-6">
+          <DialogTitle className="flex items-center text-2xl">
+            <Package className="h-6 w-6 mr-3 text-orange-600" />
             Bid Package Details
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-base mt-2">
             View package contents and recipient information
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600 mx-auto"></div>
-            <p className="text-gray-500 mt-2">Loading package details...</p>
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-600 mx-auto"></div>
+            <p className="text-gray-500 mt-3 text-lg">Loading package details...</p>
           </div>
         ) : bidPackage ? (
-          <div className="space-y-6">
-            {/* Package Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Package Information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Trade Category</label>
-                    <div className="mt-1">
-                      <Badge variant="outline" className="text-base px-3 py-1">
+          <div className="space-y-6 pt-2">
+            {/* Top Section: Package Info and Contents Side by Side */}
+            <div className="grid grid-cols-2 gap-6">
+              {/* Package Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Package Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">Trade Category</label>
+                      <Badge variant="outline" className="text-base px-4 py-2">
                         {bidPackage.trade_category}
                       </Badge>
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Status</label>
-                    <div className="mt-1">
-                      <Badge className={bidPackage.status === 'sent' ? 'bg-green-100 text-green-800' : 
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">Status</label>
+                      <Badge className={`text-base px-4 py-2 ${bidPackage.status === 'sent' ? 'bg-green-100 text-green-800' : 
                                       bidPackage.status === 'closed' ? 'bg-gray-100 text-gray-800' : 
-                                      'bg-blue-100 text-blue-800'}>
+                                      'bg-blue-100 text-blue-800'}`}>
                         {bidPackage.status}
                       </Badge>
                     </div>
                   </div>
-                </div>
 
-                {bidPackage.description && (
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Description</label>
-                    <p className="mt-1 text-gray-900">{bidPackage.description}</p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  {bidPackage.sent_at && (
+                  {bidPackage.description && (
                     <div>
-                      <label className="text-sm font-medium text-gray-700">Sent At</label>
-                      <p className="mt-1 text-gray-900">
-                        {new Date(bidPackage.sent_at).toLocaleString()}
-                      </p>
+                      <label className="text-sm font-medium text-gray-700 mb-2 block">Description</label>
+                      <p className="text-gray-900 leading-relaxed">{bidPackage.description}</p>
                     </div>
                   )}
-                  {bidPackage.deadline && (
-                    <div>
-                      <label className="text-sm font-medium text-gray-700">Deadline</label>
-                      <p className="mt-1 text-gray-900">
-                        {new Date(bidPackage.deadline).toLocaleString()}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* Package Contents */}
-            {lineItems.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center">
-                    <FileText className="h-5 w-5 mr-2" />
-                    Package Contents ({lineItems.length} items)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="max-h-64 overflow-y-auto border rounded-lg p-4 bg-gray-50">
-                    <div className="space-y-3">
-                      {lineItems.map((item: any, index: number) => (
-                        <div key={index} className="bg-white p-3 rounded border">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900">
-                                {item.description || item.name || item.item_name || `Item ${index + 1}`}
-                              </div>
-                              {item.category && (
-                                <div className="text-sm text-gray-500 mt-1">
-                                  Category: {item.category}
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right ml-4">
-                              {item.quantity !== undefined && (
-                                <div className="text-base font-semibold text-gray-900">
-                                  {item.quantity} {item.unit || ''}
-                                </div>
-                              )}
-                              {item.unit_cost !== undefined && item.unit_cost !== null && (
-                                <div className="text-sm text-gray-500">
-                                  ${Number(item.unit_cost).toLocaleString()}/{item.unit || 'unit'}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="grid grid-cols-1 gap-4 pt-2 border-t">
+                    {bidPackage.sent_at && (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">Sent At</label>
+                        <p className="text-gray-900">
+                          {new Date(bidPackage.sent_at).toLocaleString()}
+                        </p>
+                      </div>
+                    )}
+                    {bidPackage.deadline && (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">Deadline</label>
+                        <p className="text-gray-900">
+                          {new Date(bidPackage.deadline).toLocaleString()}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
-            )}
+
+              {/* Package Contents */}
+              {lineItems.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center">
+                      <FileText className="h-5 w-5 mr-2" />
+                      Package Contents ({lineItems.length} items)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="max-h-[400px] overflow-y-auto border rounded-lg p-4 bg-gray-50">
+                      <div className="space-y-2">
+                        {lineItems.map((item: any, index: number) => (
+                          <div key={index} className="bg-white p-3 rounded border hover:shadow-sm transition-shadow">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-gray-900 truncate">
+                                  {item.description || item.name || item.item_name || `Item ${index + 1}`}
+                                </div>
+                                {item.category && (
+                                  <div className="text-sm text-gray-500 mt-1">
+                                    {item.category}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                {item.quantity !== undefined && (
+                                  <div className="text-base font-semibold text-gray-900 whitespace-nowrap">
+                                    {item.quantity} {item.unit || ''}
+                                  </div>
+                                )}
+                                {item.unit_cost !== undefined && item.unit_cost !== null && (
+                                  <div className="text-sm text-gray-500 whitespace-nowrap">
+                                    ${Number(item.unit_cost).toLocaleString()}/{item.unit || 'unit'}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
 
             {/* Recipients */}
             <Card>
@@ -254,80 +254,82 @@ export default function BidPackageViewModal({ bidPackageId, isOpen, onClose }: B
                   Recipients ({recipients.length} total)
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
                 {/* Recipients with Bids */}
                 {recipientsWithBids.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                      <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                    <h4 className="text-base font-semibold text-gray-700 mb-4 flex items-center">
+                      <CheckCircle className="h-5 w-5 mr-2 text-green-600" />
                       Received Bids ({recipientsWithBids.length})
                     </h4>
-                    <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-4">
                       {recipientsWithBids.map((recipient) => {
                         const StatusIcon = statusIcons[recipient.status] || Clock
                         const bid = recipient.bids?.[0] || null
                         return (
                           <div
                             key={recipient.id}
-                            className="p-4 border-2 border-green-200 rounded-lg bg-green-50"
+                            className="p-5 border-2 border-green-200 rounded-lg bg-green-50 hover:shadow-md transition-shadow"
                           >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className="font-semibold text-gray-900">
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold text-gray-900 truncate mb-1">
                                     {recipient.subcontractor_name || 
                                      recipient.subcontractors?.name || 
                                      recipient.subcontractor_email}
-                                  </span>
-                                  <Badge className={`text-xs ${statusColors[recipient.status] || 'bg-gray-100 text-gray-800'}`}>
-                                    <StatusIcon className="h-3 w-3 mr-1 inline" />
-                                    {recipient.status}
-                                  </Badge>
-                                  {bid && (
-                                    <Badge variant="default" className="text-xs bg-green-600">
-                                      Bid Received
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="text-sm text-gray-600 mb-2">
-                                  {recipient.subcontractor_email}
-                                </div>
-                                {bid && (
-                                  <div className="mt-2 space-y-1">
-                                    {bid.bid_amount && (
-                                      <div className="text-sm">
-                                        <span className="font-medium text-gray-700">Bid Amount: </span>
-                                        <span className="text-green-700 font-semibold">
-                                          ${Number(bid.bid_amount).toLocaleString()}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {bid.timeline && (
-                                      <div className="text-sm">
-                                        <span className="font-medium text-gray-700">Timeline: </span>
-                                        <span className="text-gray-900">{bid.timeline}</span>
-                                      </div>
-                                    )}
-                                    {bid.status && (
-                                      <div className="text-sm">
-                                        <span className="font-medium text-gray-700">Bid Status: </span>
-                                        <Badge className={bid.status === 'accepted' ? 'bg-green-100 text-green-800' : 
-                                                         bid.status === 'declined' ? 'bg-red-100 text-red-800' : 
-                                                         'bg-gray-100 text-gray-800'}>
-                                          {bid.status}
-                                        </Badge>
-                                      </div>
-                                    )}
                                   </div>
+                                  <div className="text-sm text-gray-600 truncate">
+                                    {recipient.subcontractor_email}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge className={`text-xs ${statusColors[recipient.status] || 'bg-gray-100 text-gray-800'}`}>
+                                  <StatusIcon className="h-3 w-3 mr-1 inline" />
+                                  {recipient.status}
+                                </Badge>
+                                {bid && (
+                                  <Badge variant="default" className="text-xs bg-green-600">
+                                    Bid Received
+                                  </Badge>
                                 )}
                               </div>
+                              {bid && (
+                                <div className="pt-2 border-t border-green-200 space-y-2">
+                                  {bid.bid_amount && (
+                                    <div className="text-sm">
+                                      <span className="font-medium text-gray-700">Amount: </span>
+                                      <span className="text-green-700 font-semibold">
+                                        ${Number(bid.bid_amount).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {bid.timeline && (
+                                    <div className="text-sm">
+                                      <span className="font-medium text-gray-700">Timeline: </span>
+                                      <span className="text-gray-900">{bid.timeline}</span>
+                                    </div>
+                                  )}
+                                  {bid.status && (
+                                    <div className="text-sm">
+                                      <span className="font-medium text-gray-700">Status: </span>
+                                      <Badge className={`text-xs ${bid.status === 'accepted' ? 'bg-green-100 text-green-800' : 
+                                                         bid.status === 'declined' ? 'bg-red-100 text-red-800' : 
+                                                         'bg-gray-100 text-gray-800'}`}>
+                                        {bid.status}
+                                      </Badge>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {recipient.sent_at && (
+                                <div className="text-xs text-gray-500 flex items-center pt-2 border-t border-green-200">
+                                  <Calendar className="h-3 w-3 mr-1" />
+                                  Sent: {new Date(recipient.sent_at).toLocaleString()}
+                                </div>
+                              )}
                             </div>
-                            {recipient.sent_at && (
-                              <div className="text-xs text-gray-500 mt-2 flex items-center">
-                                <Calendar className="h-3 w-3 mr-1" />
-                                Sent: {new Date(recipient.sent_at).toLocaleString()}
-                              </div>
-                            )}
                           </div>
                         )
                       })}
@@ -338,42 +340,44 @@ export default function BidPackageViewModal({ bidPackageId, isOpen, onClose }: B
                 {/* Recipients without Bids */}
                 {recipientsWithoutBids.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                      <Clock className="h-4 w-4 mr-2 text-gray-600" />
+                    <h4 className="text-base font-semibold text-gray-700 mb-4 flex items-center">
+                      <Clock className="h-5 w-5 mr-2 text-gray-600" />
                       Pending ({recipientsWithoutBids.length})
                     </h4>
-                    <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-4">
                       {recipientsWithoutBids.map((recipient) => {
                         const StatusIcon = statusIcons[recipient.status] || Clock
                         return (
                           <div
                             key={recipient.id}
-                            className="p-4 border rounded-lg bg-white"
+                            className="p-5 border rounded-lg bg-white hover:shadow-md transition-shadow"
                           >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className="font-medium text-gray-900">
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-gray-900 truncate mb-1">
                                     {recipient.subcontractor_name || 
                                      recipient.subcontractors?.name || 
                                      recipient.subcontractor_email}
-                                  </span>
-                                  <Badge className={`text-xs ${statusColors[recipient.status] || 'bg-gray-100 text-gray-800'}`}>
-                                    <StatusIcon className="h-3 w-3 mr-1 inline" />
-                                    {recipient.status}
-                                  </Badge>
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                  {recipient.subcontractor_email}
+                                  </div>
+                                  <div className="text-sm text-gray-600 truncate">
+                                    {recipient.subcontractor_email}
+                                  </div>
                                 </div>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <Badge className={`text-xs ${statusColors[recipient.status] || 'bg-gray-100 text-gray-800'}`}>
+                                  <StatusIcon className="h-3 w-3 mr-1 inline" />
+                                  {recipient.status}
+                                </Badge>
+                              </div>
+                              {recipient.sent_at && (
+                                <div className="text-xs text-gray-500 flex items-center pt-2 border-t">
+                                  <Calendar className="h-3 w-3 mr-1" />
+                                  Sent: {new Date(recipient.sent_at).toLocaleString()}
+                                </div>
+                              )}
                             </div>
-                            {recipient.sent_at && (
-                              <div className="text-xs text-gray-500 mt-2 flex items-center">
-                                <Calendar className="h-3 w-3 mr-1" />
-                                Sent: {new Date(recipient.sent_at).toLocaleString()}
-                              </div>
-                            )}
                           </div>
                         )
                       })}
@@ -382,7 +386,7 @@ export default function BidPackageViewModal({ bidPackageId, isOpen, onClose }: B
                 )}
 
                 {recipients.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
+                  <div className="text-center py-12 text-gray-500 text-lg">
                     No recipients found for this package
                   </div>
                 )}
@@ -390,7 +394,7 @@ export default function BidPackageViewModal({ bidPackageId, isOpen, onClose }: B
             </Card>
           </div>
         ) : (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-12 text-gray-500 text-lg">
             Package not found
           </div>
         )}

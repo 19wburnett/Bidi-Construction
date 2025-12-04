@@ -22,18 +22,18 @@ export default function DebugBidsPage() {
         .from('bids')
         .select(`
           id,
-          job_request_id,
+          job_id,
           subcontractor_name,
           bid_amount,
           seen,
           created_at,
-          job_requests!inner(
+          jobs!inner(
             id,
-            trade_category,
-            gc_id
+            name,
+            user_id
           )
         `)
-        .eq('job_requests.gc_id', user.id)
+        .eq('jobs.user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10)
 

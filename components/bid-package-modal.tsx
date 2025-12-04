@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { createClient } from '@/lib/supabase'
 import { getJobForUser } from '@/lib/job-access'
 import { useAuth } from '@/app/providers'
@@ -48,7 +49,10 @@ import {
   Zap,
   ChevronRight,
   ChevronDown,
-  CheckCircle2
+  CheckCircle2,
+  Filter,
+  Settings,
+  X
 } from 'lucide-react'
 import { modalBackdrop, modalContent, successCheck, staggerContainer, staggerItem } from '@/lib/animations'
 import { BidPackage, Job, JobReport } from '@/types/takeoff'
@@ -174,6 +178,11 @@ export default function BidPackageModal({
   const [showCustomLineItemForm, setShowCustomLineItemForm] = useState(false)
   const [reports, setReports] = useState<JobReport[]>([])
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([])
+  // Step 4 collapsible sections and filters drawer
+  const [summaryExpanded, setSummaryExpanded] = useState(true)
+  const [packageDetailsExpanded, setPackageDetailsExpanded] = useState(true)
+  const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
+  const [expandedTradeSummaries, setExpandedTradeSummaries] = useState<Record<string, boolean>>({})
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -314,6 +323,16 @@ export default function BidPackageModal({
       }))
 
       setSubcontractors([...myContacts, ...bidiContacts])
+
+      // Load job reports
+      const { data: reportsData, error: reportsError } = await supabase
+        .from('job_reports')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+
+      if (reportsError) console.error('Error loading reports:', reportsError)
+      setReports(reportsData || [])
 
       // Use takeoff items from props and add defaults for the selected trade when chosen later
       setTakeoffItems(propsTakeoffItems)
@@ -459,6 +478,11 @@ export default function BidPackageModal({
     setLineItemSearch('')
     setCreatedPackages([])
     setRecipients([])
+    setSummaryExpanded(true)
+    setPackageDetailsExpanded(true)
+    setFiltersDrawerOpen(false)
+    setExpandedTradeSummaries({})
+    setShowAddContact(false)
     onClose()
   }
 
@@ -1616,251 +1640,33 @@ export default function BidPackageModal({
                     >
                       {/* Left Pane: Filters, Summary, Controls */}
                       <div className="flex flex-col min-h-0 h-full">
-                        <div className="flex items-center justify-between gap-3 flex-shrink-0 mb-4">
-                          <h3 className="text-lg font-semibold">Subcontractors</h3>
-                          <Badge variant="outline">
-                            {selectedSubs.length} selected
-                          </Badge>
-                        </div>
-
-                        {/* Trade Package Summary - Scrollable */}
-                        <div className="flex-1 min-h-0 flex flex-col mb-4">
-                          {(selectedTrades.length > 0 || totalSelectedLineItemCount > 0 || selectedSubs.length > 0) ? (
-                            <div className="p-3 md:p-4 border border-gray-200 rounded-lg bg-gray-50 flex flex-col min-h-0 h-full">
-                              <div className="flex items-center justify-between gap-3 flex-shrink-0 mb-3">
-                                <h4 className="text-sm md:text-base font-semibold text-gray-900 flex items-center gap-2">
-                                  <Package className="h-4 w-4 text-orange-600" />
-                                  Trade Package Summary
-                                </h4>
-                              </div>
-                              <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                                {selectedTrades.map(trade => {
-                                  const tradeLineItems = lineItemsByTrade[trade] || []
-                                  const tradeSubs = selectedSubcontractorsByTrade[trade] || []
-                                  return (
-                                    <div key={trade} className="p-3 border border-gray-200 bg-white rounded-lg space-y-2">
-                                      <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="font-semibold text-gray-900">{trade}</div>
-                                        <div className="flex items-center gap-2 text-xs text-gray-600">
-                                          <Badge variant="outline" className="text-xs">
-                                            {tradeLineItems.length} line item{tradeLineItems.length === 1 ? '' : 's'}
-                                          </Badge>
-                                          <Badge variant="outline" className="text-xs">
-                                            {tradeSubs.length} subcontractor{tradeSubs.length === 1 ? '' : 's'}
-                                          </Badge>
-                                        </div>
-                                      </div>
-                                      {tradeLineItems.length > 0 ? (
-                                        <ul className="text-xs md:text-sm text-gray-700 list-disc pl-4 space-y-1">
-                                          {tradeLineItems.map(item => {
-                                            const totalCost = item.unit_cost ? item.quantity * item.unit_cost : null
-                                            const originalMatchesTrade = normalizeTrade(item.category) === normalizeTrade(trade)
-                                            return (
-                                              <li key={item.id} className="flex flex-col gap-1">
-                                                <span>{item.description}</span>
-                                                <span className="text-gray-500">
-                                                  ({item.quantity} {item.unit}
-                                                  {item.unit_cost ? ` @ $${item.unit_cost}/${item.unit}` : ''}
-                                                  )
-                                                  {item.subcontractor && item.subcontractor !== trade && (
-                                                    <span className="ml-1 text-amber-600">
-                                                      Tagged: {item.subcontractor}
-                                                    </span>
-                                                  )}
-                                                  {totalCost !== null && (
-                                                    <span className="ml-1 text-green-600 font-medium">
-                                                      = ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                    </span>
-                                                  )}
-                                                </span>
-                                              </li>
-                                            )
-                                          })}
-                                        </ul>
-                                      ) : (
-                                        <div className="text-xs text-gray-500 italic">
-                                          No line items currently mapped to this trade. Select this trade in Step 2 to assign line items.
-                                        </div>
-                                      )}
-                                      {tradeSubs.length > 0 && (
-                                        <div className="text-xs text-gray-600">
-                                          <span className="font-medium text-gray-700">Recipients:</span>{' '}
-                                          {tradeSubs.map(sub => sub.name).join(', ')}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )
-                                })}
-                                {unassignedLineItems.length > 0 && (
-                                  <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs md:text-sm text-amber-900 space-y-1">
-                                    <div className="font-semibold">Line items without a matching selected trade</div>
-                                    <p>
-                                      These items will not be included in any bid package unless you add a trade that matches their category:
-                                    </p>
-                                    <ul className="list-disc pl-4 space-y-1">
-                                      {unassignedLineItems.map(item => (
-                                        <li key={item.id}>
-                                          {item.description}{' '}
-                                          {item.subcontractor && (
-                                            <span className="text-amber-700">
-                                              (Tagged: {item.subcontractor})
-                                            </span>
-                                          )}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="p-3 md:p-4 border border-gray-200 rounded-lg bg-gray-50 flex items-center justify-center h-full">
-                              <div className="text-center text-sm text-gray-500">
-                                <Package className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                                <p>No trades or line items selected yet</p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Filters & directory toggles - Scrollable section */}
-                        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 mb-4">
-                          <div className="p-3 border rounded-lg space-y-2">
-                            <h4 className="font-semibold text-xs md:text-sm">Directories</h4>
-                            <label className="flex items-center space-x-2">
-                              <Checkbox checked={includeMyContacts} onCheckedChange={(v: boolean) => setIncludeMyContacts(v)} />
-                              <span className="text-sm">My Contacts</span>
-                            </label>
-                            <label className="flex items-center space-x-2">
-                              <Checkbox checked={includeBidiDirectory} onCheckedChange={(v: boolean) => setIncludeBidiDirectory(v)} />
-                              <span className="text-sm">Bidi Directory</span>
-                            </label>
+                        {/* Sticky Header with Quick Actions */}
+                        <div className="flex items-center justify-between gap-3 flex-shrink-0 mb-4 pb-3 border-b sticky top-0 bg-white z-10">
+                          <div className="flex items-center gap-3">
+                            <h3 className="text-lg font-semibold">Subcontractors</h3>
+                            <Badge variant="outline">
+                              {selectedSubs.length} selected
+                            </Badge>
                           </div>
-                          <div className="p-3 border rounded-lg space-y-2">
-                            <h4 className="font-semibold text-xs md:text-sm">Filters</h4>
-                            <div className="space-y-2">
-                              <div>
-                                <div className="text-xs text-gray-600 mb-1">Min Google rating</div>
-                                <div className="flex items-center space-x-1">
-                                  {[1,2,3,4,5].map((n) => (
-                                    <button
-                                      key={n}
-                                      type="button"
-                                      onClick={() => setMinGoogleReview(String(n))}
-                                      className="p-1 rounded hover:bg-gray-100"
-                                      aria-label={`Minimum ${n} star${n>1 ? 's' : ''}`}
-                                    >
-                                      <Star className={(Number(minGoogleReview) >= n ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300') + ' h-5 w-5'} />
-                                    </button>
-                                  ))}
-                                  <Button variant="ghost" size="sm" onClick={() => setMinGoogleReview('')}>Clear</Button>
-                                </div>
-                              </div>
-                              <Input placeholder="Min jobs completed" value={minJobsCompleted} onChange={(e) => setMinJobsCompleted(e.target.value)} />
-                            </div>
-                            <div className="flex items-center space-x-4">
-                              <label className="flex items-center space-x-2">
-                                <Checkbox checked={licensedOnly} onCheckedChange={(v: boolean) => setLicensedOnly(v)} />
-                                <span className="text-sm">Licensed only</span>
-                              </label>
-                              <label className="flex items-center space-x-2">
-                                <Checkbox checked={bondedOnly} onCheckedChange={(v: boolean) => setBondedOnly(v)} />
-                                <span className="text-sm">Bonded only</span>
-                              </label>
-                            </div>
-                          </div>
-
-                          {/* Add Contact */}
-                          <div className="p-3 border rounded-lg">
-                            <div className="flex items-center justify-between flex-wrap gap-2">
-                              <h4 className="font-semibold text-xs md:text-sm">Add Contact</h4>
-                              <Button variant="outline" size="sm" onClick={() => setShowAddContact(s => !s)} className="h-8 md:h-9">
-                                {showAddContact ? 'Close' : 'Add'}
-                              </Button>
-                            </div>
-                            {showAddContact && (
-                              <div className="mt-2 md:mt-3 grid grid-cols-1 gap-2">
-                                <Input placeholder="Name" value={newContact.name} onChange={(e) => setNewContact(v => ({ ...v, name: e.target.value }))} />
-                                <Input placeholder="Email" value={newContact.email} onChange={(e) => setNewContact(v => ({ ...v, email: e.target.value }))} />
-                                <Select value={newContact.trade_category} onValueChange={(val) => setNewContact(v => ({ ...v, trade_category: val }))}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Trade" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {TRADE_CATEGORIES.map(t => (
-                                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <Input placeholder="Location" value={newContact.location} onChange={(e) => setNewContact(v => ({ ...v, location: e.target.value }))} />
-                                <div className="flex justify-end">
-                                  <Button
-                                    variant="secondary"
-                                    onClick={async () => {
-                                      if (!newContact.name || !newContact.email || !newContact.trade_category) return
-                                      const { data, error: insErr } = await supabase
-                                        .from('gc_contacts')
-                                        .insert([{ name: newContact.name, email: newContact.email, trade_category: newContact.trade_category, location: newContact.location, gc_id: user?.id }])
-                                        .select()
-                                      if (insErr) {
-                                        setError(insErr.message)
-                                        return
-                                      }
-                                      const created = (data?.[0])
-                                      if (created) {
-                                        const sc: Subcontractor = {
-                                          id: `gc:${created.id}`,
-                                          name: created.name,
-                                          email: created.email,
-                                          trade_category: created.trade_category,
-                                          location: created.location,
-                                          source: 'gc'
-                                        }
-                                        setSubcontractors(prev => [sc, ...prev])
-                                        setShowAddContact(false)
-                                        setNewContact({ name: '', email: '', trade_category: '', location: '' })
-                                      }
-                                    }}
-                                  >Save</Button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Package Description & Deadline */}
-                          <div className="space-y-3 pt-2 border-t">
-                            <div className="p-3 border rounded-lg space-y-2 bg-blue-50 border-blue-200">
-                              <Label className="text-sm font-semibold">Package Description</Label>
-                              <Textarea
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Describe the scope of work, requirements, and any special instructions for the subcontractors..."
-                                rows={4}
-                                className="resize-none"
-                              />
-                              <p className="text-xs text-gray-500">
-                                This description will be included in the bid request email sent to selected subcontractors.
-                              </p>
-                            </div>
-
-                            <div className="p-3 border rounded-lg space-y-2 bg-blue-50 border-blue-200">
-                              <Label className="text-sm font-semibold">Bid Deadline</Label>
-                              <Input
-                                type="datetime-local"
-                                value={deadline}
-                                onChange={(e) => setDeadline(e.target.value)}
-                                min={new Date().toISOString().slice(0, 16)}
-                              />
-                              <p className="text-xs text-gray-500">
-                                Set a deadline for when subcontractors should submit their bids.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons - Fixed at bottom */}
-                        <div className="flex flex-col gap-2 pt-2 border-t flex-shrink-0">
-                          <div className="flex gap-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setFiltersDrawerOpen(true)}
+                              className="h-8"
+                            >
+                              <Filter className="h-4 w-4 mr-1.5" />
+                              Filters
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowAddContact(!showAddContact)}
+                              className="h-8"
+                            >
+                              <Plus className="h-4 w-4 mr-1.5" />
+                              Add Contact
+                            </Button>
                             <Button
                               variant="outline"
                               size="sm"
@@ -1871,9 +1677,9 @@ export default function BidPackageModal({
                                 setSelectedSubs(Array.from(current))
                               }}
                               disabled={filteredSubcontractors.length === 0}
-                              className="flex-1"
+                              className="h-8"
                             >
-                              Select all
+                              Select All
                             </Button>
                             <Button
                               variant="ghost"
@@ -1884,46 +1690,351 @@ export default function BidPackageModal({
                                 setSelectedSubs(prev => prev.filter(id => !toRemove.has(id)))
                               }}
                               disabled={filteredSubcontractors.length === 0}
-                              className="flex-1"
+                              className="h-8"
                             >
                               Clear
                             </Button>
                           </div>
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <Button 
-                              variant="outline" 
-                              onClick={() => setStep(3)}
-                              className="flex-1 h-10 md:h-auto"
-                            >
-                              Back
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={() => setPreviewOpen(true)}
-                              disabled={!canCreatePackage || loading}
-                              className="flex-1 h-10 md:h-auto"
-                            >
-                              Preview
-                            </Button>
-                            <Button 
-                              onClick={handleCreatePackage}
-                              disabled={!canCreatePackage || loading}
-                              className="flex-1 h-10 md:h-auto"
-                            >
-                              {loading ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                  Creating...
-                                </>
-                              ) : (
-                                <>
-                                  <Send className="h-4 w-4 mr-2" />
-                                  Create & Send
-                                </>
-                              )}
-                            </Button>
-                          </div>
                         </div>
+
+                        {/* Scrollable Content Area */}
+                        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 mb-4">
+                        {/* Trade Package Summary - Collapsible */}
+                        <div>
+                          <Accordion type="single" collapsible value={summaryExpanded ? 'summary' : ''} onValueChange={(v) => setSummaryExpanded(v === 'summary')}>
+                            <AccordionItem value="summary" className="border border-gray-200 rounded-lg bg-gray-50">
+                              <AccordionTrigger className="px-3 md:px-4 py-3 hover:no-underline">
+                                <div className="flex items-center gap-2">
+                                  <Package className="h-4 w-4 text-orange-600" />
+                                  <h4 className="text-sm md:text-base font-semibold text-gray-900">
+                                    Trade Package Summary
+                                  </h4>
+                                </div>
+                              </AccordionTrigger>
+                              <AccordionContent className="px-3 md:px-4 pb-3">
+                                {(selectedTrades.length > 0 || totalSelectedLineItemCount > 0 || selectedSubs.length > 0) ? (
+                                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                                    {selectedTrades.map(trade => {
+                                      const tradeLineItems = lineItemsByTrade[trade] || []
+                                      const tradeSubs = selectedSubcontractorsByTrade[trade] || []
+                                      const isExpanded = expandedTradeSummaries[trade] ?? false
+                                      return (
+                                        <div key={trade} className="p-3 border border-gray-200 bg-white rounded-lg space-y-2">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="font-semibold text-gray-900">{trade}</div>
+                                            <div className="flex items-center gap-2">
+                                              <Badge variant="outline" className="text-xs">
+                                                {tradeLineItems.length} line item{tradeLineItems.length === 1 ? '' : 's'}
+                                              </Badge>
+                                              <Badge variant="outline" className="text-xs">
+                                                {tradeSubs.length} subcontractor{tradeSubs.length === 1 ? '' : 's'}
+                                              </Badge>
+                                              {tradeLineItems.length > 0 && (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() => setExpandedTradeSummaries(prev => ({ ...prev, [trade]: !prev[trade] }))}
+                                                  className="h-6 px-2 text-xs"
+                                                >
+                                                  {isExpanded ? 'Hide' : 'Show'} Details
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </div>
+                                          {isExpanded && tradeLineItems.length > 0 && (
+                                            <ul className="text-xs md:text-sm text-gray-700 list-disc pl-4 space-y-1 pt-2 border-t">
+                                              {tradeLineItems.map(item => {
+                                                const totalCost = item.unit_cost ? item.quantity * item.unit_cost : null
+                                                return (
+                                                  <li key={item.id} className="flex flex-col gap-1">
+                                                    <span>{item.description}</span>
+                                                    <span className="text-gray-500">
+                                                      ({item.quantity} {item.unit}
+                                                      {item.unit_cost ? ` @ $${item.unit_cost}/${item.unit}` : ''}
+                                                      )
+                                                      {item.subcontractor && item.subcontractor !== trade && (
+                                                        <span className="ml-1 text-amber-600">
+                                                          Tagged: {item.subcontractor}
+                                                        </span>
+                                                      )}
+                                                      {totalCost !== null && (
+                                                        <span className="ml-1 text-green-600 font-medium">
+                                                          = ${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </span>
+                                                      )}
+                                                    </span>
+                                                  </li>
+                                                )
+                                              })}
+                                            </ul>
+                                          )}
+                                          {!isExpanded && tradeLineItems.length > 0 && (
+                                            <div className="text-xs text-gray-500 italic pt-1">
+                                              {tradeLineItems.length} line item{tradeLineItems.length === 1 ? '' : 's'} - click "Show Details" to view
+                                            </div>
+                                          )}
+                                          {tradeLineItems.length === 0 && (
+                                            <div className="text-xs text-gray-500 italic">
+                                              No line items currently mapped to this trade. Select this trade in Step 2 to assign line items.
+                                            </div>
+                                          )}
+                                          {tradeSubs.length > 0 && (
+                                            <div className="text-xs text-gray-600 pt-1 border-t">
+                                              <span className="font-medium text-gray-700">Recipients:</span>{' '}
+                                              {tradeSubs.map(sub => sub.name).join(', ')}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                    {unassignedLineItems.length > 0 && (
+                                      <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs md:text-sm text-amber-900 space-y-1">
+                                        <div className="font-semibold">Line items without a matching selected trade</div>
+                                        <p>
+                                          These items will not be included in any bid package unless you add a trade that matches their category:
+                                        </p>
+                                        <ul className="list-disc pl-4 space-y-1">
+                                          {unassignedLineItems.map(item => (
+                                            <li key={item.id}>
+                                              {item.description}{' '}
+                                              {item.subcontractor && (
+                                                <span className="text-amber-700">
+                                                  (Tagged: {item.subcontractor})
+                                                </span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="p-3 md:p-4 flex items-center justify-center">
+                                    <div className="text-center text-sm text-gray-500">
+                                      <Package className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                                      <p>No trades or line items selected yet</p>
+                                    </div>
+                                  </div>
+                                )}
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        </div>
+
+                        {/* Package Details - Collapsible */}
+                        <div>
+                          <Accordion type="single" collapsible value={packageDetailsExpanded ? 'details' : ''} onValueChange={(v) => setPackageDetailsExpanded(v === 'details')}>
+                            <AccordionItem value="details" className="border border-gray-200 rounded-lg bg-blue-50 border-blue-200">
+                              <AccordionTrigger className="px-3 py-3 hover:no-underline">
+                                <h4 className="text-sm font-semibold">Package Details</h4>
+                              </AccordionTrigger>
+                              <AccordionContent className="px-3 pb-3 space-y-3">
+                                <div className="space-y-2">
+                                  <Label className="text-sm font-semibold">Package Description</Label>
+                                  <Textarea
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="Describe the scope of work, requirements, and any special instructions for the subcontractors..."
+                                    rows={4}
+                                    className="resize-none"
+                                  />
+                                  <p className="text-xs text-gray-500">
+                                    This description will be included in the bid request email sent to selected subcontractors.
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label className="text-sm font-semibold">Bid Deadline</Label>
+                                  <Input
+                                    type="datetime-local"
+                                    value={deadline}
+                                    onChange={(e) => setDeadline(e.target.value)}
+                                    min={new Date().toISOString().slice(0, 16)}
+                                  />
+                                  <p className="text-xs text-gray-500">
+                                    Set a deadline for when subcontractors should submit their bids.
+                                  </p>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        </div>
+
+                        {/* Add Contact - Collapsible */}
+                        {showAddContact && (
+                          <div className="p-3 border rounded-lg bg-white">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="font-semibold text-xs md:text-sm">Add Contact</h4>
+                              <Button variant="ghost" size="sm" onClick={() => setShowAddContact(false)} className="h-6 w-6 p-0">
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-1 gap-2">
+                              <Input placeholder="Name" value={newContact.name} onChange={(e) => setNewContact(v => ({ ...v, name: e.target.value }))} />
+                              <Input placeholder="Email" value={newContact.email} onChange={(e) => setNewContact(v => ({ ...v, email: e.target.value }))} />
+                              <Select value={newContact.trade_category} onValueChange={(val) => setNewContact(v => ({ ...v, trade_category: val }))}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Trade" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {TRADE_CATEGORIES.map(t => (
+                                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Input placeholder="Location" value={newContact.location} onChange={(e) => setNewContact(v => ({ ...v, location: e.target.value }))} />
+                              <div className="flex justify-end">
+                                <Button
+                                  variant="secondary"
+                                  onClick={async () => {
+                                    if (!newContact.name || !newContact.email || !newContact.trade_category) return
+                                    const { data, error: insErr } = await supabase
+                                      .from('gc_contacts')
+                                      .insert([{ name: newContact.name, email: newContact.email, trade_category: newContact.trade_category, location: newContact.location, gc_id: user?.id }])
+                                      .select()
+                                    if (insErr) {
+                                      setError(insErr.message)
+                                      return
+                                    }
+                                    const created = (data?.[0])
+                                    if (created) {
+                                      const sc: Subcontractor = {
+                                        id: `gc:${created.id}`,
+                                        name: created.name,
+                                        email: created.email,
+                                        trade_category: created.trade_category,
+                                        location: created.location,
+                                        source: 'gc'
+                                      }
+                                      setSubcontractors(prev => [sc, ...prev])
+                                      setShowAddContact(false)
+                                      setNewContact({ name: '', email: '', trade_category: '', location: '' })
+                                    }
+                                  }}
+                                >Save</Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        </div>
+
+                        {/* Action Buttons - Fixed at bottom */}
+                        <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t flex-shrink-0 mt-auto">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setStep(3)}
+                            className="flex-1 h-10 md:h-auto"
+                          >
+                            Back
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => setPreviewOpen(true)}
+                            disabled={!canCreatePackage || loading}
+                            className="flex-1 h-10 md:h-auto"
+                          >
+                            Preview
+                          </Button>
+                          <Button 
+                            onClick={handleCreatePackage}
+                            disabled={!canCreatePackage || loading}
+                            className="flex-1 h-10 md:h-auto"
+                          >
+                            {loading ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Creating...
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-4 w-4 mr-2" />
+                                Create & Send
+                              </>
+                            )}
+                          </Button>
+                        </div>
+
+                        {/* Filters Drawer */}
+                        <AnimatePresence>
+                          {filtersDrawerOpen && (
+                            <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 bg-black/50"
+                                onClick={() => setFiltersDrawerOpen(false)}
+                              />
+                              <motion.div
+                                initial={{ x: '-100%' }}
+                                animate={{ x: 0 }}
+                                exit={{ x: '-100%' }}
+                                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                                className="absolute left-0 top-0 bottom-0 w-[400px] max-w-[90vw] bg-white shadow-xl overflow-y-auto"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                              <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between z-10">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                  <Filter className="h-5 w-5" />
+                                  Filters & Settings
+                                </h3>
+                                <Button variant="ghost" size="sm" onClick={() => setFiltersDrawerOpen(false)}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="p-4 space-y-4">
+                                <div className="space-y-2">
+                                  <h4 className="font-semibold text-sm">Directories</h4>
+                                  <label className="flex items-center space-x-2">
+                                    <Checkbox checked={includeMyContacts} onCheckedChange={(v: boolean) => setIncludeMyContacts(v)} />
+                                    <span className="text-sm">My Contacts</span>
+                                  </label>
+                                  <label className="flex items-center space-x-2">
+                                    <Checkbox checked={includeBidiDirectory} onCheckedChange={(v: boolean) => setIncludeBidiDirectory(v)} />
+                                    <span className="text-sm">Bidi Directory</span>
+                                  </label>
+                                </div>
+                                <div className="space-y-3 pt-2 border-t">
+                                  <h4 className="font-semibold text-sm">Filters</h4>
+                                  <div className="space-y-3">
+                                    <div>
+                                      <div className="text-xs text-gray-600 mb-2">Min Google rating</div>
+                                      <div className="flex items-center space-x-1">
+                                        {[1,2,3,4,5].map((n) => (
+                                          <button
+                                            key={n}
+                                            type="button"
+                                            onClick={() => setMinGoogleReview(String(n))}
+                                            className="p-1 rounded hover:bg-gray-100"
+                                            aria-label={`Minimum ${n} star${n>1 ? 's' : ''}`}
+                                          >
+                                            <Star className={(Number(minGoogleReview) >= n ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300') + ' h-5 w-5'} />
+                                          </button>
+                                        ))}
+                                        <Button variant="ghost" size="sm" onClick={() => setMinGoogleReview('')}>Clear</Button>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs text-gray-600 mb-1 block">Min jobs completed</Label>
+                                      <Input placeholder="Min jobs completed" value={minJobsCompleted} onChange={(e) => setMinJobsCompleted(e.target.value)} />
+                                    </div>
+                                    <div className="flex items-center space-x-4">
+                                      <label className="flex items-center space-x-2">
+                                        <Checkbox checked={licensedOnly} onCheckedChange={(v: boolean) => setLicensedOnly(v)} />
+                                        <span className="text-sm">Licensed only</span>
+                                      </label>
+                                      <label className="flex items-center space-x-2">
+                                        <Checkbox checked={bondedOnly} onCheckedChange={(v: boolean) => setBondedOnly(v)} />
+                                        <span className="text-sm">Bonded only</span>
+                                      </label>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              </motion.div>
+                            </div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       {/* Right Pane: Subcontractor List */}

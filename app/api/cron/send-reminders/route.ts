@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
           to: [recipient.subcontractor_email],
           subject: emailSubject,
           html: emailHtml,
-          reply_to: `bids+${bidPackageId}@bidicontracting.com`
+          reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
         })
 
         if (sendError) {
@@ -251,6 +251,8 @@ export async function POST(request: NextRequest) {
   // Reuse GET logic for manual triggers
   return GET(request)
 }
+
+
 
 
 
