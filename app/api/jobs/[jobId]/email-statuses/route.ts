@@ -151,8 +151,8 @@ export async function GET(
         bid_packages: packagesMap.get(recipient.bid_package_id) || null,
         subcontractors: recipient.subcontractor_id ? subcontractorsMap.get(recipient.subcontractor_id) || null : null,
         bids: recipient.bid_id ? [bidsMap.get(recipient.bid_id)].filter(Boolean) : [],
-        // Mark sender type: GC sent if resend_email_id exists and status is 'sent', otherwise subcontractor sent
-        isFromGC: !!(recipient.resend_email_id && recipient.status === 'sent'),
+        // Mark sender type: use is_from_gc field if available, otherwise infer from resend_email_id and status
+        isFromGC: recipient.is_from_gc !== undefined ? recipient.is_from_gc : !!(recipient.resend_email_id && recipient.status === 'sent'),
         // Use sent_at for GC messages, responded_at for subcontractor messages
         messageTimestamp: recipient.responded_at || recipient.sent_at || recipient.created_at
       }

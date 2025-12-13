@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { createClient } from '@supabase/supabase-js'
+import { Resend } from 'resend'
 import OpenAI from 'openai'
 
 // Use Node.js runtime for Supabase compatibility
@@ -12,6 +13,8 @@ export const fetchCache = 'force-no-store'
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request: NextRequest) {
   try {
@@ -375,12 +378,62 @@ async function handleInboundEmail(body: any) {
     return NextResponse.json({ error: 'No email data' }, { status: 200 }) // Return 200 to prevent retries
   }
   
+  // Extract email_id to fetch full email content from Resend API
+  const emailId = email.email_id || email.id
+  console.log('📧 Email ID from webhook:', emailId)
+  
   // Extract email fields - handle different possible structures
   const from = email.from || (typeof email.from === 'string' ? { email: email.from } : null)
   const to = email.to || email.recipients || []
   const subject = email.subject || ''
-  const html = email.html || email.body_html || ''
-  const text = email.text || email.body_text || email.body || ''
+  
+  // Try multiple ways to extract email content from webhook payload first
+  let html = email.html || 
+             email.body_html || 
+             email.body?.html || 
+             email.content?.html ||
+             email.message?.html ||
+             ''
+  let text = email.text || 
+             email.body_text || 
+             email.body?.text ||
+             email.content?.text ||
+             email.message?.text ||
+             email.body || 
+             email.content ||
+             email.message ||
+             ''
+  
+  // If no content in webhook payload, fetch from Resend API
+  if (!html && !text && emailId) {
+    console.log('📧 No content in webhook payload, fetching from Resend API...')
+    try {
+      // Fetch email from Resend API
+      const response = await fetch(`https://api.resend.com/emails/${emailId}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const emailData = await response.json()
+        console.log('✅ Fetched email from Resend API, keys:', Object.keys(emailData))
+        
+        // Extract content from API response
+        html = emailData.html || emailData.body?.html || emailData.content?.html || html
+        text = emailData.text || emailData.body?.text || emailData.content?.text || emailData.body || text
+        
+        console.log('📧 Content from API - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
+      } else {
+        const errorText = await response.text()
+        console.error('❌ Failed to fetch email from Resend API:', response.status, errorText)
+      }
+    } catch (fetchError: any) {
+      console.error('❌ Error fetching email from Resend API:', fetchError.message)
+    }
+  }
+  
   const headers = email.headers || {}
   const attachments = email.attachments || []
   
@@ -393,7 +446,10 @@ async function handleInboundEmail(body: any) {
     htmlLength: html.length,
     textLength: text.length,
     attachmentsCount: attachments.length,
-    headersKeys: Object.keys(headers)
+    headersKeys: Object.keys(headers),
+    emailKeys: Object.keys(email),
+    sampleText: text.substring(0, 100),
+    sampleHtml: html.substring(0, 100)
   })
   
   if (!from || (!from.email && typeof from !== 'string')) {
@@ -762,7 +818,31 @@ async function handleInboundEmail(body: any) {
   }
 
   // Prepare email content - use text if available, otherwise html, fallback to empty string
-  const emailContentText = text || (html ? html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '') || ''
+  let emailContentText = text || ''
+  
+  // If no text but we have HTML, extract text from HTML
+  if (!emailContentText && html) {
+    // Remove HTML tags and clean up whitespace
+    emailContentText = html
+      .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
+      .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
+      .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
+      .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+      .replace(/&amp;/g, '&') // Replace &amp; with &
+      .replace(/&lt;/g, '<') // Replace &lt; with <
+      .replace(/&gt;/g, '>') // Replace &gt; with >
+      .replace(/&quot;/g, '"') // Replace &quot; with "
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim()
+  }
+  
+  // If still no content, log a warning
+  if (!emailContentText) {
+    console.warn('⚠️ No email content extracted. Email keys:', Object.keys(email))
+    console.warn('⚠️ Full email object (first 1000 chars):', JSON.stringify(email).substring(0, 1000))
+  } else {
+    console.log('✅ Extracted email content length:', emailContentText.length, 'Preview:', emailContentText.substring(0, 200))
+  }
   
   // Handle bid submission vs question/reply differently
   if (isBidSubmission) {

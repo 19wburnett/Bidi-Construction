@@ -198,6 +198,20 @@ export async function POST(
       }
     }
     
+    // Extract text content from formatted email body for storage
+    const emailTextContent = formattedEmailBody
+      .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
+      .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
+      .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
+      .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+      .replace(/&amp;/g, '&') // Replace &amp; with &
+      .replace(/&lt;/g, '<') // Replace &lt; with <
+      .replace(/&gt;/g, '>') // Replace &gt; with >
+      .replace(/&quot;/g, '"') // Replace &quot; with "
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim()
+      .substring(0, 5000) // Limit to 5000 chars
+    
     const { data: newRecipient, error: insertError } = await supabase
       .from('bid_package_recipients')
       .insert({
@@ -210,7 +224,8 @@ export async function POST(
         sent_at: new Date().toISOString(),
         thread_id: threadId,
         parent_email_id: parentId,
-        response_text: responseText.trim() // Store the reply text for GC messages
+        response_text: emailTextContent, // Store the full email content (includes plan links if any)
+        is_from_gc: true // Mark as sent from GC
       })
       .select()
       .single()
