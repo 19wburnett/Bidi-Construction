@@ -112,7 +112,7 @@ export default function HomePage() {
         }`}>
           AI-Powered Estimating & Takeoff
           <span className="block bidi-orange-text">
-            Built for General Contractors
+            Built for Contractors
           </span>
         </h1>
         

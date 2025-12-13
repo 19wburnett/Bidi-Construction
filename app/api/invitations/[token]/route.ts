@@ -210,17 +210,50 @@ export async function POST(
       )
     }
 
-    // Update subscription status to active
-    const { error: subscriptionError } = await supabaseAdmin
-      .from('users')
-      .update({
-        subscription_status: 'active',
-        payment_type: 'subscription',
-      })
-      .eq('id', newUserId)
+    // Wait for user record to be created by database trigger, then update subscription status
+    let attempts = 0
+    let subscriptionUpdated = false
+    
+    while (attempts < 10) {
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('id', newUserId)
+        .single()
 
-    if (subscriptionError && subscriptionError.code !== 'PGRST116') {
-      console.warn('Failed to update subscription status for new user:', subscriptionError.message)
+      if (!userError && userData) {
+        // User record exists, update subscription status
+        const { error: subscriptionError } = await supabaseAdmin
+          .from('users')
+          .update({
+            subscription_status: 'active',
+            payment_type: 'subscription',
+          })
+          .eq('id', newUserId)
+
+        if (subscriptionError) {
+          console.error('Failed to update subscription status for new user:', subscriptionError.message)
+        } else {
+          subscriptionUpdated = true
+          console.log('Subscription status set to active for invited user:', newUserId)
+        }
+        break
+      }
+      
+      // If user doesn't exist yet, wait and retry
+      if (userError?.code === 'PGRST116') {
+        attempts++
+        await new Promise(resolve => setTimeout(resolve, 500))
+        continue
+      }
+      
+      // Other error, log and break
+      console.warn('Error checking for user record:', userError?.message)
+      break
+    }
+
+    if (!subscriptionUpdated) {
+      console.warn('User record not found after retries, subscription status may not have been updated')
     }
 
     if (invitation.jobs.length > 0) {

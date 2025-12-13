@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { X } from "lucide-react"
 
 interface DialogProps {
@@ -13,20 +14,30 @@ interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const Dialog = ({ open, onOpenChange, children }: DialogProps) => {
-  if (!open) return null
+  const [mounted, setMounted] = React.useState(false)
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ pointerEvents: 'auto' }}>
+  React.useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  if (!open || !mounted) return null
+
+  const dialogContent = (
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center" style={{ pointerEvents: 'auto' }}>
       <div
         className="fixed inset-0 bg-black/80"
         onClick={() => onOpenChange(false)}
         style={{ pointerEvents: 'auto' }}
       />
-      <div className="relative z-[10000] w-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="relative z-[100000] w-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
   )
+
+  // Use portal to render dialog at document.body level to avoid z-index/overflow issues
+  return createPortal(dialogContent, document.body)
 }
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(

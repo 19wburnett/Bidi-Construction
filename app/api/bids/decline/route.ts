@@ -15,13 +15,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { bidId, documents } = body
+    const { bidId, declineReason } = body
 
-    console.log('Accept bid request:', { bidId, documentsCount: documents?.length })
+    console.log('Decline bid request:', { bidId, declineReason })
 
     if (!bidId) {
       return NextResponse.json(
         { error: 'Bid ID is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!declineReason || !declineReason.trim()) {
+      return NextResponse.json(
+        { error: 'Decline reason is required' },
         { status: 400 }
       )
     }
@@ -99,16 +106,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Allow changing status even if already accepted/declined
-    // Update bid status to accepted
+    // Update bid status to declined
     const updateData: any = {
-      status: 'accepted',
-      accepted_at: new Date().toISOString()
+      status: 'declined',
+      declined_at: new Date().toISOString(),
+      decline_reason: declineReason.trim()
     }
     
-    // Clear declined fields if switching from declined
-    if (bid.status === 'declined') {
-      updateData.declined_at = null
-      updateData.decline_reason = null
+    // Clear accepted fields if switching from accepted
+    if (bid.status === 'accepted') {
+      updateData.accepted_at = null
     }
 
     const { error: updateError } = await supabase
@@ -117,45 +124,25 @@ export async function POST(request: NextRequest) {
       .eq('id', bidId)
 
     if (updateError) {
-      console.error('Error accepting bid:', updateError)
+      console.error('Error declining bid:', updateError)
       return NextResponse.json(
-        { error: 'Failed to accept bid' },
+        { error: 'Failed to decline bid' },
         { status: 500 }
       )
     }
 
-    // Upload documents if provided
-    if (documents && documents.length > 0) {
-      const documentRecords = documents.map((doc: any) => ({
-        bid_id: bidId,
-        job_id: jobId,
-        document_type: doc.type,
-        file_name: doc.fileName,
-        file_url: doc.fileUrl,
-        uploaded_by: user.id
-      }))
-
-      const { error: docsError } = await supabase
-        .from('accepted_bid_documents')
-        .insert(documentRecords)
-
-      if (docsError) {
-        console.error('Error uploading documents:', docsError)
-        // Don't fail the whole operation, just log the error
-      }
-    }
-
     return NextResponse.json({
       success: true,
-      message: 'Bid accepted successfully',
+      message: 'Bid declined successfully',
       bidId
     })
 
   } catch (error: any) {
-    console.error('Error in accept bid API:', error)
+    console.error('Error in decline bid API:', error)
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }
     )
   }
 }
+

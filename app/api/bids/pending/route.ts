@@ -15,9 +15,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { bidId, documents } = body
+    const { bidId } = body
 
-    console.log('Accept bid request:', { bidId, documentsCount: documents?.length })
+    console.log('Set bid to pending request:', { bidId })
 
     if (!bidId) {
       return NextResponse.json(
@@ -29,12 +29,10 @@ export async function POST(request: NextRequest) {
     // Fetch the bid to verify ownership and get job_id
     const { data: bid, error: bidError } = await supabase
       .from('bids')
-      .select('id, job_id, bid_package_id, status, subcontractors (name, email)')
+      .select('id, job_id, bid_package_id, status')
       .eq('id', bidId)
       .single()
     
-    console.log('Bid query result:', { bid, bidError, bidErrorCode: bidError?.code, bidErrorDetails: bidError?.details })
-
     if (bidError) {
       console.error('Error fetching bid:', bidError)
       return NextResponse.json(
@@ -98,17 +96,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Allow changing status even if already accepted/declined
-    // Update bid status to accepted
+    // Update bid status to pending and clear status-related fields
     const updateData: any = {
-      status: 'accepted',
-      accepted_at: new Date().toISOString()
-    }
-    
-    // Clear declined fields if switching from declined
-    if (bid.status === 'declined') {
-      updateData.declined_at = null
-      updateData.decline_reason = null
+      status: 'pending',
+      accepted_at: null,
+      declined_at: null,
+      decline_reason: null
     }
 
     const { error: updateError } = await supabase
@@ -117,45 +110,25 @@ export async function POST(request: NextRequest) {
       .eq('id', bidId)
 
     if (updateError) {
-      console.error('Error accepting bid:', updateError)
+      console.error('Error setting bid to pending:', updateError)
       return NextResponse.json(
-        { error: 'Failed to accept bid' },
+        { error: 'Failed to set bid to pending' },
         { status: 500 }
       )
     }
 
-    // Upload documents if provided
-    if (documents && documents.length > 0) {
-      const documentRecords = documents.map((doc: any) => ({
-        bid_id: bidId,
-        job_id: jobId,
-        document_type: doc.type,
-        file_name: doc.fileName,
-        file_url: doc.fileUrl,
-        uploaded_by: user.id
-      }))
-
-      const { error: docsError } = await supabase
-        .from('accepted_bid_documents')
-        .insert(documentRecords)
-
-      if (docsError) {
-        console.error('Error uploading documents:', docsError)
-        // Don't fail the whole operation, just log the error
-      }
-    }
-
     return NextResponse.json({
       success: true,
-      message: 'Bid accepted successfully',
+      message: 'Bid set to pending successfully',
       bidId
     })
 
   } catch (error: any) {
-    console.error('Error in accept bid API:', error)
+    console.error('Error in set bid to pending API:', error)
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }
     )
   }
 }
+

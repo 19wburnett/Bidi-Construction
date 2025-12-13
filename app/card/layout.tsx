@@ -1,19 +1,27 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Bidi Contracting - Contact Card',
-  description: 'Connect with Bidi Contracting - Download contact info and learn about our construction bidding platform.',
+  title: 'Contact Card - Bidi Contracting',
+  description: 'Connect with Bidi Contracting - Download contact info and learn about our construction bidding platform. Get our phone number, email, and website information.',
+  keywords: ['Bidi Contracting contact', 'construction platform contact', 'bid management contact', 'construction software support'],
+  alternates: {
+    canonical: '/card',
+  },
   openGraph: {
-    title: 'Bidi Contracting - Contact Card',
+    title: 'Contact Card - Bidi Contracting',
     description: 'Connect with Bidi Contracting - Download contact info and learn about our construction bidding platform.',
-    url: 'https://bidicontracting.com/card',
-    siteName: 'Bidi Contracting',
+    url: '/card',
+    siteName: 'Bidi',
     type: 'website',
   },
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1,
+  twitter: {
+    card: 'summary',
+    title: 'Contact Card - Bidi Contracting',
+    description: 'Connect with Bidi Contracting - Download contact info and learn about our construction bidding platform.',
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 };
 

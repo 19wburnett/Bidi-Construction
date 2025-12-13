@@ -52,7 +52,9 @@ import BidComparisonModal from '@/components/bid-comparison-modal'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidPackageViewModal from '@/components/bid-package-view-modal'
 import AddBidModal from '@/components/add-bid-modal'
+import BulkPdfUploadModal from '@/components/bulk-pdf-upload-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
+import BudgetSpreadsheet from '@/components/budget-spreadsheet'
 import ReportViewerModal from '@/components/report-viewer-modal'
 
 const PROJECT_TYPES = [
@@ -108,10 +110,10 @@ export default function JobDetailPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
-  const [showBidsModal, setShowBidsModal] = useState(false)
   const [showPackageModal, setShowPackageModal] = useState(false)
   const [showPackageViewModal, setShowPackageViewModal] = useState(false)
   const [showAddBidModal, setShowAddBidModal] = useState(false)
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false)
   const [showReportViewer, setShowReportViewer] = useState(false)
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -121,6 +123,10 @@ export default function JobDetailPage() {
   const [takeoffAnalysisId, setTakeoffAnalysisId] = useState<string | null>(null)
   const [loadingTakeoff, setLoadingTakeoff] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
+  const [acceptedBidsWithLineItems, setAcceptedBidsWithLineItems] = useState<any[]>([])
+  const [showBidComparisonModal, setShowBidComparisonModal] = useState(false)
+  const [selectedBidIdForModal, setSelectedBidIdForModal] = useState<string | null>(null)
+  const [bidModalRefreshTrigger, setBidModalRefreshTrigger] = useState(0)
   const isSavingTakeoffRef = useRef(false)
   
   // Plan editing state
@@ -254,6 +260,59 @@ export default function JobDetailPage() {
       console.error('Error loading job data:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Load accepted bids with line items when bids change
+  useEffect(() => {
+    if (bids.length > 0) {
+      loadAcceptedBidsWithLineItems(bids)
+    } else {
+      setAcceptedBidsWithLineItems([])
+    }
+  }, [bids])
+
+  async function loadAcceptedBidsWithLineItems(allBids: any[]) {
+    const acceptedBids = allBids.filter(bid => bid.status === 'accepted')
+    
+    if (acceptedBids.length === 0) {
+      setAcceptedBidsWithLineItems([])
+      return
+    }
+
+    try {
+      const bidIds = acceptedBids.map(b => b.id)
+      const { data: lineItems, error: lineItemsError } = await supabase
+        .from('bid_line_items')
+        .select('*')
+        .in('bid_id', bidIds)
+        .order('item_number', { ascending: true })
+
+      if (lineItemsError) {
+        console.error('Error loading bid line items:', lineItemsError)
+        setAcceptedBidsWithLineItems(acceptedBids.map(bid => ({ ...bid, bid_line_items: [] })))
+        return
+      }
+
+      // Group line items by bid_id
+      const itemsByBid: Record<string, any[]> = {}
+      lineItems?.forEach(item => {
+        if (!itemsByBid[item.bid_id]) {
+          itemsByBid[item.bid_id] = []
+        }
+        itemsByBid[item.bid_id].push(item)
+      })
+
+      // Enrich accepted bids with their line items
+      const enrichedBids = acceptedBids.map(bid => ({
+        ...bid,
+        bid_line_items: itemsByBid[bid.id] || []
+      }))
+
+      setAcceptedBidsWithLineItems(enrichedBids)
+    } catch (error) {
+      console.error('Error loading accepted bids with line items:', error)
+      setAcceptedBidsWithLineItems(acceptedBids.map(bid => ({ ...bid, bid_line_items: [] })))
     }
   }
 
@@ -983,11 +1042,12 @@ export default function JobDetailPage() {
           </motion.div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4 lg:w-[600px]">
+            <TabsList className="grid w-full grid-cols-5 lg:w-[750px]">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="plans">Plans</TabsTrigger>
               <TabsTrigger value="takeoff">Takeoff</TabsTrigger>
               <TabsTrigger value="bids">Bids</TabsTrigger>
+              <TabsTrigger value="budget">Budget</TabsTrigger>
             </TabsList>
 
             {/* Overview Tab */}
@@ -1531,65 +1591,36 @@ export default function JobDetailPage() {
                             View and manage bids from subcontractors
                           </CardDescription>
                         </div>
-                        <Button variant="outline" onClick={() => setShowAddBidModal(true)}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Manually Add Bid
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setShowBulkUploadModal(true)}>
+                            <Upload className="h-4 w-4 mr-2" />
+                            Upload PDFs
+                          </Button>
+                          <Button variant="outline" onClick={() => setShowAddBidModal(true)}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Manually Add Bid
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="p-0">
                       {bids.length === 0 ? (
-                        <div className="text-center py-12">
+                        <div className="text-center py-12 px-6">
                           <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                           <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
                           <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
                         </div>
                       ) : (
-                        <div className="space-y-3">
-                          {bids.map((bid) => {
-                            const subcontractor = (bid.subcontractors as any)
-                            const contact = (bid.gc_contacts as any)
-                            const bidPackage = (bid.bid_packages as any)
-                            return (
-                              <div 
-                                key={bid.id} 
-                                className="flex items-center justify-between p-4 border rounded-lg cursor-pointer hover:shadow-md hover:border-orange-200 transition-all"
-                                onClick={() => setShowBidsModal(true)}
-                              >
-                                <div className="flex-1">
-                                  <div className="flex items-center space-x-2 mb-1">
-                                    <span className="font-semibold">{subcontractor?.name || contact?.name || 'Unknown'}</span>
-                                    {subcontractor?.trade_category && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {subcontractor.trade_category}
-                                      </Badge>
-                                    )}
-                                    {!subcontractor?.trade_category && contact?.trade_category && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {contact.trade_category}
-                                      </Badge>
-                                    )}
-                                    {!subcontractor?.trade_category && !contact?.trade_category && bidPackage && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {bidPackage.trade_category}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  {bid.bid_amount && (
-                                    <p className="text-sm text-gray-600">${Number(bid.bid_amount).toLocaleString()}</p>
-                                  )}
-                                  {bid.timeline && (
-                                    <p className="text-xs text-gray-500 mt-1">Timeline: {bid.timeline}</p>
-                                  )}
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-200">
-                                    Click to view
-                                  </Badge>
-                                </div>
-                              </div>
-                            )
-                          })}
+                        <div className="h-[800px] overflow-hidden">
+                          {jobId && (
+                            <BidComparisonModal
+                              jobId={jobId}
+                              isOpen={true}
+                              onClose={() => {}}
+                              inline={true}
+                              refreshTrigger={bidModalRefreshTrigger}
+                            />
+                          )}
                         </div>
                       )}
                     </CardContent>
@@ -1701,6 +1732,47 @@ export default function JobDetailPage() {
                           </motion.div>
                         )}
                       </AnimatePresence>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </motion.div>
+            </TabsContent>
+
+            {/* Budget Tab */}
+            <TabsContent value="budget" className="space-y-6">
+              <motion.div
+                variants={staggerContainer}
+                initial="initial"
+                animate="animate"
+                className="space-y-6"
+              >
+                <motion.div variants={staggerItem}>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <DollarSign className="h-5 w-5 mr-2 text-orange-600" />
+                        Budget Overview
+                      </CardTitle>
+                      <CardDescription>
+                        View accepted bids organized by trade category and see what still needs bids
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <BudgetSpreadsheet
+                        acceptedBids={acceptedBidsWithLineItems}
+                        takeoffItems={aggregatedTakeoffItems}
+                        jobId={jobId}
+                        onBidClick={(bidId) => {
+                          setSelectedBidIdForModal(bidId)
+                          setShowBidComparisonModal(true)
+                        }}
+                        onViewBidsForTrade={(tradeCategory) => {
+                          // Open bid comparison modal - it will show all bids for the job
+                          // The user can filter by trade category in the modal
+                          setSelectedBidIdForModal(null)
+                          setShowBidComparisonModal(true)
+                        }}
+                      />
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -1888,14 +1960,6 @@ export default function JobDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Bid Comparison Modal */}
-      {jobId && (
-        <BidComparisonModal
-          jobId={jobId}
-          isOpen={showBidsModal}
-          onClose={() => setShowBidsModal(false)}
-        />
-      )}
 
       {/* Bid Package Creation Modal */}
       {jobId && selectedPlanId && (
@@ -1936,6 +2000,22 @@ export default function JobDetailPage() {
           onClose={() => setShowAddBidModal(false)}
           onBidAdded={() => {
             loadJobData()
+            // Refresh bid comparison modal if it's open
+            setBidModalRefreshTrigger(prev => prev + 1)
+          }}
+        />
+      )}
+
+      {/* Bulk PDF Upload Modal */}
+      {jobId && (
+        <BulkPdfUploadModal
+          jobId={jobId}
+          isOpen={showBulkUploadModal}
+          onClose={() => setShowBulkUploadModal(false)}
+          onBidsCreated={() => {
+            loadJobData()
+            // Refresh bid comparison modal if it's open
+            setBidModalRefreshTrigger(prev => prev + 1)
           }}
         />
       )}
@@ -1949,6 +2029,22 @@ export default function JobDetailPage() {
           setSelectedReport(null)
         }}
       />
+
+      {/* Bid Comparison Modal for Budget View */}
+      {jobId && (
+        <BidComparisonModal
+          jobId={jobId}
+          isOpen={showBidComparisonModal}
+          onClose={() => {
+            setShowBidComparisonModal(false)
+            setSelectedBidIdForModal(null)
+            // Reload job data to refresh accepted bids in budget view
+            loadJobData()
+          }}
+          initialBidId={selectedBidIdForModal}
+          refreshTrigger={bidModalRefreshTrigger}
+        />
+      )}
     </>
   )
 }

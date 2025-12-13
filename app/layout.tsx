@@ -19,8 +19,52 @@ const barlow = Barlow({
 })
 
 export const metadata: Metadata = {
-  title: 'Bidi (Beta) - Connect General Contractors with Subcontractors',
-  description: 'A marketplace connecting general contractors with qualified subcontractors for construction projects.',
+  title: {
+    default: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    template: '%s | Bidi',
+  },
+  description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
+  keywords: ['construction estimating', 'bid management', 'construction software', 'general contractors', 'subcontractors', 'AI estimating', 'construction takeoff', 'automated bidding'],
+  authors: [{ name: 'Bidi Contracting' }],
+  creator: 'Bidi Contracting',
+  publisher: 'Bidi Contracting',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'),
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: '/',
+    siteName: 'Bidi',
+    title: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
+    images: [
+      {
+        url: '/brand/Bidi%20Contracting%20Logo.svg',
+        width: 1200,
+        height: 630,
+        alt: 'Bidi Construction Platform',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    description: 'AI-powered construction estimating and automated bid management platform for General Contractors.',
+    images: ['/brand/Bidi%20Contracting%20Logo.svg'],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: [
       { url: '/brand/Bidi%20Contracting%20Logo.svg', type: 'image/svg+xml' },
