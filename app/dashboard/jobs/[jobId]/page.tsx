@@ -56,6 +56,7 @@ import BulkPdfUploadModal from '@/components/bulk-pdf-upload-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
 import BudgetSpreadsheet from '@/components/budget-spreadsheet'
 import ReportViewerModal from '@/components/report-viewer-modal'
+import JobTimeline from '@/components/job-timeline'
 
 const PROJECT_TYPES = [
   'Residential',
@@ -1122,6 +1123,17 @@ export default function JobDetailPage() {
                         </div>
                       </CardContent>
                     </Card>
+                  </motion.div>
+
+                  {/* Project Timeline */}
+                  <motion.div variants={staggerItem}>
+                    <JobTimeline 
+                      jobId={jobId} 
+                      canEdit={jobRole === 'owner'}
+                      onUpdate={() => {
+                        // Refresh any relevant data if needed
+                      }}
+                    />
                   </motion.div>
                 </div>
 

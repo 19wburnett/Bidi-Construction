@@ -72,13 +72,13 @@ export async function GET(
       return NextResponse.json({ recipients: [] })
     }
 
-    // Get all recipients for all bid packages in this job
-    // First, get recipients without joins to test
+    // Get all recipients for all bid packages in this job (including thread messages)
+    // Order by created_at to get chronological order
     const { data: recipients, error: recipientsError } = await supabase
       .from('bid_package_recipients')
       .select('*')
       .in('bid_package_id', packageIds)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: true }) // Chronological order for threads
 
     if (recipientsError) {
       console.error('Error fetching recipients:', recipientsError)
@@ -133,15 +133,74 @@ export async function GET(
       }
     }
 
-    // Combine the data
-    const enrichedRecipients = recipients.map(recipient => ({
-      ...recipient,
-      bid_packages: packagesMap.get(recipient.bid_package_id) || null,
-      subcontractors: recipient.subcontractor_id ? subcontractorsMap.get(recipient.subcontractor_id) || null : null,
-      bids: recipient.bid_id ? [bidsMap.get(recipient.bid_id)].filter(Boolean) : []
-    }))
+    // Build thread structure - group by thread_id
+    const threadsMap = new Map<string, any[]>()
+    
+    // First, enrich all recipients with related data
+    const enrichedRecipients = recipients.map(recipient => {
+      const enriched = {
+        ...recipient,
+        bid_packages: packagesMap.get(recipient.bid_package_id) || null,
+        subcontractors: recipient.subcontractor_id ? subcontractorsMap.get(recipient.subcontractor_id) || null : null,
+        bids: recipient.bid_id ? [bidsMap.get(recipient.bid_id)].filter(Boolean) : [],
+        // Mark sender type: GC sent if resend_email_id exists and status is 'sent', otherwise subcontractor sent
+        isFromGC: !!(recipient.resend_email_id && recipient.status === 'sent'),
+        // Use sent_at for GC messages, responded_at for subcontractor messages
+        messageTimestamp: recipient.responded_at || recipient.sent_at || recipient.created_at
+      }
+      
+      // Group by thread_id (use original recipient ID as thread key if no thread_id)
+      const threadKey = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+      
+      if (!threadsMap.has(threadKey)) {
+        threadsMap.set(threadKey, [])
+      }
+      threadsMap.get(threadKey)!.push(enriched)
+      
+      return enriched
+    })
 
-    return NextResponse.json({ recipients: enrichedRecipients })
+    // Build thread structure - for each thread, get all messages
+    const threadStructures: any[] = []
+    
+    threadsMap.forEach((messages, threadId) => {
+      // Sort messages by timestamp
+      messages.sort((a, b) => {
+        const timeA = new Date(a.messageTimestamp || a.created_at).getTime()
+        const timeB = new Date(b.messageTimestamp || b.created_at).getTime()
+        return timeA - timeB
+      })
+      
+      // Find the original email (parent_email_id is null)
+      const originalEmail = messages.find(m => m.parent_email_id === null)
+      
+      if (originalEmail) {
+        // Add thread with all messages
+        threadStructures.push({
+          thread_id: threadId,
+          original_email: originalEmail,
+          messages: messages,
+          latest_message: messages[messages.length - 1],
+          message_count: messages.length
+        })
+      } else {
+        // No original found, use first message as original
+        threadStructures.push({
+          thread_id: threadId,
+          original_email: messages[0],
+          messages: messages,
+          latest_message: messages[messages.length - 1],
+          message_count: messages.length
+        })
+      }
+    })
+
+    // Return both flat list (for backward compatibility) and thread structure
+    // The UI can use the flat list and build threads client-side, or use the thread structure
+    return NextResponse.json({ 
+      recipients: enrichedRecipients,
+      threads: threadStructures
+    })
 
   } catch (error: any) {
     console.error('Error fetching email statuses:', error)

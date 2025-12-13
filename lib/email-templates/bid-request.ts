@@ -125,8 +125,11 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
       <!-- View Plans Button -->
       <div style="text-align: center; margin: 32px 0;">
         <a href="${planLink}" class="button" style="${EMAIL_STYLES.buttonPrimary}">
-          📐 View Project Plans
+          📐 View & Download All Project Plans
         </a>
+        <p style="font-size: 13px; color: #6B7280; margin-top: 8px;">
+          Access all plans, drawings, and documents for this project
+        </p>
       </div>
     ` : ''}
 

@@ -138,26 +138,63 @@ export async function GET(request: NextRequest) {
 
         console.log(`📧 Sending reminder #${currentReminderCount + 1} to ${recipient.subcontractor_email}`)
 
-        // Generate signed URL for plans if possible
+        // Generate job share link (allows viewing all plans for the job)
         let planLink: string | null = null
         const bidPackageId = recipient.bid_package_id
+        const jobId = recipient.bid_packages.jobs.id
         
-        // Try to get plan link from the bid package
-        const { data: planData } = await supabase
-          .from('plans')
-          .select('id, file_path')
-          .eq('job_id', recipient.bid_packages.jobs.id)
-          .limit(1)
-          .single()
+        try {
+          // Check if a job share already exists
+          const { data: existingShare } = await supabase
+            .from('job_shares')
+            .select('*')
+            .eq('job_id', jobId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
 
-        if (planData?.file_path) {
-          const { data: signedUrlData } = await supabase.storage
-            .from('plans')
-            .createSignedUrl(planData.file_path, 30 * 24 * 60 * 60) // 30 days
-          
-          if (signedUrlData?.signedUrl) {
-            planLink = signedUrlData.signedUrl
+          let shareToken: string
+          let isNewShare = false
+
+          if (existingShare && (!existingShare.expires_at || new Date(existingShare.expires_at) > new Date())) {
+            // Use existing non-expired share
+            shareToken = existingShare.share_token
+          } else {
+            // Create new job share
+            shareToken = Math.random().toString(36).substring(2) + Date.now().toString(36)
+            const expiresAt = new Date()
+            expiresAt.setDate(expiresAt.getDate() + 30) // 30 days
+
+            // Get job owner
+            const { data: jobData } = await supabase
+              .from('jobs')
+              .select('user_id')
+              .eq('id', jobId)
+              .single()
+
+            const { error: shareError } = await supabase
+              .from('job_shares')
+              .insert({
+                job_id: jobId,
+                share_token: shareToken,
+                created_by: jobData?.user_id,
+                expires_at: expiresAt.toISOString()
+              })
+
+            if (shareError) {
+              console.error('❌ Error creating job share:', shareError)
+            } else {
+              isNewShare = true
+            }
           }
+
+          // Construct share URL
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin
+          planLink = `${baseUrl}/share/jobs/${shareToken}`
+          
+          console.log(`🔗 Generated job share link: ${planLink} (${isNewShare ? 'new' : 'existing'})`)
+        } catch (error) {
+          console.error('❌ Error generating job share link:', error)
         }
 
         // Generate reminder email

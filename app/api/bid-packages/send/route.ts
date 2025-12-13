@@ -144,22 +144,55 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate signed URL for plan file
+    // Generate job share link (allows viewing all plans for the job)
     let planLink: string | null = null
 
     try {
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from('plans')
-        .createSignedUrl(plan.file_path, 30 * 24 * 60 * 60) // 30 days
-      
-      if (signedUrlError) {
-        console.error('❌ Error generating signed URL:', signedUrlError)
-      } else if (signedUrlData) {
-        planLink = signedUrlData.signedUrl
-        console.log(`🔗 Generated signed URL for plans: ${planLink}`)
+      // Check if a job share already exists
+      const { data: existingShare } = await supabase
+        .from('job_shares')
+        .select('*')
+        .eq('job_id', bidPackage.jobs.id)
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      let shareToken: string
+      let isNewShare = false
+
+      if (existingShare && (!existingShare.expires_at || new Date(existingShare.expires_at) > new Date())) {
+        // Use existing non-expired share
+        shareToken = existingShare.share_token
+      } else {
+        // Create new job share
+        shareToken = Math.random().toString(36).substring(2) + Date.now().toString(36)
+        const expiresAt = new Date()
+        expiresAt.setDate(expiresAt.getDate() + 30) // 30 days
+
+        const { error: shareError } = await supabase
+          .from('job_shares')
+          .insert({
+            job_id: bidPackage.jobs.id,
+            share_token: shareToken,
+            created_by: user.id,
+            expires_at: expiresAt.toISOString()
+          })
+
+        if (shareError) {
+          console.error('❌ Error creating job share:', shareError)
+        } else {
+          isNewShare = true
+        }
       }
+
+      // Construct share URL
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin
+      planLink = `${baseUrl}/share/jobs/${shareToken}`
+      
+      console.log(`🔗 Generated job share link: ${planLink} (${isNewShare ? 'new' : 'existing'})`)
     } catch (error) {
-      console.error('❌ Error generating plan link:', error)
+      console.error('❌ Error generating job share link:', error)
     }
 
     // Generate signed URLs for reports
@@ -237,6 +270,9 @@ export async function POST(request: NextRequest) {
         const [source, id] = subId.includes(':') ? subId.split(':') : ['gc', subId]
         const subcontractorDbId = source === 'gc' ? null : id
 
+        // Create thread_id for this recipient
+        const threadId = `thread-${bidPackageId}-${sub.email}`
+        
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
           .insert({
@@ -246,7 +282,9 @@ export async function POST(request: NextRequest) {
             subcontractor_name: sub.name,
             resend_email_id: resendData?.id,
             status: 'sent',
-            sent_at: new Date().toISOString()
+            sent_at: new Date().toISOString(),
+            thread_id: threadId,
+            parent_email_id: null
           })
           .select()
           .single()
@@ -331,7 +369,7 @@ function generateCustomTemplateBody(
   
   // Replace plan link
   if (planLink) {
-    htmlBody = htmlBody.replace(/{planLink}/g, `<a href="${planLink}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View Plans</a>`)
+    htmlBody = htmlBody.replace(/{planLink}/g, `<a href="${planLink}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View & Download All Project Plans</a>`)
   } else {
     htmlBody = htmlBody.replace(/{planLink}/g, 'Plans will be provided separately')
   }

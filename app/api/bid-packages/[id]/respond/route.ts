@@ -179,9 +179,26 @@ export async function POST(
     }
 
     // Create new recipient record for the response (to track thread)
-    const threadId = recipient.thread_id || `thread-${bidPackageId}-${recipient.subcontractor_email}`
+    // Use the original recipient's thread_id, or find the original email in the thread
+    let threadId = recipient.thread_id || `thread-${bidPackageId}-${recipient.subcontractor_email}`
+    let parentId = recipient.id
     
-    await supabase
+    // If this recipient is a reply, find the original email to get the correct thread_id
+    if (recipient.parent_email_id) {
+      const { data: originalRecipient } = await supabase
+        .from('bid_package_recipients')
+        .select('thread_id, id')
+        .eq('id', recipient.parent_email_id)
+        .maybeSingle()
+      
+      if (originalRecipient) {
+        threadId = originalRecipient.thread_id || threadId
+        // Use the latest message in the thread as parent (the recipient passed in)
+        parentId = recipient.id
+      }
+    }
+    
+    const { data: newRecipient, error: insertError } = await supabase
       .from('bid_package_recipients')
       .insert({
         bid_package_id: bidPackageId,
@@ -192,19 +209,35 @@ export async function POST(
         status: 'sent',
         sent_at: new Date().toISOString(),
         thread_id: threadId,
-        parent_email_id: recipient.id
+        parent_email_id: parentId,
+        response_text: responseText.trim() // Store the reply text for GC messages
       })
-
-    // Ensure thread exists
-    await supabase
-      .from('email_threads')
-      .upsert({
-        bid_package_id: bidPackageId,
-        subcontractor_email: recipient.subcontractor_email,
-        thread_id: threadId
-      }, {
-        onConflict: 'thread_id'
-      })
+      .select()
+      .single()
+    
+    if (insertError) {
+      console.error('Error creating reply recipient:', insertError)
+      return NextResponse.json(
+        { error: 'Failed to create reply record', details: insertError.message },
+        { status: 500 }
+      )
+    }
+    
+    // Try to ensure thread exists in email_threads table (if it exists)
+    try {
+      await supabase
+        .from('email_threads')
+        .upsert({
+          bid_package_id: bidPackageId,
+          subcontractor_email: recipient.subcontractor_email,
+          thread_id: threadId
+        }, {
+          onConflict: 'thread_id'
+        })
+    } catch (error) {
+      // Table might not exist, that's okay - we track threads via thread_id in bid_package_recipients
+      console.log('Note: email_threads table may not exist, continuing without it')
+    }
 
     return NextResponse.json({
       success: true,

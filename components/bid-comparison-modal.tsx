@@ -131,6 +131,7 @@ export default function BidComparisonModal({
   const [error, setError] = useState('')
   const [emailStatuses, setEmailStatuses] = useState<Record<string, any>>({})
   const [allRecipients, setAllRecipients] = useState<any[]>([])
+  const [emailThreads, setEmailThreads] = useState<Record<string, any>>({})
   const [activeTab, setActiveTab] = useState<'details' | 'comparison'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
@@ -228,7 +229,41 @@ export default function BidComparisonModal({
         if (statusResponse.ok) {
           const statusData = await statusResponse.json()
           if (statusData.recipients && Array.isArray(statusData.recipients)) {
-            setAllRecipients(statusData.recipients)
+            // Use threads if available, otherwise use flat recipients list
+            if (statusData.threads && Array.isArray(statusData.threads)) {
+              // Build recipients list from threads (use latest message for each thread)
+              const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+              setAllRecipients(threadRecipients)
+              
+              // Store full thread data for display
+              const threadsMap: Record<string, any> = {}
+              statusData.threads.forEach((thread: any) => {
+                threadsMap[thread.thread_id] = thread
+              })
+              setEmailThreads(threadsMap)
+            } else {
+              setAllRecipients(statusData.recipients)
+              // Build threads from recipients if threads not provided
+              const threadsMap: Record<string, any> = {}
+              statusData.recipients.forEach((recipient: any) => {
+                const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                if (!threadsMap[threadId]) {
+                  threadsMap[threadId] = {
+                    thread_id: threadId,
+                    original_email: recipient,
+                    messages: [recipient],
+                    latest_message: recipient,
+                    message_count: 1
+                  }
+                } else {
+                  threadsMap[threadId].messages.push(recipient)
+                  threadsMap[threadId].latest_message = recipient
+                  threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                }
+              })
+              setEmailThreads(threadsMap)
+            }
+            
             const statusMap: Record<string, any> = {}
             statusData.recipients.forEach((recipient: any) => {
               statusMap[recipient.subcontractor_email] = recipient
@@ -1185,21 +1220,61 @@ export default function BidComparisonModal({
                         </Card>
                       </div>
 
-                      {/* Response/Thread Content */}
+                      {/* Thread Content - Display all messages chronologically */}
                       <div className="space-y-4">
-                        {selectedEmailRecipient.response_text && (
-                          <Card className="border-orange-200 bg-orange-50">
-                            <CardHeader>
-                              <CardTitle className="text-base text-orange-900">Response from Subcontractor</CardTitle>
-                              <CardDescription className="text-orange-700">
-                                Received {new Date(selectedEmailRecipient.responded_at).toLocaleString()}
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                              <p className="whitespace-pre-wrap text-gray-800">{selectedEmailRecipient.response_text}</p>
-                            </CardContent>
-                          </Card>
-                        )}
+                        {(() => {
+                          // Get thread for this recipient
+                          const threadId = selectedEmailRecipient.thread_id || 
+                            `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                          const thread = emailThreads[threadId]
+                          const threadMessages = thread?.messages || [selectedEmailRecipient]
+                          
+                          // Sort messages by timestamp
+                          const sortedMessages = [...threadMessages].sort((a, b) => {
+                            const timeA = new Date(a.messageTimestamp || a.responded_at || a.sent_at || a.created_at).getTime()
+                            const timeB = new Date(b.messageTimestamp || b.responded_at || b.sent_at || b.created_at).getTime()
+                            return timeA - timeB
+                          })
+                          
+                          if (sortedMessages.length === 0) {
+                            return (
+                              <Card className="border-gray-200 bg-gray-50">
+                                <CardContent className="p-4">
+                                  <p className="text-gray-500 text-sm">No messages in this thread yet.</p>
+                                </CardContent>
+                              </Card>
+                            )
+                          }
+                          
+                          return sortedMessages.map((message: any, index: number) => {
+                            const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
+                            const messageContent = message.response_text || message.notes || ''
+                            const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            return (
+                              <Card 
+                                key={message.id || `message-${index}`}
+                                className={isFromGC ? 'border-blue-200 bg-blue-50' : 'border-orange-200 bg-orange-50'}
+                              >
+                                <CardHeader className="pb-2">
+                                  <div className="flex items-center justify-between">
+                                    <CardTitle className={`text-base ${isFromGC ? 'text-blue-900' : 'text-orange-900'}`}>
+                                      {isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')}
+                                    </CardTitle>
+                                    <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
+                                      {new Date(messageTime).toLocaleString()}
+                                    </CardDescription>
+                                  </div>
+                                </CardHeader>
+                                <CardContent>
+                                  <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
+                                    {messageContent || (isFromGC ? 'Email sent' : 'No message content')}
+                                  </p>
+                                </CardContent>
+                              </Card>
+                            )
+                          })
+                        })()}
 
                         {/* Reply Action */}
                         <Card>
@@ -1253,8 +1328,62 @@ export default function BidComparisonModal({
                                             await loadData()
                                             setShowEmailResponseForm(false)
                                             setResponseText('')
-                                            const updated = allRecipients.find(r => r.id === selectedEmailRecipient.id)
-                                            if (updated) setSelectedEmailRecipient(updated)
+                                            // Reload email statuses to get updated threads
+                                            try {
+                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                              if (statusResponse.ok) {
+                                                const statusData = await statusResponse.json()
+                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                    setAllRecipients(threadRecipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.threads.forEach((thread: any) => {
+                                                      threadsMap[thread.thread_id] = thread
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                    
+                                                    // Update selected recipient to show latest thread
+                                                    const threadId = selectedEmailRecipient.thread_id || 
+                                                      `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                                                    const updatedThread = threadsMap[threadId]
+                                                    if (updatedThread && updatedThread.latest_message) {
+                                                      setSelectedEmailRecipient(updatedThread.latest_message)
+                                                    }
+                                                  } else {
+                                                    setAllRecipients(statusData.recipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.recipients.forEach((recipient: any) => {
+                                                      const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                                                      if (!threadsMap[threadId]) {
+                                                        threadsMap[threadId] = {
+                                                          thread_id: threadId,
+                                                          original_email: recipient,
+                                                          messages: [recipient],
+                                                          latest_message: recipient,
+                                                          message_count: 1
+                                                        }
+                                                      } else {
+                                                        threadsMap[threadId].messages.push(recipient)
+                                                        threadsMap[threadId].latest_message = recipient
+                                                        threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                                                      }
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                    
+                                                    // Update selected recipient
+                                                    const updated = statusData.recipients.find((r: any) => 
+                                                      r.thread_id === selectedEmailRecipient.thread_id ||
+                                                      (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
+                                                       r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
+                                                    )
+                                                    if (updated) setSelectedEmailRecipient(updated)
+                                                  }
+                                                }
+                                              }
+                                            } catch (e) {
+                                              console.error('Error reloading email threads:', e)
+                                            }
                                           } else {
                                             const err = await res.json()
                                             setError(err.error || 'Failed to send')
@@ -2704,21 +2833,61 @@ export default function BidComparisonModal({
                         </Card>
                       </div>
 
-                      {/* Response/Thread Content */}
+                      {/* Thread Content - Display all messages chronologically */}
                       <div className="space-y-4">
-                        {selectedEmailRecipient.response_text && (
-                          <Card className="border-orange-200 bg-orange-50">
-                            <CardHeader>
-                              <CardTitle className="text-base text-orange-900">Response from Subcontractor</CardTitle>
-                              <CardDescription className="text-orange-700">
-                                Received {new Date(selectedEmailRecipient.responded_at).toLocaleString()}
-                              </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                              <p className="whitespace-pre-wrap text-gray-800">{selectedEmailRecipient.response_text}</p>
-                            </CardContent>
-                          </Card>
-                        )}
+                        {(() => {
+                          // Get thread for this recipient
+                          const threadId = selectedEmailRecipient.thread_id || 
+                            `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                          const thread = emailThreads[threadId]
+                          const threadMessages = thread?.messages || [selectedEmailRecipient]
+                          
+                          // Sort messages by timestamp
+                          const sortedMessages = [...threadMessages].sort((a, b) => {
+                            const timeA = new Date(a.messageTimestamp || a.responded_at || a.sent_at || a.created_at).getTime()
+                            const timeB = new Date(b.messageTimestamp || b.responded_at || b.sent_at || b.created_at).getTime()
+                            return timeA - timeB
+                          })
+                          
+                          if (sortedMessages.length === 0) {
+                            return (
+                              <Card className="border-gray-200 bg-gray-50">
+                                <CardContent className="p-4">
+                                  <p className="text-gray-500 text-sm">No messages in this thread yet.</p>
+                                </CardContent>
+                              </Card>
+                            )
+                          }
+                          
+                          return sortedMessages.map((message: any, index: number) => {
+                            const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
+                            const messageContent = message.response_text || message.notes || ''
+                            const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            return (
+                              <Card 
+                                key={message.id || `message-${index}`}
+                                className={isFromGC ? 'border-blue-200 bg-blue-50' : 'border-orange-200 bg-orange-50'}
+                              >
+                                <CardHeader className="pb-2">
+                                  <div className="flex items-center justify-between">
+                                    <CardTitle className={`text-base ${isFromGC ? 'text-blue-900' : 'text-orange-900'}`}>
+                                      {isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')}
+                                    </CardTitle>
+                                    <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
+                                      {new Date(messageTime).toLocaleString()}
+                                    </CardDescription>
+                                  </div>
+                                </CardHeader>
+                                <CardContent>
+                                  <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
+                                    {messageContent || (isFromGC ? 'Email sent' : 'No message content')}
+                                  </p>
+                                </CardContent>
+                              </Card>
+                            )
+                          })
+                        })()}
 
                         {/* Reply Action */}
                         <Card>
@@ -2772,8 +2941,62 @@ export default function BidComparisonModal({
                                             await loadData()
                                             setShowEmailResponseForm(false)
                                             setResponseText('')
-                                            const updated = allRecipients.find(r => r.id === selectedEmailRecipient.id)
-                                            if (updated) setSelectedEmailRecipient(updated)
+                                            // Reload email statuses to get updated threads
+                                            try {
+                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                              if (statusResponse.ok) {
+                                                const statusData = await statusResponse.json()
+                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                    setAllRecipients(threadRecipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.threads.forEach((thread: any) => {
+                                                      threadsMap[thread.thread_id] = thread
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                    
+                                                    // Update selected recipient to show latest thread
+                                                    const threadId = selectedEmailRecipient.thread_id || 
+                                                      `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                                                    const updatedThread = threadsMap[threadId]
+                                                    if (updatedThread && updatedThread.latest_message) {
+                                                      setSelectedEmailRecipient(updatedThread.latest_message)
+                                                    }
+                                                  } else {
+                                                    setAllRecipients(statusData.recipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.recipients.forEach((recipient: any) => {
+                                                      const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                                                      if (!threadsMap[threadId]) {
+                                                        threadsMap[threadId] = {
+                                                          thread_id: threadId,
+                                                          original_email: recipient,
+                                                          messages: [recipient],
+                                                          latest_message: recipient,
+                                                          message_count: 1
+                                                        }
+                                                      } else {
+                                                        threadsMap[threadId].messages.push(recipient)
+                                                        threadsMap[threadId].latest_message = recipient
+                                                        threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                                                      }
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                    
+                                                    // Update selected recipient
+                                                    const updated = statusData.recipients.find((r: any) => 
+                                                      r.thread_id === selectedEmailRecipient.thread_id ||
+                                                      (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
+                                                       r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
+                                                    )
+                                                    if (updated) setSelectedEmailRecipient(updated)
+                                                  }
+                                                }
+                                              }
+                                            } catch (e) {
+                                              console.error('Error reloading email threads:', e)
+                                            }
                                           } else {
                                             const err = await res.json()
                                             setError(err.error || 'Failed to send')
