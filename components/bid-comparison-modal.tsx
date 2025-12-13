@@ -229,7 +229,7 @@ export default function BidComparisonModal({
               console.log('📧 Polling: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
               
               // Update selected recipient if viewing a thread (use functional update to get current value)
-              setSelectedEmailRecipient((current) => {
+              setSelectedEmailRecipient((current: any | null) => {
                 if (!current) return current
                 const threadId = current.thread_id || 
                   `thread-${current.bid_package_id || current.bid_packages?.id}-${current.subcontractor_email}`
