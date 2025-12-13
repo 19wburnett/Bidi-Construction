@@ -524,8 +524,71 @@ async function handleInboundEmail(body: any) {
   // Detect clarifying questions
   const clarifyingQuestions = await detectClarifyingQuestions(emailContent)
 
+  // Helper function to determine subcontractor name from multiple sources
+  async function determineSubcontractorName(): Promise<string> {
+    // 1. Check original recipient record (best source - name used when email was sent)
+    const { data: originalRecipient } = await supabase
+      .from('bid_package_recipients')
+      .select('subcontractor_name')
+      .eq('bid_package_id', bidPackageId)
+      .eq('subcontractor_email', fromEmail)
+      .is('parent_email_id', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    
+    if (originalRecipient?.subcontractor_name && originalRecipient.subcontractor_name !== 'Unknown') {
+      console.log('📧 Using name from original recipient:', originalRecipient.subcontractor_name)
+      return originalRecipient.subcontractor_name
+    }
+    
+    // 2. Check existing subcontractor record
+    const { data: existingSub } = await supabase
+      .from('subcontractors')
+      .select('name')
+      .eq('email', fromEmail)
+      .maybeSingle()
+    
+    if (existingSub?.name && existingSub.name !== 'Unknown') {
+      console.log('📧 Using name from subcontractor record:', existingSub.name)
+      return existingSub.name
+    }
+    
+    // 3. Check GC contacts (need job owner's user_id)
+    if (bidPackage.jobs?.user_id) {
+      const { data: gcContact } = await supabase
+        .from('gc_contacts')
+        .select('name')
+        .eq('gc_id', bidPackage.jobs.user_id)
+        .eq('email', fromEmail)
+        .maybeSingle()
+      
+      if (gcContact?.name) {
+        console.log('📧 Using name from GC contact:', gcContact.name)
+        return gcContact.name
+      }
+    }
+    
+    // 4. Try email headers (from.name)
+    if (typeof from === 'object' && (from as any).name) {
+      console.log('📧 Using name from email header:', (from as any).name)
+      return (from as any).name
+    }
+    
+    // 5. Try AI extraction
+    if (bidData.companyName) {
+      console.log('📧 Using name from AI extraction:', bidData.companyName)
+      return bidData.companyName
+    }
+    
+    // 6. Fallback to 'Unknown'
+    console.log('📧 No name found, using Unknown')
+    return 'Unknown'
+  }
+
   // Find or create subcontractor record
   let subcontractorId: string | null = null
+  const subcontractorName = await determineSubcontractorName()
   
   // First, try to find existing subcontractor by email
   const { data: existingSub } = await supabase
@@ -541,7 +604,7 @@ async function handleInboundEmail(body: any) {
     await supabase
       .from('subcontractors')
       .update({
-        name: bidData.companyName || existingSub.name || (from as any).name || 'Unknown',
+        name: subcontractorName !== 'Unknown' ? subcontractorName : existingSub.name,
         phone: bidData.phone || null,
         website_url: bidData.website || null,
       })
@@ -563,7 +626,7 @@ async function handleInboundEmail(body: any) {
       .from('subcontractors')
       .insert({
         email: fromEmail,
-        name: bidData.companyName || (typeof from === 'object' ? (from as any).name : null) || 'Unknown',
+        name: subcontractorName,
         trade_category: bidPackage.trade_category,
         location: bidPackage.jobs.location,
         phone: bidData.phone || null,
@@ -806,7 +869,7 @@ async function handleInboundEmail(body: any) {
           bid_package_id: bidPackageId,
           subcontractor_id: subcontractorId,
           subcontractor_email: fromEmail,
-          subcontractor_name: bidData.companyName || (typeof from === 'object' ? (from as any).name : null) || 'Unknown',
+          subcontractor_name: subcontractorName,
           status: 'responded',
           responded_at: new Date().toISOString(),
           response_text: emailContentText.substring(0, 5000),
@@ -858,7 +921,7 @@ async function handleInboundEmail(body: any) {
             bid_package_id: bidPackageId,
             subcontractor_id: subcontractorId,
             subcontractor_email: fromEmail,
-            subcontractor_name: bidData.companyName || (typeof from === 'object' ? (from as any).name : null) || 'Unknown',
+            subcontractor_name: subcontractorName,
             status: 'responded',
             responded_at: new Date().toISOString(),
             response_text: emailContentText.substring(0, 5000),
@@ -893,7 +956,7 @@ async function handleInboundEmail(body: any) {
             bid_package_id: bidPackageId,
             subcontractor_id: subcontractorId,
             subcontractor_email: fromEmail,
-            subcontractor_name: bidData.companyName || (typeof from === 'object' ? (from as any).name : null) || 'Unknown',
+            subcontractor_name: subcontractorName,
             status: 'responded',
             responded_at: new Date().toISOString(),
             response_text: emailContentText.substring(0, 5000),
@@ -924,7 +987,7 @@ async function handleInboundEmail(body: any) {
           bid_package_id: bidPackageId,
           subcontractor_id: subcontractorId,
           subcontractor_email: fromEmail,
-          subcontractor_name: bidData.companyName || (typeof from === 'object' ? (from as any).name : null) || 'Unknown',
+          subcontractor_name: subcontractorName,
           status: 'responded',
           responded_at: new Date().toISOString(),
           response_text: emailContentText.substring(0, 5000),

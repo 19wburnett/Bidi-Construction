@@ -1288,16 +1288,24 @@ export default function BidComparisonModal({
                                     </div>
                                   )}
                                   <div className="flex items-center justify-between mt-2">
-                                    <Badge variant="outline" className={`
-                                      text-[10px] px-1.5 py-0 h-5 capitalize border-0
-                                      ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                                        recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                                        recipient.status === 'opened' ? 'bg-purple-100 text-purple-700' :
-                                        recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
-                                        'bg-gray-100 text-gray-600'}
-                                    `}>
-                                      {recipient.status}
-                                    </Badge>
+                                    <div className="flex items-center gap-1.5">
+                                      <Badge variant="outline" className={`
+                                        text-[10px] px-1.5 py-0 h-5 capitalize border-0
+                                        ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                          recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                          recipient.status === 'opened' ? 'bg-purple-100 text-purple-700 border-purple-300' :
+                                          recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
+                                          'bg-gray-100 text-gray-600'}
+                                      `}>
+                                        {recipient.status === 'opened' && <Eye className="h-2.5 w-2.5 mr-1" />}
+                                        {recipient.status}
+                                      </Badge>
+                                      {recipient.status === 'opened' && !recipient.response_text && (
+                                        <span className="text-[9px] text-purple-600 font-medium" title="Email opened but not yet responded">
+                                          Viewed
+                                        </span>
+                                      )}
+                                    </div>
                                     {recipient.bids?.length > 0 && (
                                       <Badge className="text-[10px] h-5 bg-green-600 px-1.5">Bid</Badge>
                                     )}
@@ -2913,16 +2921,24 @@ export default function BidComparisonModal({
                                     </div>
                                   )}
                                   <div className="flex items-center justify-between mt-2">
-                                    <Badge variant="outline" className={`
-                                      text-[10px] px-1.5 py-0 h-5 capitalize border-0
-                                      ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                                        recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                                        recipient.status === 'opened' ? 'bg-purple-100 text-purple-700' :
-                                        recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
-                                        'bg-gray-100 text-gray-600'}
-                                    `}>
-                                      {recipient.status}
-                                    </Badge>
+                                    <div className="flex items-center gap-1.5">
+                                      <Badge variant="outline" className={`
+                                        text-[10px] px-1.5 py-0 h-5 capitalize border-0
+                                        ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                          recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                          recipient.status === 'opened' ? 'bg-purple-100 text-purple-700 border-purple-300' :
+                                          recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
+                                          'bg-gray-100 text-gray-600'}
+                                      `}>
+                                        {recipient.status === 'opened' && <Eye className="h-2.5 w-2.5 mr-1" />}
+                                        {recipient.status}
+                                      </Badge>
+                                      {recipient.status === 'opened' && !recipient.response_text && (
+                                        <span className="text-[9px] text-purple-600 font-medium" title="Email opened but not yet responded">
+                                          Viewed
+                                        </span>
+                                      )}
+                                    </div>
                                     {recipient.bids?.length > 0 && (
                                       <Badge className="text-[10px] h-5 bg-green-600 px-1.5">Bid</Badge>
                                     )}
