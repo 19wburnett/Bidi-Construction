@@ -9,16 +9,20 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
+    const { jobId } = await params
+    console.log('📧 [email-statuses] GET request for job:', jobId)
+    
     const { user, error: authError } = await getAuthenticatedUser()
     
     if (authError || !user) {
+      console.log('📧 [email-statuses] Authentication failed')
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    const { jobId } = await params
+    console.log('📧 [email-statuses] User authenticated:', user.id)
 
     if (!jobId) {
       return NextResponse.json(
@@ -74,6 +78,7 @@ export async function GET(
 
     // Get all recipients for all bid packages in this job (including thread messages)
     // Order by created_at to get chronological order
+    console.log('📧 [email-statuses] Fetching recipients for package IDs:', packageIds)
     const { data: recipients, error: recipientsError } = await supabase
       .from('bid_package_recipients')
       .select('*')
@@ -81,15 +86,18 @@ export async function GET(
       .order('created_at', { ascending: true }) // Chronological order for threads
 
     if (recipientsError) {
-      console.error('Error fetching recipients:', recipientsError)
+      console.error('📧 [email-statuses] Error fetching recipients:', recipientsError)
       return NextResponse.json(
         { error: 'Failed to fetch email statuses', details: recipientsError.message },
         { status: 500 }
       )
     }
 
+    console.log('📧 [email-statuses] Found recipients:', recipients?.length || 0)
+
     // If no recipients, return empty array
     if (!recipients || recipients.length === 0) {
+      console.log('📧 [email-statuses] No recipients found, returning empty array')
       return NextResponse.json({ recipients: [] })
     }
 
@@ -197,6 +205,23 @@ export async function GET(
 
     // Return both flat list (for backward compatibility) and thread structure
     // The UI can use the flat list and build threads client-side, or use the thread structure
+    console.log('📧 [email-statuses] Returning data:', {
+      recipientsCount: enrichedRecipients.length,
+      threadsCount: threadStructures.length
+    })
+    
+    // Log status breakdown for debugging
+    const statusBreakdown: Record<string, number> = {}
+    enrichedRecipients.forEach((r: any) => {
+      statusBreakdown[r.status] = (statusBreakdown[r.status] || 0) + 1
+    })
+    console.log('📧 [email-statuses] Status breakdown:', statusBreakdown)
+    
+    // Log thread latest message statuses
+    threadStructures.forEach((thread: any) => {
+      console.log(`📧 [email-statuses] Thread ${thread.thread_id}: ${thread.message_count} messages, latest status: ${thread.latest_message?.status}, latest opened_at: ${thread.latest_message?.opened_at}`)
+    })
+    
     return NextResponse.json({ 
       recipients: enrichedRecipients,
       threads: threadStructures

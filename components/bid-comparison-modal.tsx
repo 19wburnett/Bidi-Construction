@@ -173,74 +173,118 @@ export default function BidComparisonModal({
 
   // Poll for email updates every 10 seconds when modal is open
   useEffect(() => {
-    if (!isOpen || !jobId) return
+    if (!isOpen || !jobId) {
+      console.log('📧 Polling stopped: isOpen=', isOpen, 'jobId=', jobId)
+      return
+    }
 
-    const pollInterval = setInterval(() => {
-      // Only reload email statuses, not all data (to avoid disrupting user)
-      const refreshEmailStatuses = async () => {
-        try {
-          const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
-          if (statusResponse.ok) {
-            const statusData = await statusResponse.json()
-            if (statusData.recipients && Array.isArray(statusData.recipients)) {
-              if (statusData.threads && Array.isArray(statusData.threads)) {
-                const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
-                setAllRecipients(threadRecipients)
-                
-                const threadsMap: Record<string, any> = {}
-                statusData.threads.forEach((thread: any) => {
-                  threadsMap[thread.thread_id] = thread
-                })
-                setEmailThreads(threadsMap)
-                
-                // Update selected recipient if viewing a thread
-                if (selectedEmailRecipient) {
-                  const threadId = selectedEmailRecipient.thread_id || 
-                    `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
-                  const updatedThread = threadsMap[threadId]
-                  if (updatedThread && updatedThread.latest_message) {
-                    setSelectedEmailRecipient(updatedThread.latest_message)
-                  }
-                }
-              } else {
-                setAllRecipients(statusData.recipients)
-                const threadsMap: Record<string, any> = {}
-                statusData.recipients.forEach((recipient: any) => {
-                  const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
-                  if (!threadsMap[threadId]) {
-                    threadsMap[threadId] = {
-                      thread_id: threadId,
-                      original_email: recipient,
-                      messages: [recipient],
-                      latest_message: recipient,
-                      message_count: 1
-                    }
-                  } else {
-                    threadsMap[threadId].messages.push(recipient)
-                    threadsMap[threadId].latest_message = recipient
-                    threadsMap[threadId].message_count = threadsMap[threadId].messages.length
-                  }
-                })
-                setEmailThreads(threadsMap)
-              }
-              
-              const statusMap: Record<string, any> = {}
-              statusData.recipients.forEach((recipient: any) => {
-                statusMap[recipient.subcontractor_email] = recipient
-              })
-              setEmailStatuses(statusMap)
-            }
+    console.log('📧 Starting email polling for job:', jobId)
+
+    // Only reload email statuses, not all data (to avoid disrupting user)
+    const refreshEmailStatuses = async () => {
+      try {
+        console.log('📧 Polling: Fetching email statuses for job:', jobId)
+        const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`, {
+          cache: 'no-store', // Ensure we don't get cached responses
+          headers: {
+            'Cache-Control': 'no-cache'
           }
-        } catch (err) {
-          console.error('Error polling email statuses:', err)
+        })
+        console.log('📧 Polling: Response status:', statusResponse.status)
+        
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json()
+          console.log('📧 Polling: Received data, recipients:', statusData.recipients?.length, 'threads:', statusData.threads?.length)
+          
+          if (statusData.recipients && Array.isArray(statusData.recipients)) {
+            console.log('📧 Polling: recipients is array, length:', statusData.recipients.length)
+            console.log('📧 Polling: threads exists?', !!statusData.threads, 'is array?', Array.isArray(statusData.threads), 'length:', statusData.threads?.length)
+            if (statusData.threads && Array.isArray(statusData.threads)) {
+              console.log('📧 Polling: Processing threads:', statusData.threads.length)
+              const threadRecipients = statusData.threads.map((thread: any) => {
+                const latest = thread.latest_message
+                console.log('📧 Polling: Thread', thread.thread_id, 'has', thread.message_count, 'messages')
+                console.log('  - Latest message status:', latest?.status, 'opened_at:', latest?.opened_at, 'responded_at:', latest?.responded_at)
+                return latest
+              })
+              console.log('📧 Polling: All recipient statuses:', threadRecipients.map((r: any) => ({ 
+                id: r.id,
+                email: r.subcontractor_email, 
+                status: r.status,
+                opened_at: r.opened_at,
+                responded_at: r.responded_at,
+                isFromGC: r.isFromGC
+              })))
+              setAllRecipients(threadRecipients)
+              console.log('📧 Polling: Updated allRecipients with', threadRecipients.length, 'recipients')
+              
+              // Force a re-render by logging the state
+              console.log('📧 Polling: Current allRecipients state will have', threadRecipients.length, 'items')
+              
+              const threadsMap: Record<string, any> = {}
+              statusData.threads.forEach((thread: any) => {
+                threadsMap[thread.thread_id] = thread
+              })
+              setEmailThreads(threadsMap)
+              console.log('📧 Polling: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
+              
+              // Update selected recipient if viewing a thread (use functional update to get current value)
+              setSelectedEmailRecipient((current) => {
+                if (!current) return current
+                const threadId = current.thread_id || 
+                  `thread-${current.bid_package_id || current.bid_packages?.id}-${current.subcontractor_email}`
+                const updatedThread = threadsMap[threadId]
+                if (updatedThread && updatedThread.latest_message) {
+                  return updatedThread.latest_message
+                }
+                return current
+              })
+            } else {
+              setAllRecipients(statusData.recipients)
+              const threadsMap: Record<string, any> = {}
+              statusData.recipients.forEach((recipient: any) => {
+                const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                if (!threadsMap[threadId]) {
+                  threadsMap[threadId] = {
+                    thread_id: threadId,
+                    original_email: recipient,
+                    messages: [recipient],
+                    latest_message: recipient,
+                    message_count: 1
+                  }
+                } else {
+                  threadsMap[threadId].messages.push(recipient)
+                  threadsMap[threadId].latest_message = recipient
+                  threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                }
+              })
+              setEmailThreads(threadsMap)
+            }
+            
+            const statusMap: Record<string, any> = {}
+            statusData.recipients.forEach((recipient: any) => {
+              statusMap[recipient.subcontractor_email] = recipient
+            })
+            setEmailStatuses(statusMap)
+          }
+        } else {
+          const errorText = await statusResponse.text()
+          console.error('📧 Polling: Error response:', statusResponse.status, errorText)
         }
+      } catch (err) {
+        console.error('📧 Polling: Error polling email statuses:', err)
       }
-      
-      refreshEmailStatuses()
-    }, 10000) // Poll every 10 seconds
+    }
 
-    return () => clearInterval(pollInterval)
-  }, [isOpen, jobId, selectedEmailRecipient])
+    // Poll immediately, then every 10 seconds
+    refreshEmailStatuses()
+    const pollInterval = setInterval(refreshEmailStatuses, 10000)
+
+    return () => {
+      console.log('📧 Polling stopped: Cleaning up interval')
+      clearInterval(pollInterval)
+    }
+  }, [isOpen, jobId]) // Removed selectedEmailRecipient from dependencies to avoid restarting polling
 
   async function loadData() {
     setLoading(true)
@@ -304,8 +348,13 @@ export default function BidComparisonModal({
             // Use threads if available, otherwise use flat recipients list
             if (statusData.threads && Array.isArray(statusData.threads)) {
               // Build recipients list from threads (use latest message for each thread)
-              const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+              console.log('📧 loadData: Processing threads:', statusData.threads.length)
+              const threadRecipients = statusData.threads.map((thread: any) => {
+                console.log('📧 loadData: Thread', thread.thread_id, 'has', thread.message_count, 'messages, latest status:', thread.latest_message?.status)
+                return thread.latest_message
+              })
               setAllRecipients(threadRecipients)
+              console.log('📧 loadData: Updated allRecipients with', threadRecipients.length, 'recipients')
               
               // Store full thread data for display
               const threadsMap: Record<string, any> = {}
@@ -313,6 +362,7 @@ export default function BidComparisonModal({
                 threadsMap[thread.thread_id] = thread
               })
               setEmailThreads(threadsMap)
+              console.log('📧 loadData: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
             } else {
               setAllRecipients(statusData.recipients)
               // Build threads from recipients if threads not provided

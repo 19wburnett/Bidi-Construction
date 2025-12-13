@@ -1,77 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
 
+// Public endpoint - no auth required for testing
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
- * Test endpoint to manually simulate an inbound email webhook
- * This helps test the webhook handler without needing Resend domain setup
+ * Test endpoint to verify webhook connectivity
+ * This helps diagnose if webhooks are reaching the server
  */
-export async function POST(request: NextRequest) {
-  try {
-    const { user, error: authError } = await getAuthenticatedUser()
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      )
-    }
-
-    const body = await request.json()
-    const { bidPackageId, fromEmail, subject, content } = body
-
-    if (!bidPackageId || !fromEmail || !content) {
-      return NextResponse.json(
-        { error: 'Missing required fields: bidPackageId, fromEmail, content' },
-        { status: 400 }
-      )
-    }
-
-    // Simulate Resend webhook payload
-    const mockWebhookPayload = {
-      type: 'email.received',
-      data: {
-        from: {
-          email: fromEmail,
-          name: 'Test Subcontractor'
-        },
-        to: [`bids+${bidPackageId}@bids.bidicontracting.com`],
-        subject: subject || 'Re: Bid Request',
-        html: `<p>${content}</p>`,
-        text: content,
-        headers: {
-          'reply-to': `bids+${bidPackageId}@bids.bidicontracting.com`
-        },
-        attachments: []
-      }
-    }
-
-    // Call the webhook endpoint directly (simpler approach)
-    const baseUrl = request.nextUrl.origin
-    const webhookUrl = `${baseUrl}/api/resend/webhook`
-    
-    console.log('Calling webhook at:', webhookUrl)
-    const webhookResponse = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mockWebhookPayload)
-    })
-    
-    const result = await webhookResponse.json()
-
-    return NextResponse.json({
-      success: true,
-      message: 'Test email processed',
-      result
-    })
-
-  } catch (error: any) {
-    console.error('Error in test webhook:', error)
-    return NextResponse.json(
-      { error: 'Failed to process test webhook', details: error.message },
-      { status: 500 }
-    )
-  }
+export async function GET(request: NextRequest) {
+  return NextResponse.json({ 
+    message: 'Webhook test endpoint is accessible',
+    timestamp: new Date().toISOString(),
+    url: request.nextUrl.toString(),
+    host: request.headers.get('host'),
+    method: 'GET'
+  })
 }
 
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    return NextResponse.json({ 
+      message: 'Test webhook received',
+      body,
+      timestamp: new Date().toISOString(),
+      url: request.nextUrl.toString(),
+      host: request.headers.get('host'),
+      method: 'POST'
+    })
+  } catch (error: any) {
+    return NextResponse.json({ 
+      error: 'Failed to parse body',
+      message: error.message 
+    }, { status: 400 })
+  }
+}

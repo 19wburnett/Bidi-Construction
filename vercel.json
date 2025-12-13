@@ -5,6 +5,19 @@
       "path": "/api/cron/send-reminders",
       "schedule": "0 9 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/resend/webhook",
+      "destination": "/api/resend/webhook",
+      "has": [
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "application/json"
+        }
+      ]
+    }
   ]
 }
 

@@ -4,6 +4,9 @@ import OpenAI from 'openai'
 
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
+// Prevent any redirects or caching for webhook endpoint
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -14,7 +17,9 @@ export async function POST(request: NextRequest) {
     // Log request details for debugging
     const url = request.nextUrl.toString()
     const method = request.method
-    console.log('📧 Resend webhook received:', { method, url, pathname: request.nextUrl.pathname })
+    const headers = Object.fromEntries(request.headers.entries())
+    console.log('📧 Resend webhook received:', { method, url, pathname: request.nextUrl.pathname, host: request.headers.get('host') })
+    console.log('📧 Webhook headers:', JSON.stringify(headers, null, 2))
     
     const body = await request.json()
     console.log('📧 Resend webhook payload:', JSON.stringify(body, null, 2))
@@ -65,9 +70,25 @@ export async function POST(request: NextRequest) {
 async function handleOutboundEvent(body: any) {
   const supabase = await createServerSupabaseClient()
   const eventType = body.type
-  const emailId = body.data?.email_id || body.data?.id
+  // Resend can send email_id in different places - check all possibilities
+  const emailId = body.data?.email_id || 
+                  body.data?.id || 
+                  body.email_id || 
+                  body.id ||
+                  body.payload?.email_id ||
+                  body.payload?.id
+
+  console.log('📧 [webhook] Processing outbound event:', eventType)
+  console.log('📧 [webhook] Full body structure:', JSON.stringify(body, null, 2))
+  console.log('📧 [webhook] Extracted emailId:', emailId, 'from paths:', {
+    'body.data?.email_id': body.data?.email_id,
+    'body.data?.id': body.data?.id,
+    'body.email_id': body.email_id,
+    'body.id': body.id
+  })
 
   if (!emailId) {
+    console.log('📧 [webhook] No email ID in event, body:', JSON.stringify(body, null, 2))
     return NextResponse.json({ message: 'No email ID in event' })
   }
 
@@ -79,9 +100,18 @@ async function handleOutboundEvent(body: any) {
     .single()
 
   if (recipientError || !recipient) {
-    console.log('Recipient not found for email ID:', emailId)
+    console.log('📧 [webhook] Recipient not found for email ID:', emailId, 'Error:', recipientError)
+    // Try to find by any resend_email_id that might match
+    const { data: allRecipients } = await supabase
+      .from('bid_package_recipients')
+      .select('id, resend_email_id, subcontractor_email, status')
+      .not('resend_email_id', 'is', null)
+      .limit(10)
+    console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
     return NextResponse.json({ message: 'Recipient not found' })
   }
+
+  console.log('📧 [webhook] Found recipient:', recipient.id, 'Current status:', recipient.status, 'Email:', recipient.subcontractor_email)
 
   const updateData: any = {}
   const timestamp = new Date().toISOString()
@@ -114,20 +144,30 @@ async function handleOutboundEvent(body: any) {
       break
   }
 
+  console.log('📧 [webhook] Updating recipient with data:', updateData)
   const { error: updateError } = await supabase
     .from('bid_package_recipients')
     .update(updateData)
     .eq('id', recipient.id)
 
   if (updateError) {
-    console.error('❌ Error updating recipient:', updateError)
+    console.error('📧 [webhook] ❌ Error updating recipient:', updateError)
     return NextResponse.json(
       { error: 'Failed to update recipient', details: updateError.message },
       { status: 200 } // Return 200 to prevent retries
     )
   }
 
-  console.log('✅ Recipient updated successfully for event:', eventType)
+  console.log('📧 [webhook] ✅ Recipient updated successfully for event:', eventType, 'New status:', updateData.status, 'Recipient ID:', recipient.id)
+  
+  // Verify the update
+  const { data: updatedRecipient } = await supabase
+    .from('bid_package_recipients')
+    .select('id, status, opened_at, delivered_at, responded_at')
+    .eq('id', recipient.id)
+    .single()
+  console.log('📧 [webhook] Verified update - recipient now has status:', updatedRecipient?.status)
+  
   return NextResponse.json({ message: 'Event processed successfully' }, { status: 200 })
 }
 
