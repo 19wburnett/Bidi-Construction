@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createClient } from '@supabase/supabase-js'
 import OpenAI from 'openai'
 
 // Use Node.js runtime for Supabase compatibility
@@ -68,7 +69,23 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleOutboundEvent(body: any) {
-  const supabase = await createServerSupabaseClient()
+  // Use service role to bypass RLS for webhook operations
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!serviceRoleKey) {
+    console.error('❌ SUPABASE_SERVICE_ROLE_KEY not configured')
+    return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
   const eventType = body.type
   // Resend can send email_id in different places - check all possibilities
   const emailId = body.data?.email_id || 
@@ -93,7 +110,7 @@ async function handleOutboundEvent(body: any) {
   }
 
   // Find recipient by resend_email_id
-  const { data: recipient, error: recipientError } = await supabase
+  let { data: recipient, error: recipientError } = await supabase
     .from('bid_package_recipients')
     .select('*')
     .eq('resend_email_id', emailId)
@@ -101,14 +118,34 @@ async function handleOutboundEvent(body: any) {
 
   if (recipientError || !recipient) {
     console.log('📧 [webhook] Recipient not found for email ID:', emailId, 'Error:', recipientError)
-    // Try to find by any resend_email_id that might match
-    const { data: allRecipients } = await supabase
+    
+    // Retry after a short delay - the recipient record might not be committed yet
+    console.log('📧 [webhook] Retrying after 1 second delay...')
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    const { data: retryRecipient, error: retryError } = await supabase
       .from('bid_package_recipients')
-      .select('id, resend_email_id, subcontractor_email, status')
-      .not('resend_email_id', 'is', null)
-      .limit(10)
-    console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
-    return NextResponse.json({ message: 'Recipient not found' })
+      .select('*')
+      .eq('resend_email_id', emailId)
+      .single()
+    
+    if (retryError || !retryRecipient) {
+      // Try to find by any resend_email_id that might match for debugging
+      const { data: allRecipients } = await supabase
+        .from('bid_package_recipients')
+        .select('id, resend_email_id, subcontractor_email, status')
+        .not('resend_email_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(10)
+      console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
+      console.log('📧 [webhook] Looking for email_id:', emailId)
+      return NextResponse.json({ message: 'Recipient not found' }, { status: 200 }) // Return 200 to prevent retries
+    }
+    
+    // Use the retry recipient
+    recipient = retryRecipient
+    recipientError = null
+    console.log('📧 [webhook] Found recipient on retry:', recipient.id)
   }
 
   console.log('📧 [webhook] Found recipient:', recipient.id, 'Current status:', recipient.status, 'Email:', recipient.subcontractor_email)
@@ -310,7 +347,23 @@ async function handleInboundEmail(body: any) {
   console.log('📥 Processing inbound email...')
   console.log('📥 Full webhook body structure:', JSON.stringify(body, null, 2))
   
-  const supabase = await createServerSupabaseClient()
+  // Use service role to bypass RLS for webhook operations
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!serviceRoleKey) {
+    console.error('❌ SUPABASE_SERVICE_ROLE_KEY not configured')
+    return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
   
   // Resend webhook structure: body.data contains the email data
   // But sometimes it might be nested differently, so check multiple locations
