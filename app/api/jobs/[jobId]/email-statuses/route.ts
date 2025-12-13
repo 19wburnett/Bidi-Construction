@@ -144,17 +144,104 @@ export async function GET(
     // Build thread structure - group by thread_id
     const threadsMap = new Map<string, any[]>()
     
+    // Helper function to fetch email content from Resend API
+    async function fetchEmailContentFromResend(resendEmailId: string): Promise<string | null> {
+      if (!resendEmailId) return null
+      
+      try {
+        console.log('📧 [email-statuses] Fetching email content from Resend for:', resendEmailId)
+        const response = await fetch(`https://api.resend.com/emails/${resendEmailId}`, {
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (response.ok) {
+          const emailData = await response.json()
+          // Extract text content from HTML or use text field
+          let textContent = emailData.text || ''
+          
+          if (!textContent && emailData.html) {
+            // Strip HTML tags to get plain text
+            textContent = emailData.html
+              .replace(/<style[^>]*>.*?<\/style>/gi, '')
+              .replace(/<script[^>]*>.*?<\/script>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .substring(0, 5000)
+          }
+          
+          console.log('📧 [email-statuses] Fetched content length:', textContent?.length || 0)
+          return textContent || null
+        } else {
+          const errorText = await response.text()
+          console.error('❌ [email-statuses] Failed to fetch from Resend:', response.status, errorText)
+          return null
+        }
+      } catch (error: any) {
+        console.error('❌ [email-statuses] Error fetching from Resend:', error.message)
+        return null
+      }
+    }
+    
     // First, enrich all recipients with related data
-    const enrichedRecipients = recipients.map(recipient => {
+    // For GC messages missing response_text, fetch from Resend API
+    const enrichedRecipients = await Promise.all(recipients.map(async (recipient) => {
+      const isFromGC = recipient.is_from_gc !== undefined ? recipient.is_from_gc : !!(recipient.resend_email_id && recipient.status === 'sent')
+      
+      // If this is a GC message without response_text, try to fetch from Resend
+      let responseText = recipient.response_text
+      if (isFromGC && !responseText && recipient.resend_email_id) {
+        console.log('📧 [email-statuses] GC message missing response_text, fetching from Resend:', recipient.resend_email_id)
+        const fetchedContent = await fetchEmailContentFromResend(recipient.resend_email_id)
+        if (fetchedContent) {
+          responseText = fetchedContent
+          // Update the database with the fetched content (async, don't wait)
+          supabase
+            .from('bid_package_recipients')
+            .update({ response_text: fetchedContent })
+            .eq('id', recipient.id)
+            .then(({ error }) => {
+              if (error) {
+                console.error('❌ [email-statuses] Failed to update response_text:', error)
+              } else {
+                console.log('✅ [email-statuses] Updated response_text for recipient:', recipient.id)
+              }
+            })
+        }
+      }
+      
       const enriched = {
         ...recipient,
+        response_text: responseText, // Use fetched content if available
         bid_packages: packagesMap.get(recipient.bid_package_id) || null,
         subcontractors: recipient.subcontractor_id ? subcontractorsMap.get(recipient.subcontractor_id) || null : null,
         bids: recipient.bid_id ? [bidsMap.get(recipient.bid_id)].filter(Boolean) : [],
         // Mark sender type: use is_from_gc field if available, otherwise infer from resend_email_id and status
-        isFromGC: recipient.is_from_gc !== undefined ? recipient.is_from_gc : !!(recipient.resend_email_id && recipient.status === 'sent'),
+        isFromGC,
         // Use sent_at for GC messages, responded_at for subcontractor messages
         messageTimestamp: recipient.responded_at || recipient.sent_at || recipient.created_at
+      }
+      
+      // Log response_text for debugging
+      if (enriched.isFromGC) {
+        console.log('📧 [email-statuses] GC message:', {
+          id: recipient.id,
+          status: recipient.status,
+          hasResponseText: !!enriched.response_text,
+          responseTextLength: enriched.response_text?.length || 0,
+          responseTextPreview: enriched.response_text?.substring(0, 100) || 'null',
+          isFromGC: enriched.isFromGC,
+          resendEmailId: recipient.resend_email_id,
+          wasFetched: !recipient.response_text && !!enriched.response_text
+        })
       }
       
       // Group by thread_id (use original recipient ID as thread key if no thread_id)
@@ -166,7 +253,7 @@ export async function GET(
       threadsMap.get(threadKey)!.push(enriched)
       
       return enriched
-    })
+    }))
 
     // Build thread structure - for each thread, get all messages
     const threadStructures: any[] = []

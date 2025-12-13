@@ -274,18 +274,28 @@ export async function POST(request: NextRequest) {
         const threadId = `thread-${bidPackageId}-${sub.email}`
         
         // Extract text content from HTML email body for storage
-        const emailTextContent = emailBody
-          .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
-          .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
-          .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
-          .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-          .replace(/&amp;/g, '&') // Replace &amp; with &
-          .replace(/&lt;/g, '<') // Replace &lt; with <
-          .replace(/&gt;/g, '>') // Replace &gt; with >
-          .replace(/&quot;/g, '"') // Replace &quot; with "
-          .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-          .trim()
-          .substring(0, 5000) // Limit to 5000 chars
+        let emailTextContent = ''
+        if (emailBody) {
+          emailTextContent = emailBody
+            .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
+            .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
+            .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
+            .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+            .replace(/&amp;/g, '&') // Replace &amp; with &
+            .replace(/&lt;/g, '<') // Replace &lt; with <
+            .replace(/&gt;/g, '>') // Replace &gt; with >
+            .replace(/&quot;/g, '"') // Replace &quot; with "
+            .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+            .trim()
+            .substring(0, 5000) // Limit to 5000 chars
+        }
+        
+        console.log('📧 [send] Storing email content:', {
+          emailBodyLength: emailBody?.length || 0,
+          emailTextContentLength: emailTextContent.length,
+          emailTextContentPreview: emailTextContent.substring(0, 200),
+          subcontractorEmail: sub.email
+        })
         
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
@@ -299,11 +309,20 @@ export async function POST(request: NextRequest) {
             sent_at: new Date().toISOString(),
             thread_id: threadId,
             parent_email_id: null,
-            response_text: emailTextContent, // Store email content so it can be displayed in thread
+            response_text: emailTextContent || null, // Store email content so it can be displayed in thread (null if empty)
             is_from_gc: true // Mark as sent from GC
           })
           .select()
           .single()
+        
+        // Verify the content was saved
+        if (recipient) {
+          console.log('📧 [send] Recipient created:', {
+            id: recipient.id,
+            hasResponseText: !!recipient.response_text,
+            responseTextLength: recipient.response_text?.length || 0
+          })
+        }
 
         if (recipientError) {
           console.error('Error creating recipient record:', recipientError)

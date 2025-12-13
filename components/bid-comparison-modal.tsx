@@ -1393,6 +1393,20 @@ export default function BidComparisonModal({
                             const messageContent = message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
                             
+                            // Debug logging
+                            if (isFromGC && !messageContent) {
+                              console.log('📧 [UI] GC message with no content:', {
+                                id: message.id,
+                                status: message.status,
+                                hasResponseText: !!message.response_text,
+                                responseText: message.response_text,
+                                hasNotes: !!message.notes,
+                                notes: message.notes,
+                                isFromGC: message.isFromGC,
+                                resendEmailId: message.resend_email_id
+                              })
+                            }
+                            
                             return (
                               <Card 
                                 key={message.id || `message-${index}`}
@@ -3025,6 +3039,20 @@ export default function BidComparisonModal({
                             const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
                             const messageContent = message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            // Debug logging
+                            if (isFromGC && !messageContent) {
+                              console.log('📧 [UI] GC message with no content:', {
+                                id: message.id,
+                                status: message.status,
+                                hasResponseText: !!message.response_text,
+                                responseText: message.response_text,
+                                hasNotes: !!message.notes,
+                                notes: message.notes,
+                                isFromGC: message.isFromGC,
+                                resendEmailId: message.resend_email_id
+                              })
+                            }
                             
                             return (
                               <Card 
