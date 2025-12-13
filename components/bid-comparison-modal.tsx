@@ -25,7 +25,8 @@ import {
   Download,
   Eye,
   CheckCircle2,
-  XCircle
+  XCircle,
+  RefreshCw
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -169,6 +170,77 @@ export default function BidComparisonModal({
       }
     }
   }, [isOpen, jobId, initialBidId, refreshTrigger])
+
+  // Poll for email updates every 10 seconds when modal is open
+  useEffect(() => {
+    if (!isOpen || !jobId) return
+
+    const pollInterval = setInterval(() => {
+      // Only reload email statuses, not all data (to avoid disrupting user)
+      const refreshEmailStatuses = async () => {
+        try {
+          const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json()
+            if (statusData.recipients && Array.isArray(statusData.recipients)) {
+              if (statusData.threads && Array.isArray(statusData.threads)) {
+                const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                setAllRecipients(threadRecipients)
+                
+                const threadsMap: Record<string, any> = {}
+                statusData.threads.forEach((thread: any) => {
+                  threadsMap[thread.thread_id] = thread
+                })
+                setEmailThreads(threadsMap)
+                
+                // Update selected recipient if viewing a thread
+                if (selectedEmailRecipient) {
+                  const threadId = selectedEmailRecipient.thread_id || 
+                    `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                  const updatedThread = threadsMap[threadId]
+                  if (updatedThread && updatedThread.latest_message) {
+                    setSelectedEmailRecipient(updatedThread.latest_message)
+                  }
+                }
+              } else {
+                setAllRecipients(statusData.recipients)
+                const threadsMap: Record<string, any> = {}
+                statusData.recipients.forEach((recipient: any) => {
+                  const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                  if (!threadsMap[threadId]) {
+                    threadsMap[threadId] = {
+                      thread_id: threadId,
+                      original_email: recipient,
+                      messages: [recipient],
+                      latest_message: recipient,
+                      message_count: 1
+                    }
+                  } else {
+                    threadsMap[threadId].messages.push(recipient)
+                    threadsMap[threadId].latest_message = recipient
+                    threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                  }
+                })
+                setEmailThreads(threadsMap)
+              }
+              
+              const statusMap: Record<string, any> = {}
+              statusData.recipients.forEach((recipient: any) => {
+                statusMap[recipient.subcontractor_email] = recipient
+              })
+              setEmailStatuses(statusMap)
+            }
+          }
+        } catch (err) {
+          console.error('Error polling email statuses:', err)
+        }
+      }
+      
+      refreshEmailStatuses()
+    }, 10000) // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval)
+  }, [isOpen, jobId, selectedEmailRecipient])
 
   async function loadData() {
     setLoading(true)
@@ -1002,24 +1074,36 @@ export default function BidComparisonModal({
               <div className="w-[320px] border-r flex flex-col bg-gray-50/50 overflow-hidden">
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
                   <div className="p-3 border-b bg-white">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                        Bids
-                        {bids.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {bids.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                        Emails
-                        {allRecipients.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between mb-2">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                          Bids
+                          {bids.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {bids.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                          Emails
+                          {allRecipients.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {allRecipients.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                      </TabsList>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadData}
+                        disabled={loading}
+                        className="ml-2 h-8 w-8 p-0"
+                        title="Refresh data"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
                   </div>
                   
                   <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
@@ -2615,24 +2699,36 @@ export default function BidComparisonModal({
               <div className="w-[320px] border-r flex flex-col bg-gray-50/50 overflow-hidden">
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
                   <div className="p-3 border-b bg-white">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                        Bids
-                        {bids.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {bids.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                        Emails
-                        {allRecipients.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between mb-2">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                          Bids
+                          {bids.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {bids.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                          Emails
+                          {allRecipients.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {allRecipients.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                      </TabsList>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadData}
+                        disabled={loading}
+                        className="ml-2 h-8 w-8 p-0"
+                        title="Refresh data"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
                   </div>
                   
                   <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
