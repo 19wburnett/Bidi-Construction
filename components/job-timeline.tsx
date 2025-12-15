@@ -15,7 +15,8 @@ import {
   Plus,
   Edit,
   Trash2,
-  ChevronRight
+  ChevronRight,
+  Sparkles
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -69,6 +70,7 @@ export default function JobTimeline({ jobId, canEdit = false, shareToken, onUpda
   const [saving, setSaving] = useState(false)
   const [availableTrades, setAvailableTrades] = useState<string[]>([...TRADE_CATEGORIES])
   const [loadingTrades, setLoadingTrades] = useState(false)
+  const [generating, setGenerating] = useState(false)
   
   const [formData, setFormData] = useState({
     trade_category: '',
@@ -212,6 +214,35 @@ export default function JobTimeline({ jobId, canEdit = false, shareToken, onUpda
     }
   }
 
+  const handleGenerateWithAI = async () => {
+    if (!confirm('This will generate a timeline based on your takeoff data. Existing timeline items will be preserved. Continue?')) {
+      return
+    }
+
+    try {
+      setGenerating(true)
+      const response = await fetch(`/api/jobs/${jobId}/timeline/generate`, {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to generate timeline')
+      }
+
+      const data = await response.json()
+      await loadTimeline()
+      onUpdate?.()
+      
+      alert(`Successfully generated ${data.count || 0} timeline items!`)
+    } catch (error: any) {
+      console.error('Error generating timeline:', error)
+      alert(error.message || 'Failed to generate timeline. Make sure you have takeoff data for your plans.')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   // Calculate timeline visualization
   const sortedItems = [...timelineItems].sort((a, b) => {
     const dateCompare = new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
@@ -264,10 +295,21 @@ export default function JobTimeline({ jobId, canEdit = false, shareToken, onUpda
               </CardDescription>
             </div>
             {canEdit && (
-              <Button onClick={() => handleOpenEditDialog()} size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Item
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleGenerateWithAI} 
+                  size="sm" 
+                  variant="outline"
+                  disabled={generating}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  {generating ? 'Generating...' : 'AI Generate'}
+                </Button>
+                <Button onClick={() => handleOpenEditDialog()} size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Item
+                </Button>
+              </div>
             )}
           </div>
         </CardHeader>
@@ -277,88 +319,143 @@ export default function JobTimeline({ jobId, canEdit = false, shareToken, onUpda
               <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
               <p>No timeline items yet</p>
               {canEdit && (
-                <Button onClick={() => handleOpenEditDialog()} className="mt-4" variant="outline">
-                  Add First Timeline Item
-                </Button>
+                <div className="flex gap-2 justify-center mt-4">
+                  <Button 
+                    onClick={handleGenerateWithAI} 
+                    className="mt-4" 
+                    disabled={generating}
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    {generating ? 'Generating...' : 'Generate with AI'}
+                  </Button>
+                  <Button onClick={() => handleOpenEditDialog()} className="mt-4" variant="outline">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Manually
+                  </Button>
+                </div>
               )}
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Timeline Visualization */}
-              <div className="relative">
-                <div className="h-2 bg-gray-200 rounded-full mb-8 relative">
-                  {/* Timeline bar */}
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full h-0.5 bg-gray-300"></div>
-                  </div>
-                  
-                  {/* Timeline items */}
-                  <div className="relative" style={{ minHeight: '120px' }}>
-                    {sortedItems.map((item, index) => {
-                      const { leftPercent, widthPercent, duration } = getItemPosition(item)
-                      const StatusIcon = STATUS_ICONS[item.status]
-                      
-                      return (
-                        <motion.div
-                          key={item.id}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.1 }}
-                          className="absolute"
-                          style={{
-                            left: `${leftPercent}%`,
-                            width: `${Math.max(2, widthPercent)}%`,
-                            top: index % 2 === 0 ? '0' : '60px'
-                          }}
-                        >
-                          <div className="relative group">
-                            <div className={`absolute top-0 left-0 right-0 h-2 rounded-full ${STATUS_COLORS[item.status]}`}></div>
-                            <div className="mt-4 flex flex-col items-center">
-                              <div className={`px-3 py-2 rounded-lg border-2 shadow-sm min-w-[200px] max-w-[300px] ${STATUS_COLORS[item.status]}`}>
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <StatusIcon className="h-4 w-4 shrink-0" />
-                                      <span className="font-semibold text-sm truncate">{item.trade_category}</span>
-                                    </div>
-                                    {item.subcontractor_name && (
-                                      <p className="text-xs text-gray-600 truncate mb-1">{item.subcontractor_name}</p>
-                                    )}
-                                    <p className="text-xs text-gray-600">
-                                      {new Date(item.start_date).toLocaleDateString()} - {new Date(item.end_date).toLocaleDateString()}
-                                    </p>
-                                    {item.description && (
-                                      <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
-                                    )}
-                                  </div>
-                                  {canEdit && (
-                                    <div className="flex gap-1 shrink-0">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0"
-                                        onClick={() => handleOpenEditDialog(item)}
-                                      >
-                                        <Edit className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 text-red-600"
-                                        onClick={() => handleDelete(item.id)}
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  )}
+              {/* Gantt Chart Visualization */}
+              <div className="border rounded-lg overflow-hidden bg-white">
+                {/* Date Header */}
+                <div className="border-b bg-gray-50 px-4 py-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="w-48 font-semibold text-sm text-gray-700">Trade / Task</div>
+                    <div className="flex-1 relative" style={{ minHeight: '40px' }}>
+                      {/* Date markers */}
+                      <div className="absolute inset-0 flex">
+                        {(() => {
+                          const dateMarkers = []
+                          const daysToShow = Math.min(totalDays, 90) // Show max 90 days
+                          const markerInterval = Math.max(1, Math.floor(daysToShow / 10)) // ~10 markers
+                          
+                          for (let i = 0; i <= daysToShow; i += markerInterval) {
+                            const date = new Date(minDate)
+                            date.setDate(date.getDate() + i)
+                            const percent = (i / daysToShow) * 100
+                            dateMarkers.push(
+                              <div
+                                key={i}
+                                className="absolute border-l border-gray-300"
+                                style={{ left: `${percent}%` }}
+                              >
+                                <div className="absolute top-0 left-0 transform -translate-x-1/2 text-xs text-gray-600 whitespace-nowrap mt-1">
+                                  {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                 </div>
                               </div>
+                            )
+                          }
+                          return dateMarkers
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Gantt Rows */}
+                <div className="divide-y">
+                  {sortedItems.map((item, index) => {
+                    const { leftPercent, widthPercent, duration } = getItemPosition(item)
+                    const StatusIcon = STATUS_ICONS[item.status]
+                    const startDate = new Date(item.start_date)
+                    const endDate = new Date(item.end_date)
+                    
+                    return (
+                      <motion.div
+                        key={item.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="flex items-center hover:bg-gray-50 transition-colors"
+                      >
+                        {/* Trade Name Column */}
+                        <div className="w-48 px-4 py-3 border-r bg-white">
+                          <div className="flex items-center gap-2 mb-1">
+                            <StatusIcon className={`h-4 w-4 shrink-0 ${STATUS_COLORS[item.status].split(' ')[1]}`} />
+                            <span className="font-semibold text-sm">{item.trade_category}</span>
+                          </div>
+                          {item.subcontractor_name && (
+                            <p className="text-xs text-gray-600 truncate">{item.subcontractor_name}</p>
+                          )}
+                          <p className="text-xs text-gray-500 mt-1">
+                            {duration} {duration === 1 ? 'day' : 'days'}
+                          </p>
+                        </div>
+
+                        {/* Gantt Bar Column */}
+                        <div className="flex-1 relative px-4 py-3" style={{ minHeight: '60px' }}>
+                          <div className="relative h-8">
+                            {/* Background grid */}
+                            <div className="absolute inset-0 border-t border-b border-gray-200"></div>
+                            
+                            {/* Gantt bar */}
+                            <div
+                              className={`absolute top-1 bottom-1 rounded ${STATUS_COLORS[item.status]} shadow-sm border-2 flex items-center px-2 group cursor-pointer`}
+                              style={{
+                                left: `${leftPercent}%`,
+                                width: `${Math.max(2, widthPercent)}%`,
+                                minWidth: '60px'
+                              }}
+                              title={`${item.trade_category}: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-medium truncate">
+                                  {item.trade_category}
+                                </div>
+                                {widthPercent > 5 && (
+                                  <div className="text-xs text-gray-600 truncate">
+                                    {startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                  </div>
+                                )}
+                              </div>
+                              {canEdit && (
+                                <div className="flex gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-5 w-5 p-0"
+                                    onClick={() => handleOpenEditDialog(item)}
+                                  >
+                                    <Edit className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-5 w-5 p-0 text-red-600"
+                                    onClick={() => handleDelete(item.id)}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        </motion.div>
-                      )
-                    })}
-                  </div>
+                        </div>
+                      </motion.div>
+                    )
+                  })}
                 </div>
               </div>
 

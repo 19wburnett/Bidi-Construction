@@ -136,7 +136,6 @@ export default function BidComparisonModal({
   const [activeTab, setActiveTab] = useState<'details' | 'comparison'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
-  const [showEmailResponseForm, setShowEmailResponseForm] = useState(false)
   const [responseText, setResponseText] = useState('')
   const [sendingResponse, setSendingResponse] = useState(false)
   const [takeoffSearchTerm, setTakeoffSearchTerm] = useState('')
@@ -652,6 +651,37 @@ export default function BidComparisonModal({
     }
   }, [bids.length, allRecipients.length])
 
+  // Function to clean email content by removing HTML/CSS and extracting text
+  const cleanEmailContent = (content: string): string => {
+    if (!content) return ''
+    
+    // Remove style tags and their content
+    let cleaned = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    
+    // Remove script tags and their content
+    cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    
+    // Remove CSS in style attributes
+    cleaned = cleaned.replace(/\s*style\s*=\s*["'][^"']*["']/gi, '')
+    
+    // Remove HTML tags but keep the text content
+    cleaned = cleaned.replace(/<[^>]+>/g, ' ')
+    
+    // Decode HTML entities
+    cleaned = cleaned
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+    
+    // Clean up extra whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim()
+    
+    return cleaned
+  }
+
   // Auto-select all takeoff items when they're loaded
   // Auto-select filtered takeoff items when bid is selected or items change
   useEffect(() => {
@@ -765,6 +795,92 @@ export default function BidComparisonModal({
   }
 
   const discrepancies = calculateDiscrepancies()
+
+  const handleSendMessage = async () => {
+    if (!responseText.trim() || !selectedEmailRecipient?.id || sendingResponse) return
+    const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
+    if (!bidPackageId) return
+
+    setSendingResponse(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientId: selectedEmailRecipient.id,
+          responseText: responseText.trim()
+        })
+      })
+      if (res.ok) {
+        await loadData()
+        setResponseText('')
+        // Reload email statuses to get updated threads
+        try {
+          const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json()
+            if (statusData.recipients && Array.isArray(statusData.recipients)) {
+              if (statusData.threads && Array.isArray(statusData.threads)) {
+                const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                setAllRecipients(threadRecipients)
+                const threadsMap: Record<string, any> = {}
+                statusData.threads.forEach((thread: any) => {
+                  threadsMap[thread.thread_id] = thread
+                })
+                setEmailThreads(threadsMap)
+                
+                // Update selected recipient to show latest thread
+                const threadId = selectedEmailRecipient.thread_id || 
+                  `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                const updatedThread = threadsMap[threadId]
+                if (updatedThread && updatedThread.latest_message) {
+                  setSelectedEmailRecipient(updatedThread.latest_message)
+                }
+              } else {
+                setAllRecipients(statusData.recipients)
+                const threadsMap: Record<string, any> = {}
+                statusData.recipients.forEach((recipient: any) => {
+                  const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                  if (!threadsMap[threadId]) {
+                    threadsMap[threadId] = {
+                      thread_id: threadId,
+                      original_email: recipient,
+                      messages: [recipient],
+                      latest_message: recipient,
+                      message_count: 1
+                    }
+                  } else {
+                    threadsMap[threadId].messages.push(recipient)
+                    threadsMap[threadId].latest_message = recipient
+                    threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                  }
+                })
+                setEmailThreads(threadsMap)
+                
+                // Update selected recipient
+                const updated = statusData.recipients.find((r: any) => 
+                  r.thread_id === selectedEmailRecipient.thread_id ||
+                  (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
+                   r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
+                )
+                if (updated) setSelectedEmailRecipient(updated)
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Error reloading email threads:', e)
+        }
+      } else {
+        const err = await res.json()
+        setError(err.error || 'Failed to send')
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to send message')
+    } finally {
+      setSendingResponse(false)
+    }
+  }
 
   const calculateSimplifiedMetrics = () => {
     if (!selectedBid || filteredTakeoffItems.length === 0) {
@@ -1173,7 +1289,6 @@ export default function BidComparisonModal({
                         onClick={() => {
                           setSelectedBidId(bid.id)
                           setSelectedEmailRecipient(null)
-                          setShowEmailResponseForm(false)
                           setResponseText('')
                           setLeftSideTab('bids')
                         }}
@@ -1260,7 +1375,6 @@ export default function BidComparisonModal({
                                   onClick={() => {
                                     setSelectedEmailRecipient(recipient)
                                     setSelectedBidId(null)
-                                    setShowEmailResponseForm(false)
                                     setResponseText('')
                                   }}
                                   className={`
@@ -1492,7 +1606,7 @@ export default function BidComparisonModal({
                                       </div>
                                     ) : (
                                       <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                        {messageContent ? cleanEmailContent(messageContent) : (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
                                   </div>
@@ -1506,143 +1620,63 @@ export default function BidComparisonModal({
                         })()}
                         </div>
 
-                        {/* Reply Input - Chat-like */}
-                        <div className="border-t bg-white p-4 flex-shrink-0">
-                          {!showEmailResponseForm ? (
-                            <div className="flex gap-2">
-                              <Button 
-                                onClick={() => setShowEmailResponseForm(true)}
-                                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                        {/* Reply Input - Chat-like (iMessage style) */}
+                        <div className="border-t bg-white p-3 flex-shrink-0">
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1 flex items-end gap-2">
+                              <Textarea
+                                value={responseText}
+                                onChange={(e) => setResponseText(e.target.value)}
+                                placeholder="Type a message..."
+                                rows={1}
+                                className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[44px] max-h-[120px] py-2.5 px-3 text-sm rounded-full"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    if (responseText.trim() && !sendingResponse) {
+                                      handleSendMessage()
+                                    }
+                                  }
+                                }}
+                                style={{
+                                  height: 'auto',
+                                  minHeight: '44px',
+                                }}
+                                onInput={(e) => {
+                                  const target = e.target as HTMLTextAreaElement
+                                  target.style.height = 'auto'
+                                  target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+                                }}
+                              />
+                              <Button
+                                size="icon"
+                                disabled={sendingResponse || !responseText.trim()}
+                                onClick={handleSendMessage}
+                                className="h-[44px] w-[44px] rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                               >
-                                <Mail className="h-4 w-4 mr-2" />
-                                Send Message
+                                {sendingResponse ? (
+                                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                                ) : (
+                                  <Mail className="h-4 w-4 text-white" />
+                                )}
                               </Button>
-                              {selectedEmailRecipient.bids?.length > 0 && (
-                                <Button variant="outline" onClick={() => {
+                            </div>
+                            {selectedEmailRecipient.bids?.length > 0 && (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
                                   setSelectedBidId(selectedEmailRecipient.bids[0].id)
                                   setSelectedEmailRecipient(null)
                                   setLeftSideTab('bids')
-                                }}>
-                                  View Bid
-                                </Button>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="flex items-end gap-2">
-                                <Textarea
-                                  value={responseText}
-                                  onChange={(e) => setResponseText(e.target.value)}
-                                  placeholder="Type a message..."
-                                  rows={3}
-                                  className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                      e.preventDefault()
-                                      if (responseText.trim() && !sendingResponse) {
-                                        // Trigger send
-                                        const sendBtn = e.currentTarget.closest('div')?.querySelector('button[type="button"]')
-                                        if (sendBtn) (sendBtn as HTMLButtonElement).click()
-                                      }
-                                    }
-                                  }}
-                                />
-                                <Button
-                                  size="icon"
-                                  disabled={sendingResponse || !responseText.trim()}
-                                  onClick={async () => {
-                                        if (!responseText.trim() || !selectedEmailRecipient.id) return
-                                        const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
-                                        if (!bidPackageId) return
-
-                                        setSendingResponse(true)
-                                        try {
-                                          const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({
-                                              recipientId: selectedEmailRecipient.id,
-                                              responseText: responseText.trim()
-                                            })
-                                          })
-                                          if (res.ok) {
-                                            await loadData()
-                                            setShowEmailResponseForm(false)
-                                            setResponseText('')
-                                            // Reload email statuses to get updated threads
-                                            try {
-                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
-                                              if (statusResponse.ok) {
-                                                const statusData = await statusResponse.json()
-                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
-                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
-                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
-                                                    setAllRecipients(threadRecipients)
-                                                    const threadsMap: Record<string, any> = {}
-                                                    statusData.threads.forEach((thread: any) => {
-                                                      threadsMap[thread.thread_id] = thread
-                                                    })
-                                                    setEmailThreads(threadsMap)
-                                                    
-                                                    // Update selected recipient to show latest thread
-                                                    const threadId = selectedEmailRecipient.thread_id || 
-                                                      `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
-                                                    const updatedThread = threadsMap[threadId]
-                                                    if (updatedThread && updatedThread.latest_message) {
-                                                      setSelectedEmailRecipient(updatedThread.latest_message)
-                                                    }
-                                                  } else {
-                                                    setAllRecipients(statusData.recipients)
-                                                    const threadsMap: Record<string, any> = {}
-                                                    statusData.recipients.forEach((recipient: any) => {
-                                                      const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
-                                                      if (!threadsMap[threadId]) {
-                                                        threadsMap[threadId] = {
-                                                          thread_id: threadId,
-                                                          original_email: recipient,
-                                                          messages: [recipient],
-                                                          latest_message: recipient,
-                                                          message_count: 1
-                                                        }
-                                                      } else {
-                                                        threadsMap[threadId].messages.push(recipient)
-                                                        threadsMap[threadId].latest_message = recipient
-                                                        threadsMap[threadId].message_count = threadsMap[threadId].messages.length
-                                                      }
-                                                    })
-                                                    setEmailThreads(threadsMap)
-                                                    
-                                                    // Update selected recipient
-                                                    const updated = statusData.recipients.find((r: any) => 
-                                                      r.thread_id === selectedEmailRecipient.thread_id ||
-                                                      (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
-                                                       r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
-                                                    )
-                                            if (updated) setSelectedEmailRecipient(updated)
-                                                  }
-                                                }
-                                              }
-                                            } catch (e) {
-                                              console.error('Error reloading email threads:', e)
-                                            }
-                                          } else {
-                                            const err = await res.json()
-                                            setError(err.error || 'Failed to send')
-                                          }
-                                        } catch (e: any) {
-                                          setError(e.message)
-                                        } finally {
-                                          setSendingResponse(false)
-                                        }
-                                      }}
-                                   >
-                                      {sendingResponse ? 'Sending...' : 'Send Message'}
-                                   </Button>
-                                <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
-                              </div>
-                              {error && <p className="text-sm text-red-600">{error}</p>}
-                            </div>
-                          )}
+                                }}
+                                className="h-[44px] px-3 flex-shrink-0"
+                              >
+                                View Bid
+                              </Button>
+                            )}
+                          </div>
+                          {error && <p className="text-sm text-red-600 mt-2 px-1">{error}</p>}
                         </div>
                       </div>
                 ) : selectedBid ? (
@@ -2900,7 +2934,6 @@ export default function BidComparisonModal({
                         onClick={() => {
                           setSelectedBidId(bid.id)
                           setSelectedEmailRecipient(null)
-                          setShowEmailResponseForm(false)
                           setResponseText('')
                           setLeftSideTab('bids')
                         }}
@@ -2987,7 +3020,6 @@ export default function BidComparisonModal({
                                   onClick={() => {
                                     setSelectedEmailRecipient(recipient)
                                     setSelectedBidId(null)
-                                    setShowEmailResponseForm(false)
                                     setResponseText('')
                                   }}
                                   className={`
@@ -3219,7 +3251,7 @@ export default function BidComparisonModal({
                                       </div>
                                     ) : (
                                       <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                        {messageContent ? cleanEmailContent(messageContent) : (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
                                   </div>
@@ -3233,143 +3265,63 @@ export default function BidComparisonModal({
                         })()}
                         </div>
 
-                        {/* Reply Input - Chat-like */}
-                        <div className="border-t bg-white p-4 flex-shrink-0">
-                          {!showEmailResponseForm ? (
-                            <div className="flex gap-2">
-                              <Button 
-                                onClick={() => setShowEmailResponseForm(true)}
-                                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                        {/* Reply Input - Chat-like (iMessage style) */}
+                        <div className="border-t bg-white p-3 flex-shrink-0">
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1 flex items-end gap-2">
+                              <Textarea
+                                value={responseText}
+                                onChange={(e) => setResponseText(e.target.value)}
+                                placeholder="Type a message..."
+                                rows={1}
+                                className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[44px] max-h-[120px] py-2.5 px-3 text-sm rounded-full"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    if (responseText.trim() && !sendingResponse) {
+                                      handleSendMessage()
+                                    }
+                                  }
+                                }}
+                                style={{
+                                  height: 'auto',
+                                  minHeight: '44px',
+                                }}
+                                onInput={(e) => {
+                                  const target = e.target as HTMLTextAreaElement
+                                  target.style.height = 'auto'
+                                  target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+                                }}
+                              />
+                              <Button
+                                size="icon"
+                                disabled={sendingResponse || !responseText.trim()}
+                                onClick={handleSendMessage}
+                                className="h-[44px] w-[44px] rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                               >
-                                <Mail className="h-4 w-4 mr-2" />
-                                Send Message
+                                {sendingResponse ? (
+                                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                                ) : (
+                                  <Mail className="h-4 w-4 text-white" />
+                                )}
                               </Button>
-                              {selectedEmailRecipient.bids?.length > 0 && (
-                                <Button variant="outline" onClick={() => {
+                            </div>
+                            {selectedEmailRecipient.bids?.length > 0 && (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
                                   setSelectedBidId(selectedEmailRecipient.bids[0].id)
                                   setSelectedEmailRecipient(null)
                                   setLeftSideTab('bids')
-                                }}>
-                                  View Bid
-                                </Button>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="flex items-end gap-2">
-                                <Textarea
-                                  value={responseText}
-                                  onChange={(e) => setResponseText(e.target.value)}
-                                  placeholder="Type a message..."
-                                  rows={3}
-                                  className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                      e.preventDefault()
-                                      if (responseText.trim() && !sendingResponse) {
-                                        // Trigger send
-                                        const sendBtn = e.currentTarget.closest('div')?.querySelector('button[type="button"]')
-                                        if (sendBtn) (sendBtn as HTMLButtonElement).click()
-                                      }
-                                    }
-                                  }}
-                                />
-                                <Button
-                                  size="icon"
-                                  disabled={sendingResponse || !responseText.trim()}
-                                  onClick={async () => {
-                                        if (!responseText.trim() || !selectedEmailRecipient.id) return
-                                        const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
-                                        if (!bidPackageId) return
-
-                                        setSendingResponse(true)
-                                        try {
-                                          const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({
-                                              recipientId: selectedEmailRecipient.id,
-                                              responseText: responseText.trim()
-                                            })
-                                          })
-                                          if (res.ok) {
-                                            await loadData()
-                                            setShowEmailResponseForm(false)
-                                            setResponseText('')
-                                            // Reload email statuses to get updated threads
-                                            try {
-                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
-                                              if (statusResponse.ok) {
-                                                const statusData = await statusResponse.json()
-                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
-                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
-                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
-                                                    setAllRecipients(threadRecipients)
-                                                    const threadsMap: Record<string, any> = {}
-                                                    statusData.threads.forEach((thread: any) => {
-                                                      threadsMap[thread.thread_id] = thread
-                                                    })
-                                                    setEmailThreads(threadsMap)
-                                                    
-                                                    // Update selected recipient to show latest thread
-                                                    const threadId = selectedEmailRecipient.thread_id || 
-                                                      `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
-                                                    const updatedThread = threadsMap[threadId]
-                                                    if (updatedThread && updatedThread.latest_message) {
-                                                      setSelectedEmailRecipient(updatedThread.latest_message)
-                                                    }
-                                                  } else {
-                                                    setAllRecipients(statusData.recipients)
-                                                    const threadsMap: Record<string, any> = {}
-                                                    statusData.recipients.forEach((recipient: any) => {
-                                                      const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
-                                                      if (!threadsMap[threadId]) {
-                                                        threadsMap[threadId] = {
-                                                          thread_id: threadId,
-                                                          original_email: recipient,
-                                                          messages: [recipient],
-                                                          latest_message: recipient,
-                                                          message_count: 1
-                                                        }
-                                                      } else {
-                                                        threadsMap[threadId].messages.push(recipient)
-                                                        threadsMap[threadId].latest_message = recipient
-                                                        threadsMap[threadId].message_count = threadsMap[threadId].messages.length
-                                                      }
-                                                    })
-                                                    setEmailThreads(threadsMap)
-                                                    
-                                                    // Update selected recipient
-                                                    const updated = statusData.recipients.find((r: any) => 
-                                                      r.thread_id === selectedEmailRecipient.thread_id ||
-                                                      (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
-                                                       r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
-                                                    )
-                                            if (updated) setSelectedEmailRecipient(updated)
-                                                  }
-                                                }
-                                              }
-                                            } catch (e) {
-                                              console.error('Error reloading email threads:', e)
-                                            }
-                                          } else {
-                                            const err = await res.json()
-                                            setError(err.error || 'Failed to send')
-                                          }
-                                        } catch (e: any) {
-                                          setError(e.message)
-                                        } finally {
-                                          setSendingResponse(false)
-                                        }
-                                      }}
-                                   >
-                                      {sendingResponse ? 'Sending...' : 'Send Message'}
-                                   </Button>
-                                <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
-                              </div>
-                              {error && <p className="text-sm text-red-600">{error}</p>}
-                            </div>
-                          )}
+                                }}
+                                className="h-[44px] px-3 flex-shrink-0"
+                              >
+                                View Bid
+                              </Button>
+                            )}
+                          </div>
+                          {error && <p className="text-sm text-red-600 mt-2 px-1">{error}</p>}
                         </div>
                       </div>
                 ) : selectedBid ? (

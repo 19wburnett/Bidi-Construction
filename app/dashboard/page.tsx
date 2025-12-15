@@ -745,9 +745,11 @@ function DashboardContent() {
                     Resume Work
                   </h2>
                 </div>
-                <Link href={`/dashboard/jobs/${heroJob.id}`} className="block">
-                  <Card className="border-l-4 border-l-orange overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
-                    <CardContent className="p-6">
+                <Card 
+                  className="border-l-4 border-l-orange overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => router.push(`/dashboard/jobs/${heroJob.id}`)}
+                >
+                  <CardContent className="p-6">
                       <div className="flex flex-col md:flex-row justify-between gap-6">
                         <div className="space-y-4 flex-1">
                           <div className="flex items-start gap-4">
@@ -821,7 +823,6 @@ function DashboardContent() {
                       </div>
                     </CardContent>
                   </Card>
-                </Link>
               </motion.div>
             ) : (
               <motion.div variants={staggerItem}>

@@ -45,6 +45,7 @@ export async function GET(
     }
 
     // Get recipients with subcontractor info
+    console.log(`📧 [recipients] Fetching recipients for bid package: ${bidPackageId}`)
     const { data: recipients, error: recipientsError } = await supabase
       .from('bid_package_recipients')
       .select(`
@@ -68,10 +69,33 @@ export async function GET(
       .order('created_at', { ascending: false })
 
     if (recipientsError) {
+      console.error(`📧 [recipients] Error fetching recipients:`, recipientsError)
       return NextResponse.json(
-        { error: 'Failed to fetch recipients' },
+        { error: 'Failed to fetch recipients', details: recipientsError.message },
         { status: 500 }
       )
+    }
+
+    console.log(`📧 [recipients] Found ${recipients?.length || 0} recipients for package ${bidPackageId}`)
+    
+    // Debug: Check if there are any recipients at all for this package (without joins)
+    const { data: rawRecipients, error: rawError } = await supabase
+      .from('bid_package_recipients')
+      .select('id, bid_package_id, subcontractor_email, subcontractor_name, created_at')
+      .eq('bid_package_id', bidPackageId)
+    
+    if (rawError) {
+      console.error(`📧 [recipients] Error fetching raw recipients:`, rawError)
+    } else {
+      console.log(`📧 [recipients] Raw recipients count: ${rawRecipients?.length || 0}`)
+      if (rawRecipients && rawRecipients.length > 0) {
+        console.log(`📧 [recipients] Raw recipients:`, rawRecipients.map(r => ({
+          id: r.id,
+          email: r.subcontractor_email,
+          name: r.subcontractor_name,
+          created_at: r.created_at
+        })))
+      }
     }
 
     return NextResponse.json({ recipients: recipients || [] })

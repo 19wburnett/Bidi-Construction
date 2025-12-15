@@ -187,6 +187,7 @@ export default function BidPackageModal({
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
   const [expandedTradeSummaries, setExpandedTradeSummaries] = useState<Record<string, boolean>>({})
   const [subcontractorSearch, setSubcontractorSearch] = useState('')
+  const [loadingPhase, setLoadingPhase] = useState<'creating' | 'sending' | 'loading-recipients'>('creating')
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -350,6 +351,7 @@ export default function BidPackageModal({
     if (!user || !job) return
 
     setLoading(true)
+    setLoadingPhase('creating')
     setError('')
 
     try {
@@ -368,13 +370,22 @@ export default function BidPackageModal({
             unit_cost: item.unit_cost
           }))
 
+        // Convert date-only input to end of day in local timezone, then to ISO string
+        let deadlineISO: string | null = null
+        if (deadline) {
+          const deadlineDate = new Date(deadline)
+          // Set to end of day (23:59:59) in local timezone
+          deadlineDate.setHours(23, 59, 59, 999)
+          deadlineISO = deadlineDate.toISOString()
+        }
+
         return {
           job_id: jobId,
           trade_category: trade,
           description: description || null,
           minimum_line_items: minimumLineItems,
           status: 'draft',
-          deadline: deadline ? new Date(deadline).toISOString() : null
+          deadline: deadlineISO
         }
       })
 
@@ -421,29 +432,52 @@ export default function BidPackageModal({
         }
 
         // Send emails for each bid package
+        const sendPromises = []
         for (const pkg of data) {
           const tradeSubs = byTrade[pkg.trade_category] || []
           if (tradeSubs.length > 0) {
-            try {
-              const response = await fetch('/api/bid-packages/send', {
+            sendPromises.push(
+              fetch('/api/bid-packages/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
+                body: JSON.stringify({
                   bidPackageId: pkg.id,
                   subcontractorIds: tradeSubs.map(sub => sub.id),
                   planId: planId,
                   reportIds: selectedReportIds, // Pass report IDs to API
                   templateId: selectedTemplateId || undefined // Pass template ID if selected
                 })
+              }).then(async (response) => {
+                if (!response.ok) {
+                  const errorData = await response.json()
+                  console.error('Error sending emails:', errorData)
+                  throw new Error(errorData.error || 'Failed to send emails')
+                }
+                return response.json()
+              }).catch((err) => {
+                console.error('Error sending emails:', err)
+                throw err
               })
+            )
+          }
+        }
 
-              if (!response.ok) {
-                const errorData = await response.json()
-                console.error('Error sending emails:', errorData)
-              }
-            } catch (err) {
-              console.error('Error sending emails:', err)
-            }
+        // Wait for all emails to be sent and recipients to be created
+        if (sendPromises.length > 0) {
+          setLoadingPhase('sending')
+          try {
+            const results = await Promise.allSettled(sendPromises)
+            const successful = results.filter(r => r.status === 'fulfilled').length
+            const failed = results.filter(r => r.status === 'rejected').length
+            console.log(`📧 Email sending complete: ${successful} successful, ${failed} failed`)
+            
+            // Longer delay to ensure recipients are committed to database
+            // The send API creates recipients synchronously, but we want to be safe
+            await new Promise(resolve => setTimeout(resolve, 2000))
+          } catch (err) {
+            console.error('Some emails failed to send:', err)
+            // Continue anyway - some recipients may have been created
+            await new Promise(resolve => setTimeout(resolve, 2000))
           }
         }
       }
@@ -452,14 +486,35 @@ export default function BidPackageModal({
         setCreatedPackages(data)
         data.forEach(pkg => onPackageCreated?.(pkg))
         
-        // Load recipients for created packages
+        // Load recipients for created packages - keep loading state active until complete
         if (selectedSubs.length > 0) {
-          await loadRecipients(data.map(p => p.id))
+          setLoadingPhase('loading-recipients')
+          // Retry loading recipients with exponential backoff if not found initially
+          let retries = 5
+          let recipientsCount = 0
+          while (retries > 0 && recipientsCount === 0) {
+            recipientsCount = await loadRecipients(data.map(p => p.id))
+            console.log(`📧 Loaded ${recipientsCount} recipients (attempt ${6 - retries}/5)`)
+            if (recipientsCount === 0) {
+              retries--
+              if (retries > 0) {
+                // Wait before retrying (exponential backoff: 1s, 2s, 3s, 4s)
+                const delay = (5 - retries) * 1000
+                console.log(`📧 No recipients found, retrying in ${delay}ms...`)
+                await new Promise(resolve => setTimeout(resolve, delay))
+              } else {
+                console.warn('📧 Warning: No recipients found after all retries. They may still be processing.')
+              }
+            }
+          }
         }
         
+        // Only stop loading and move to Step 5 after recipients are loaded
+        setLoading(false)
         // Move to Step 5 to show email status
         setStep(5)
       } else {
+        setLoading(false)
         setSuccess(true)
         setTimeout(() => {
           handleClose()
@@ -468,7 +523,6 @@ export default function BidPackageModal({
 
     } catch (err: any) {
       setError(err.message || 'Failed to create bid package')
-    } finally {
       setLoading(false)
     }
   }
@@ -493,25 +547,40 @@ export default function BidPackageModal({
     setExpandedTradeSummaries({})
     setShowAddContact(false)
     setSubcontractorSearch('')
+    setLoadingPhase('creating')
     onClose()
   }
 
-  const loadRecipients = async (packageIds: string[]) => {
+  const loadRecipients = async (packageIds: string[]): Promise<number> => {
     setLoadingRecipients(true)
     try {
       const allRecipients: any[] = []
       for (const packageId of packageIds) {
-        const response = await fetch(`/api/bid-packages/${packageId}/recipients`)
+        const response = await fetch(`/api/bid-packages/${packageId}/recipients`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache'
+          }
+        })
         if (response.ok) {
           const data = await response.json()
-          if (data.recipients) {
+          if (data.recipients && Array.isArray(data.recipients)) {
             allRecipients.push(...data.recipients)
+            console.log(`📧 Loaded ${data.recipients.length} recipients for package ${packageId}`)
+          } else {
+            console.warn(`📧 No recipients array in response for package ${packageId}:`, data)
           }
+        } else {
+          const errorText = await response.text()
+          console.error(`📧 Error loading recipients for package ${packageId}:`, response.status, errorText)
         }
       }
       setRecipients(allRecipients)
+      console.log(`📧 Total recipients loaded: ${allRecipients.length}`)
+      return allRecipients.length
     } catch (err) {
       console.error('Error loading recipients:', err)
+      return 0
     } finally {
       setLoadingRecipients(false)
     }
@@ -1867,10 +1936,10 @@ export default function BidPackageModal({
                                 <div className="space-y-2">
                                   <Label className="text-sm font-semibold">Bid Deadline</Label>
                                   <Input
-                                    type="datetime-local"
+                                    type="date"
                                     value={deadline}
                                     onChange={(e) => setDeadline(e.target.value)}
-                                    min={new Date().toISOString().slice(0, 16)}
+                                    min={new Date().toISOString().slice(0, 10)}
                                   />
                                   <p className="text-xs text-gray-500">
                                     Set a deadline for when subcontractors should submit their bids.
@@ -1964,7 +2033,9 @@ export default function BidPackageModal({
                             {loading ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Creating...
+                                {loadingPhase === 'creating' && 'Creating packages...'}
+                                {loadingPhase === 'sending' && 'Sending emails...'}
+                                {loadingPhase === 'loading-recipients' && 'Loading recipients...'}
                               </>
                             ) : (
                               <>

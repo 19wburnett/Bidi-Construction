@@ -1066,10 +1066,12 @@ export default function JobDetailPage() {
                 variants={staggerContainer}
                 initial="initial"
                 animate="animate"
-                className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+                className="space-y-6"
               >
-                <div className="lg:col-span-2 space-y-6">
-                  <motion.div variants={staggerItem}>
+                {/* Top Row: Overview Stats and Recent Activity Side by Side */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Project Overview - Left Column */}
+                  <motion.div variants={staggerItem} className="lg:col-span-2">
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center">
@@ -1134,20 +1136,8 @@ export default function JobDetailPage() {
                     </Card>
                   </motion.div>
 
-                  {/* Project Timeline */}
-                  <motion.div variants={staggerItem}>
-                    <JobTimeline 
-                      jobId={jobId} 
-                      canEdit={jobRole === 'owner'}
-                      onUpdate={() => {
-                        // Refresh any relevant data if needed
-                      }}
-                    />
-                  </motion.div>
-                </div>
-
-                <div className="lg:col-span-1">
-                  <motion.div variants={staggerItem}>
+                  {/* Recent Activity - Right Column */}
+                  <motion.div variants={staggerItem} className="lg:col-span-1">
                     <Card className="h-full">
                       <CardHeader>
                         <CardTitle className="flex items-center">
@@ -1184,6 +1174,17 @@ export default function JobDetailPage() {
                     </Card>
                   </motion.div>
                 </div>
+
+                {/* Bottom Row: Timeline Full Width */}
+                <motion.div variants={staggerItem} className="w-full">
+                  <JobTimeline 
+                    jobId={jobId} 
+                    canEdit={jobRole === 'owner'}
+                    onUpdate={() => {
+                      // Refresh any relevant data if needed
+                    }}
+                  />
+                </motion.div>
               </motion.div>
             </TabsContent>
 
@@ -1625,25 +1626,17 @@ export default function JobDetailPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="p-0">
-                      {bids.length === 0 ? (
-                        <div className="text-center py-12 px-6">
-                          <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-lg font-semibold text-gray-900 mb-2">No bids received yet</h3>
-                          <p className="text-gray-600">Bids will appear here once you send out bid packages</p>
-                        </div>
-                      ) : (
-                        <div className="h-[800px] overflow-hidden">
-                          {jobId && (
-                            <BidComparisonModal
-                              jobId={jobId}
-                              isOpen={true}
-                              onClose={() => {}}
-                              inline={true}
-                              refreshTrigger={bidModalRefreshTrigger}
-                            />
-                          )}
-                        </div>
-                      )}
+                      <div className="h-[800px] overflow-hidden">
+                        {jobId && (
+                          <BidComparisonModal
+                            jobId={jobId}
+                            isOpen={true}
+                            onClose={() => {}}
+                            inline={true}
+                            refreshTrigger={bidModalRefreshTrigger}
+                          />
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -1997,6 +1990,8 @@ export default function JobDetailPage() {
           onPackageCreated={(pkg) => {
             // Reload bid packages after creation
             loadJobData()
+            // Refresh bid comparison modal to show new email recipients
+            setBidModalRefreshTrigger(prev => prev + 1)
           }}
         />
       )}

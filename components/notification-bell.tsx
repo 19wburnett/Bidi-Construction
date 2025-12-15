@@ -50,9 +50,15 @@ export default function NotificationBell() {
           read,
           dismissed,
           created_at,
-          bids!inner(
+          job_id,
+          bid_id,
+          bid_package_id,
+          notification_type,
+          message,
+          bids (
             id,
-            job_request_id,
+            job_id,
+            bid_package_id,
             bid_amount,
             seen,
             created_at,
@@ -61,10 +67,11 @@ export default function NotificationBell() {
               id,
               name,
               email
-            ),
-            jobs!inner(
-              name
             )
+          ),
+          jobs (
+            id,
+            name
           )
         `)
         .eq('user_id', user.id)
@@ -88,18 +95,33 @@ export default function NotificationBell() {
 
       // If we have notification data, use it
       if (notificationData && notificationData.length > 0) {
-        const notifications = notificationData.map((notif: any) => ({
-          id: notif.bids.id,
-          notification_id: notif.id,
-          job_id: notif.bids.job_id,
-          job_title: notif.bids.jobs?.name || 'Job',
-          subcontractor_name: notif.bids.subcontractors?.name || notif.bids.subcontractor_email || 'Unknown Subcontractor',
-          bid_amount: notif.bids.bid_amount,
-          created_at: notif.bids.created_at,
-          read: notif.read,
-          seen: notif.bids.seen,
-          dismissed: notif.dismissed || false
-        }))
+        const notifications = notificationData.map((notif: any) => {
+          // Get job info - prefer direct job_id relationship, fallback to bid's job_id
+          const jobName = notif.jobs?.name || 'Job'
+          const jobId = notif.job_id || notif.bids?.job_id || null
+
+          // Get bid info if available
+          const bidId = notif.bid_id || notif.bids?.id || null
+          const bidAmount = notif.bids?.bid_amount || null
+          const subcontractorName = notif.bids?.subcontractors?.name || 
+                                   notif.bids?.subcontractor_email || 
+                                   'Unknown Subcontractor'
+
+          return {
+            id: bidId || notif.id, // Use bid ID if available, otherwise notification ID
+            notification_id: notif.id,
+            job_id: jobId,
+            job_title: jobName,
+            subcontractor_name: subcontractorName,
+            bid_amount: bidAmount,
+            created_at: notif.bids?.created_at || notif.created_at,
+            read: notif.read || false,
+            seen: notif.bids?.seen || false,
+            dismissed: notif.dismissed || false,
+            notification_type: notif.notification_type,
+            message: notif.message
+          }
+        })
         // Processed notifications
         setNotifications(notifications)
       } else {

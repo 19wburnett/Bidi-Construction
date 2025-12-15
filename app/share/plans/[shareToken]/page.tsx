@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createClient } from '@/lib/supabase'
 import { 
   Eye,
   MessageSquare,
@@ -47,8 +46,6 @@ export default function GuestPlanViewer() {
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0, pageNumber: 1 })
   const [activeTab, setActiveTab] = useState<AnalysisMode>('takeoff')
   const [takeoffData, setTakeoffData] = useState<any>(null)
-  
-  const supabase = createClient()
 
   const shareToken = params.shareToken as string
 
@@ -60,70 +57,35 @@ export default function GuestPlanViewer() {
 
   async function loadShareData() {
     try {
-      // Load share details
-      const { data: shareData, error: shareError } = await supabase
-        .from('plan_shares')
-        .select('*')
-        .eq('share_token', shareToken)
-        .single()
+      // Fetch share and plan data from API (no authentication required)
+      const response = await fetch(`/api/plan/share/${shareToken}`)
+      const data = await response.json()
 
-      if (shareError) throw shareError
-
-      // Check if share is expired
-      if (shareData.expires_at && new Date(shareData.expires_at) < new Date()) {
-        throw new Error('This share link has expired')
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to load plan')
       }
 
-      setShare(shareData)
+      // Set share data
+      setShare(data.share as PlanShare)
 
-      // Load plan details
-      const { data: planData, error: planError } = await supabase
-        .from('plans')
-        .select('*')
-        .eq('id', shareData.plan_id)
-        .single()
+      // Set plan data
+      setPlan(data.plan)
 
-      if (planError) throw planError
-      setPlan(planData)
+      // Set PDF URL (already signed by API)
+      if (data.plan?.pdfUrl) {
+        setPdfUrl(data.plan.pdfUrl)
+      } else if (data.plan?.file_path) {
+        setPdfUrl(data.plan.file_path)
+      }
 
-      // Get signed URL for PDF
-      if (planData?.file_path) {
-        let pdfUrlValue = planData.file_path
-        
-        console.log('Loading PDF:', pdfUrlValue)
-        
-        // If it's already a full URL, use it directly
-        if (pdfUrlValue.startsWith('http')) {
-          setPdfUrl(pdfUrlValue)
-        } else {
-          // Try to get signed URL from storage
-          try {
-            const { data: urlData, error: urlError } = await supabase.storage
-              .from('job-plans')
-              .createSignedUrl(pdfUrlValue, 3600)
-
-            if (urlError) {
-              console.error('Error creating signed URL:', urlError)
-              // If creating signed URL fails, try using the path directly as it might be public
-              setPdfUrl(pdfUrlValue)
-            } else if (urlData) {
-              pdfUrlValue = urlData.signedUrl
-              console.log('Got signed URL:', pdfUrlValue)
-              setPdfUrl(pdfUrlValue)
-            }
-          } catch (storageError) {
-            console.error('Storage error:', storageError)
-            // Fallback: use the path directly
-            setPdfUrl(pdfUrlValue)
-          }
-        }
-      } else {
-        console.error('No file_path found in plan data')
+      // Set takeoff data if available
+      if (data.takeoffData) {
+        setTakeoffData(data.takeoffData)
       }
 
       // Load existing comments for this plan so they show in the sidebar
       try {
-        const commentPersistence = new CommentPersistence(planData.id)
+        const commentPersistence = new CommentPersistence(data.plan.id)
         const existingComments = await commentPersistence.loadComments()
         if (Array.isArray(existingComments)) {
           setDrawings(existingComments)
@@ -131,31 +93,6 @@ export default function GuestPlanViewer() {
       } catch (loadCommentsError) {
         console.warn('Unable to load existing comments for shared view:', loadCommentsError)
       }
-
-      // Update access count
-      await supabase
-        .from('plan_shares')
-        .update({ 
-          accessed_count: shareData.accessed_count + 1,
-          last_accessed_at: new Date().toISOString()
-        })
-        .eq('id', shareData.id)
-      
-      // Load takeoff analysis if available
-      if (planData.job_id) {
-        const { data: takeoffAnalysis } = await supabase
-          .from('plan_takeoff_analysis')
-          .select('*')
-          .eq('job_id', planData.job_id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-        
-        if (takeoffAnalysis) {
-          setTakeoffData(takeoffAnalysis)
-        }
-      }
-      
 
     } catch (err: any) {
       setError(err.message || 'Failed to load plan')

@@ -324,6 +324,7 @@ export async function POST(request: NextRequest) {
           subcontractorEmail: sub.email
         })
         
+        console.log(`📧 [send] Creating recipient record for ${sub.email} in package ${bidPackageId}`)
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
           .insert({
@@ -336,25 +337,52 @@ export async function POST(request: NextRequest) {
             sent_at: new Date().toISOString(),
             thread_id: threadId,
             parent_email_id: null,
-            response_text: emailTextContent || null, // Store email content so it can be displayed in thread (null if empty)
-            is_from_gc: true // Mark as sent from GC
+            response_text: emailTextContent || null // Store email content so it can be displayed in thread (null if empty)
+            // Note: is_from_gc column doesn't exist in schema - using fallback logic in UI based on resend_email_id and status
           })
           .select()
           .single()
         
         // Verify the content was saved
-        if (recipient) {
-          console.log('📧 [send] Recipient created:', {
-            id: recipient.id,
-            hasResponseText: !!recipient.response_text,
-            responseTextLength: recipient.response_text?.length || 0
+        if (recipientError) {
+          console.error(`📧 [send] Error creating recipient record for ${sub.email}:`, recipientError)
+          console.error(`📧 [send] Error details:`, {
+            code: recipientError.code,
+            message: recipientError.message,
+            details: recipientError.details,
+            hint: recipientError.hint
           })
+          errors.push({ subcontractor: sub.email, error: `Failed to create recipient record: ${recipientError.message}` })
+          // Don't continue - throw error so frontend knows recipient wasn't created
+          throw new Error(`Failed to create recipient record for ${sub.email}: ${recipientError.message}`)
         }
 
-        if (recipientError) {
-          console.error('Error creating recipient record:', recipientError)
-          errors.push({ subcontractor: sub.email, error: 'Failed to create recipient record' })
-          continue
+        if (!recipient) {
+          console.error(`📧 [send] Recipient insert returned no data for ${sub.email} - this should not happen`)
+          errors.push({ subcontractor: sub.email, error: 'Recipient insert returned no data' })
+          throw new Error(`Recipient insert returned no data for ${sub.email}`)
+        }
+
+        console.log('📧 [send] Recipient created successfully:', {
+          id: recipient.id,
+          bid_package_id: recipient.bid_package_id,
+          subcontractor_email: recipient.subcontractor_email,
+          hasResponseText: !!recipient.response_text,
+          responseTextLength: recipient.response_text?.length || 0
+        })
+
+        // Verify the recipient was actually saved by querying it back
+        const { data: verifyRecipient, error: verifyError } = await supabase
+          .from('bid_package_recipients')
+          .select('id, bid_package_id, subcontractor_email')
+          .eq('id', recipient.id)
+          .single()
+
+        if (verifyError || !verifyRecipient) {
+          console.error(`📧 [send] WARNING: Could not verify recipient was saved:`, verifyError)
+          console.error(`📧 [send] Original recipient data:`, recipient)
+        } else {
+          console.log(`📧 [send] Verified recipient exists in database:`, verifyRecipient.id)
         }
 
         results.push({

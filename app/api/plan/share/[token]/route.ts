@@ -50,10 +50,10 @@ export async function GET(
       }, { status: 404 })
     }
 
-    // Get the plan details
+    // Get the plan details - return all fields needed for the viewer
     const { data: planData, error: planError } = await supabase
       .from('plans')
-      .select('id, title, file_name, file_path')
+      .select('*')
       .eq('id', shareData.plan_id)
       .single()
 
@@ -63,6 +63,41 @@ export async function GET(
         error: 'Plan not found',
         valid: false 
       }, { status: 404 })
+    }
+
+    // Create signed URL for PDF if needed
+    let pdfUrl = planData.file_path
+    if (pdfUrl && !pdfUrl.startsWith('http')) {
+      // Try to get signed URL from storage
+      const bucketsToTry = ['job-plans', 'plans']
+      
+      for (const bucket of bucketsToTry) {
+        const candidatePaths = [pdfUrl]
+        if (pdfUrl.startsWith(`${bucket}/`)) {
+          candidatePaths.push(pdfUrl.slice(bucket.length + 1))
+        }
+        
+        // Handle fully-qualified public URLs stored in the database
+        if (pdfUrl.includes('/storage/v1/object/public/')) {
+          const [, afterPublic] = pdfUrl.split('/storage/v1/object/public/')
+          if (afterPublic) {
+            candidatePaths.push(afterPublic)
+          }
+        }
+
+        for (const candidatePath of candidatePaths) {
+          const { data: urlData, error: urlError } = await supabase.storage
+            .from(bucket)
+            .createSignedUrl(candidatePath, 3600)
+
+          if (!urlError && urlData?.signedUrl) {
+            pdfUrl = urlData.signedUrl
+            break
+          }
+        }
+        
+        if (pdfUrl.startsWith('http')) break
+      }
     }
 
     // Update access count and last accessed time
@@ -86,15 +121,37 @@ export async function GET(
       .eq('id', shareData.created_by)
       .single()
 
+    // Load takeoff analysis if available
+    let takeoffData = null
+    if (planData.job_id) {
+      const { data: takeoffAnalysis } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('*')
+        .eq('job_id', planData.job_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      
+      if (takeoffAnalysis) {
+        takeoffData = takeoffAnalysis
+      }
+    }
+
     return NextResponse.json({
       success: true,
       valid: true,
-      plan: {
-        id: planData.id,
-        title: planData.title,
-        fileName: planData.file_name,
-        fileUrl: planData.file_path
+      share: {
+        id: shareData.id,
+        permissions: shareData.permissions,
+        expires_at: shareData.expires_at,
+        created_at: shareData.created_at,
+        accessed_count: shareData.accessed_count
       },
+      plan: {
+        ...planData,
+        pdfUrl: pdfUrl
+      },
+      takeoffData: takeoffData,
       permissions: {
         allowComments,
         allowDrawings
