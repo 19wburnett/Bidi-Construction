@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Resend } from 'resend'
 
 export const runtime = 'nodejs'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function GET(
   request: NextRequest,
@@ -13,28 +16,45 @@ export async function GET(
       return NextResponse.json({ error: 'Email ID required' }, { status: 400 })
     }
 
-    // Try to fetch email content from Resend API
-    // Note: Inbound emails may not be accessible via this endpoint
-    const response = await fetch(`https://api.resend.com/emails/${emailId}`, {
-      headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    })
+    // Fetch inbound email content using Resend Receiving API
+    console.log('📧 [content API] Fetching email content for:', emailId)
+    const { data: emailData, error: receivingError } = await resend.emails.receiving.get(emailId)
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('❌ Failed to fetch email content from Resend:', response.status, errorText)
+    if (receivingError) {
+      console.error('❌ [content API] Failed to fetch email content from Resend Receiving API:', JSON.stringify(receivingError, null, 2))
       return NextResponse.json(
-        { error: 'Email content not available', details: errorText },
-        { status: response.status }
+        { error: 'Email content not available', details: receivingError.message || 'Unknown error' },
+        { status: 404 }
       )
     }
 
-    const emailData = await response.json()
+    if (!emailData) {
+      console.log('⚠️ [content API] No emailData returned from Receiving API')
+      return NextResponse.json(
+        { error: 'Email not found' },
+        { status: 404 }
+      )
+    }
+    
+    console.log('✅ [content API] Fetched email data, keys:', Object.keys(emailData))
+    console.log('📧 [content API] Email data structure:', JSON.stringify({
+      hasHtml: !!emailData.html,
+      hasText: !!emailData.text,
+      htmlLength: emailData.html?.length || 0,
+      textLength: emailData.text?.length || 0,
+      bodyType: typeof emailData.body,
+      bodyKeys: emailData.body && typeof emailData.body === 'object' ? Object.keys(emailData.body) : null,
+      contentKeys: emailData.content ? Object.keys(emailData.content) : null,
+      allKeys: Object.keys(emailData)
+    }, null, 2))
     
     // Extract text content from HTML or use text field
-    let textContent = emailData.text || ''
+    // Try multiple possible locations for content
+    let textContent = emailData.text || 
+                     emailData.body?.text || 
+                     emailData.content?.text ||
+                     (typeof emailData.body === 'string' ? emailData.body : '') ||
+                     ''
     
     if (!textContent && emailData.html) {
       // Strip HTML tags to get plain text
@@ -50,6 +70,11 @@ export async function GET(
         .replace(/\s+/g, ' ')
         .trim()
         .substring(0, 10000) // Limit to 10k chars
+    }
+
+    console.log('📧 [content API] Extracted content - hasText:', !!textContent, 'textLength:', textContent?.length)
+    if (textContent) {
+      console.log('📧 [content API] Text preview (first 200 chars):', textContent.substring(0, 200))
     }
 
     return NextResponse.json({

@@ -404,45 +404,58 @@ async function handleInboundEmail(body: any) {
              email.message ||
              ''
   
-  // If no content in webhook payload, try to fetch from Resend API
-  // Note: Resend's inbound emails may not be accessible via /emails/{id} endpoint
-  // Try multiple approaches to get the content
+  // If no content in webhook payload, fetch from Resend Receiving API
+  // Resend's inbound emails must be fetched using the Receiving API, not the standard emails endpoint
   if (!html && !text && emailId) {
-    console.log('📧 No content in webhook payload, attempting to fetch from Resend API...')
-    
-    // Try standard emails endpoint first
+    console.log('📧 No content in webhook payload, fetching from Resend Receiving API...')
+    console.log('📧 Using email_id:', emailId)
     try {
-      const response = await fetch(`https://api.resend.com/emails/${emailId}`, {
-        headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      // Use Resend SDK's receiving API for inbound emails
+      const { data: emailData, error: receivingError } = await resend.emails.receiving.get(emailId)
       
-      if (response.ok) {
-        const emailData = await response.json()
-        console.log('✅ Fetched email from Resend API, keys:', Object.keys(emailData))
+      if (receivingError) {
+        console.error('❌ Failed to fetch email from Resend Receiving API:', JSON.stringify(receivingError, null, 2))
+        console.log('⚠️ Email content not available via API. Will store email_id for later fetching.')
+      } else if (emailData) {
+        console.log('✅ Fetched email from Resend Receiving API')
+        console.log('📧 Full emailData keys:', Object.keys(emailData))
+        console.log('📧 emailData structure:', JSON.stringify({
+          hasHtml: !!emailData.html,
+          hasText: !!emailData.text,
+          htmlLength: emailData.html?.length || 0,
+          textLength: emailData.text?.length || 0,
+          bodyKeys: emailData.body ? Object.keys(emailData.body) : null,
+          contentKeys: emailData.content ? Object.keys(emailData.content) : null,
+          allKeys: Object.keys(emailData)
+        }, null, 2))
         
-        // Extract content from API response
-        html = emailData.html || emailData.body?.html || emailData.content?.html || html
-        text = emailData.text || emailData.body?.text || emailData.content?.text || emailData.body || text
+        // Extract content from API response - try multiple possible locations
+        html = emailData.html || 
+               emailData.body?.html || 
+               emailData.content?.html || 
+               (typeof emailData.body === 'string' ? emailData.body : null) ||
+               html
         
-        console.log('📧 Content from API - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
-      } else {
-        const errorText = await response.text()
-        console.error('❌ Failed to fetch email from Resend API (standard endpoint):', response.status, errorText)
+        text = emailData.text || 
+               emailData.body?.text || 
+               emailData.content?.text || 
+               (typeof emailData.body === 'string' ? emailData.body : null) ||
+               emailData.body ||
+               text
         
-        // Try using Resend SDK for inbound emails
-        try {
-          // Resend SDK might have a different method for inbound emails
-          // For now, log that we need to fetch content later via stored email_id
-          console.log('⚠️ Email content not available via API. Will store email_id for later fetching.')
-        } catch (sdkError: any) {
-          console.error('❌ Error with Resend SDK:', sdkError.message)
+        console.log('📧 Content extracted - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
+        if (text) {
+          console.log('📧 Text preview (first 200 chars):', text.substring(0, 200))
         }
+        if (html) {
+          console.log('📧 HTML preview (first 200 chars):', html.substring(0, 200))
+        }
+      } else {
+        console.log('⚠️ No emailData returned from Receiving API')
       }
     } catch (fetchError: any) {
-      console.error('❌ Error fetching email from Resend API:', fetchError.message)
+      console.error('❌ Error fetching email from Resend Receiving API:', fetchError.message)
+      console.error('❌ Error stack:', fetchError.stack)
       console.log('⚠️ Email content will be fetched later using stored email_id')
     }
   }
