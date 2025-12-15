@@ -1285,16 +1285,15 @@ export default function BidComparisonModal({
                       </TabsTrigger>
                       <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
                         Emails
-                        {allRecipients.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        )}
-                        {unreadCount > 0 && (
+                        {unreadCount > 0 ? (
                           <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
                             {unreadCount}
                           </Badge>
-                        )}
+                        ) : allRecipients.length > 0 ? (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {allRecipients.length}
+                          </Badge>
+                        ) : null}
                       </TabsTrigger>
                     </TabsList>
                       <Button
@@ -2984,16 +2983,15 @@ export default function BidComparisonModal({
                       </TabsTrigger>
                       <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
                         Emails
-                        {allRecipients.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        )}
-                        {unreadCount > 0 && (
+                        {unreadCount > 0 ? (
                           <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
                             {unreadCount}
                           </Badge>
-                        )}
+                        ) : allRecipients.length > 0 ? (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {allRecipients.length}
+                          </Badge>
+                        ) : null}
                       </TabsTrigger>
                     </TabsList>
                       <Button

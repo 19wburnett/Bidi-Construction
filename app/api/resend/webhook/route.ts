@@ -657,7 +657,8 @@ async function handleInboundEmail(body: any) {
     let attachmentsWithDownloadUrls: any[] = []
     try {
       console.log(`📎 Fetching attachment list from Resend Receiving API for email: ${emailId}`)
-      const listResponse = await fetch(`https://api.resend.com/emails/${emailId}/attachments`, {
+      // For receiving emails, use /emails/receiving/{emailId}/attachments endpoint
+      const listResponse = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
         headers: {
           'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
           'Content-Type': 'application/json'
