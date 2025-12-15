@@ -241,25 +241,12 @@ export default function GuestJobPlansViewer() {
           </Card>
         </motion.div>
 
-        {/* Project Timeline */}
+        {/* Plans List */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.1 }}
           className="mb-8"
-        >
-          <JobTimeline 
-            jobId={job?.id || ''} 
-            canEdit={false}
-            shareToken={shareToken}
-          />
-        </motion.div>
-
-        {/* Plans List */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-semibold text-gray-900">
@@ -344,6 +331,20 @@ export default function GuestJobPlansViewer() {
               ))}
             </div>
           )}
+        </motion.div>
+
+        {/* Project Timeline */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="mb-8"
+        >
+          <JobTimeline 
+            jobId={job?.id || ''} 
+            canEdit={false}
+            shareToken={shareToken}
+          />
         </motion.div>
 
         {/* Footer */}

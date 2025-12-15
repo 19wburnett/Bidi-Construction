@@ -1039,7 +1039,8 @@ async function handleInboundEmail(body: any) {
         clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
         bid_id: bidId,
         thread_id: threadId || `thread-${bidPackageId}-${fromEmail}`,
-        parent_email_id: null
+        parent_email_id: null,
+        is_from_gc: false // Explicitly mark as subcontractor-sent email
       })
       .select()
       .single()
@@ -1087,6 +1088,7 @@ async function handleInboundEmail(body: any) {
             status: 'responded',
             responded_at: new Date().toISOString(),
             response_text: emailContentText.substring(0, 5000),
+            is_from_gc: false, // Explicitly mark as subcontractor-sent email
             has_clarifying_questions: clarifyingQuestions.hasQuestions,
             clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
             bid_id: null,
@@ -1128,7 +1130,8 @@ async function handleInboundEmail(body: any) {
             bid_id: null,
             thread_id: finalThreadId,
             parent_email_id: null,
-            resend_email_id: emailId || null // Store email_id for later content fetching
+            resend_email_id: emailId || null, // Store email_id for later content fetching
+            is_from_gc: false // Explicitly mark as subcontractor-sent email
           })
           .select()
           .single()
@@ -1160,7 +1163,8 @@ async function handleInboundEmail(body: any) {
             bid_id: null,
             thread_id: finalThreadId,
             parent_email_id: finalParentId,
-            resend_email_id: emailId || null // Store email_id for later content fetching
+            resend_email_id: emailId || null, // Store email_id for later content fetching
+            is_from_gc: false // Explicitly mark as subcontractor-sent email
           })
         .select()
         .single()

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -175,59 +175,34 @@ export default function BidComparisonModal({
   // Poll for email updates every 10 seconds when modal is open
   useEffect(() => {
     if (!isOpen || !jobId) {
-      console.log('📧 Polling stopped: isOpen=', isOpen, 'jobId=', jobId)
       return
     }
-
-    console.log('📧 Starting email polling for job:', jobId)
 
     // Only reload email statuses, not all data (to avoid disrupting user)
     const refreshEmailStatuses = async () => {
       try {
-        console.log('📧 Polling: Fetching email statuses for job:', jobId)
         const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`, {
           cache: 'no-store', // Ensure we don't get cached responses
           headers: {
             'Cache-Control': 'no-cache'
           }
         })
-        console.log('📧 Polling: Response status:', statusResponse.status)
         
         if (statusResponse.ok) {
           const statusData = await statusResponse.json()
-          console.log('📧 Polling: Received data, recipients:', statusData.recipients?.length, 'threads:', statusData.threads?.length)
           
           if (statusData.recipients && Array.isArray(statusData.recipients)) {
-            console.log('📧 Polling: recipients is array, length:', statusData.recipients.length)
-            console.log('📧 Polling: threads exists?', !!statusData.threads, 'is array?', Array.isArray(statusData.threads), 'length:', statusData.threads?.length)
             if (statusData.threads && Array.isArray(statusData.threads)) {
-              console.log('📧 Polling: Processing threads:', statusData.threads.length)
               const threadRecipients = statusData.threads.map((thread: any) => {
-                const latest = thread.latest_message
-                console.log('📧 Polling: Thread', thread.thread_id, 'has', thread.message_count, 'messages')
-                console.log('  - Latest message status:', latest?.status, 'opened_at:', latest?.opened_at, 'responded_at:', latest?.responded_at)
-                return latest
+                return thread.latest_message
               })
-              console.log('📧 Polling: All recipient statuses:', threadRecipients.map((r: any) => ({ 
-                id: r.id,
-                email: r.subcontractor_email, 
-                status: r.status,
-                opened_at: r.opened_at,
-                responded_at: r.responded_at,
-                isFromGC: r.isFromGC
-              })))
               setAllRecipients(threadRecipients)
-              console.log('📧 Polling: Updated allRecipients with', threadRecipients.length, 'recipients')
-              
-              // Force a re-render by logging the state
-              console.log('📧 Polling: Current allRecipients state will have', threadRecipients.length, 'items')
               
               const threadsMap: Record<string, any> = {}
               statusData.threads.forEach((thread: any) => {
                 threadsMap[thread.thread_id] = thread
               })
               setEmailThreads(threadsMap)
-              console.log('📧 Polling: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
               
               // Update selected recipient if viewing a thread (use functional update to get current value)
               setSelectedEmailRecipient((current: any | null) => {
@@ -268,12 +243,9 @@ export default function BidComparisonModal({
             })
             setEmailStatuses(statusMap)
           }
-        } else {
-          const errorText = await statusResponse.text()
-          console.error('📧 Polling: Error response:', statusResponse.status, errorText)
         }
       } catch (err) {
-        console.error('📧 Polling: Error polling email statuses:', err)
+        console.error('Error polling email statuses:', err)
       }
     }
 
@@ -282,7 +254,6 @@ export default function BidComparisonModal({
     const pollInterval = setInterval(refreshEmailStatuses, 10000)
 
     return () => {
-      console.log('📧 Polling stopped: Cleaning up interval')
       clearInterval(pollInterval)
     }
   }, [isOpen, jobId]) // Removed selectedEmailRecipient from dependencies to avoid restarting polling
@@ -569,7 +540,7 @@ export default function BidComparisonModal({
     }
   }, [comparisonMode, selectedBidId, filteredTakeoffItems.length, bidLineItems.length, selectedTakeoffItemIds.size])
 
-  async function generateAIComparison(forceRefresh = false) {
+  const generateAIComparison = useCallback(async (forceRefresh = false) => {
     if (!selectedBidId || selectedComparisonBidIds.size === 0) return
 
     setLoadingAI(true)
@@ -603,9 +574,9 @@ export default function BidComparisonModal({
     } finally {
       setLoadingAI(false)
     }
-  }
+  }, [selectedBidId, selectedComparisonBidIds, jobId])
 
-  async function generateTakeoffAIComparison(forceRefresh = false) {
+  const generateTakeoffAIComparison = useCallback(async (forceRefresh = false) => {
     if (!selectedBidId || filteredTakeoffItems.length === 0 || bidLineItems.length === 0) return
 
     setLoadingTakeoffAI(true)
@@ -642,7 +613,7 @@ export default function BidComparisonModal({
     } finally {
       setLoadingTakeoffAI(false)
     }
-  }
+  }, [selectedBidId, filteredTakeoffItems, bidLineItems, selectedTakeoffItemIds, jobId])
 
   // Default to emails tab when there are no bids
   useEffect(() => {
@@ -1478,14 +1449,8 @@ export default function BidComparisonModal({
                           }
                           
                           return sortedMessages.map((message: any, index: number) => {
-                            // Determine if message is from GC:
-                            // 1. Use explicit isFromGC flag if available (from API)
-                            // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
-                            // 3. If message has responded_at, it's from subcontractor (inbound email response)
-                            // This ensures GC responses stay marked as from GC even after reload
-                            const isFromGC = message.isFromGC !== undefined 
-                              ? message.isFromGC 
-                              : !!(message.resend_email_id && message.status === 'sent' && !message.responded_at)
+                            // Use explicit isFromGC from API (fallback to false for safety)
+                            const isFromGC = message.isFromGC ?? false
                             // Use fetched content if available, otherwise fall back to stored content
                             const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
@@ -3147,14 +3112,8 @@ export default function BidComparisonModal({
                           }
                           
                           return sortedMessages.map((message: any, index: number) => {
-                            // Determine if message is from GC:
-                            // 1. Use explicit isFromGC flag if available (from API)
-                            // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
-                            // 3. If message has responded_at, it's from subcontractor (inbound email response)
-                            // This ensures GC responses stay marked as from GC even after reload
-                            const isFromGC = message.isFromGC !== undefined 
-                              ? message.isFromGC 
-                              : !!(message.resend_email_id && message.status === 'sent' && !message.responded_at)
+                            // Use explicit isFromGC from API (fallback to false for safety)
+                            const isFromGC = message.isFromGC ?? false
                             // Use fetched content if available, otherwise fall back to stored content
                             const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at

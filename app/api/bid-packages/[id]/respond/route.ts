@@ -224,8 +224,8 @@ export async function POST(
         sent_at: new Date().toISOString(),
         thread_id: threadId,
         parent_email_id: parentId,
-        response_text: emailTextContent // Store the full email content (includes plan links if any)
-        // Note: is_from_gc column doesn't exist in schema - using fallback logic in UI based on resend_email_id and status
+        response_text: emailTextContent, // Store the full email content (includes plan links if any)
+        is_from_gc: true // Explicitly mark as GC-sent email
       })
       .select()
       .single()

@@ -124,7 +124,8 @@ export function EmailChatThread({
           </div>
         ) : (
           sortedMessages.map((message: any, index: number) => {
-            const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
+            // Use explicit isFromGC from API (fallback to false for safety)
+            const isFromGC = message.isFromGC ?? false
             const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
             const messageTime = new Date(message.responded_at || message.sent_at || message.created_at)
             const senderName = isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')

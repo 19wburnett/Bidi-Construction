@@ -9,7 +9,6 @@ const fetchEmailContentFromResend = async (resendEmailId: string): Promise<strin
   if (!resendEmailId) return null
   
   try {
-    console.log('📧 [email-statuses] Fetching email content from Resend for:', resendEmailId)
     const response = await fetch(`https://api.resend.com/emails/${resendEmailId}`, {
       headers: {
         'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
@@ -38,11 +37,8 @@ const fetchEmailContentFromResend = async (resendEmailId: string): Promise<strin
           .substring(0, 5000)
       }
       
-      console.log('📧 [email-statuses] Fetched content length:', textContent?.length || 0)
       return textContent || null
     } else {
-      const errorText = await response.text()
-      console.error('❌ [email-statuses] Failed to fetch from Resend:', response.status, errorText)
       return null
     }
   } catch (error: any) {
@@ -57,19 +53,15 @@ export async function GET(
 ) {
   try {
     const { jobId } = await params
-    console.log('📧 [email-statuses] GET request for job:', jobId)
     
     const { user, error: authError } = await getAuthenticatedUser()
     
     if (authError || !user) {
-      console.log('📧 [email-statuses] Authentication failed')
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
-
-    console.log('📧 [email-statuses] User authenticated:', user.id)
 
     if (!jobId) {
       return NextResponse.json(
@@ -125,7 +117,6 @@ export async function GET(
 
     // Get all recipients for all bid packages in this job (including thread messages)
     // Order by created_at to get chronological order
-    console.log('📧 [email-statuses] Fetching recipients for package IDs:', packageIds)
     const { data: recipients, error: recipientsError } = await supabase
       .from('bid_package_recipients')
       .select('*')
@@ -133,18 +124,15 @@ export async function GET(
       .order('created_at', { ascending: true }) // Chronological order for threads
 
     if (recipientsError) {
-      console.error('📧 [email-statuses] Error fetching recipients:', recipientsError)
+      console.error('❌ [email-statuses] Error fetching recipients:', recipientsError)
       return NextResponse.json(
         { error: 'Failed to fetch email statuses', details: recipientsError.message },
         { status: 500 }
       )
     }
 
-    console.log('📧 [email-statuses] Found recipients:', recipients?.length || 0)
-
     // If no recipients, return empty array
     if (!recipients || recipients.length === 0) {
-      console.log('📧 [email-statuses] No recipients found, returning empty array')
       return NextResponse.json({ recipients: [] })
     }
 
@@ -191,38 +179,46 @@ export async function GET(
     // Build thread structure - group by thread_id
     const threadsMap = new Map<string, any[]>()
     
-    // First, enrich all recipients with related data
-    // For GC messages missing response_text, fetch from Resend API
-    const enrichedRecipients = await Promise.all(recipients.map(async (recipient) => {
-      // Determine if message is from GC:
-      // 1. Use explicit is_from_gc field if available
-      // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
-      // 3. If message has responded_at, it's from subcontractor (inbound email response)
-      const isFromGC = recipient.is_from_gc !== undefined 
-        ? recipient.is_from_gc 
-        : !!(recipient.resend_email_id && recipient.status === 'sent' && !recipient.responded_at)
-      
-      // If this is a GC message without response_text, try to fetch from Resend
-      let responseText = recipient.response_text
-      if (isFromGC && !responseText && recipient.resend_email_id) {
-        console.log('📧 [email-statuses] GC message missing response_text, fetching from Resend:', recipient.resend_email_id)
-        const fetchedContent = await fetchEmailContentFromResend(recipient.resend_email_id)
-        if (fetchedContent) {
-          responseText = fetchedContent
-          // Update the database with the fetched content (async, don't wait)
-          supabase
-            .from('bid_package_recipients')
-            .update({ response_text: fetchedContent })
-            .eq('id', recipient.id)
-            .then(({ error }) => {
-              if (error) {
-                console.error('❌ [email-statuses] Failed to update response_text:', error)
-              } else {
-                console.log('✅ [email-statuses] Updated response_text for recipient:', recipient.id)
-              }
-            })
-        }
+    // First, identify recipients that need Resend API calls (parallelize these)
+    const recipientsNeedingFetch = recipients.filter((r: any) => {
+      const isFromGC = r.is_from_gc ?? false
+      return isFromGC && !r.response_text && r.resend_email_id
+    })
+    
+    // Fetch all Resend content in parallel
+    const resendFetches = recipientsNeedingFetch.map(async (recipient: any) => {
+      const fetchedContent = await fetchEmailContentFromResend(recipient.resend_email_id)
+      return { recipientId: recipient.id, content: fetchedContent }
+    })
+    const resendResults = await Promise.all(resendFetches)
+    const resendContentMap = new Map(
+      resendResults
+        .filter(r => r.content)
+        .map(r => [r.recipientId, r.content])
+    )
+    
+    // Update database with fetched content in parallel (fire and forget)
+    resendResults.forEach(({ recipientId, content }) => {
+      if (content) {
+        supabase
+          .from('bid_package_recipients')
+          .update({ response_text: content })
+          .eq('id', recipientId)
+          .then(({ error }) => {
+            if (error) {
+              console.error('❌ [email-statuses] Failed to update response_text:', error)
+            }
+          })
       }
+    })
+    
+    // Now enrich all recipients with related data
+    const enrichedRecipients = recipients.map((recipient) => {
+      // Use explicit is_from_gc column (fallback to false for backward compatibility during migration)
+      const isFromGC = recipient.is_from_gc ?? false
+      
+      // Use fetched content if available
+      const responseText = recipient.response_text || resendContentMap.get(recipient.id) || null
       
       const enriched = {
         ...recipient,
@@ -236,20 +232,6 @@ export async function GET(
         messageTimestamp: recipient.responded_at || recipient.sent_at || recipient.created_at
       }
       
-      // Log response_text for debugging
-      if (enriched.isFromGC) {
-        console.log('📧 [email-statuses] GC message:', {
-          id: recipient.id,
-          status: recipient.status,
-          hasResponseText: !!enriched.response_text,
-          responseTextLength: enriched.response_text?.length || 0,
-          responseTextPreview: enriched.response_text?.substring(0, 100) || 'null',
-          isFromGC: enriched.isFromGC,
-          resendEmailId: recipient.resend_email_id,
-          wasFetched: !recipient.response_text && !!enriched.response_text
-        })
-      }
-      
       // Group by thread_id (use original recipient ID as thread key if no thread_id)
       const threadKey = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
       
@@ -259,7 +241,7 @@ export async function GET(
       threadsMap.get(threadKey)!.push(enriched)
       
       return enriched
-    }))
+    })
 
     // Build thread structure - for each thread, get all messages
     const threadStructures: any[] = []
@@ -298,23 +280,6 @@ export async function GET(
 
     // Return both flat list (for backward compatibility) and thread structure
     // The UI can use the flat list and build threads client-side, or use the thread structure
-    console.log('📧 [email-statuses] Returning data:', {
-      recipientsCount: enrichedRecipients.length,
-      threadsCount: threadStructures.length
-    })
-    
-    // Log status breakdown for debugging
-    const statusBreakdown: Record<string, number> = {}
-    enrichedRecipients.forEach((r: any) => {
-      statusBreakdown[r.status] = (statusBreakdown[r.status] || 0) + 1
-    })
-    console.log('📧 [email-statuses] Status breakdown:', statusBreakdown)
-    
-    // Log thread latest message statuses
-    threadStructures.forEach((thread: any) => {
-      console.log(`📧 [email-statuses] Thread ${thread.thread_id}: ${thread.message_count} messages, latest status: ${thread.latest_message?.status}, latest opened_at: ${thread.latest_message?.opened_at}`)
-    })
-    
     return NextResponse.json({ 
       recipients: enrichedRecipients,
       threads: threadStructures

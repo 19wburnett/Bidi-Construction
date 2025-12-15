@@ -194,26 +194,44 @@ export default function JobDetailPage() {
       setJob(membership.job)
       setJobRole(membership.role)
 
-      // Load plans for this job with takeoff analysis status
-      const { data: plansData, error: plansError } = await supabase
-        .from('plans')
-        .select(`
-          *,
-          plan_takeoff_analysis (
-            id,
-            created_at,
-            updated_at,
-            status,
-            is_finalized
-          )
-        `)
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
+      // Load all independent data in parallel for better performance
+      const [plansResult, reportsResult, packagesResult, bidsResult] = await Promise.all([
+        supabase
+          .from('plans')
+          .select(`
+            *,
+            plan_takeoff_analysis (
+              id,
+              created_at,
+              updated_at,
+              status,
+              is_finalized
+            )
+          `)
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('job_reports')
+          .select('*')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('bid_packages')
+          .select('*')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('bids')
+          .select('*, subcontractors (id, name, email, trade_category), gc_contacts (id, name, email, trade_category, location, company, phone), bid_packages (id, trade_category, description, minimum_line_items, status)')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false })
+      ])
 
-      if (plansError) throw plansError
+      if (plansResult.error) throw plansResult.error
+      const plansData = plansResult.data || []
       
       // Enrich plans with takeoff status from plan_takeoff_analysis
-      const enrichedPlans = (plansData || []).map((plan: any) => {
+      const enrichedPlans = plansData.map((plan: any) => {
         const takeoffAnalyses = plan.plan_takeoff_analysis || []
         const hasTakeoffAnalysis = takeoffAnalyses.length > 0
         const latestTakeoff = takeoffAnalyses.length > 0 
@@ -233,38 +251,17 @@ export default function JobDetailPage() {
       
       setPlans(enrichedPlans)
 
-      // Load job reports
-      const { data: reportsData, error: reportsError } = await supabase
-        .from('job_reports')
-        .select('*')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
+      if (reportsResult.error) console.error('Error loading reports:', reportsResult.error)
+      setReports(reportsResult.data || [])
 
-      if (reportsError) console.error('Error loading reports:', reportsError)
-      setReports(reportsData || [])
+      if (packagesResult.error) throw packagesResult.error
+      setBidPackages(packagesResult.data || [])
 
-      // Load bid packages for this job
-      const { data: packagesData, error: packagesError } = await supabase
-        .from('bid_packages')
-        .select('*')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
-
-      if (packagesError) throw packagesError
-      setBidPackages(packagesData || [])
-
-      // Load bids for this job with bid package info, subcontractors, and contacts
-      const { data: bidsData, error: bidsError } = await supabase
-        .from('bids')
-        .select('*, subcontractors (id, name, email, trade_category), gc_contacts (id, name, email, trade_category, location, company, phone), bid_packages (id, trade_category, description, minimum_line_items, status)')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
-
-      if (bidsError) throw bidsError
-      setBids(bidsData || [])
+      if (bidsResult.error) throw bidsResult.error
+      setBids(bidsResult.data || [])
 
       // Load takeoff items from all plans
-      await loadAggregatedTakeoffItems(plansData || [])
+      await loadAggregatedTakeoffItems(plansData)
 
     } catch (error) {
       console.error('Error loading job data:', error)

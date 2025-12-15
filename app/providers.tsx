@@ -125,9 +125,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // Use shouldTriggerChange option to prevent unnecessary refreshes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (mounted) {
+        if (!mounted) return
+        
+        // Create abort controller to prevent race conditions
+        const controller = new AbortController()
+        
+        try {
           // Check masquerade status on auth changes
-          const masqueradeStatus = await fetch('/api/admin/masquerade/status').then(r => r.json()).catch(() => ({ isMasquerading: false }))
+          const masqueradeStatus = await fetch('/api/admin/masquerade/status', {
+            signal: controller.signal
+          }).then(r => r.json()).catch(() => ({ isMasquerading: false }))
+          
+          // Only update if component is still mounted
+          if (!mounted) return
           
           // Only update if not masquerading
           if (!masqueradeStatus.isMasquerading) {
@@ -147,7 +157,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
             // Refresh masquerade status
             await checkMasqueradeStatus()
           }
-          setLoading(false)
+          if (mounted) {
+            setLoading(false)
+          }
+        } catch (error: any) {
+          // Ignore abort errors (component unmounted)
+          if (error?.name !== 'AbortError' && mounted) {
+            console.error('Error checking masquerade status:', error)
+            setLoading(false)
+          }
         }
       }
     )

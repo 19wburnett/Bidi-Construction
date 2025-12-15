@@ -337,8 +337,8 @@ export async function POST(request: NextRequest) {
             sent_at: new Date().toISOString(),
             thread_id: threadId,
             parent_email_id: null,
-            response_text: emailTextContent || null // Store email content so it can be displayed in thread (null if empty)
-            // Note: is_from_gc column doesn't exist in schema - using fallback logic in UI based on resend_email_id and status
+            response_text: emailTextContent || null, // Store email content so it can be displayed in thread (null if empty)
+            is_from_gc: true // Explicitly mark as GC-sent email
           })
           .select()
           .single()
