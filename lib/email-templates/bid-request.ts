@@ -57,7 +57,6 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
         <tr>
           <th style="${EMAIL_STYLES.tableHeader}">Description</th>
           <th style="${EMAIL_STYLES.tableHeader}">Quantity</th>
-          <th style="${EMAIL_STYLES.tableHeader}">Unit Cost</th>
         </tr>
       </thead>
       <tbody>
@@ -65,7 +64,6 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
           <tr>
             <td style="${EMAIL_STYLES.tableCell}">${item.description || '—'}</td>
             <td style="${EMAIL_STYLES.tableCell}">${item.quantity || ''} ${item.unit || ''}</td>
-            <td style="${EMAIL_STYLES.tableCell}">${item.unit_cost ? `$${Number(item.unit_cost).toFixed(2)}/${item.unit || 'unit'}` : '—'}</td>
           </tr>
         `).join('')}
       </tbody>

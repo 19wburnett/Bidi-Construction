@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cleanEmailContent } from '@/lib/email-content-cleaner'
 
 export const runtime = 'nodejs'
 
@@ -56,29 +57,17 @@ export async function GET(
     
     // Extract text content from HTML or use text field
     // Try multiple possible locations for content
-    let textContent = emailData.text || 
-                     emailData.body?.text || 
-                     emailData.content?.text ||
-                     (typeof emailData.body === 'string' ? emailData.body : '') ||
-                     ''
+    let rawText = emailData.text || 
+                  emailData.body?.text || 
+                  emailData.content?.text ||
+                  (typeof emailData.body === 'string' ? emailData.body : '') ||
+                  ''
     
-    if (!textContent && emailData.html) {
-      // Strip HTML tags to get plain text
-      textContent = emailData.html
-        .replace(/<style[^>]*>.*?<\/style>/gi, '')
-        .replace(/<script[^>]*>.*?<\/script>/gi, '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .substring(0, 10000) // Limit to 10k chars
-    }
+    // Clean the email content to remove quoted/replied messages
+    const textContent = cleanEmailContent(rawText, emailData.html || '')
+      .substring(0, 10000) // Limit to 10k chars
 
-    console.log('📧 [content API] Extracted content - hasText:', !!textContent, 'textLength:', textContent?.length)
+    console.log('📧 [content API] Extracted and cleaned content - hasText:', !!textContent, 'textLength:', textContent?.length)
     if (textContent) {
       console.log('📧 [content API] Text preview (first 200 chars):', textContent.substring(0, 200))
     }

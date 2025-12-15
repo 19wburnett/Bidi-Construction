@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,10 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase'
-import { Save, User, Phone, Bell, CreditCard, Coins, ListChecks } from 'lucide-react'
+import { Save, User, Phone, Bell, CreditCard, Coins, ListChecks, FileText, Mail, ChevronRight } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import DocumentTemplatesManager from '@/components/document-templates-manager'
+import EmailTemplatesManager from '@/components/email-templates-manager'
 import { AVAILABLE_STANDARDS, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
+import { cn } from '@/lib/utils'
 
 interface UserSettings {
   first_name: string
@@ -26,6 +28,23 @@ interface UserSettings {
   credits: number
   preferred_cost_code_standard: CostCodeStandard
 }
+
+type SettingsSection = 'personal' | 'preferences' | 'notifications' | 'payment' | 'documents' | 'emails'
+
+interface SettingsNavItem {
+  id: SettingsSection
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+const settingsNavItems: SettingsNavItem[] = [
+  { id: 'personal', label: 'Personal Information', icon: User },
+  { id: 'preferences', label: 'Preferences', icon: ListChecks },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'payment', label: 'Payment', icon: CreditCard },
+  { id: 'documents', label: 'Document Templates', icon: FileText },
+  { id: 'emails', label: 'Email Templates', icon: Mail },
+]
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings>({
@@ -46,6 +65,7 @@ export default function SettingsPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [newPaymentType, setNewPaymentType] = useState<'subscription' | 'credits'>('subscription')
   const [paymentChanging, setPaymentChanging] = useState(false)
+  const [activeSection, setActiveSection] = useState<SettingsSection>('personal')
   
   const router = useRouter()
   const supabase = createClient()
@@ -199,187 +219,159 @@ export default function SettingsPage() {
     )
   }
 
-  return (
-    <div className="container mx-auto px-4 py-8 max-w-2xl">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-black dark:text-white">Settings</h2>
-        <p className="text-gray-600 dark:text-gray-300">Manage your account preferences and notifications</p>
-      </div>
-
-      {/* Message */}
-      {message && (
-        <div className={`mb-6 p-4 rounded-lg border-2 ${
-          message.type === 'success' 
-            ? 'bg-green-50 border-green-200 text-green-700' 
-            : 'bg-red-50 border-red-200 text-red-700'
-        }`}>
-          {message.text}
-        </div>
-      )}
-
-      <div className="space-y-6">
-        {/* Personal Information */}
-        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <User className="h-5 w-5 mr-2" />
-              Personal Information
-            </CardTitle>
-            <CardDescription className="font-medium text-gray-600">
-              Update your personal details and contact information
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="first_name">First Name</Label>
-                <Input
-                  id="first_name"
-                  value={settings.first_name}
-                  onChange={(e) => handleInputChange('first_name', e.target.value)}
-                  placeholder="Enter your first name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="last_name">Last Name</Label>
-                <Input
-                  id="last_name"
-                  value={settings.last_name}
-                  onChange={(e) => handleInputChange('last_name', e.target.value)}
-                  placeholder="Enter your last name"
-                />
-              </div>
+  const renderSectionContent = () => {
+    switch (activeSection) {
+      case 'personal':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Personal Information</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Update your personal details and contact information</p>
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="phone" className="flex items-center">
-                <Phone className="h-4 w-4 mr-1" />
-                Phone Number
-              </Label>
-              <Input
-                id="phone"
-                type="tel"
-                value={settings.phone}
-                onChange={(e) => handleInputChange('phone', e.target.value)}
-                placeholder="Enter your phone number"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Cost Code Preferences */}
-        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <ListChecks className="h-5 w-5 mr-2" />
-              Cost Code Standards
-            </CardTitle>
-            <CardDescription className="font-medium text-gray-600">
-              Select the cost code standard you prefer for your takeoffs
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="cost_code_standard">Preferred Standard</Label>
-              <Select 
-                value={settings.preferred_cost_code_standard} 
-                onValueChange={(value) => handleInputChange('preferred_cost_code_standard', value)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a standard" />
-                </SelectTrigger>
-                <SelectContent>
-                  {AVAILABLE_STANDARDS.map((std) => (
-                    <SelectItem key={std.id} value={std.id}>
-                      {std.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-gray-500 mt-1">
-                This standard will be used by the AI to categorize items in your future takeoffs.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Notification Settings */}
-        <Card className="border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Bell className="h-5 w-5 mr-2" />
-              Notification Preferences
-            </CardTitle>
-            <CardDescription className="font-medium text-gray-600">
-              Choose how you want to be notified about activity on your account
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <Label htmlFor="email_notifications" className="cursor-pointer">Email Notifications</Label>
-                <p className="text-sm text-gray-500">Receive notifications about job requests and bids</p>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="first_name" className="text-sm font-medium text-gray-700 dark:text-gray-300">First Name</Label>
+                  <Input
+                    id="first_name"
+                    value={settings.first_name}
+                    onChange={(e) => handleInputChange('first_name', e.target.value)}
+                    placeholder="Enter your first name"
+                    className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="last_name" className="text-sm font-medium text-gray-700 dark:text-gray-300">Last Name</Label>
+                  <Input
+                    id="last_name"
+                    value={settings.last_name}
+                    onChange={(e) => handleInputChange('last_name', e.target.value)}
+                    placeholder="Enter your last name"
+                    className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800"
+                  />
+                </div>
               </div>
-              <Switch
-                id="email_notifications"
-                checked={settings.email_notifications}
-                onCheckedChange={(checked) => handleInputChange('email_notifications', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <Label htmlFor="bid_notifications" className="cursor-pointer">Bid Notifications</Label>
-                <p className="text-sm text-gray-500">Get notified when you receive new bids</p>
+              
+              <div className="space-y-2">
+                <Label htmlFor="phone" className="text-sm font-medium text-gray-700 dark:text-gray-300">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={settings.phone}
+                  onChange={(e) => handleInputChange('phone', e.target.value)}
+                  placeholder="Enter your phone number"
+                  className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800"
+                />
               </div>
-              <Switch
-                id="bid_notifications"
-                checked={settings.bid_notifications}
-                onCheckedChange={(checked) => handleInputChange('bid_notifications', checked)}
-              />
             </div>
+          </div>
+        )
 
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <Label htmlFor="marketing_emails" className="cursor-pointer">Marketing Emails</Label>
-                <p className="text-sm text-gray-500">Receive updates about new features and tips</p>
+      case 'preferences':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Cost Code Standards</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Select the cost code standard you prefer for your takeoffs</p>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="cost_code_standard" className="text-sm font-medium text-gray-700 dark:text-gray-300">Preferred Standard</Label>
+                <Select 
+                  value={settings.preferred_cost_code_standard} 
+                  onValueChange={(value) => handleInputChange('preferred_cost_code_standard', value)}
+                >
+                  <SelectTrigger className="w-full bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800">
+                    <SelectValue placeholder="Select a standard" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AVAILABLE_STANDARDS.map((std) => (
+                      <SelectItem key={std.id} value={std.id}>
+                        {std.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                  This standard will be used by the AI to categorize items in your future takeoffs.
+                </p>
               </div>
-              <Switch
-                id="marketing_emails"
-                checked={settings.marketing_emails}
-                onCheckedChange={(checked) => handleInputChange('marketing_emails', checked)}
-              />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        )
 
-        {/* Payment Method */}
-        <Card className="border-2 border-gray-200 bg-white">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <CreditCard className="h-5 w-5 mr-2" />
-              Payment Method
-            </CardTitle>
-            <CardDescription className="font-medium text-gray-600">
-              Choose how you want to pay for job requests
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {/* Current Payment Method Display */}
-              <div className="p-4 bg-gray-50 rounded-lg border-2 border-gray-200">
+      case 'notifications':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Notification Preferences</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Choose how you want to be notified about activity on your account</p>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="flex items-center justify-between py-4 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex-1">
+                  <Label htmlFor="email_notifications" className="text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer">Email Notifications</Label>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Receive notifications about job requests and bids</p>
+                </div>
+                <Switch
+                  id="email_notifications"
+                  checked={settings.email_notifications}
+                  onCheckedChange={(checked) => handleInputChange('email_notifications', checked)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-4 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex-1">
+                  <Label htmlFor="bid_notifications" className="text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer">Bid Notifications</Label>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Get notified when you receive new bids</p>
+                </div>
+                <Switch
+                  id="bid_notifications"
+                  checked={settings.bid_notifications}
+                  onCheckedChange={(checked) => handleInputChange('bid_notifications', checked)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-4">
+                <div className="flex-1">
+                  <Label htmlFor="marketing_emails" className="text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer">Marketing Emails</Label>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Receive updates about new features and tips</p>
+                </div>
+                <Switch
+                  id="marketing_emails"
+                  checked={settings.marketing_emails}
+                  onCheckedChange={(checked) => handleInputChange('marketing_emails', checked)}
+                />
+              </div>
+            </div>
+          </div>
+        )
+
+      case 'payment':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Payment Method</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Choose how you want to pay for job requests</p>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     {settings.payment_type === 'credits' ? (
                       <Coins className="h-5 w-5 text-orange" />
                     ) : (
-                      <CreditCard className="h-5 w-5 text-gray-700" />
+                      <CreditCard className="h-5 w-5 text-gray-700 dark:text-gray-300" />
                     )}
                     <div>
-                      <p className="font-medium text-black dark:text-white">
+                      <p className="font-medium text-gray-900 dark:text-gray-100">
                         {settings.payment_type === 'credits' ? 'Credits' : 'Subscription'}
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
                         {settings.payment_type === 'credits' 
                           ? `You have ${settings.credits} credit${settings.credits !== 1 ? 's' : ''} available`
                           : `Status: ${settings.subscription_status}`
@@ -390,9 +382,8 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Payment Method Options */}
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-black dark:text-white">Switch Payment Method:</Label>
+              <div className="space-y-4">
+                <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Switch Payment Method:</Label>
                 <div className="flex space-x-3">
                   <Button
                     variant={settings.payment_type === 'subscription' ? 'orange' : 'construction'}
@@ -417,56 +408,139 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Payment Method Info */}
-              <div className="text-sm text-gray-600 space-y-1">
-                <p><strong>Subscription:</strong> Monthly recurring payment for unlimited job requests</p>
-                <p><strong>Credits:</strong> Pay per job request ($20 per credit, never expire)</p>
+              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2 pt-4 border-t border-gray-100 dark:border-gray-800">
+                <p><strong className="text-gray-900 dark:text-gray-100">Subscription:</strong> Monthly recurring payment for unlimited job requests</p>
+                <p><strong className="text-gray-900 dark:text-gray-100">Credits:</strong> Pay per job request ($20 per credit, never expire)</p>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        )
 
-        {/* Document Templates */}
-        <DocumentTemplatesManager />
+      case 'documents':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Document Templates</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Manage your document templates</p>
+            </div>
+            <DocumentTemplatesManager />
+          </div>
+        )
 
-        {/* Save Button */}
-        <div className="flex justify-end">
-          <Button onClick={handleSave} variant="orange" disabled={saving} className="min-w-32 font-bold">
-            {saving ? (
-              <div className="flex items-center justify-center">
-                <FallingBlocksLoader text="" size="sm" />
-                <span className="ml-2">Saving...</span>
-              </div>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-2" />
-                Save Settings
-              </>
-            )}
-          </Button>
+      case 'emails':
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Email Templates</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Manage your email templates</p>
+            </div>
+            <EmailTemplatesManager />
+          </div>
+        )
+
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="flex h-full min-h-[calc(100vh-4rem)] bg-gray-50 dark:bg-gray-950">
+      {/* Sidebar Navigation */}
+      <div className="w-64 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-y-auto">
+        <div className="p-6">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-1">Settings</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Manage your account</p>
+        </div>
+        
+        <nav className="px-3 pb-6">
+          <div className="space-y-1">
+            {settingsNavItems.map((item) => {
+              const Icon = item.icon
+              const isActive = activeSection === item.id
+              
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveSection(item.id)}
+                  className={cn(
+                    "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-gray-100"
+                  )}
+                >
+                  <div className="flex items-center space-x-3">
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </div>
+                  {isActive && <ChevronRight className="h-4 w-4" />}
+                </button>
+              )
+            })}
+          </div>
+        </nav>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto p-8">
+          {/* Message */}
+          {message && (
+            <div className={`mb-6 p-4 rounded-lg border ${
+              message.type === 'success' 
+                ? 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' 
+                : 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+            }`}>
+              {message.text}
+            </div>
+          )}
+
+          {/* Section Content */}
+          <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-8">
+            {renderSectionContent()}
+          </div>
+
+          {/* Save Button - Only show for sections that need saving */}
+          {(activeSection === 'personal' || activeSection === 'preferences' || activeSection === 'notifications') && (
+            <div className="flex justify-end mt-6">
+              <Button onClick={handleSave} variant="orange" disabled={saving} className="min-w-32 font-semibold">
+                {saving ? (
+                  <div className="flex items-center justify-center">
+                    <FallingBlocksLoader text="" size="sm" />
+                    <span className="ml-2">Saving...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Payment Method Change Confirmation Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md border-2 border-gray-200 bg-white">
+          <Card className="w-full max-w-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             <CardHeader>
               <CardTitle className="flex items-center">
                 {newPaymentType === 'credits' ? (
                   <Coins className="h-5 w-5 mr-2 text-orange" />
                 ) : (
-                  <CreditCard className="h-5 w-5 mr-2 text-gray-700" />
+                  <CreditCard className="h-5 w-5 mr-2 text-gray-700 dark:text-gray-300" />
                 )}
                 Switch to {newPaymentType === 'credits' ? 'Credits' : 'Subscription'}
               </CardTitle>
-              <CardDescription className="font-medium text-gray-600">
+              <CardDescription>
                 Are you sure you want to change your payment method?
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-3">
-                <p className="text-sm text-orange-700">
+              <div className="bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
+                <p className="text-sm text-orange-700 dark:text-orange-300">
                   <strong>Important:</strong> Changing your payment method will affect how you pay for future job requests.
                   {newPaymentType === 'credits' && ' You will need to purchase credits before posting jobs.'}
                 </p>
@@ -484,7 +558,7 @@ export default function SettingsPage() {
                   onClick={confirmPaymentTypeChange}
                   variant="orange"
                   disabled={paymentChanging}
-                  className="flex-1 font-bold"
+                  className="flex-1 font-semibold"
                 >
                   {paymentChanging ? (
                     <div className="flex items-center justify-center">

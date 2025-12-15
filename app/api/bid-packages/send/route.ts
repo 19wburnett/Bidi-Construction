@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createServerSupabaseClient()
 
-    // Get bid package details
+    // Get bid package details (including deadline field)
     const { data: bidPackage, error: packageError } = await supabase
       .from('bid_packages')
       .select(`
@@ -225,20 +225,47 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate email content using branded templates
-    const emailSubject = emailTemplate?.subject || generateBidRequestSubject(
+    // Generate email subject - replace variables if using custom template
+    let emailSubject = emailTemplate?.subject || generateBidRequestSubject(
       bidPackage.jobs.name,
       bidPackage.trade_category
     )
     
+    // Replace variables in custom template subject
+    if (emailTemplate?.subject) {
+      emailSubject = emailSubject.replace(/{jobName}/g, bidPackage.jobs.name || '')
+      emailSubject = emailSubject.replace(/{jobLocation}/g, bidPackage.jobs.location || '')
+      emailSubject = emailSubject.replace(/{tradeCategory}/g, bidPackage.trade_category || '')
+      emailSubject = emailSubject.replace(/{deadline}/g, bidPackage.deadline ? new Date(bidPackage.deadline).toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      }) : 'No deadline set')
+      emailSubject = emailSubject.replace(/{description}/g, bidPackage.description || '')
+    }
+    
     // Use custom template if provided, otherwise use branded template
+    // Ensure deadline is properly formatted (Supabase may return it as Date or string)
+    const deadlineValue = bidPackage.deadline 
+      ? (bidPackage.deadline instanceof Date 
+          ? bidPackage.deadline.toISOString() 
+          : String(bidPackage.deadline))
+      : null
+    
+    // Create a copy of bidPackage with formatted deadline for custom templates
+    const bidPackageWithFormattedDeadline = {
+      ...bidPackage,
+      deadline: deadlineValue
+    }
+    
     const emailBody = emailTemplate 
-      ? generateCustomTemplateBody(bidPackage, planLink, reportLinks, emailTemplate)
+      ? generateCustomTemplateBody(bidPackageWithFormattedDeadline, planLink, reportLinks, emailTemplate)
       : generateBidRequestEmail({
           jobName: bidPackage.jobs.name,
           jobLocation: bidPackage.jobs.location,
           tradeCategory: bidPackage.trade_category,
-          deadline: bidPackage.deadline,
+          deadline: deadlineValue,
           description: bidPackage.description,
           lineItems: bidPackage.minimum_line_items,
           planLink,
@@ -382,29 +409,63 @@ function generateCustomTemplateBody(
 ): string {
   let htmlBody = template.html_body
   
-  // Replace template variables
-  htmlBody = htmlBody.replace(/{jobName}/g, bidPackage.jobs.name || '')
-  htmlBody = htmlBody.replace(/{jobLocation}/g, bidPackage.jobs.location || '')
-  htmlBody = htmlBody.replace(/{tradeCategory}/g, bidPackage.trade_category || '')
-  htmlBody = htmlBody.replace(/{deadline}/g, bidPackage.deadline ? new Date(bidPackage.deadline).toLocaleDateString() : 'No deadline set')
-  htmlBody = htmlBody.replace(/{description}/g, bidPackage.description || '')
+  // Helper function to escape HTML
+  const escapeHtml = (text: string): string => {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+  }
   
-  // Replace line items
+  // Format deadline
+  const formatDeadline = (deadline: string | Date | null): string => {
+    if (!deadline) return 'No deadline set'
+    try {
+      return new Date(deadline).toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+    } catch {
+      return 'No deadline set'
+    }
+  }
+  
+  // Replace template variables (escape user content to prevent XSS)
+  htmlBody = htmlBody.replace(/{jobName}/g, escapeHtml(bidPackage.jobs.name || ''))
+  htmlBody = htmlBody.replace(/{jobLocation}/g, escapeHtml(bidPackage.jobs.location || ''))
+  htmlBody = htmlBody.replace(/{tradeCategory}/g, escapeHtml(bidPackage.trade_category || ''))
+  htmlBody = htmlBody.replace(/{deadline}/g, formatDeadline(bidPackage.deadline))
+  htmlBody = htmlBody.replace(/{description}/g, escapeHtml(bidPackage.description || ''))
+  
+  // Replace line items - build HTML table
   const lineItemsHtml = bidPackage.minimum_line_items && bidPackage.minimum_line_items.length > 0
-    ? bidPackage.minimum_line_items.map((item: any) => 
-        `<tr>
-          <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6;">${item.description || ''}</td>
-          <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6;">${item.quantity || ''} ${item.unit || ''}</td>
-          <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6;">${item.unit_cost ? `$${item.unit_cost.toFixed(2)}/${item.unit || ''}` : '—'}</td>
-        </tr>`
-      ).join('')
-    : '<tr><td colspan="3" style="padding: 12px 16px; text-align: center; color: #777878;">No specific line items required</td></tr>'
+    ? `<table role="presentation" style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+        <thead>
+          <tr>
+            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Description</th>
+            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Quantity</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${bidPackage.minimum_line_items.map((item: any) => 
+            `<tr>
+              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(item.description || '')}</td>
+              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}</td>
+            </tr>`
+          ).join('')}
+        </tbody>
+      </table>`
+    : '<p style="padding: 12px 16px; text-align: center; color: #777878;">No specific line items required</p>'
   
   htmlBody = htmlBody.replace(/{lineItems}/g, lineItemsHtml)
   
   // Replace plan link
   if (planLink) {
-    htmlBody = htmlBody.replace(/{planLink}/g, `<a href="${planLink}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View & Download All Project Plans</a>`)
+    htmlBody = htmlBody.replace(/{planLink}/g, `<a href="${escapeHtml(planLink)}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View & Download All Project Plans</a>`)
   } else {
     htmlBody = htmlBody.replace(/{planLink}/g, 'Plans will be provided separately')
   }
@@ -412,7 +473,7 @@ function generateCustomTemplateBody(
   // Replace reports
   if (reportLinks.length > 0) {
     const reportsHtml = reportLinks.map(r => 
-      `<a href="${r.url}" style="color: #EB5023; text-decoration: none; margin-right: 12px;">📄 ${r.title}</a>`
+      `<a href="${escapeHtml(r.url)}" style="color: #EB5023; text-decoration: none; margin-right: 12px; display: inline-block; margin-bottom: 8px; padding: 10px 16px; border: 2px solid #EB5023; border-radius: 6px; font-size: 13px;">📄 ${escapeHtml(r.title)}</a>`
     ).join('')
     htmlBody = htmlBody.replace(/{reports}/g, reportsHtml)
   } else {

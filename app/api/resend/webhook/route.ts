@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
 import OpenAI from 'openai'
+import { cleanEmailContent } from '@/lib/email-content-cleaner'
 
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
@@ -291,11 +292,13 @@ async function findParentRecipient(
   
   // Fallback: find most recent recipient from same email address in this bid package
   // This handles cases where headers don't match exactly
+  // Use normalized email for case-insensitive matching
+  const normalizedFromEmail = fromEmail.toLowerCase().trim()
   const { data: recentRecipient } = await supabase
     .from('bid_package_recipients')
     .select('*')
     .eq('bid_package_id', bidPackageId)
-    .eq('subcontractor_email', fromEmail)
+    .ilike('subcontractor_email', normalizedFromEmail) // Case-insensitive match
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -498,8 +501,13 @@ async function handleInboundEmail(body: any) {
     console.error('❌ No email address in from field')
     return NextResponse.json({ error: 'No email address in from field' }, { status: 200 })
   }
+  
+  // Normalize email immediately for consistent matching throughout
+  const normalizedFromEmail = fromEmail.toLowerCase().trim()
+  
   console.log('📧 Email details:', { 
     from: from?.email || from, 
+    normalizedFromEmail,
     subject, 
     hasHtml: !!html, 
     hasText: !!text,
@@ -600,15 +608,22 @@ async function handleInboundEmail(body: any) {
     }
   }
 
-  // Check if this is a bid submission (has bid attachments or AI detects bid)
+  // Check if this is a bid submission (ONLY if has PDF attachment)
   const bidAttachments = checkBidAttachments(attachments)
-  const aiSummary = await parseBidWithAI(emailContent, fromEmail, bidPackage.trade_category)
-  const bidData = await extractBidData(emailContent, fromEmail)
   
-  // Determine if this is a bid submission
-  const isBidSubmission = bidAttachments.hasBidAttachments || bidData.bidAmount !== null || 
-                         emailContent.toLowerCase().includes('bid') || 
-                         emailContent.toLowerCase().includes('quote')
+  // Check specifically for PDF attachments
+  const hasPdfAttachment = attachments && Array.isArray(attachments) && attachments.some((att: any) => {
+    const filename = (att.filename || att.name || '').toLowerCase()
+    const contentType = (att.content_type || att.type || '').toLowerCase()
+    return filename.endsWith('.pdf') || contentType === 'application/pdf'
+  })
+  
+  // Only create a bid if there's a PDF attachment
+  const isBidSubmission = hasPdfAttachment
+  
+  // Only run AI parsing if this is actually a bid submission
+  const aiSummary = isBidSubmission ? await parseBidWithAI(emailContent, fromEmail, bidPackage.trade_category) : null
+  const bidData = isBidSubmission ? await extractBidData(emailContent, fromEmail) : { bidAmount: null, timeline: null, notes: null, phone: null, website: null, companyName: null }
   
   // Extract categorized notes using AI (only if bid submission)
   const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(emailContent, bidPackage.trade_category) : []
@@ -619,11 +634,13 @@ async function handleInboundEmail(body: any) {
   // Helper function to determine subcontractor name from multiple sources
   async function determineSubcontractorName(): Promise<string> {
     // 1. Check original recipient record (best source - name used when email was sent)
+    // Use normalized email for case-insensitive matching
+    const normalizedEmail = fromEmail.toLowerCase().trim()
     const { data: originalRecipient } = await supabase
       .from('bid_package_recipients')
       .select('subcontractor_name')
       .eq('bid_package_id', bidPackageId)
-      .eq('subcontractor_email', fromEmail)
+      .ilike('subcontractor_email', normalizedEmail) // Case-insensitive match
       .is('parent_email_id', null)
       .order('created_at', { ascending: true })
       .limit(1)
@@ -682,63 +699,125 @@ async function handleInboundEmail(body: any) {
   let subcontractorId: string | null = null
   const subcontractorName = await determineSubcontractorName()
   
-  // First, try to find existing subcontractor by email
-  const { data: existingSub } = await supabase
+  // Normalize email for consistent matching (lowercase, trim)
+  const normalizedEmail = fromEmail.toLowerCase().trim()
+  console.log('🔍 Looking for subcontractor with email:', normalizedEmail)
+  
+  // First, try to find existing subcontractor by email (case-insensitive)
+  // Use maybeSingle() instead of single() to handle no results gracefully
+  const { data: existingSub, error: findError } = await supabase
     .from('subcontractors')
-    .select('id, name')
-    .eq('email', fromEmail)
-    .single()
+    .select('id, name, email')
+    .ilike('email', normalizedEmail) // Case-insensitive match
+    .maybeSingle()
+  
+  if (findError) {
+    console.error('❌ Error finding subcontractor:', findError)
+  }
   
   if (existingSub) {
     subcontractorId = existingSub.id
+    console.log('✅ Found existing subcontractor:', existingSub.id, existingSub.name, existingSub.email)
     
     // Update subcontractor with any new data from the bid
-    await supabase
-      .from('subcontractors')
-      .update({
-        name: subcontractorName !== 'Unknown' ? subcontractorName : existingSub.name,
-        phone: bidData.phone || null,
-        website_url: bidData.website || null,
-      })
-      .eq('id', subcontractorId)
+    const updateData: any = {}
+    if (subcontractorName !== 'Unknown' && subcontractorName !== existingSub.name) {
+      updateData.name = subcontractorName
+    }
+    if (bidData.phone) {
+      updateData.phone = bidData.phone
+    }
+    if (bidData.website) {
+      updateData.website_url = bidData.website
+    }
+    
+    if (Object.keys(updateData).length > 0) {
+      await supabase
+        .from('subcontractors')
+        .update(updateData)
+        .eq('id', subcontractorId)
+      console.log('📝 Updated subcontractor with new data:', updateData)
+    }
   } else {
-    // Create new subcontractor record
-    let website = bidData.website || null
-    const { data: contractorData } = await supabase
-      .from('crawler_discovered_contractors')
-      .select('website')
-      .eq('email', fromEmail)
-      .single()
-    
-    if (contractorData?.website) {
-      website = contractorData.website
-    }
-    
-    const { data: newSub, error: subError } = await supabase
+    // Check if email already exists with different case (to prevent duplicates)
+    const { data: duplicateCheck } = await supabase
       .from('subcontractors')
-      .insert({
-        email: fromEmail,
-        name: subcontractorName,
-        trade_category: bidPackage.trade_category,
-        location: bidPackage.jobs.location,
-        phone: bidData.phone || null,
-        website_url: website,
-      })
-      .select('id')
-      .single()
+      .select('id, email')
+      .ilike('email', normalizedEmail)
+      .maybeSingle()
     
-    if (subError) {
-      console.error('Error creating subcontractor:', subError)
-      return NextResponse.json({ error: 'Failed to create subcontractor' }, { status: 500 })
+    if (duplicateCheck) {
+      console.log('⚠️ Found duplicate subcontractor with different case:', duplicateCheck.email, 'using existing ID:', duplicateCheck.id)
+      subcontractorId = duplicateCheck.id
+    } else {
+      // Create new subcontractor record
+      console.log('➕ Creating new subcontractor:', normalizedEmail, subcontractorName)
+      let website = bidData.website || null
+      const { data: contractorData } = await supabase
+        .from('crawler_discovered_contractors')
+        .select('website')
+        .ilike('email', normalizedEmail)
+        .maybeSingle()
+      
+      if (contractorData?.website) {
+        website = contractorData.website
+      }
+      
+      const { data: newSub, error: subError } = await supabase
+        .from('subcontractors')
+        .insert({
+          email: normalizedEmail, // Store normalized email
+          name: subcontractorName,
+          trade_category: bidPackage.trade_category,
+          location: bidPackage.jobs.location,
+          phone: bidData.phone || null,
+          website_url: website,
+        })
+        .select('id')
+        .single()
+      
+      if (subError) {
+        // If insert fails due to unique constraint, try to find the existing record
+        if (subError.code === '23505') { // Unique violation
+          console.log('⚠️ Unique constraint violation, attempting to find existing subcontractor...')
+          const { data: existingAfterError } = await supabase
+            .from('subcontractors')
+            .select('id')
+            .ilike('email', normalizedEmail)
+            .maybeSingle()
+          
+          if (existingAfterError) {
+            subcontractorId = existingAfterError.id
+            console.log('✅ Found existing subcontractor after constraint error:', subcontractorId)
+          } else {
+            console.error('❌ Error creating subcontractor:', subError)
+            return NextResponse.json({ error: 'Failed to create subcontractor' }, { status: 500 })
+          }
+        } else {
+          console.error('❌ Error creating subcontractor:', subError)
+          return NextResponse.json({ error: 'Failed to create subcontractor' }, { status: 500 })
+        }
+      } else {
+        subcontractorId = newSub.id
+        console.log('✅ Created new subcontractor:', subcontractorId)
+      }
     }
-    
-    subcontractorId = newSub.id
   }
 
-  // Process attachments if any (only for bid submissions)
+  // Process PDF attachments only (only for bid submissions)
   const attachmentIds: string[] = []
   if (attachments && Array.isArray(attachments) && attachments.length > 0 && isBidSubmission) {
     for (const attachment of attachments) {
+      // Only process PDF attachments
+      const filename = (attachment.filename || attachment.name || '').toLowerCase()
+      const contentType = (attachment.content_type || attachment.type || '').toLowerCase()
+      const isPdf = filename.endsWith('.pdf') || contentType === 'application/pdf'
+      
+      if (!isPdf) {
+        console.log('⏭️ Skipping non-PDF attachment:', filename || contentType)
+        continue
+      }
+      
       try {
         let attachmentBuffer: Buffer | null = null
         
@@ -763,7 +842,7 @@ async function handleInboundEmail(body: any) {
           const { error: uploadError } = await supabase.storage
             .from('bid-attachments')
             .upload(filePath, attachmentBuffer, {
-              contentType: attachment.content_type || attachment.type || 'application/octet-stream'
+              contentType: attachment.content_type || attachment.type || 'application/pdf'
             })
           
           if (!uploadError) {
@@ -774,18 +853,19 @@ async function handleInboundEmail(body: any) {
                 file_name: attachment.filename || attachment.name || fileName,
                 file_path: filePath,
                 file_size: attachment.size || attachment.length || attachmentBuffer.length,
-                file_type: attachment.content_type || attachment.type || 'application/octet-stream'
+                file_type: attachment.content_type || attachment.type || 'application/pdf'
               })
               .select()
               .single()
             
             if (attachmentRecord) {
               attachmentIds.push(attachmentRecord.id)
+              console.log('✅ Processed PDF attachment:', fileName)
             }
           }
         }
       } catch (error) {
-        console.error('Error processing attachment:', error)
+        console.error('Error processing PDF attachment:', error)
       }
     }
   }
@@ -854,39 +934,21 @@ async function handleInboundEmail(body: any) {
   }
 
   // Prepare email content - use text if available, otherwise html, fallback to empty string
-  let emailContentText = text || ''
+  // Clean the content to remove quoted/replied messages
+  let emailContentText = cleanEmailContent(text || '', html || '')
   
-  // If no text but we have HTML, extract text from HTML
-  if (!emailContentText && html) {
-    // Remove HTML tags and clean up whitespace
-    emailContentText = html
-      .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
-      .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
-      .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
-      .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-      .replace(/&amp;/g, '&') // Replace &amp; with &
-      .replace(/&lt;/g, '<') // Replace &lt; with <
-      .replace(/&gt;/g, '>') // Replace &gt; with >
-      .replace(/&quot;/g, '"') // Replace &quot; with "
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-      .trim()
-  }
-  
-  // If still no content, log a warning
+  // If still no content after cleaning, log a warning
   if (!emailContentText) {
-    console.warn('⚠️ No email content extracted. Email keys:', Object.keys(email))
+    console.warn('⚠️ No email content extracted after cleaning. Email keys:', Object.keys(email))
     console.warn('⚠️ Full email object (first 1000 chars):', JSON.stringify(email).substring(0, 1000))
   } else {
-    console.log('✅ Extracted email content length:', emailContentText.length, 'Preview:', emailContentText.substring(0, 200))
+    console.log('✅ Extracted and cleaned email content length:', emailContentText.length, 'Preview:', emailContentText.substring(0, 200))
   }
   
   // Handle bid submission vs question/reply differently
   if (isBidSubmission) {
     // For bid submissions, find and update the original recipient record
-  let recipient = null
-    
-    // Normalize email for comparison (lowercase, trim)
-    const normalizedFromEmail = fromEmail.toLowerCase().trim()
+    let recipient = null
     
     console.log('🔍 Looking for recipient for bid submission:', {
       bidPackageId,
@@ -895,119 +957,103 @@ async function handleInboundEmail(body: any) {
       subcontractorId
     })
     
-    // First, try exact match (case-sensitive)
-  const { data: recipientsByEmail, error: recipientError } = await supabase
-    .from('bid_package_recipients')
-    .select('*')
-    .eq('bid_package_id', bidPackageId)
-      .eq('subcontractor_email', fromEmail)
+    // Use case-insensitive matching with normalized email
+    const { data: recipientsByEmail, error: recipientError } = await supabase
+      .from('bid_package_recipients')
+      .select('*')
+      .eq('bid_package_id', bidPackageId)
+      .ilike('subcontractor_email', normalizedFromEmail) // Case-insensitive match
       .is('parent_email_id', null) // Only get original emails, not replies
-    .order('created_at', { ascending: false })
-    .limit(1)
+      .order('created_at', { ascending: false })
+      .limit(1)
 
-  if (recipientsByEmail && recipientsByEmail.length > 0) {
-    recipient = recipientsByEmail[0]
-      console.log('✅ Found recipient by exact email match:', recipient.id)
+    if (recipientsByEmail && recipientsByEmail.length > 0) {
+      recipient = recipientsByEmail[0]
+      console.log('✅ Found recipient by email match:', recipient.id, recipient.subcontractor_email)
     } else {
-      // Try case-insensitive match using ilike
-      const { data: recipientsByEmailCaseInsensitive } = await supabase
-        .from('bid_package_recipients')
-        .select('*')
-        .eq('bid_package_id', bidPackageId)
-        .ilike('subcontractor_email', normalizedFromEmail)
-        .is('parent_email_id', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      
-      if (recipientsByEmailCaseInsensitive && recipientsByEmailCaseInsensitive.length > 0) {
-        recipient = recipientsByEmailCaseInsensitive[0]
-        console.log('✅ Found recipient by case-insensitive email match:', recipient.id)
-  } else {
-    // Try finding by subcontractor_id if email doesn't match
-    if (subcontractorId) {
-      const { data: recipientsBySub } = await supabase
-        .from('bid_package_recipients')
-        .select('*')
-        .eq('bid_package_id', bidPackageId)
-        .eq('subcontractor_id', subcontractorId)
-            .is('parent_email_id', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      
-      if (recipientsBySub && recipientsBySub.length > 0) {
-        recipient = recipientsBySub[0]
-        console.log('✅ Found recipient by subcontractor_id:', recipient.id)
+      // Try finding by subcontractor_id if email doesn't match
+      if (subcontractorId) {
+        const { data: recipientsBySub } = await supabase
+          .from('bid_package_recipients')
+          .select('*')
+          .eq('bid_package_id', bidPackageId)
+          .eq('subcontractor_id', subcontractorId)
+          .is('parent_email_id', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        
+        if (recipientsBySub && recipientsBySub.length > 0) {
+          recipient = recipientsBySub[0]
+          console.log('✅ Found recipient by subcontractor_id:', recipient.id)
+        }
       }
     }
-  }
-  }
 
     if (recipient) {
       // Update existing recipient with bid information
-  const recipientUpdateData: any = {
-    status: 'responded',
-    responded_at: new Date().toISOString(),
+      const recipientUpdateData: any = {
+        status: 'responded',
+        responded_at: new Date().toISOString(),
         response_text: emailContentText.substring(0, 5000),
-    has_clarifying_questions: clarifyingQuestions.hasQuestions,
-    clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
-        bid_id: bidId,
-        updated_at: new Date().toISOString()
+        has_clarifying_questions: clarifyingQuestions.hasQuestions,
+        clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
+        bid_id: bidId
       }
 
       console.log('📝 Updating recipient record with bid:', recipient.id)
       const { data: updatedRecipient, error: updateError } = await supabase
-      .from('bid_package_recipients')
-      .update(recipientUpdateData)
-      .eq('id', recipient.id)
+        .from('bid_package_recipients')
+        .update(recipientUpdateData)
+        .eq('id', recipient.id)
         .select()
         .single()
     
-    if (updateError) {
-      console.error('❌ Error updating recipient:', updateError)
+      if (updateError) {
+        console.error('❌ Error updating recipient:', updateError)
         return NextResponse.json(
           { error: 'Failed to update recipient', details: updateError.message },
           { status: 200 }
         )
-    } else {
+      } else {
         console.log('✅ Recipient updated successfully with bid')
-    }
+      }
     
     // Create notification for clarifying questions if detected
     if (clarifyingQuestions.hasQuestions) {
       await createNotification(supabase, bidPackageId, recipient.id, 'clarifying_question')
     }
   } else {
-      console.log('⚠️ No original recipient found for bid submission, creating new record')
-      // Create new recipient record for bid submission
+    console.log('⚠️ No original recipient found for bid submission, creating new record')
+    // Create new recipient record for bid submission
     const { data: newRecipient, error: insertError } = await supabase
       .from('bid_package_recipients')
       .insert({
         bid_package_id: bidPackageId,
         subcontractor_id: subcontractorId,
-          subcontractor_email: fromEmail,
-          subcontractor_name: subcontractorName,
-          status: 'responded',
-          responded_at: new Date().toISOString(),
-          response_text: emailContentText.substring(0, 5000),
-          has_clarifying_questions: clarifyingQuestions.hasQuestions,
-          clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
-          bid_id: bidId,
-          thread_id: threadId || `thread-${bidPackageId}-${fromEmail}`,
-          parent_email_id: null
+        subcontractor_email: normalizedFromEmail, // Use normalized email
+        subcontractor_name: subcontractorName,
+        status: 'responded',
+        responded_at: new Date().toISOString(),
+        response_text: emailContentText.substring(0, 5000),
+        has_clarifying_questions: clarifyingQuestions.hasQuestions,
+        clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
+        bid_id: bidId,
+        thread_id: threadId || `thread-${bidPackageId}-${fromEmail}`,
+        parent_email_id: null
       })
       .select()
       .single()
     
     if (insertError) {
-        console.error('❌ Error creating recipient for bid:', insertError)
-        return NextResponse.json(
-          { error: 'Failed to create recipient', details: insertError.message },
-          { status: 200 }
-        )
+      console.error('❌ Error creating recipient for bid:', insertError)
+      return NextResponse.json(
+        { error: 'Failed to create recipient', details: insertError.message },
+        { status: 200 }
+      )
     } else {
-        console.log('✅ Created new recipient record for bid:', newRecipient?.id)
-      }
+      console.log('✅ Created new recipient record for bid:', newRecipient?.id)
     }
+  }
   } else {
     // For questions/replies (not bid submissions), create a new thread message
     console.log('📧 Creating thread message for question/reply')
@@ -1022,7 +1068,7 @@ async function handleInboundEmail(body: any) {
         .from('bid_package_recipients')
         .select('*')
         .eq('bid_package_id', bidPackageId)
-        .eq('subcontractor_email', fromEmail)
+        .ilike('subcontractor_email', normalizedFromEmail) // Case-insensitive match
         .is('parent_email_id', null)
         .order('created_at', { ascending: true })
         .limit(1)
@@ -1036,7 +1082,7 @@ async function handleInboundEmail(body: any) {
           .insert({
             bid_package_id: bidPackageId,
             subcontractor_id: subcontractorId,
-            subcontractor_email: fromEmail,
+            subcontractor_email: normalizedFromEmail, // Use normalized email
             subcontractor_name: subcontractorName,
             status: 'responded',
             responded_at: new Date().toISOString(),
@@ -1057,13 +1103,13 @@ async function handleInboundEmail(body: any) {
             { error: 'Failed to create thread message', details: threadError.message },
             { status: 200 }
           )
-        } else {
-          console.log('✅ Created thread message:', newThreadMessage?.id)
-          
-          // Create notification for clarifying questions
-          if (clarifyingQuestions.hasQuestions) {
-            await createNotification(supabase, bidPackageId, newThreadMessage.id, 'clarifying_question')
-          }
+        }
+        
+        console.log('✅ Created thread message:', newThreadMessage?.id)
+        
+        // Create notification for clarifying questions
+        if (clarifyingQuestions.hasQuestions) {
+          await createNotification(supabase, bidPackageId, newThreadMessage.id, 'clarifying_question')
         }
       } else {
         // No original recipient found, create new thread
@@ -1072,7 +1118,7 @@ async function handleInboundEmail(body: any) {
           .insert({
             bid_package_id: bidPackageId,
             subcontractor_id: subcontractorId,
-            subcontractor_email: fromEmail,
+            subcontractor_email: normalizedFromEmail, // Use normalized email
             subcontractor_name: subcontractorName,
             status: 'responded',
             responded_at: new Date().toISOString(),
@@ -1093,29 +1139,29 @@ async function handleInboundEmail(body: any) {
             { error: 'Failed to create thread', details: threadError.message },
             { status: 200 }
           )
-        } else {
-          console.log('✅ Created new thread:', newThreadMessage?.id)
         }
+        
+        console.log('✅ Created new thread:', newThreadMessage?.id)
       }
     } else {
       // Create thread message with parent
-      const { data: newThreadMessage, error: threadError } = await supabase
-        .from('bid_package_recipients')
-        .insert({
-          bid_package_id: bidPackageId,
-          subcontractor_id: subcontractorId,
-          subcontractor_email: fromEmail,
-          subcontractor_name: subcontractorName,
-          status: 'responded',
-          responded_at: new Date().toISOString(),
-          response_text: emailContentText.substring(0, 5000),
-          has_clarifying_questions: clarifyingQuestions.hasQuestions,
-          clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
-          bid_id: null,
-          thread_id: finalThreadId,
-          parent_email_id: finalParentId,
-          resend_email_id: emailId || null // Store email_id for later content fetching
-        })
+        const { data: newThreadMessage, error: threadError } = await supabase
+          .from('bid_package_recipients')
+          .insert({
+            bid_package_id: bidPackageId,
+            subcontractor_id: subcontractorId,
+            subcontractor_email: normalizedFromEmail, // Use normalized email
+            subcontractor_name: subcontractorName,
+            status: 'responded',
+            responded_at: new Date().toISOString(),
+            response_text: emailContentText.substring(0, 5000),
+            has_clarifying_questions: clarifyingQuestions.hasQuestions,
+            clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
+            bid_id: null,
+            thread_id: finalThreadId,
+            parent_email_id: finalParentId,
+            resend_email_id: emailId || null // Store email_id for later content fetching
+          })
         .select()
         .single()
       
@@ -1125,13 +1171,13 @@ async function handleInboundEmail(body: any) {
           { error: 'Failed to create thread message', details: threadError.message },
           { status: 200 }
         )
-      } else {
-        console.log('✅ Created thread message:', newThreadMessage?.id)
-        
-        // Create notification for clarifying questions
-        if (clarifyingQuestions.hasQuestions) {
-          await createNotification(supabase, bidPackageId, newThreadMessage.id, 'clarifying_question')
-        }
+      }
+      
+      console.log('✅ Created thread message:', newThreadMessage?.id)
+      
+      // Create notification for clarifying questions
+      if (clarifyingQuestions.hasQuestions) {
+        await createNotification(supabase, bidPackageId, newThreadMessage.id, 'clarifying_question')
       }
     }
   }

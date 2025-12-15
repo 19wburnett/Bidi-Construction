@@ -745,81 +745,83 @@ function DashboardContent() {
                     Resume Work
                   </h2>
                 </div>
-                <Card className="border-l-4 border-l-orange overflow-hidden">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row justify-between gap-6">
-                      <div className="space-y-4 flex-1">
-                        <div className="flex items-start gap-4">
-                          {/* Hero Job Cover Image */}
-                          <div className="flex-shrink-0">
-                            {heroJob.cover_image_path ? (
-                              <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm">
-                                <Image
-                                  src={getCoverImageUrl(heroJob.cover_image_path) || ''}
-                                  alt={heroJob.name}
-                                  width={64}
-                                  height={64}
-                                  className="w-full h-full object-cover"
-                                />
+                <Link href={`/dashboard/jobs/${heroJob.id}`} className="block">
+                  <Card className="border-l-4 border-l-orange overflow-hidden hover:shadow-lg transition-shadow cursor-pointer">
+                    <CardContent className="p-6">
+                      <div className="flex flex-col md:flex-row justify-between gap-6">
+                        <div className="space-y-4 flex-1">
+                          <div className="flex items-start gap-4">
+                            {/* Hero Job Cover Image */}
+                            <div className="flex-shrink-0">
+                              {heroJob.cover_image_path ? (
+                                <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm">
+                                  <Image
+                                    src={getCoverImageUrl(heroJob.cover_image_path) || ''}
+                                    alt={heroJob.name}
+                                    width={64}
+                                    height={64}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center border-2 border-orange-200">
+                                  <Building2 className="h-8 w-8 text-orange-500" />
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <h3 className="text-2xl font-bold text-gray-900">{heroJob.name}</h3>
+                                <Badge className={getStatusColor(heroJob.status)}>{formatStatus(heroJob.status)}</Badge>
                               </div>
-                            ) : (
-                              <div className="w-16 h-16 rounded-lg bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center border-2 border-orange-200">
-                                <Building2 className="h-8 w-8 text-orange-500" />
+                              <div className="flex items-center text-gray-500 text-sm">
+                                <MapPin className="h-4 w-4 mr-1" />
+                                {heroJob.location}
                               </div>
-                            )}
+                            </div>
                           </div>
-                          <div>
-                            <div className="flex items-center gap-2 mb-2">
-                              <h3 className="text-2xl font-bold text-gray-900">{heroJob.name}</h3>
-                              <Badge className={getStatusColor(heroJob.status)}>{formatStatus(heroJob.status)}</Badge>
+                          
+                          <div className="grid grid-cols-3 gap-4 py-4 border-y border-gray-100">
+                            <div>
+                              <p className="text-sm text-gray-500 mb-1">Plans</p>
+                              <p className="text-xl font-bold text-gray-900">{heroJob.plan_count}</p>
                             </div>
-                            <div className="flex items-center text-gray-500 text-sm">
-                              <MapPin className="h-4 w-4 mr-1" />
-                              {heroJob.location}
+                            <div>
+                              <p className="text-sm text-gray-500 mb-1">Packages</p>
+                              <p className="text-xl font-bold text-gray-900">{heroJob.bid_package_count}</p>
                             </div>
+                            <div>
+                              <p className="text-sm text-gray-500 mb-1">Bids</p>
+                              <p className="text-xl font-bold text-gray-900">{heroJob.bid_count}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            <Link href={`/dashboard/jobs/${heroJob.id}`} onClick={(e) => e.stopPropagation()}>
+                              <Button size="sm">
+                                Open Dashboard
+                                <ArrowRight className="h-4 w-4 ml-2" />
+                              </Button>
+                            </Link>
+                            <Link href={`/dashboard/jobs/${heroJob.id}?tab=plans`} onClick={(e) => e.stopPropagation()}>
+                              <Button variant="outline" size="sm">
+                                View Plans
+                              </Button>
+                            </Link>
                           </div>
                         </div>
                         
-                        <div className="grid grid-cols-3 gap-4 py-4 border-y border-gray-100">
-                          <div>
-                            <p className="text-sm text-gray-500 mb-1">Plans</p>
-                            <p className="text-xl font-bold text-gray-900">{heroJob.plan_count}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500 mb-1">Packages</p>
-                            <p className="text-xl font-bold text-gray-900">{heroJob.bid_package_count}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500 mb-1">Bids</p>
-                            <p className="text-xl font-bold text-gray-900">{heroJob.bid_count}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-3">
-                          <Link href={`/dashboard/jobs/${heroJob.id}`}>
-                            <Button size="sm">
-                              Open Dashboard
-                              <ArrowRight className="h-4 w-4 ml-2" />
-                            </Button>
-                          </Link>
-                          <Link href={`/dashboard/jobs/${heroJob.id}?tab=plans`}>
-                            <Button variant="outline" size="sm">
-                              View Plans
-                            </Button>
-                          </Link>
+                        <div className="md:w-1/3 bg-gray-50 rounded-lg p-4 border border-gray-100 flex flex-col justify-center items-center text-center">
+                           <Clock className="h-8 w-8 text-gray-400 mb-2" />
+                           <p className="text-sm text-gray-600 mb-1">Last Updated</p>
+                           <p className="text-sm font-medium text-gray-900">
+                             {new Date(heroJob.created_at).toLocaleDateString()}
+                           </p>
                         </div>
                       </div>
-                      
-                      <div className="md:w-1/3 bg-gray-50 rounded-lg p-4 border border-gray-100 flex flex-col justify-center items-center text-center">
-                         <Clock className="h-8 w-8 text-gray-400 mb-2" />
-                         <p className="text-sm text-gray-600 mb-1">Last Updated</p>
-                         <p className="text-sm font-medium text-gray-900">
-                           {new Date(heroJob.created_at).toLocaleDateString()}
-                         </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </Link>
               </motion.div>
             ) : (
               <motion.div variants={staggerItem}>

@@ -1326,46 +1326,30 @@ export default function BidComparisonModal({
               {/* Right Content Area */}
               <div className="flex-1 overflow-hidden flex flex-col bg-white">
                 {selectedEmailRecipient ? (
-                  // Email View
-                  <div className="flex-1 overflow-y-auto p-6">
-                    <div className="max-w-3xl mx-auto space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-2xl font-bold text-gray-900">Email Details</h2>
-                          <p className="text-gray-500">
-                            Communication with {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
-                          </p>
+                  // Email View - Chat Style
+                  <div className="flex flex-col h-full bg-white">
+                    {/* Header */}
+                    <div className="border-b bg-white px-6 py-4 flex items-center justify-between flex-shrink-0">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
+                        </h2>
+                        <div className="flex items-center gap-3 mt-1">
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {selectedEmailRecipient.status}
+                          </Badge>
+                          <span className="text-xs text-gray-500">
+                            {selectedEmailRecipient.bid_packages?.trade_category || 'General'}
+                          </span>
                         </div>
-                        <Button variant="outline" onClick={() => setSelectedEmailRecipient(null)}>Close</Button>
                       </div>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedEmailRecipient(null)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
 
-                      <div className="grid grid-cols-3 gap-4">
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Status</div>
-                            <div className="font-semibold capitalize">{selectedEmailRecipient.status}</div>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Last Activity</div>
-                            <div className="font-semibold">
-                              {new Date(selectedEmailRecipient.updated_at || selectedEmailRecipient.created_at).toLocaleDateString()}
-                            </div>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Bid Package</div>
-                            <div className="font-semibold">
-                              {selectedEmailRecipient.bid_packages?.trade_category || 'General'}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-
-                      {/* Thread Content - Display all messages chronologically */}
-                      <div className="space-y-4">
+                    {/* Chat Messages Container */}
+                    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-3 bg-gray-50">
                         {(() => {
                           // Get thread for this recipient
                           const threadId = selectedEmailRecipient.thread_id || 
@@ -1382,11 +1366,9 @@ export default function BidComparisonModal({
                           
                           if (sortedMessages.length === 0) {
                             return (
-                              <Card className="border-gray-200 bg-gray-50">
-                                <CardContent className="p-4">
-                                  <p className="text-gray-500 text-sm">No messages in this thread yet.</p>
-                                </CardContent>
-                              </Card>
+                              <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-400 text-sm">No messages yet</p>
+                              </div>
                             )
                           }
                           
@@ -1453,72 +1435,122 @@ export default function BidComparisonModal({
                               })
                             }
                             
+                            const senderName = isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')
+                            const prevMessage = index > 0 ? sortedMessages[index - 1] : null
+                            const showAvatar = !prevMessage || prevMessage.isFromGC !== isFromGC
+                            const getInitials = (name: string) => {
+                              if (!name) return '?'
+                              const parts = name.trim().split(/\s+/)
+                              if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                              return name.substring(0, 2).toUpperCase()
+                            }
+                            const formatChatTime = (date: Date) => {
+                              const now = new Date()
+                              const diffMs = now.getTime() - date.getTime()
+                              const diffMins = Math.floor(diffMs / 60000)
+                              const diffHours = Math.floor(diffMs / 3600000)
+                              const diffDays = Math.floor(diffMs / 86400000)
+                              if (diffMins < 1) return 'Just now'
+                              if (diffMins < 60) return `${diffMins}m ago`
+                              if (diffHours < 24) return `${diffHours}h ago`
+                              if (diffDays < 7) return `${diffDays}d ago`
+                              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            }
+                            
                             return (
-                              <Card 
+                              <div
                                 key={message.id || `message-${index}`}
-                                className={isFromGC ? 'border-blue-200 bg-blue-50' : 'border-orange-200 bg-orange-50'}
+                                className={`flex items-end gap-2 ${isFromGC ? 'flex-row-reverse' : 'flex-row'} ${showAvatar ? 'mt-4' : 'mt-1'}`}
                               >
-                                <CardHeader className="pb-2">
-                                  <div className="flex items-center justify-between">
-                                    <CardTitle className={`text-base ${isFromGC ? 'text-blue-900' : 'text-orange-900'}`}>
-                                      {isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')}
-                                    </CardTitle>
-                                    <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
-                                      {new Date(messageTime).toLocaleString()}
-                              </CardDescription>
+                                {/* Avatar */}
+                                {showAvatar ? (
+                                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shadow-sm ${
+                                    isFromGC ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
+                                  }`}>
+                                    {isFromGC ? 'Y' : getInitials(senderName)}
                                   </div>
-                            </CardHeader>
-                            <CardContent>
-                                  {fetchingEmailContent.has(message.id) ? (
-                                    <div className="flex items-center gap-2 text-gray-500">
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
-                                      <span className="text-sm">Loading email content...</span>
-                                    </div>
-                                  ) : (
-                                    <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
-                                      {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
-                                    </p>
+                                ) : (
+                                  <div className="w-8" />
+                                )}
+                                
+                                {/* Message Bubble */}
+                                <div className={`flex flex-col max-w-[75%] ${isFromGC ? 'items-end' : 'items-start'}`}>
+                                  {showAvatar && (
+                                    <span className={`text-xs text-gray-500 mb-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                      {senderName}
+                                    </span>
                                   )}
-                            </CardContent>
-                          </Card>
+                                  <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                                    isFromGC
+                                      ? 'bg-blue-600 text-white rounded-br-sm'
+                                      : 'bg-white text-gray-900 rounded-bl-sm border border-gray-200'
+                                  }`}>
+                                    {fetchingEmailContent.has(message.id) ? (
+                                      <div className="flex items-center gap-2">
+                                        <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
+                                        <span className="text-xs">Loading...</span>
+                                      </div>
+                                    ) : (
+                                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                    {formatChatTime(new Date(messageTime))}
+                                  </span>
+                                </div>
+                              </div>
                             )
                           })
                         })()}
+                        </div>
 
-                        {/* Reply Action */}
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base">Reply</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                             {!showEmailResponseForm ? (
-                               <div className="flex gap-3">
-                                 <Button onClick={() => setShowEmailResponseForm(true)}>
-                                    <Mail className="h-4 w-4 mr-2" />
-                                    Send Message
-                                 </Button>
-                                 {selectedEmailRecipient.bids?.length > 0 && (
-                                   <Button variant="outline" onClick={() => {
-                                      setSelectedBidId(selectedEmailRecipient.bids[0].id)
-                                      setSelectedEmailRecipient(null)
-                                      setLeftSideTab('bids')
-                                   }}>
-                                      View Bid
-                                   </Button>
-                                 )}
-                               </div>
-                             ) : (
-                               <div className="space-y-4">
-                                 <Textarea
-                                    value={responseText}
-                                    onChange={(e) => setResponseText(e.target.value)}
-                                    placeholder="Type your message here..."
-                                    rows={5}
-                                 />
-                                 <div className="flex gap-3">
-                                   <Button 
-                                      disabled={sendingResponse || !responseText.trim()}
-                                      onClick={async () => {
+                        {/* Reply Input - Chat-like */}
+                        <div className="border-t bg-white p-4 flex-shrink-0">
+                          {!showEmailResponseForm ? (
+                            <div className="flex gap-2">
+                              <Button 
+                                onClick={() => setShowEmailResponseForm(true)}
+                                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                              >
+                                <Mail className="h-4 w-4 mr-2" />
+                                Send Message
+                              </Button>
+                              {selectedEmailRecipient.bids?.length > 0 && (
+                                <Button variant="outline" onClick={() => {
+                                  setSelectedBidId(selectedEmailRecipient.bids[0].id)
+                                  setSelectedEmailRecipient(null)
+                                  setLeftSideTab('bids')
+                                }}>
+                                  View Bid
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex items-end gap-2">
+                                <Textarea
+                                  value={responseText}
+                                  onChange={(e) => setResponseText(e.target.value)}
+                                  placeholder="Type a message..."
+                                  rows={3}
+                                  className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault()
+                                      if (responseText.trim() && !sendingResponse) {
+                                        // Trigger send
+                                        const sendBtn = e.currentTarget.closest('div')?.querySelector('button[type="button"]')
+                                        if (sendBtn) (sendBtn as HTMLButtonElement).click()
+                                      }
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  size="icon"
+                                  disabled={sendingResponse || !responseText.trim()}
+                                  onClick={async () => {
                                         if (!responseText.trim() || !selectedEmailRecipient.id) return
                                         const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
                                         if (!bidPackageId) return
@@ -1606,16 +1638,13 @@ export default function BidComparisonModal({
                                    >
                                       {sendingResponse ? 'Sending...' : 'Send Message'}
                                    </Button>
-                                   <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
-                                 </div>
-                                 {error && <p className="text-sm text-red-600">{error}</p>}
-                               </div>
-                             )}
-                          </CardContent>
-                        </Card>
+                                <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
+                              </div>
+                              {error && <p className="text-sm text-red-600">{error}</p>}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
                 ) : selectedBid ? (
                   // Bid View
                   <div className="flex flex-col h-full">
@@ -3024,46 +3053,30 @@ export default function BidComparisonModal({
               {/* Right Content Area */}
               <div className="flex-1 overflow-hidden flex flex-col bg-white">
                 {selectedEmailRecipient ? (
-                  // Email View
-                  <div className="flex-1 overflow-y-auto p-6">
-                    <div className="max-w-3xl mx-auto space-y-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-2xl font-bold text-gray-900">Email Details</h2>
-                          <p className="text-gray-500">
-                            Communication with {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
-                          </p>
+                  // Email View - Chat Style
+                  <div className="flex flex-col h-full bg-white">
+                    {/* Header */}
+                    <div className="border-b bg-white px-6 py-4 flex items-center justify-between flex-shrink-0">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          {selectedEmailRecipient.subcontractor_name || selectedEmailRecipient.subcontractors?.name || selectedEmailRecipient.subcontractor_email}
+                        </h2>
+                        <div className="flex items-center gap-3 mt-1">
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {selectedEmailRecipient.status}
+                          </Badge>
+                          <span className="text-xs text-gray-500">
+                            {selectedEmailRecipient.bid_packages?.trade_category || 'General'}
+                          </span>
                         </div>
-                        <Button variant="outline" onClick={() => setSelectedEmailRecipient(null)}>Close</Button>
                       </div>
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedEmailRecipient(null)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
 
-                      <div className="grid grid-cols-3 gap-4">
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Status</div>
-                            <div className="font-semibold capitalize">{selectedEmailRecipient.status}</div>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Last Activity</div>
-                            <div className="font-semibold">
-                              {new Date(selectedEmailRecipient.updated_at || selectedEmailRecipient.created_at).toLocaleDateString()}
-                            </div>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="text-sm text-gray-500 mb-1">Bid Package</div>
-                            <div className="font-semibold">
-                              {selectedEmailRecipient.bid_packages?.trade_category || 'General'}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-
-                      {/* Thread Content - Display all messages chronologically */}
-                      <div className="space-y-4">
+                    {/* Chat Messages Container */}
+                    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-3 bg-gray-50">
                         {(() => {
                           // Get thread for this recipient
                           const threadId = selectedEmailRecipient.thread_id || 
@@ -3080,11 +3093,9 @@ export default function BidComparisonModal({
                           
                           if (sortedMessages.length === 0) {
                             return (
-                              <Card className="border-gray-200 bg-gray-50">
-                                <CardContent className="p-4">
-                                  <p className="text-gray-500 text-sm">No messages in this thread yet.</p>
-                                </CardContent>
-                              </Card>
+                              <div className="flex items-center justify-center h-full">
+                                <p className="text-gray-400 text-sm">No messages yet</p>
+                              </div>
                             )
                           }
                           
@@ -3151,72 +3162,122 @@ export default function BidComparisonModal({
                               })
                             }
                             
+                            const senderName = isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')
+                            const prevMessage = index > 0 ? sortedMessages[index - 1] : null
+                            const showAvatar = !prevMessage || prevMessage.isFromGC !== isFromGC
+                            const getInitials = (name: string) => {
+                              if (!name) return '?'
+                              const parts = name.trim().split(/\s+/)
+                              if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                              return name.substring(0, 2).toUpperCase()
+                            }
+                            const formatChatTime = (date: Date) => {
+                              const now = new Date()
+                              const diffMs = now.getTime() - date.getTime()
+                              const diffMins = Math.floor(diffMs / 60000)
+                              const diffHours = Math.floor(diffMs / 3600000)
+                              const diffDays = Math.floor(diffMs / 86400000)
+                              if (diffMins < 1) return 'Just now'
+                              if (diffMins < 60) return `${diffMins}m ago`
+                              if (diffHours < 24) return `${diffHours}h ago`
+                              if (diffDays < 7) return `${diffDays}d ago`
+                              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            }
+                            
                             return (
-                              <Card 
+                              <div
                                 key={message.id || `message-${index}`}
-                                className={isFromGC ? 'border-blue-200 bg-blue-50' : 'border-orange-200 bg-orange-50'}
+                                className={`flex items-end gap-2 ${isFromGC ? 'flex-row-reverse' : 'flex-row'} ${showAvatar ? 'mt-4' : 'mt-1'}`}
                               >
-                                <CardHeader className="pb-2">
-                                  <div className="flex items-center justify-between">
-                                    <CardTitle className={`text-base ${isFromGC ? 'text-blue-900' : 'text-orange-900'}`}>
-                                      {isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')}
-                                    </CardTitle>
-                                    <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
-                                      {new Date(messageTime).toLocaleString()}
-                              </CardDescription>
+                                {/* Avatar */}
+                                {showAvatar ? (
+                                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shadow-sm ${
+                                    isFromGC ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
+                                  }`}>
+                                    {isFromGC ? 'Y' : getInitials(senderName)}
                                   </div>
-                            </CardHeader>
-                            <CardContent>
-                                  {fetchingEmailContent.has(message.id) ? (
-                                    <div className="flex items-center gap-2 text-gray-500">
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
-                                      <span className="text-sm">Loading email content...</span>
-                                    </div>
-                                  ) : (
-                                    <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
-                                      {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
-                                    </p>
+                                ) : (
+                                  <div className="w-8" />
+                                )}
+                                
+                                {/* Message Bubble */}
+                                <div className={`flex flex-col max-w-[75%] ${isFromGC ? 'items-end' : 'items-start'}`}>
+                                  {showAvatar && (
+                                    <span className={`text-xs text-gray-500 mb-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                      {senderName}
+                                    </span>
                                   )}
-                            </CardContent>
-                          </Card>
+                                  <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                                    isFromGC
+                                      ? 'bg-blue-600 text-white rounded-br-sm'
+                                      : 'bg-white text-gray-900 rounded-bl-sm border border-gray-200'
+                                  }`}>
+                                    {fetchingEmailContent.has(message.id) ? (
+                                      <div className="flex items-center gap-2">
+                                        <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
+                                        <span className="text-xs">Loading...</span>
+                                      </div>
+                                    ) : (
+                                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                    {formatChatTime(new Date(messageTime))}
+                                  </span>
+                                </div>
+                              </div>
                             )
                           })
                         })()}
+                        </div>
 
-                        {/* Reply Action */}
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base">Reply</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                             {!showEmailResponseForm ? (
-                               <div className="flex gap-3">
-                                 <Button onClick={() => setShowEmailResponseForm(true)}>
-                                    <Mail className="h-4 w-4 mr-2" />
-                                    Send Message
-                                 </Button>
-                                 {selectedEmailRecipient.bids?.length > 0 && (
-                                   <Button variant="outline" onClick={() => {
-                                      setSelectedBidId(selectedEmailRecipient.bids[0].id)
-                                      setSelectedEmailRecipient(null)
-                                      setLeftSideTab('bids')
-                                   }}>
-                                      View Bid
-                                   </Button>
-                                 )}
-                               </div>
-                             ) : (
-                               <div className="space-y-4">
-                                 <Textarea
-                                    value={responseText}
-                                    onChange={(e) => setResponseText(e.target.value)}
-                                    placeholder="Type your message here..."
-                                    rows={5}
-                                 />
-                                 <div className="flex gap-3">
-                                   <Button 
-                                      disabled={sendingResponse || !responseText.trim()}
-                                      onClick={async () => {
+                        {/* Reply Input - Chat-like */}
+                        <div className="border-t bg-white p-4 flex-shrink-0">
+                          {!showEmailResponseForm ? (
+                            <div className="flex gap-2">
+                              <Button 
+                                onClick={() => setShowEmailResponseForm(true)}
+                                className="flex-1 bg-blue-600 hover:bg-blue-700"
+                              >
+                                <Mail className="h-4 w-4 mr-2" />
+                                Send Message
+                              </Button>
+                              {selectedEmailRecipient.bids?.length > 0 && (
+                                <Button variant="outline" onClick={() => {
+                                  setSelectedBidId(selectedEmailRecipient.bids[0].id)
+                                  setSelectedEmailRecipient(null)
+                                  setLeftSideTab('bids')
+                                }}>
+                                  View Bid
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="flex items-end gap-2">
+                                <Textarea
+                                  value={responseText}
+                                  onChange={(e) => setResponseText(e.target.value)}
+                                  placeholder="Type a message..."
+                                  rows={3}
+                                  className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault()
+                                      if (responseText.trim() && !sendingResponse) {
+                                        // Trigger send
+                                        const sendBtn = e.currentTarget.closest('div')?.querySelector('button[type="button"]')
+                                        if (sendBtn) (sendBtn as HTMLButtonElement).click()
+                                      }
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  size="icon"
+                                  disabled={sendingResponse || !responseText.trim()}
+                                  onClick={async () => {
                                         if (!responseText.trim() || !selectedEmailRecipient.id) return
                                         const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
                                         if (!bidPackageId) return
@@ -3304,16 +3365,13 @@ export default function BidComparisonModal({
                                    >
                                       {sendingResponse ? 'Sending...' : 'Send Message'}
                                    </Button>
-                                   <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
-                                 </div>
-                                 {error && <p className="text-sm text-red-600">{error}</p>}
-                               </div>
-                             )}
-                          </CardContent>
-                        </Card>
+                                <Button variant="ghost" onClick={() => setShowEmailResponseForm(false)}>Cancel</Button>
+                              </div>
+                              {error && <p className="text-sm text-red-600">{error}</p>}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
                 ) : selectedBid ? (
                   // Bid View - This is the same content as the inline version, so I'll reference it
                   <div className="flex flex-col h-full">

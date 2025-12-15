@@ -14,6 +14,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { createClient } from '@/lib/supabase'
 import { getJobForUser } from '@/lib/job-access'
 import { useAuth } from '@/app/providers'
+import EmailTemplateSelector from '@/components/email-template-selector'
+import EmailPreviewModal from '@/components/email-preview-modal'
 import { 
   Package,
   Users,
@@ -178,11 +180,13 @@ export default function BidPackageModal({
   const [showCustomLineItemForm, setShowCustomLineItemForm] = useState(false)
   const [reports, setReports] = useState<JobReport[]>([])
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   // Step 4 collapsible sections and filters drawer
   const [summaryExpanded, setSummaryExpanded] = useState(true)
   const [packageDetailsExpanded, setPackageDetailsExpanded] = useState(true)
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
   const [expandedTradeSummaries, setExpandedTradeSummaries] = useState<Record<string, boolean>>({})
+  const [subcontractorSearch, setSubcontractorSearch] = useState('')
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -408,7 +412,10 @@ export default function BidPackageModal({
         const selectedSubcontractors = subcontractors.filter(sub => selectedSubs.includes(sub.id))
         const byTrade: Record<string, Subcontractor[]> = {}
         for (const sub of selectedSubcontractors) {
-          const canonicalTrade = normalizedLookup.get(normalizeTrade(sub.trade_category)) ?? sub.trade_category
+          const subTradeNormalized = normalizeTrade(sub.trade_category)
+          const canonicalTrade = normalizedLookup.get(subTradeNormalized)
+          // Only include subcontractors that match a selected trade
+          if (!canonicalTrade) continue
           if (!byTrade[canonicalTrade]) byTrade[canonicalTrade] = []
           byTrade[canonicalTrade].push(sub)
         }
@@ -421,11 +428,12 @@ export default function BidPackageModal({
               const response = await fetch('/api/bid-packages/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                  body: JSON.stringify({
                   bidPackageId: pkg.id,
                   subcontractorIds: tradeSubs.map(sub => sub.id),
                   planId: planId,
-                  reportIds: selectedReportIds // Pass report IDs to API
+                  reportIds: selectedReportIds, // Pass report IDs to API
+                  templateId: selectedTemplateId || undefined // Pass template ID if selected
                 })
               })
 
@@ -478,11 +486,13 @@ export default function BidPackageModal({
     setLineItemSearch('')
     setCreatedPackages([])
     setRecipients([])
+    setSelectedTemplateId(null)
     setSummaryExpanded(true)
     setPackageDetailsExpanded(true)
     setFiltersDrawerOpen(false)
     setExpandedTradeSummaries({})
     setShowAddContact(false)
+    setSubcontractorSearch('')
     onClose()
   }
 
@@ -717,15 +727,21 @@ export default function BidPackageModal({
     .filter(sub => (includeMyContacts && sub.source === 'gc') || (includeBidiDirectory && sub.source === 'bidi'))
     .filter(sub => {
       if (selectedTrades.length === 0) return true
-      const subTrade = (sub.trade_category || '').trim().toLowerCase()
+      const subTradeNormalized = normalizeTrade(sub.trade_category)
+      if (!subTradeNormalized) return false
       return selectedTrades.some(t => {
-        const selected = (t || '').trim().toLowerCase()
-        if (!selected || !subTrade) return false
-        if (selected === subTrade) return true
-        // Normalize common synonyms: treat "electrical" and "electrician" the same
-        if (selected.startsWith('electric') && subTrade.startsWith('electric')) return true
-        return false
+        const selectedNormalized = normalizeTrade(t)
+        return selectedNormalized === subTradeNormalized
       })
+    })
+    .filter(sub => {
+      const searchTerm = subcontractorSearch.trim().toLowerCase()
+      if (!searchTerm) return true
+      const name = (sub.name || '').toLowerCase()
+      const email = (sub.email || '').toLowerCase()
+      const location = (sub.location || '').toLowerCase()
+      const trade = (sub.trade_category || '').toLowerCase()
+      return name.includes(searchTerm) || email.includes(searchTerm) || location.includes(searchTerm) || trade.includes(searchTerm)
     })
     .filter(sub => {
       if (licensedOnly && sub.source === 'bidi') return !!sub.licensed
@@ -773,13 +789,13 @@ export default function BidPackageModal({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="bg-white rounded-lg shadow-xl w-[80vw] h-[80vh] max-w-[90vw] flex flex-col"
+        className="bg-white rounded-lg shadow-xl w-[95vw] h-[95vh] max-w-[95vw] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="border-0 shadow-none flex flex-col h-full">
           <CardHeader className="flex-shrink-0">
             <div className="flex items-center justify-between mb-4">
-              <div>
+              <div className="flex-1">
                 <CardTitle className="flex items-center">
                   <Package className="h-5 w-5 mr-2 text-orange-600" />
                   Create Bid Package
@@ -787,6 +803,21 @@ export default function BidPackageModal({
                 <CardDescription>
                   Create a bid request for subcontractors
                 </CardDescription>
+                {job && (
+                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                    <span className="font-semibold text-gray-900">{job.name}</span>
+                    <div className="flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5" />
+                      {job.location}
+                    </div>
+                    {job.budget_range && (
+                      <div className="flex items-center gap-1">
+                        <DollarSign className="h-3.5 w-3.5" />
+                        {job.budget_range}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <Button variant="ghost" size="sm" onClick={handleClose}>
                 ×
@@ -860,28 +891,6 @@ export default function BidPackageModal({
                   exit={{ opacity: 0 }}
                   className="flex-1 flex flex-col min-h-0"
                 >
-                  {/* Job Info */}
-                  {job && (
-                    <motion.div
-                      variants={staggerItem}
-                      className="p-4 bg-gray-50 rounded-lg"
-                    >
-                      <h3 className="font-semibold text-gray-900 mb-2">{job.name}</h3>
-                      <div className="flex items-center space-x-4 text-sm text-gray-600">
-                        <div className="flex items-center">
-                          <MapPin className="h-4 w-4 mr-1" />
-                          {job.location}
-                        </div>
-                        {job.budget_range && (
-                          <div className="flex items-center">
-                            <DollarSign className="h-4 w-4 mr-1" />
-                            {job.budget_range}
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-
               {/* Step 1: Trades & Description */}
                   {step === 1 && (
                     <motion.div
@@ -1830,6 +1839,18 @@ export default function BidPackageModal({
                               </AccordionTrigger>
                               <AccordionContent className="px-3 pb-3 space-y-3">
                                 <div className="space-y-2">
+                                  <Label className="text-sm font-semibold">Email Template</Label>
+                                  <EmailTemplateSelector
+                                    value={selectedTemplateId}
+                                    onValueChange={setSelectedTemplateId}
+                                    templateType="bid_package"
+                                  />
+                                  <p className="text-xs text-gray-500">
+                                    Choose a custom template or use the default Bidi template.
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2">
                                   <Label className="text-sm font-semibold">Package Description</Label>
                                   <Textarea
                                     value={description}
@@ -2039,6 +2060,14 @@ export default function BidPackageModal({
 
                       {/* Right Pane: Subcontractor List */}
                       <div className="flex flex-col min-h-0 h-full">
+                        <div className="flex-shrink-0 mb-4">
+                          <Input
+                            placeholder="Search subcontractors by name, email, location, or trade..."
+                            value={subcontractorSearch}
+                            onChange={(e) => setSubcontractorSearch(e.target.value)}
+                            className="w-full"
+                          />
+                        </div>
                         <div className="flex-1 overflow-y-auto space-y-3 pr-2">
                           {filteredSubcontractors.length === 0 ? (
                             <div className="text-center py-8">
@@ -2153,17 +2182,6 @@ export default function BidPackageModal({
                                         {sub.bonded && <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300">Bonded</Badge>}
                                       </div>
                                     )}
-                                    {(() => {
-                                      const tradeKey = normalizeTrade(sub.trade_category)
-                                      const canonicalTrade = canonicalTradeByNormalized[tradeKey]
-                                      const itemsForSub = canonicalTrade ? lineItemsByTrade[canonicalTrade] || [] : []
-                                      return itemsForSub.length > 0 ? (
-                                        <div className="mt-2 text-xs text-gray-500">
-                                          <span className="font-semibold text-gray-600">Assigned line items:</span>{' '}
-                                          {itemsForSub.map(item => item.description).join(', ')}
-                                        </div>
-                                      ) : null
-                                    })()}
                                   </div>
                                 </div>
                               </motion.div>
@@ -2172,90 +2190,24 @@ export default function BidPackageModal({
                         </div>
                       </div>
                       {previewOpen && (
-                        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
-                          <div className="absolute inset-0 bg-black/50" onClick={() => setPreviewOpen(false)} />
-                          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] overflow-y-auto p-6">
-                            <div className="flex items-center justify-between mb-4">
-                              <h3 className="text-lg font-semibold">Preview Bid Package</h3>
-                              <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(false)}>×</Button>
-                            </div>
-
-                            <div className="space-y-6">
-                              {selectedTrades.map((trade) => {
-                                const recipients = selectedSubcontractorsByTrade[trade] ?? []
-                                const assignedIds = selectedTradeLineItems[trade] ?? []
-                                const lineItems = assignedIds
-                                  .map(id => takeoffItemById[id])
-                                  .filter((item): item is TakeoffItem => Boolean(item))
-                                const subject = `${job?.name || 'Project'} - Bid Request: ${trade}`
-                                const prettyDeadline = deadline ? new Date(deadline).toLocaleString() : 'No deadline set'
-                                const attachments = [
-                                  `Project Plan - ${job?.name || 'Project'} (Plan ID: ${planId}) - Link included`,
-                                  ...reports
-                                    .filter(r => selectedReportIds.includes(r.id))
-                                    .map(r => `Report: ${r.title || r.file_name} - Link included`)
-                                ]
-                                return (
-                                  <div key={trade} className="p-4 border rounded-lg space-y-3">
-                                    <div className="flex items-center justify-between">
-                                      <h4 className="font-semibold">{trade}</h4>
-                                      <Badge variant="outline">{recipients.length} recipient{recipients.length === 1 ? '' : 's'}</Badge>
-                                    </div>
-                                    <div className="text-sm">
-                                      <div className="mb-2"><span className="font-medium">To:</span> {recipients.map(r => r.email).join(', ') || '—'}</div>
-                                      <div className="mb-2"><span className="font-medium">Subject:</span> {subject}</div>
-                                      <div className="mb-2">
-                                        <span className="font-medium">Body:</span>
-                                        <div className="mt-1 whitespace-pre-wrap border rounded-md p-3 bg-gray-50">
-{`${description || ''}
-
-Project: ${job?.name || ''}
-Location: ${job?.location || ''}
-Trade: ${trade}
-Deadline: ${prettyDeadline}
-
-Minimum required line items:
-${lineItems.length > 0 ? lineItems.map(li => `- ${li.description} (${li.quantity} ${li.unit}${li.unit_cost ? ` @ $${li.unit_cost}/${li.unit}` : ''})`).join('\n') : '- (none selected)' }
-
-View Plans: [Link to Download Plans]
-
-Please reply with your bid and any questions.
-
-Thank you,`}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <span className="font-medium">Included Links:</span>
-                                        <ul className="list-disc pl-5 mt-1">
-                                          {attachments.map(a => (
-                                            <li key={a} className="text-sm">{a}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-
-                            <div className="mt-6 flex gap-3">
-                              <Button variant="outline" className="flex-1" onClick={() => setPreviewOpen(false)}>Close</Button>
-                              <Button className="flex-1" disabled={!canCreatePackage || loading} onClick={() => { setPreviewOpen(false); handleCreatePackage(); }}>
-                                {loading ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Sending...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Send className="h-4 w-4 mr-2" />
-                                    Send Now
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
+                        <EmailPreviewModal
+                          isOpen={previewOpen}
+                          onClose={() => setPreviewOpen(false)}
+                          onSend={() => { setPreviewOpen(false); handleCreatePackage(); }}
+                          job={job}
+                          selectedTrades={selectedTrades}
+                          selectedSubcontractorsByTrade={selectedSubcontractorsByTrade}
+                          selectedTradeLineItems={selectedTradeLineItems}
+                          takeoffItemById={takeoffItemById}
+                          description={description}
+                          deadline={deadline}
+                          planId={planId}
+                          selectedReportIds={selectedReportIds}
+                          reports={reports}
+                          selectedTemplateId={selectedTemplateId}
+                          canCreatePackage={canCreatePackage}
+                          loading={loading}
+                        />
                       )}
                     </motion.div>
                   )}
