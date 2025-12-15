@@ -163,6 +163,57 @@ export default function BidComparisonModal({
   const { user } = useAuth()
   const supabase = createClient()
 
+  // Mark incoming emails as read when viewing a thread
+  const markEmailAsRead = useCallback(async (recipientId: string) => {
+    try {
+      const response = await fetch(`/api/bid-package-recipients/${recipientId}/mark-read`, {
+        method: 'POST'
+      })
+      if (response.ok) {
+        // Update local state to reflect read status
+        setAllRecipients(prev => prev.map(r => 
+          r.id === recipientId ? { ...r, read_by_gc_at: new Date().toISOString() } : r
+        ))
+        // Update threads
+        setEmailThreads(prev => {
+          const updated = { ...prev }
+          Object.keys(updated).forEach(threadId => {
+            const thread = updated[threadId]
+            if (thread.messages) {
+              thread.messages = thread.messages.map((m: any) =>
+                m.id === recipientId ? { ...m, read_by_gc_at: new Date().toISOString() } : m
+              )
+              if (thread.latest_message?.id === recipientId) {
+                thread.latest_message = { ...thread.latest_message, read_by_gc_at: new Date().toISOString() }
+              }
+            }
+          })
+          return updated
+        })
+      }
+    } catch (error) {
+      console.error('Error marking email as read:', error)
+    }
+  }, [])
+
+  // Calculate unread count for incoming emails across all threads
+  const unreadCount = useMemo(() => {
+    // Count unread messages from all threads, not just latest messages
+    let count = 0
+    Object.values(emailThreads).forEach((thread: any) => {
+      if (thread.messages && Array.isArray(thread.messages)) {
+        thread.messages.forEach((message: any) => {
+          const isIncoming = !(message.isFromGC ?? message.is_from_gc ?? false)
+          const isUnread = isIncoming && !message.read_by_gc_at
+          if (isUnread) {
+            count++
+          }
+        })
+      }
+    })
+    return count
+  }, [emailThreads])
+
   useEffect(() => {
     if (isOpen && jobId) {
       loadData()
@@ -171,6 +222,24 @@ export default function BidComparisonModal({
       }
     }
   }, [isOpen, jobId, initialBidId, refreshTrigger])
+
+  // Mark all unread messages in a thread as read when viewing it
+  useEffect(() => {
+    if (!selectedEmailRecipient) return
+    
+    const threadId = selectedEmailRecipient.thread_id || 
+      `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+    const thread = emailThreads[threadId]
+    const threadMessages = thread?.messages || [selectedEmailRecipient]
+    
+    // Mark all unread incoming messages in this thread as read
+    threadMessages.forEach((message: any) => {
+      const isIncoming = !(message.isFromGC ?? message.is_from_gc ?? false)
+      if (isIncoming && !message.read_by_gc_at) {
+        markEmailAsRead(message.id)
+      }
+    })
+  }, [selectedEmailRecipient?.id, emailThreads, markEmailAsRead])
 
   // Poll for email updates every 10 seconds when modal is open
   useEffect(() => {
@@ -1221,6 +1290,11 @@ export default function BidComparisonModal({
                             {allRecipients.length}
                           </Badge>
                         )}
+                        {unreadCount > 0 && (
+                          <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
+                            {unreadCount}
+                          </Badge>
+                        )}
                       </TabsTrigger>
                     </TabsList>
                       <Button
@@ -1331,18 +1405,45 @@ export default function BidComparisonModal({
                               {category}
                             </h3>
                             <div className="space-y-2">
-                              {recipients.map((recipient: any) => (
+                              {recipients.map((recipient: any) => {
+                                // Check if this thread has any unread messages
+                                const threadId = recipient.thread_id || `thread-${recipient.bid_package_id || recipient.bid_packages?.id}-${recipient.subcontractor_email}`
+                                const thread = emailThreads[threadId]
+                                const hasUnreadInThread = thread?.messages?.some((m: any) => {
+                                  const isIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
+                                  return isIncoming && !m.read_by_gc_at
+                                }) ?? false
+                                
+                                // Also check the recipient itself (for backward compatibility)
+                                const isIncoming = !(recipient.isFromGC ?? recipient.is_from_gc ?? false)
+                                const isUnread = isIncoming && !recipient.read_by_gc_at
+                                const showUnread = hasUnreadInThread || isUnread
+                                
+                                return (
                                 <div
                                   key={recipient.id}
                                   onClick={() => {
                                     setSelectedEmailRecipient(recipient)
                                     setSelectedBidId(null)
                                     setResponseText('')
+                                    // Mark all unread messages in thread as read when viewing
+                                    if (hasUnreadInThread && thread?.messages) {
+                                      thread.messages.forEach((m: any) => {
+                                        const msgIsIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
+                                        if (msgIsIncoming && !m.read_by_gc_at) {
+                                          markEmailAsRead(m.id)
+                                        }
+                                      })
+                                    } else if (isIncoming && !recipient.read_by_gc_at) {
+                                      markEmailAsRead(recipient.id)
+                                    }
                                   }}
                                   className={`
                                     cursor-pointer rounded-lg p-3 border transition-all
                                     ${selectedEmailRecipient?.id === recipient.id 
                                       ? 'border-blue-400 bg-white shadow-md ring-1 ring-blue-400/20' 
+                                      : showUnread
+                                      ? 'bg-blue-50/50 border-blue-300 hover:border-blue-400'
                                       : 'bg-white border-gray-200 hover:border-blue-200'
                                     }
                                   `}
@@ -1352,6 +1453,9 @@ export default function BidComparisonModal({
                                       {recipient.subcontractor_name || recipient.subcontractors?.name || recipient.subcontractor_email}
                                     </h4>
                                     <div className="flex items-center gap-1">
+                                      {showUnread && (
+                                        <Badge variant="default" className="h-2 w-2 p-0 rounded-full bg-blue-600 animate-pulse" title="Unread message" />
+                                      )}
                                       {recipient.has_clarifying_questions && (
                                         <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" />
                                       )}
@@ -1389,7 +1493,8 @@ export default function BidComparisonModal({
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           </div>
                         ))}
@@ -2884,6 +2989,11 @@ export default function BidComparisonModal({
                             {allRecipients.length}
                           </Badge>
                         )}
+                        {unreadCount > 0 && (
+                          <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
+                            {unreadCount}
+                          </Badge>
+                        )}
                       </TabsTrigger>
                     </TabsList>
                       <Button
@@ -2994,18 +3104,45 @@ export default function BidComparisonModal({
                               {category}
                             </h3>
                             <div className="space-y-2">
-                              {recipients.map((recipient: any) => (
+                              {recipients.map((recipient: any) => {
+                                // Check if this thread has any unread messages
+                                const threadId = recipient.thread_id || `thread-${recipient.bid_package_id || recipient.bid_packages?.id}-${recipient.subcontractor_email}`
+                                const thread = emailThreads[threadId]
+                                const hasUnreadInThread = thread?.messages?.some((m: any) => {
+                                  const isIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
+                                  return isIncoming && !m.read_by_gc_at
+                                }) ?? false
+                                
+                                // Also check the recipient itself (for backward compatibility)
+                                const isIncoming = !(recipient.isFromGC ?? recipient.is_from_gc ?? false)
+                                const isUnread = isIncoming && !recipient.read_by_gc_at
+                                const showUnread = hasUnreadInThread || isUnread
+                                
+                                return (
                                 <div
                                   key={recipient.id}
                                   onClick={() => {
                                     setSelectedEmailRecipient(recipient)
                                     setSelectedBidId(null)
                                     setResponseText('')
+                                    // Mark all unread messages in thread as read when viewing
+                                    if (hasUnreadInThread && thread?.messages) {
+                                      thread.messages.forEach((m: any) => {
+                                        const msgIsIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
+                                        if (msgIsIncoming && !m.read_by_gc_at) {
+                                          markEmailAsRead(m.id)
+                                        }
+                                      })
+                                    } else if (isIncoming && !recipient.read_by_gc_at) {
+                                      markEmailAsRead(recipient.id)
+                                    }
                                   }}
                                   className={`
                                     cursor-pointer rounded-lg p-3 border transition-all
                                     ${selectedEmailRecipient?.id === recipient.id 
                                       ? 'border-blue-400 bg-white shadow-md ring-1 ring-blue-400/20' 
+                                      : showUnread
+                                      ? 'bg-blue-50/50 border-blue-300 hover:border-blue-400'
                                       : 'bg-white border-gray-200 hover:border-blue-200'
                                     }
                                   `}
@@ -3015,6 +3152,9 @@ export default function BidComparisonModal({
                                       {recipient.subcontractor_name || recipient.subcontractors?.name || recipient.subcontractor_email}
                                     </h4>
                                     <div className="flex items-center gap-1">
+                                      {showUnread && (
+                                        <Badge variant="default" className="h-2 w-2 p-0 rounded-full bg-blue-600 animate-pulse" title="Unread message" />
+                                      )}
                                       {recipient.has_clarifying_questions && (
                                         <Badge variant="destructive" className="h-2 w-2 p-0 rounded-full" />
                                       )}
@@ -3052,7 +3192,8 @@ export default function BidComparisonModal({
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           </div>
                         ))}

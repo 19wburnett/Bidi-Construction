@@ -162,40 +162,96 @@ export async function POST(
       formattedEmailBody = `${formattedEmailBody}<br><br>${planLinksHtml}`
     }
 
-    // Send response email
-    const { data: resendData, error: resendError } = await resend.emails.send({
+    // Find the original email in the thread (the one with parent_email_id = null)
+    // This is the first email sent, which we need to thread the follow-up to
+    let threadId = recipient.thread_id || `thread-${bidPackageId}-${recipient.subcontractor_email}`
+    let originalEmail: any = null
+    let parentId: string | null = null
+    
+    // Find the original email in this thread (the root email)
+    const { data: originalEmails } = await supabase
+      .from('bid_package_recipients')
+      .select('id, resend_email_id, thread_id')
+      .eq('thread_id', threadId)
+      .is('parent_email_id', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    
+    if (originalEmails && originalEmails.length > 0) {
+      originalEmail = originalEmails[0]
+      parentId = originalEmail.id
+      threadId = originalEmail.thread_id || threadId
+    } else {
+      // Fallback: use the recipient passed in as parent if no original found
+      parentId = recipient.id
+    }
+    
+    // Fetch the original email's Message-ID from Resend for proper threading headers
+    let inReplyTo: string | undefined = undefined
+    let references: string | undefined = undefined
+    
+    if (originalEmail?.resend_email_id) {
+      try {
+        const emailResponse = await fetch(`https://api.resend.com/emails/${originalEmail.resend_email_id}`, {
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (emailResponse.ok) {
+          const emailData = await emailResponse.json()
+          // Resend may return message_id in the response, or we construct it
+          // Standard format: <message-id@domain>
+          // Try to get it from the response, or construct from resend_email_id
+          const messageId = emailData.message_id || 
+                           emailData.headers?.['message-id'] || 
+                           `<${originalEmail.resend_email_id}@resend.dev>`
+          inReplyTo = messageId
+          references = messageId
+          console.log('📧 [respond] Setting threading headers:', { inReplyTo, references, originalEmailId: originalEmail.resend_email_id })
+        } else {
+          console.log('📧 [respond] Could not fetch original email from Resend, constructing Message-ID')
+          // Construct Message-ID from resend_email_id as fallback
+          const messageId = `<${originalEmail.resend_email_id}@resend.dev>`
+          inReplyTo = messageId
+          references = messageId
+        }
+      } catch (error) {
+        console.error('📧 [respond] Error fetching original email from Resend:', error)
+        // Construct Message-ID from resend_email_id as fallback
+        const messageId = `<${originalEmail.resend_email_id}@resend.dev>`
+        inReplyTo = messageId
+        references = messageId
+      }
+    }
+    
+    // Build email headers for proper threading
+    const emailHeaders: Record<string, string> = {}
+    if (inReplyTo) {
+      emailHeaders['In-Reply-To'] = inReplyTo
+    }
+    if (references) {
+      emailHeaders['References'] = references
+    }
+    
+    // Send response email with threading headers
+    const emailData: any = {
       from: 'Bidi <noreply@bidicontracting.com>',
       to: [recipient.subcontractor_email],
       subject: emailSubject,
       html: formattedEmailBody,
-      reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
-    })
+      reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`,
+      ...(Object.keys(emailHeaders).length > 0 && { headers: emailHeaders })
+    }
+    
+    const { data: resendData, error: resendError } = await resend.emails.send(emailData)
 
     if (resendError) {
       return NextResponse.json(
         { error: 'Failed to send email', details: resendError.message },
         { status: 500 }
       )
-    }
-
-    // Create new recipient record for the response (to track thread)
-    // Use the original recipient's thread_id, or find the original email in the thread
-    let threadId = recipient.thread_id || `thread-${bidPackageId}-${recipient.subcontractor_email}`
-    let parentId = recipient.id
-    
-    // If this recipient is a reply, find the original email to get the correct thread_id
-    if (recipient.parent_email_id) {
-      const { data: originalRecipient } = await supabase
-        .from('bid_package_recipients')
-        .select('thread_id, id')
-        .eq('id', recipient.parent_email_id)
-        .maybeSingle()
-      
-      if (originalRecipient) {
-        threadId = originalRecipient.thread_id || threadId
-        // Use the latest message in the thread as parent (the recipient passed in)
-        parentId = recipient.id
-      }
     }
     
     // Extract text content from formatted email body for storage

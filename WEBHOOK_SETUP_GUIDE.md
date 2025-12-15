@@ -19,7 +19,7 @@ Email statuses (opened, delivered, etc.) are not updating in the app because Res
 3. Select the events to listen for:
    - ✅ `email.sent` - When email is sent
    - ✅ `email.delivered` - When email is delivered
-   - ✅ `email.opened` - When email is opened (IMPORTANT for status updates)
+   - ✅ `email.clicked` - When email is clicked/opened (IMPORTANT for status updates)
    - ✅ `email.bounced` - When email bounces
    - ✅ `email.failed` - When email fails to send
    - ✅ `email.received` - When inbound email is received (for replies)
@@ -38,16 +38,16 @@ curl https://bidicontracting.com/api/resend/webhook/test
 # Test POST request (simulating Resend webhook)
 curl -X POST https://bidicontracting.com/api/resend/webhook/test \
   -H "Content-Type: application/json" \
-  -d '{"type": "email.opened", "data": {"email_id": "test-123"}}'
+  -d '{"type": "email.clicked", "data": {"email_id": "test-123"}}'
 ```
 
 Both should return JSON responses.
 
 ### Step 5: Send a Test Email
 1. Send a bid package email from your app
-2. Open the email in your email client
+2. Click/open the email in your email client
 3. Check your Vercel logs for webhook events:
-   - Look for: `📧 [webhook] Processing outbound event: email.opened`
+   - Look for: `📧 [webhook] Processing outbound event: email.clicked`
    - Look for: `📧 [webhook] ✅ Recipient updated successfully`
 
 ### Step 6: Check Resend Webhook Logs
@@ -95,7 +95,7 @@ Both should return JSON responses.
 - [ ] Webhook created in Resend dashboard
 - [ ] Webhook URL is: `https://bidicontracting.com/api/resend/webhook`
 - [ ] Webhook is Active/Enabled
-- [ ] All events are selected (sent, delivered, opened, bounced, failed, received)
+- [ ] All events are selected (sent, delivered, clicked, bounced, failed, received)
 - [ ] Test endpoint returns 200: `curl https://bidicontracting.com/api/resend/webhook/test`
 - [ ] Webhook events appear in Resend dashboard after sending/opening emails
 - [ ] Vercel logs show `📧 [webhook]` messages when events occur

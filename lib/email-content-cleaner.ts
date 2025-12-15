@@ -16,20 +16,25 @@ export function cleanEmailText(text: string): string {
   let cleaned = text.trim()
   
   // Common reply patterns to detect where quoted content starts
+  // These patterns match both at start of line and mid-text
   const replyPatterns = [
     // "On [date] [person] wrote:" pattern (Gmail, Outlook, etc.)
-    // Pattern: "On Mon, Dec 15, 2025 at 10:39 AM Weston Burnett <email> wrote:"
-    /\nOn\s+[A-Z][a-z]{2,},\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<[^>]+>\s+wrote:/i,
+    // Pattern: "On Mon, Dec 15, 2025, 1:57 PM Bidi <email> wrote:" (comma before time, no "at")
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,},\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
+    // Pattern: "On Mon, Dec 15, 2025 at 2:01 PM Weston Burnett < weston.burnett19@gmail.com > wrote:" (with spaces around email)
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,},\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
     // Pattern: "On Mon Dec 15, 2025 at 10:39 AM ... wrote:"
-    /\nOn\s+[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<[^>]+>\s+wrote:/i,
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
     // Pattern: "On [day] [date] [person] wrote:" (without time)
-    /\nOn\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<[^>]+>\s+wrote:/i,
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
     // Pattern: "On [date] [person] wrote:" (various formats)
-    /\nOn\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<[^>]+>\s+wrote:/i,
-    /\nOn\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+[^<]+<[^>]+>\s+wrote:/i,
-    /\nOn\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+[^:]+\s+wrote:/i,
-    // Pattern: "On [date] [person] <email> wrote:" (simpler format)
-    /\nOn\s+[^<]+<[^>]+>\s+wrote:/i,
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
+    /(?:^|\n)\s*On\s+[A-Z][a-z]{2,}\s+\d{1,2}\s+[A-Z][a-z]{2,}\s+\d{4}\s+[^:]+\s+wrote:/i,
+    // Pattern: "On [date] [person] <email> wrote:" (simpler format, handles spaces around email)
+    /(?:^|\n)\s*On\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
+    // Pattern: "On [date]" - catch-all for date patterns (matches mid-text too)
+    /\sOn\s+[A-Z][a-z]{2,},\s+[A-Z][a-z]{2,}\s+\d{1,2},\s+\d{4}(?:,\s+\d{1,2}:\d{2}\s+[AP]M)?\s+[^<]+<\s*[^>]+\s*>\s+wrote:/i,
     // "-----Original Message-----" pattern
     /\n-{3,}\s*Original\s+Message\s*-{3,}/i,
     // "From:" header pattern

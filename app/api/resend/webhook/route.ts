@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const eventType = body.type
 
     // Handle outbound status events
-    if (['email.sent', 'email.delivered', 'email.opened', 'email.bounced', 'email.failed'].includes(eventType)) {
+    if (['email.sent', 'email.delivered', 'email.clicked', 'email.bounced', 'email.failed'].includes(eventType)) {
       const result = await handleOutboundEvent(body)
       console.log('✅ Outbound event processed:', eventType)
       return result
@@ -166,11 +166,11 @@ async function handleOutboundEvent(body: any) {
       updateData.status = 'delivered'
       updateData.delivered_at = timestamp
       break
-    case 'email.opened':
+    case 'email.clicked':
       updateData.status = 'opened'
       if (!recipient.opened_at) {
         updateData.opened_at = timestamp
-        // Create notification for first open
+        // Create notification for first open (clicked)
         await createNotification(supabase, recipient.bid_package_id, recipient.id, 'email_opened')
       }
       break
@@ -621,15 +621,20 @@ async function handleInboundEmail(body: any) {
   // Only create a bid if there's a PDF attachment
   const isBidSubmission = hasPdfAttachment
   
+  // Clean email content BEFORE AI processing to get better results
+  // But keep original for raw_email storage
+  const cleanedEmailContent = cleanEmailContent(text || '', html || '')
+  
   // Only run AI parsing if this is actually a bid submission
-  const aiSummary = isBidSubmission ? await parseBidWithAI(emailContent, fromEmail, bidPackage.trade_category) : null
-  const bidData = isBidSubmission ? await extractBidData(emailContent, fromEmail) : { bidAmount: null, timeline: null, notes: null, phone: null, website: null, companyName: null }
+  // Use cleaned content for better AI results (no quoted text)
+  const aiSummary = isBidSubmission ? await parseBidWithAI(cleanedEmailContent || emailContent, fromEmail, bidPackage.trade_category) : null
+  const bidData = isBidSubmission ? await extractBidData(cleanedEmailContent || emailContent, fromEmail) : { bidAmount: null, timeline: null, notes: null, phone: null, website: null, companyName: null }
   
   // Extract categorized notes using AI (only if bid submission)
-  const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(emailContent, bidPackage.trade_category) : []
+  const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(cleanedEmailContent || emailContent, bidPackage.trade_category) : []
 
-  // Detect clarifying questions
-  const clarifyingQuestions = await detectClarifyingQuestions(emailContent)
+  // Detect clarifying questions (use cleaned content for better detection)
+  const clarifyingQuestions = await detectClarifyingQuestions(cleanedEmailContent || emailContent)
 
   // Helper function to determine subcontractor name from multiple sources
   async function determineSubcontractorName(): Promise<string> {
@@ -933,9 +938,9 @@ async function handleInboundEmail(body: any) {
     }
   }
 
-  // Prepare email content - use text if available, otherwise html, fallback to empty string
-  // Clean the content to remove quoted/replied messages
-  let emailContentText = cleanEmailContent(text || '', html || '')
+  // Use the already-cleaned email content (cleaned earlier for AI processing)
+  // This avoids double-cleaning and ensures consistency
+  const emailContentText = cleanedEmailContent
   
   // If still no content after cleaning, log a warning
   if (!emailContentText) {
@@ -991,13 +996,15 @@ async function handleInboundEmail(body: any) {
 
     if (recipient) {
       // Update existing recipient with bid information
+      // IMPORTANT: Set is_from_gc to false since this is a reply from subcontractor
       const recipientUpdateData: any = {
         status: 'responded',
         responded_at: new Date().toISOString(),
         response_text: emailContentText.substring(0, 5000),
         has_clarifying_questions: clarifyingQuestions.hasQuestions,
         clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
-        bid_id: bidId
+        bid_id: bidId,
+        is_from_gc: false // Explicitly mark as subcontractor-sent email (reply)
       }
 
       console.log('📝 Updating recipient record with bid:', recipient.id)
