@@ -651,35 +651,26 @@ export default function BidComparisonModal({
     }
   }, [bids.length, allRecipients.length])
 
-  // Function to clean email content by removing HTML/CSS and extracting text
-  const cleanEmailContent = (content: string): string => {
+  // Function to check if content contains HTML
+  const containsHTML = (content: string): boolean => {
+    if (!content) return false
+    return /<[a-z][\s\S]*>/i.test(content)
+  }
+
+  // Function to sanitize HTML content (remove scripts, keep styling)
+  const sanitizeHTML = (content: string): string => {
     if (!content) return ''
     
-    // Remove style tags and their content
-    let cleaned = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // Remove script tags and their content (security)
+    let sanitized = content.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     
-    // Remove script tags and their content
-    cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    // Remove event handlers (onclick, onerror, etc.)
+    sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '')
     
-    // Remove CSS in style attributes
-    cleaned = cleaned.replace(/\s*style\s*=\s*["'][^"']*["']/gi, '')
+    // Remove javascript: URLs
+    sanitized = sanitized.replace(/javascript:/gi, '')
     
-    // Remove HTML tags but keep the text content
-    cleaned = cleaned.replace(/<[^>]+>/g, ' ')
-    
-    // Decode HTML entities
-    cleaned = cleaned
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-    
-    // Clean up extra whitespace
-    cleaned = cleaned.replace(/\s+/g, ' ').trim()
-    
-    return cleaned
+    return sanitized
   }
 
   // Auto-select all takeoff items when they're loaded
@@ -1604,9 +1595,19 @@ export default function BidComparisonModal({
                                         <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
                                         <span className="text-xs">Loading...</span>
                                       </div>
+                                    ) : messageContent && containsHTML(messageContent) ? (
+                                      <div 
+                                        className="text-sm leading-relaxed max-w-none email-content"
+                                        dangerouslySetInnerHTML={{ __html: sanitizeHTML(messageContent) }}
+                                        style={{
+                                          color: isFromGC ? 'white' : 'inherit',
+                                          // Ensure links are visible
+                                          '--tw-prose-links': isFromGC ? 'white' : 'rgb(59 130 246)',
+                                        } as React.CSSProperties}
+                                      />
                                     ) : (
                                       <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                                        {messageContent ? cleanEmailContent(messageContent) : (isFromGC ? 'Email sent' : 'No message content available')}
+                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
                                   </div>
@@ -3249,9 +3250,19 @@ export default function BidComparisonModal({
                                         <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
                                         <span className="text-xs">Loading...</span>
                                       </div>
+                                    ) : messageContent && containsHTML(messageContent) ? (
+                                      <div 
+                                        className="text-sm leading-relaxed max-w-none email-content"
+                                        dangerouslySetInnerHTML={{ __html: sanitizeHTML(messageContent) }}
+                                        style={{
+                                          color: isFromGC ? 'white' : 'inherit',
+                                          // Ensure links are visible
+                                          '--tw-prose-links': isFromGC ? 'white' : 'rgb(59 130 246)',
+                                        } as React.CSSProperties}
+                                      />
                                     ) : (
                                       <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                                        {messageContent ? cleanEmailContent(messageContent) : (isFromGC ? 'Email sent' : 'No message content available')}
+                                        {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
                                   </div>

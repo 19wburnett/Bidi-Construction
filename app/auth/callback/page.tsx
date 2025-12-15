@@ -107,6 +107,40 @@ function AuthCallbackContent() {
             localStorage.removeItem('pending_subscription_type')
           }
 
+          // Check for pending invitations and accept them if found
+          // This handles the case where someone signs in with Google OAuth after being invited
+          if (data.session.user.email) {
+            try {
+              const invitationResponse = await fetch('/api/invitations/accept-by-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: data.session.user.id,
+                  email: data.session.user.email,
+                }),
+              })
+
+              const invitationData = await invitationResponse.json()
+              
+              if (invitationData.success && invitationData.invitationAccepted) {
+                console.log('Invitation accepted and subscription activated for OAuth user')
+                // Refresh user data to get updated subscription status
+                const { data: refreshedUserData } = await supabase
+                  .from('users')
+                  .select('subscription_status, stripe_customer_id')
+                  .eq('id', data.session.user.id)
+                  .single()
+                
+                if (refreshedUserData) {
+                  userData = { ...userData, ...refreshedUserData }
+                }
+              }
+            } catch (invitationError) {
+              // Log error but don't block the flow - user can still proceed
+              console.error('Error checking/accepting invitations:', invitationError)
+            }
+          }
+
           // Check subscription status
           let hasActiveSubscription = false
           if (userData?.subscription_status === 'active') {
