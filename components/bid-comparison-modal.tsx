@@ -158,6 +158,8 @@ export default function BidComparisonModal({
   const [showDeclinePopover, setShowDeclinePopover] = useState(false)
   const [customDeclineReason, setCustomDeclineReason] = useState<string>('')
   const [processingBidAction, setProcessingBidAction] = useState(false)
+  const [fetchedEmailContent, setFetchedEmailContent] = useState<Record<string, string>>({})
+  const [fetchingEmailContent, setFetchingEmailContent] = useState<Set<string>>(new Set())
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -364,7 +366,7 @@ export default function BidComparisonModal({
               setEmailThreads(threadsMap)
               console.log('📧 loadData: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
             } else {
-              setAllRecipients(statusData.recipients)
+            setAllRecipients(statusData.recipients)
               // Build threads from recipients if threads not provided
               const threadsMap: Record<string, any> = {}
               statusData.recipients.forEach((recipient: any) => {
@@ -1125,24 +1127,24 @@ export default function BidComparisonModal({
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
                   <div className="p-3 border-b bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                          Bids
-                          {bids.length > 0 && (
-                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                              {bids.length}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                          Emails
-                          {allRecipients.length > 0 && (
-                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                              {allRecipients.length}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                      </TabsList>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                        Bids
+                        {bids.length > 0 && (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {bids.length}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                        Emails
+                        {allRecipients.length > 0 && (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {allRecipients.length}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                    </TabsList>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1289,17 +1291,17 @@ export default function BidComparisonModal({
                                   )}
                                   <div className="flex items-center justify-between mt-2">
                                     <div className="flex items-center gap-1.5">
-                                      <Badge variant="outline" className={`
-                                        text-[10px] px-1.5 py-0 h-5 capitalize border-0
-                                        ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                                          recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                    <Badge variant="outline" className={`
+                                      text-[10px] px-1.5 py-0 h-5 capitalize border-0
+                                      ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                        recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
                                           recipient.status === 'opened' ? 'bg-purple-100 text-purple-700 border-purple-300' :
-                                          recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
-                                          'bg-gray-100 text-gray-600'}
-                                      `}>
+                                        recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-gray-100 text-gray-600'}
+                                    `}>
                                         {recipient.status === 'opened' && <Eye className="h-2.5 w-2.5 mr-1" />}
-                                        {recipient.status}
-                                      </Badge>
+                                      {recipient.status}
+                                    </Badge>
                                       {recipient.status === 'opened' && !recipient.response_text && (
                                         <span className="text-[9px] text-purple-600 font-medium" title="Email opened but not yet responded">
                                           Viewed
@@ -1390,8 +1392,52 @@ export default function BidComparisonModal({
                           
                           return sortedMessages.map((message: any, index: number) => {
                             const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
-                            const messageContent = message.response_text || message.notes || ''
+                            // Use fetched content if available, otherwise fall back to stored content
+                            const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            // Fetch email content if missing and we have a resend_email_id
+                            if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
+                              // Trigger async fetch
+                              setFetchingEmailContent(prev => new Set(prev).add(message.id))
+                              fetch(`/api/emails/${message.resend_email_id}/content`)
+                                .then(res => res.json())
+                                .then(data => {
+                                  if (data.content) {
+                                    setFetchedEmailContent(prev => ({
+                                      ...prev,
+                                      [message.id]: data.content
+                                    }))
+                                    // Also update the message in the thread if possible
+                                    setEmailThreads(prev => {
+                                      const updated = { ...prev }
+                                      const threadId = message.thread_id || 
+                                        `thread-${message.bid_package_id || message.bid_packages?.id}-${message.subcontractor_email}`
+                                      if (updated[threadId]) {
+                                        const updatedThread = { ...updated[threadId] }
+                                        updatedThread.messages = updatedThread.messages.map((m: any) =>
+                                          m.id === message.id ? { ...m, response_text: data.content } : m
+                                        )
+                                        updatedThread.latest_message = updatedThread.latest_message?.id === message.id
+                                          ? { ...updatedThread.latest_message, response_text: data.content }
+                                          : updatedThread.latest_message
+                                        updated[threadId] = updatedThread
+                                      }
+                                      return updated
+                                    })
+                                  }
+                                })
+                                .catch(err => {
+                                  console.error('Failed to fetch email content:', err)
+                                })
+                                .finally(() => {
+                                  setFetchingEmailContent(prev => {
+                                    const next = new Set(prev)
+                                    next.delete(message.id)
+                                    return next
+                                  })
+                                })
+                            }
                             
                             // Debug logging
                             if (isFromGC && !messageContent) {
@@ -1419,15 +1465,22 @@ export default function BidComparisonModal({
                                     </CardTitle>
                                     <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
                                       {new Date(messageTime).toLocaleString()}
-                                    </CardDescription>
+                              </CardDescription>
                                   </div>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
-                                    {messageContent || (isFromGC ? 'Email sent' : 'No message content')}
-                                  </p>
-                                </CardContent>
-                              </Card>
+                            </CardHeader>
+                            <CardContent>
+                                  {fetchingEmailContent.has(message.id) ? (
+                                    <div className="flex items-center gap-2 text-gray-500">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
+                                      <span className="text-sm">Loading email content...</span>
+                                    </div>
+                                  ) : (
+                                    <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
+                                      {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                    </p>
+                                  )}
+                            </CardContent>
+                          </Card>
                             )
                           })
                         })()}
@@ -1533,7 +1586,7 @@ export default function BidComparisonModal({
                                                       (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
                                                        r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
                                                     )
-                                                    if (updated) setSelectedEmailRecipient(updated)
+                                            if (updated) setSelectedEmailRecipient(updated)
                                                   }
                                                 }
                                               }
@@ -2772,24 +2825,24 @@ export default function BidComparisonModal({
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
                   <div className="p-3 border-b bg-white">
                     <div className="flex items-center justify-between mb-2">
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                          Bids
-                          {bids.length > 0 && (
-                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                              {bids.length}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                          Emails
-                          {allRecipients.length > 0 && (
-                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                              {allRecipients.length}
-                            </Badge>
-                          )}
-                        </TabsTrigger>
-                      </TabsList>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                        Bids
+                        {bids.length > 0 && (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {bids.length}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                        Emails
+                        {allRecipients.length > 0 && (
+                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                            {allRecipients.length}
+                          </Badge>
+                        )}
+                      </TabsTrigger>
+                    </TabsList>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -2936,17 +2989,17 @@ export default function BidComparisonModal({
                                   )}
                                   <div className="flex items-center justify-between mt-2">
                                     <div className="flex items-center gap-1.5">
-                                      <Badge variant="outline" className={`
-                                        text-[10px] px-1.5 py-0 h-5 capitalize border-0
-                                        ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                                          recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                    <Badge variant="outline" className={`
+                                      text-[10px] px-1.5 py-0 h-5 capitalize border-0
+                                      ${recipient.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                        recipient.status === 'delivered' ? 'bg-green-100 text-green-700' :
                                           recipient.status === 'opened' ? 'bg-purple-100 text-purple-700 border-purple-300' :
-                                          recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
-                                          'bg-gray-100 text-gray-600'}
-                                      `}>
+                                        recipient.status === 'responded' ? 'bg-orange-100 text-orange-700' :
+                                        'bg-gray-100 text-gray-600'}
+                                    `}>
                                         {recipient.status === 'opened' && <Eye className="h-2.5 w-2.5 mr-1" />}
-                                        {recipient.status}
-                                      </Badge>
+                                      {recipient.status}
+                                    </Badge>
                                       {recipient.status === 'opened' && !recipient.response_text && (
                                         <span className="text-[9px] text-purple-600 font-medium" title="Email opened but not yet responded">
                                           Viewed
@@ -3037,8 +3090,52 @@ export default function BidComparisonModal({
                           
                           return sortedMessages.map((message: any, index: number) => {
                             const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
-                            const messageContent = message.response_text || message.notes || ''
+                            // Use fetched content if available, otherwise fall back to stored content
+                            const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            // Fetch email content if missing and we have a resend_email_id
+                            if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
+                              // Trigger async fetch
+                              setFetchingEmailContent(prev => new Set(prev).add(message.id))
+                              fetch(`/api/emails/${message.resend_email_id}/content`)
+                                .then(res => res.json())
+                                .then(data => {
+                                  if (data.content) {
+                                    setFetchedEmailContent(prev => ({
+                                      ...prev,
+                                      [message.id]: data.content
+                                    }))
+                                    // Also update the message in the thread if possible
+                                    setEmailThreads(prev => {
+                                      const updated = { ...prev }
+                                      const threadId = message.thread_id || 
+                                        `thread-${message.bid_package_id || message.bid_packages?.id}-${message.subcontractor_email}`
+                                      if (updated[threadId]) {
+                                        const updatedThread = { ...updated[threadId] }
+                                        updatedThread.messages = updatedThread.messages.map((m: any) =>
+                                          m.id === message.id ? { ...m, response_text: data.content } : m
+                                        )
+                                        updatedThread.latest_message = updatedThread.latest_message?.id === message.id
+                                          ? { ...updatedThread.latest_message, response_text: data.content }
+                                          : updatedThread.latest_message
+                                        updated[threadId] = updatedThread
+                                      }
+                                      return updated
+                                    })
+                                  }
+                                })
+                                .catch(err => {
+                                  console.error('Failed to fetch email content:', err)
+                                })
+                                .finally(() => {
+                                  setFetchingEmailContent(prev => {
+                                    const next = new Set(prev)
+                                    next.delete(message.id)
+                                    return next
+                                  })
+                                })
+                            }
                             
                             // Debug logging
                             if (isFromGC && !messageContent) {
@@ -3066,15 +3163,22 @@ export default function BidComparisonModal({
                                     </CardTitle>
                                     <CardDescription className={isFromGC ? 'text-blue-700' : 'text-orange-700'}>
                                       {new Date(messageTime).toLocaleString()}
-                                    </CardDescription>
+                              </CardDescription>
                                   </div>
-                                </CardHeader>
-                                <CardContent>
-                                  <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
-                                    {messageContent || (isFromGC ? 'Email sent' : 'No message content')}
-                                  </p>
-                                </CardContent>
-                              </Card>
+                            </CardHeader>
+                            <CardContent>
+                                  {fetchingEmailContent.has(message.id) ? (
+                                    <div className="flex items-center gap-2 text-gray-500">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
+                                      <span className="text-sm">Loading email content...</span>
+                                    </div>
+                                  ) : (
+                                    <p className={`whitespace-pre-wrap ${isFromGC ? 'text-gray-800' : 'text-gray-800'}`}>
+                                      {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                    </p>
+                                  )}
+                            </CardContent>
+                          </Card>
                             )
                           })
                         })()}
@@ -3180,7 +3284,7 @@ export default function BidComparisonModal({
                                                       (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
                                                        r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
                                                     )
-                                                    if (updated) setSelectedEmailRecipient(updated)
+                                            if (updated) setSelectedEmailRecipient(updated)
                                                   }
                                                 }
                                               }

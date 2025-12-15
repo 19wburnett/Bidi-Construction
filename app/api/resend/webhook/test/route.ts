@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    return NextResponse.json({ 
+    return NextResponse.json({
       message: 'Test webhook received',
       body,
       timestamp: new Date().toISOString(),

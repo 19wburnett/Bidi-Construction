@@ -240,15 +240,15 @@ export async function POST(
     
     // Try to ensure thread exists in email_threads table (if it exists)
     try {
-      await supabase
-        .from('email_threads')
-        .upsert({
-          bid_package_id: bidPackageId,
-          subcontractor_email: recipient.subcontractor_email,
-          thread_id: threadId
-        }, {
-          onConflict: 'thread_id'
-        })
+    await supabase
+      .from('email_threads')
+      .upsert({
+        bid_package_id: bidPackageId,
+        subcontractor_email: recipient.subcontractor_email,
+        thread_id: threadId
+      }, {
+        onConflict: 'thread_id'
+      })
     } catch (error) {
       // Table might not exist, that's okay - we track threads via thread_id in bid_package_recipients
       console.log('Note: email_threads table may not exist, continuing without it')

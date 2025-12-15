@@ -143,7 +143,7 @@ async function handleOutboundEvent(body: any) {
       console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
       console.log('📧 [webhook] Looking for email_id:', emailId)
       return NextResponse.json({ message: 'Recipient not found' }, { status: 200 }) // Return 200 to prevent retries
-    }
+  }
     
     // Use the retry recipient
     recipient = retryRecipient
@@ -404,11 +404,14 @@ async function handleInboundEmail(body: any) {
              email.message ||
              ''
   
-  // If no content in webhook payload, fetch from Resend API
+  // If no content in webhook payload, try to fetch from Resend API
+  // Note: Resend's inbound emails may not be accessible via /emails/{id} endpoint
+  // Try multiple approaches to get the content
   if (!html && !text && emailId) {
-    console.log('📧 No content in webhook payload, fetching from Resend API...')
+    console.log('📧 No content in webhook payload, attempting to fetch from Resend API...')
+    
+    // Try standard emails endpoint first
     try {
-      // Fetch email from Resend API
       const response = await fetch(`https://api.resend.com/emails/${emailId}`, {
         headers: {
           'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
@@ -427,10 +430,20 @@ async function handleInboundEmail(body: any) {
         console.log('📧 Content from API - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
       } else {
         const errorText = await response.text()
-        console.error('❌ Failed to fetch email from Resend API:', response.status, errorText)
+        console.error('❌ Failed to fetch email from Resend API (standard endpoint):', response.status, errorText)
+        
+        // Try using Resend SDK for inbound emails
+        try {
+          // Resend SDK might have a different method for inbound emails
+          // For now, log that we need to fetch content later via stored email_id
+          console.log('⚠️ Email content not available via API. Will store email_id for later fetching.')
+        } catch (sdkError: any) {
+          console.error('❌ Error with Resend SDK:', sdkError.message)
+        }
       }
     } catch (fetchError: any) {
       console.error('❌ Error fetching email from Resend API:', fetchError.message)
+      console.log('⚠️ Email content will be fetched later using stored email_id')
     }
   }
   
@@ -576,7 +589,7 @@ async function handleInboundEmail(body: any) {
   
   // Extract categorized notes using AI (only if bid submission)
   const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(emailContent, bidPackage.trade_category) : []
-  
+
   // Detect clarifying questions
   const clarifyingQuestions = await detectClarifyingQuestions(emailContent)
 
@@ -847,7 +860,7 @@ async function handleInboundEmail(body: any) {
   // Handle bid submission vs question/reply differently
   if (isBidSubmission) {
     // For bid submissions, find and update the original recipient record
-    let recipient = null
+  let recipient = null
     
     // Normalize email for comparison (lowercase, trim)
     const normalizedFromEmail = fromEmail.toLowerCase().trim()
@@ -860,17 +873,17 @@ async function handleInboundEmail(body: any) {
     })
     
     // First, try exact match (case-sensitive)
-    const { data: recipientsByEmail, error: recipientError } = await supabase
-      .from('bid_package_recipients')
-      .select('*')
-      .eq('bid_package_id', bidPackageId)
+  const { data: recipientsByEmail, error: recipientError } = await supabase
+    .from('bid_package_recipients')
+    .select('*')
+    .eq('bid_package_id', bidPackageId)
       .eq('subcontractor_email', fromEmail)
       .is('parent_email_id', null) // Only get original emails, not replies
-      .order('created_at', { ascending: false })
-      .limit(1)
+    .order('created_at', { ascending: false })
+    .limit(1)
 
-    if (recipientsByEmail && recipientsByEmail.length > 0) {
-      recipient = recipientsByEmail[0]
+  if (recipientsByEmail && recipientsByEmail.length > 0) {
+    recipient = recipientsByEmail[0]
       console.log('✅ Found recipient by exact email match:', recipient.id)
     } else {
       // Try case-insensitive match using ilike
@@ -886,68 +899,68 @@ async function handleInboundEmail(body: any) {
       if (recipientsByEmailCaseInsensitive && recipientsByEmailCaseInsensitive.length > 0) {
         recipient = recipientsByEmailCaseInsensitive[0]
         console.log('✅ Found recipient by case-insensitive email match:', recipient.id)
-      } else {
-        // Try finding by subcontractor_id if email doesn't match
-        if (subcontractorId) {
-          const { data: recipientsBySub } = await supabase
-            .from('bid_package_recipients')
-            .select('*')
-            .eq('bid_package_id', bidPackageId)
-            .eq('subcontractor_id', subcontractorId)
+  } else {
+    // Try finding by subcontractor_id if email doesn't match
+    if (subcontractorId) {
+      const { data: recipientsBySub } = await supabase
+        .from('bid_package_recipients')
+        .select('*')
+        .eq('bid_package_id', bidPackageId)
+        .eq('subcontractor_id', subcontractorId)
             .is('parent_email_id', null)
-            .order('created_at', { ascending: false })
-            .limit(1)
-          
-          if (recipientsBySub && recipientsBySub.length > 0) {
-            recipient = recipientsBySub[0]
-            console.log('✅ Found recipient by subcontractor_id:', recipient.id)
-          }
-        }
+        .order('created_at', { ascending: false })
+        .limit(1)
+      
+      if (recipientsBySub && recipientsBySub.length > 0) {
+        recipient = recipientsBySub[0]
+        console.log('✅ Found recipient by subcontractor_id:', recipient.id)
       }
     }
+  }
+  }
 
     if (recipient) {
       // Update existing recipient with bid information
-      const recipientUpdateData: any = {
-        status: 'responded',
-        responded_at: new Date().toISOString(),
+  const recipientUpdateData: any = {
+    status: 'responded',
+    responded_at: new Date().toISOString(),
         response_text: emailContentText.substring(0, 5000),
-        has_clarifying_questions: clarifyingQuestions.hasQuestions,
-        clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
+    has_clarifying_questions: clarifyingQuestions.hasQuestions,
+    clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
         bid_id: bidId,
         updated_at: new Date().toISOString()
       }
 
       console.log('📝 Updating recipient record with bid:', recipient.id)
       const { data: updatedRecipient, error: updateError } = await supabase
-        .from('bid_package_recipients')
-        .update(recipientUpdateData)
-        .eq('id', recipient.id)
+      .from('bid_package_recipients')
+      .update(recipientUpdateData)
+      .eq('id', recipient.id)
         .select()
         .single()
-      
-      if (updateError) {
-        console.error('❌ Error updating recipient:', updateError)
+    
+    if (updateError) {
+      console.error('❌ Error updating recipient:', updateError)
         return NextResponse.json(
           { error: 'Failed to update recipient', details: updateError.message },
           { status: 200 }
         )
-      } else {
-        console.log('✅ Recipient updated successfully with bid')
-      }
-      
-      // Create notification for clarifying questions if detected
-      if (clarifyingQuestions.hasQuestions) {
-        await createNotification(supabase, bidPackageId, recipient.id, 'clarifying_question')
-      }
     } else {
+        console.log('✅ Recipient updated successfully with bid')
+    }
+    
+    // Create notification for clarifying questions if detected
+    if (clarifyingQuestions.hasQuestions) {
+      await createNotification(supabase, bidPackageId, recipient.id, 'clarifying_question')
+    }
+  } else {
       console.log('⚠️ No original recipient found for bid submission, creating new record')
       // Create new recipient record for bid submission
-      const { data: newRecipient, error: insertError } = await supabase
-        .from('bid_package_recipients')
-        .insert({
-          bid_package_id: bidPackageId,
-          subcontractor_id: subcontractorId,
+    const { data: newRecipient, error: insertError } = await supabase
+      .from('bid_package_recipients')
+      .insert({
+        bid_package_id: bidPackageId,
+        subcontractor_id: subcontractorId,
           subcontractor_email: fromEmail,
           subcontractor_name: subcontractorName,
           status: 'responded',
@@ -958,17 +971,17 @@ async function handleInboundEmail(body: any) {
           bid_id: bidId,
           thread_id: threadId || `thread-${bidPackageId}-${fromEmail}`,
           parent_email_id: null
-        })
-        .select()
-        .single()
-      
-      if (insertError) {
+      })
+      .select()
+      .single()
+    
+    if (insertError) {
         console.error('❌ Error creating recipient for bid:', insertError)
         return NextResponse.json(
           { error: 'Failed to create recipient', details: insertError.message },
           { status: 200 }
         )
-      } else {
+    } else {
         console.log('✅ Created new recipient record for bid:', newRecipient?.id)
       }
     }
@@ -1009,7 +1022,8 @@ async function handleInboundEmail(body: any) {
             clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
             bid_id: null,
             thread_id: originalRecipient.thread_id || finalThreadId,
-            parent_email_id: originalRecipient.id
+            parent_email_id: originalRecipient.id,
+            resend_email_id: emailId || null // Store email_id for later content fetching
           })
           .select()
           .single()
@@ -1044,7 +1058,8 @@ async function handleInboundEmail(body: any) {
             clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
             bid_id: null,
             thread_id: finalThreadId,
-            parent_email_id: null
+            parent_email_id: null,
+            resend_email_id: emailId || null // Store email_id for later content fetching
           })
           .select()
           .single()
@@ -1075,7 +1090,8 @@ async function handleInboundEmail(body: any) {
           clarifying_questions: clarifyingQuestions.questions.length > 0 ? clarifyingQuestions.questions : null,
           bid_id: null,
           thread_id: finalThreadId,
-          parent_email_id: finalParentId
+          parent_email_id: finalParentId,
+          resend_email_id: emailId || null // Store email_id for later content fetching
         })
         .select()
         .single()
