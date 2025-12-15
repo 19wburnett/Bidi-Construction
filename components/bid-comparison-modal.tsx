@@ -1478,10 +1478,20 @@ export default function BidComparisonModal({
                           }
                           
                           return sortedMessages.map((message: any, index: number) => {
-                            const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
+                            // Determine if message is from GC:
+                            // 1. Use explicit isFromGC flag if available (from API)
+                            // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
+                            // 3. If message has responded_at, it's from subcontractor (inbound email response)
+                            // This ensures GC responses stay marked as from GC even after reload
+                            const isFromGC = message.isFromGC !== undefined 
+                              ? message.isFromGC 
+                              : !!(message.resend_email_id && message.status === 'sent' && !message.responded_at)
                             // Use fetched content if available, otherwise fall back to stored content
                             const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            // Check if this is the original bid email (first message from GC)
+                            const isOriginalBidEmail = index === 0 && isFromGC && message.resend_email_id
                             
                             // Fetch email content if missing and we have a resend_email_id
                             if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
@@ -1595,6 +1605,10 @@ export default function BidComparisonModal({
                                         <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
                                         <span className="text-xs">Loading...</span>
                                       </div>
+                                    ) : isOriginalBidEmail ? (
+                                      <p className="text-sm leading-relaxed italic opacity-90">
+                                        Original bid email
+                                      </p>
                                     ) : messageContent && containsHTML(messageContent) ? (
                                       <div 
                                         className="text-sm leading-relaxed max-w-none email-content"
@@ -3133,10 +3147,20 @@ export default function BidComparisonModal({
                           }
                           
                           return sortedMessages.map((message: any, index: number) => {
-                            const isFromGC = message.isFromGC !== undefined ? message.isFromGC : !!(message.resend_email_id && message.status === 'sent')
+                            // Determine if message is from GC:
+                            // 1. Use explicit isFromGC flag if available (from API)
+                            // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
+                            // 3. If message has responded_at, it's from subcontractor (inbound email response)
+                            // This ensures GC responses stay marked as from GC even after reload
+                            const isFromGC = message.isFromGC !== undefined 
+                              ? message.isFromGC 
+                              : !!(message.resend_email_id && message.status === 'sent' && !message.responded_at)
                             // Use fetched content if available, otherwise fall back to stored content
                             const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
                             const messageTime = message.responded_at || message.sent_at || message.created_at
+                            
+                            // Check if this is the original bid email (first message from GC)
+                            const isOriginalBidEmail = index === 0 && isFromGC && message.resend_email_id
                             
                             // Fetch email content if missing and we have a resend_email_id
                             if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
@@ -3250,6 +3274,10 @@ export default function BidComparisonModal({
                                         <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
                                         <span className="text-xs">Loading...</span>
                                       </div>
+                                    ) : isOriginalBidEmail ? (
+                                      <p className="text-sm leading-relaxed italic opacity-90">
+                                        Original bid email
+                                      </p>
                                     ) : messageContent && containsHTML(messageContent) ? (
                                       <div 
                                         className="text-sm leading-relaxed max-w-none email-content"

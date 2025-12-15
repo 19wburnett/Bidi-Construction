@@ -194,7 +194,13 @@ export async function GET(
     // First, enrich all recipients with related data
     // For GC messages missing response_text, fetch from Resend API
     const enrichedRecipients = await Promise.all(recipients.map(async (recipient) => {
-      const isFromGC = recipient.is_from_gc !== undefined ? recipient.is_from_gc : !!(recipient.resend_email_id && recipient.status === 'sent')
+      // Determine if message is from GC:
+      // 1. Use explicit is_from_gc field if available
+      // 2. If message has resend_email_id AND status is 'sent' AND no responded_at, it's from GC (outbound email)
+      // 3. If message has responded_at, it's from subcontractor (inbound email response)
+      const isFromGC = recipient.is_from_gc !== undefined 
+        ? recipient.is_from_gc 
+        : !!(recipient.resend_email_id && recipient.status === 'sent' && !recipient.responded_at)
       
       // If this is a GC message without response_text, try to fetch from Resend
       let responseText = recipient.response_text

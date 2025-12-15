@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -37,7 +37,9 @@ export async function proxy(request: NextRequest) {
 
     // Define public paths
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card']
-    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
+                         request.nextUrl.pathname.startsWith('/auth') || 
+                         request.nextUrl.pathname.startsWith('/share')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
     // For API routes, only refresh cookies/session and pass through without redirects
@@ -69,7 +71,9 @@ export async function proxy(request: NextRequest) {
   } catch (error) {
     // On error, allow access to public paths, redirect others to login
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card']
-    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || request.nextUrl.pathname.startsWith('/auth')
+    const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
+                         request.nextUrl.pathname.startsWith('/auth') || 
+                         request.nextUrl.pathname.startsWith('/share')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
     if (!isApiRoute && !isPublicPath) {
