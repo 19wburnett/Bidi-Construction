@@ -86,3 +86,4 @@ COMMENT ON COLUMN job_timeline_items.status IS 'Status: scheduled, in_progress, 
 COMMENT ON COLUMN job_timeline_items.display_order IS 'Custom ordering for timeline display';
 
 
+

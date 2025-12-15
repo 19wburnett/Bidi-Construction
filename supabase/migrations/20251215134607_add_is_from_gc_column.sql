@@ -34,3 +34,4 @@ ON bid_package_recipients(is_from_gc);
 CREATE INDEX IF NOT EXISTS idx_bid_package_recipients_thread_sender 
 ON bid_package_recipients(thread_id, is_from_gc, created_at);
 
+

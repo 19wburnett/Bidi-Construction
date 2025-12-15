@@ -59,3 +59,4 @@ COMMENT ON COLUMN job_shares.share_token IS 'Unique token for sharing URL';
 COMMENT ON COLUMN job_shares.expires_at IS 'Optional expiration date for share link';
 
 
+

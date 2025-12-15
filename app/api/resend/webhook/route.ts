@@ -409,9 +409,10 @@ async function handleInboundEmail(body: any) {
              email.message ||
              ''
   
-  // If no content in webhook payload, fetch from Resend Receiving API
+  // Fetch from Resend Receiving API to get attachments and full content
   // Resend's inbound emails must be fetched using the Receiving API, not the standard emails endpoint
-  if (!html && !text && emailId) {
+  let emailData: any = null
+  if (emailId) {
     console.log('📧 No content in webhook payload, fetching from Resend Receiving API...')
     console.log('📧 Using email_id:', emailId)
     try {
@@ -428,7 +429,7 @@ async function handleInboundEmail(body: any) {
         console.error('❌ Failed to fetch email from Resend Receiving API:', response.status, errorText)
         console.log('⚠️ Email content not available via API. Will store email_id for later fetching.')
       } else {
-        const emailData = await response.json()
+        emailData = await response.json()
         
         if (emailData) {
         console.log('✅ Fetched email from Resend Receiving API')
@@ -438,6 +439,14 @@ async function handleInboundEmail(body: any) {
           hasText: !!emailData.text,
           htmlLength: emailData.html?.length || 0,
           textLength: emailData.text?.length || 0,
+          attachmentsCount: emailData.attachments?.length || 0,
+          attachments: emailData.attachments?.map((att: any) => ({
+            filename: att.filename || att.name,
+            contentType: att.content_type || att.type,
+            hasId: !!att.id,
+            hasContent: !!att.content,
+            hasUrl: !!att.url
+          })) || null,
           bodyKeys: emailData.body ? Object.keys(emailData.body) : null,
           contentKeys: emailData.content ? Object.keys(emailData.content) : null,
           allKeys: Object.keys(emailData)
@@ -476,7 +485,13 @@ async function handleInboundEmail(body: any) {
   }
   
   const headers = email.headers || {}
-  const attachments = email.attachments || []
+  // Merge attachments from webhook payload and fetched emailData
+  // Prioritize emailData attachments if available (they may have more complete data)
+  const attachments = (emailData?.attachments && Array.isArray(emailData.attachments) && emailData.attachments.length > 0) 
+    ? emailData.attachments 
+    : (email.attachments || [])
+  
+  console.log('📎 Attachments found:', attachments.length, 'from webhook:', email.attachments?.length || 0, 'from emailData:', emailData?.attachments?.length || 0)
   
   console.log('📧 Extracted email fields:', {
     from: from?.email || from,
@@ -635,11 +650,14 @@ async function handleInboundEmail(body: any) {
   let pdfBidData: any = { bidAmount: null, timeline: null, notes: null } // Data extracted from PDFs
   
   if (attachments && Array.isArray(attachments) && attachments.length > 0 && isBidSubmission) {
+    console.log(`📎 Processing ${attachments.length} attachments for bid submission...`)
     for (const attachment of attachments) {
       // Only process PDF attachments
       const filename = (attachment.filename || attachment.name || '').toLowerCase()
       const contentType = (attachment.content_type || attachment.type || '').toLowerCase()
       const isPdf = filename.endsWith('.pdf') || contentType === 'application/pdf'
+      
+      console.log(`📎 Attachment: ${attachment.filename || attachment.name || 'unnamed'}, type: ${contentType}, isPdf: ${isPdf}, hasId: ${!!attachment.id}, hasContent: ${!!attachment.content}, hasUrl: ${!!attachment.url}`)
       
       if (!isPdf) {
         console.log('⏭️ Skipping non-PDF attachment:', filename || contentType)
@@ -657,6 +675,32 @@ async function handleInboundEmail(body: any) {
           attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
         } else if (attachment.content) {
           attachmentBuffer = Buffer.from(attachment.content)
+        } else if (attachment.id && emailId) {
+          // Fetch attachment content from Resend API if we only have an ID
+          console.log(`📎 Fetching attachment content from Resend API for attachment ID: ${attachment.id}`)
+          try {
+            const attachmentResponse = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments/${attachment.id}`, {
+              headers: {
+                'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+              }
+            })
+            
+            if (attachmentResponse.ok) {
+              attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
+              console.log(`✅ Fetched attachment content: ${attachmentBuffer.length} bytes`)
+            } else {
+              const errorText = await attachmentResponse.text()
+              console.error(`❌ Failed to fetch attachment ${attachment.id}:`, attachmentResponse.status, errorText)
+            }
+          } catch (fetchError: any) {
+            console.error(`❌ Error fetching attachment ${attachment.id}:`, fetchError.message)
+          }
+        }
+        
+        if (!attachmentBuffer) {
+          console.error(`❌ Could not get attachment content for: ${attachment.filename || attachment.name || attachment.id}`)
+          console.log('📎 Attachment object keys:', Object.keys(attachment))
+          continue
         }
         
         if (attachmentBuffer) {
