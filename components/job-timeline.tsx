@@ -113,12 +113,24 @@ export default function JobTimeline({ jobId, canEdit = false, shareToken, onUpda
         : `/api/jobs/${jobId}/timeline`
       
       const response = await fetch(url)
-      if (!response.ok) throw new Error('Failed to load timeline')
+      if (!response.ok) {
+        let errorMessage = `Failed to load timeline (${response.status})`
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorData.details || errorMessage
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = response.statusText || errorMessage
+        }
+        throw new Error(errorMessage)
+      }
       
       const data = await response.json()
       setTimelineItems(data.timelineItems || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading timeline:', error)
+      // Set empty array on error to prevent infinite retry loops
+      setTimelineItems([])
     } finally {
       setLoading(false)
     }

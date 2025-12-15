@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (plan.job_id) {
-      const membership = await getJobForUser(supabase, plan.job_id, user.id, 'role')
+      const membership = await getJobForUser(supabase, plan.job_id, user.id, 'id')
       const isOwner = membership?.role === 'owner'
       const isUploader = plan.user_id === user.id
 

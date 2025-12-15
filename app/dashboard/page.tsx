@@ -802,7 +802,7 @@ function DashboardContent() {
                               <ArrowRight className="h-4 w-4 ml-2" />
                             </Button>
                           </Link>
-                          <Link href={`/dashboard/jobs/${heroJob.id}/plans`}>
+                          <Link href={`/dashboard/jobs/${heroJob.id}?tab=plans`}>
                             <Button variant="outline" size="sm">
                               View Plans
                             </Button>

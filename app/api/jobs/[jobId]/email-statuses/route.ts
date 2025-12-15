@@ -4,6 +4,53 @@ import { userHasJobAccess } from '@/lib/job-access'
 
 export const runtime = 'nodejs'
 
+// Helper function to fetch email content from Resend API
+const fetchEmailContentFromResend = async (resendEmailId: string): Promise<string | null> => {
+  if (!resendEmailId) return null
+  
+  try {
+    console.log('📧 [email-statuses] Fetching email content from Resend for:', resendEmailId)
+    const response = await fetch(`https://api.resend.com/emails/${resendEmailId}`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    if (response.ok) {
+      const emailData = await response.json()
+      // Extract text content from HTML or use text field
+      let textContent = emailData.text || ''
+      
+      if (!textContent && emailData.html) {
+        // Strip HTML tags to get plain text
+        textContent = emailData.html
+          .replace(/<style[^>]*>.*?<\/style>/gi, '')
+          .replace(/<script[^>]*>.*?<\/script>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 5000)
+      }
+      
+      console.log('📧 [email-statuses] Fetched content length:', textContent?.length || 0)
+      return textContent || null
+    } else {
+      const errorText = await response.text()
+      console.error('❌ [email-statuses] Failed to fetch from Resend:', response.status, errorText)
+      return null
+    }
+  } catch (error: any) {
+    console.error('❌ [email-statuses] Error fetching from Resend:', error.message)
+    return null
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -143,53 +190,6 @@ export async function GET(
 
     // Build thread structure - group by thread_id
     const threadsMap = new Map<string, any[]>()
-    
-    // Helper function to fetch email content from Resend API
-    async function fetchEmailContentFromResend(resendEmailId: string): Promise<string | null> {
-      if (!resendEmailId) return null
-      
-      try {
-        console.log('📧 [email-statuses] Fetching email content from Resend for:', resendEmailId)
-        const response = await fetch(`https://api.resend.com/emails/${resendEmailId}`, {
-          headers: {
-            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (response.ok) {
-          const emailData = await response.json()
-          // Extract text content from HTML or use text field
-          let textContent = emailData.text || ''
-          
-          if (!textContent && emailData.html) {
-            // Strip HTML tags to get plain text
-            textContent = emailData.html
-              .replace(/<style[^>]*>.*?<\/style>/gi, '')
-              .replace(/<script[^>]*>.*?<\/script>/gi, '')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/&nbsp;/g, ' ')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/\s+/g, ' ')
-              .trim()
-              .substring(0, 5000)
-          }
-          
-          console.log('📧 [email-statuses] Fetched content length:', textContent?.length || 0)
-          return textContent || null
-        } else {
-          const errorText = await response.text()
-          console.error('❌ [email-statuses] Failed to fetch from Resend:', response.status, errorText)
-          return null
-        }
-      } catch (error: any) {
-        console.error('❌ [email-statuses] Error fetching from Resend:', error.message)
-        return null
-      }
-    }
     
     // First, enrich all recipients with related data
     // For GC messages missing response_text, fetch from Resend API

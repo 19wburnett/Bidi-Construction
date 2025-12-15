@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify user can access this job
-    const membership = await getJobForUser(supabase, jobId, user.id, 'role')
+    const membership = await getJobForUser(supabase, jobId, user.id, 'id')
     if (!membership || membership.role !== 'owner') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
@@ -106,4 +106,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
 

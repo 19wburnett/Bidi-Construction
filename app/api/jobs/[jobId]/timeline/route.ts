@@ -47,7 +47,7 @@ export async function GET(
     }
 
     // Verify user has access to this job
-    const membership = await getJobForUser(supabase, jobId, user.id, 'role')
+    const membership = await getJobForUser(supabase, jobId, user.id, 'id')
     if (!membership) {
       return NextResponse.json({ error: 'Job not found or access denied' }, { status: 403 })
     }
@@ -88,7 +88,7 @@ export async function POST(
     const supabase = await createServerSupabaseClient()
 
     // Verify user owns this job
-    const membership = await getJobForUser(supabase, jobId, user.id, 'role')
+    const membership = await getJobForUser(supabase, jobId, user.id, 'id')
     if (!membership || membership.role !== 'owner') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
@@ -164,7 +164,7 @@ export async function PUT(
     const supabase = await createServerSupabaseClient()
 
     // Verify user owns this job
-    const membership = await getJobForUser(supabase, jobId, user.id, 'role')
+    const membership = await getJobForUser(supabase, jobId, user.id, 'id')
     if (!membership || membership.role !== 'owner') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
@@ -223,7 +223,7 @@ export async function DELETE(
     const supabase = await createServerSupabaseClient()
 
     // Verify user owns this job
-    const membership = await getJobForUser(supabase, jobId, user.id, 'role')
+    const membership = await getJobForUser(supabase, jobId, user.id, 'id')
     if (!membership || membership.role !== 'owner') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
@@ -253,4 +253,5 @@ export async function DELETE(
     )
   }
 }
+
 

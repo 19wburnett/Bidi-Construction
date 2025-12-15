@@ -1701,7 +1701,7 @@ export default function ManageBidsPage() {
 
         {/* Invoice Upload Modal */}
         <Dialog open={showInvoiceModal} onOpenChange={(open) => !open && resetInvoiceModal()}>
-          <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-[800px] max-h-[90vh] flex flex-col p-6">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-orange-600" />
@@ -1712,6 +1712,7 @@ export default function ManageBidsPage() {
               </DialogDescription>
             </DialogHeader>
 
+            <div className="overflow-y-auto flex-1 pt-4">
             {/* Upload Zone - Show when idle or error */}
             {(invoiceParseState === 'idle' || invoiceParseState === 'error') && (
               <div className="space-y-4">
@@ -2080,6 +2081,7 @@ export default function ManageBidsPage() {
                 </DialogFooter>
               </div>
             )}
+            </div>
           </DialogContent>
         </Dialog>
       </div>

@@ -24,3 +24,4 @@ export function sortBidIds(bidIds: string[]): string[] {
   return [...bidIds].sort()
 }
 
+

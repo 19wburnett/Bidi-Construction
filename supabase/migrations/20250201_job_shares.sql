@@ -58,3 +58,4 @@ COMMENT ON TABLE job_shares IS 'Share links for jobs that allow viewing all plan
 COMMENT ON COLUMN job_shares.share_token IS 'Unique token for sharing URL';
 COMMENT ON COLUMN job_shares.expires_at IS 'Optional expiration date for share link';
 
+

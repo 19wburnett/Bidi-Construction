@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -98,6 +98,7 @@ type Activity = {
 export default function JobDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuth()
   const [job, setJob] = useState<Job | null>(null)
   const [jobRole, setJobRole] = useState<'owner' | 'collaborator' | null>(null)
@@ -150,6 +151,14 @@ export default function JobDetailPage() {
   const supabase = createClient()
 
   const jobId = params.jobId as string
+
+  // Set active tab from query parameter
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab && ['overview', 'plans', 'takeoff', 'bids', 'budget'].includes(tab)) {
+      setActiveTab(tab)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (user && jobId) {
