@@ -675,25 +675,45 @@ async function handleInboundEmail(body: any) {
           attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
         } else if (attachment.content) {
           attachmentBuffer = Buffer.from(attachment.content)
-        } else if (attachment.id && emailId) {
+        } else if (attachment.id) {
           // Fetch attachment content from Resend API if we only have an ID
-          console.log(`📎 Fetching attachment content from Resend API for attachment ID: ${attachment.id}`)
+          // Resend requires two steps: 1) Get attachment details (includes download_url), 2) Download from download_url
+          console.log(`📎 Fetching attachment details from Resend API for attachment ID: ${attachment.id}`)
           try {
-            const attachmentResponse = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments/${attachment.id}`, {
+            // Step 1: Get attachment details to retrieve download_url
+            const attachmentDetailsResponse = await fetch(`https://api.resend.com/attachments/${attachment.id}`, {
               headers: {
                 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
               }
             })
             
-            if (attachmentResponse.ok) {
-              attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
-              console.log(`✅ Fetched attachment content: ${attachmentBuffer.length} bytes`)
+            if (!attachmentDetailsResponse.ok) {
+              const errorText = await attachmentDetailsResponse.text()
+              console.error(`❌ Failed to fetch attachment details ${attachment.id}:`, attachmentDetailsResponse.status, errorText)
             } else {
-              const errorText = await attachmentResponse.text()
-              console.error(`❌ Failed to fetch attachment ${attachment.id}:`, attachmentResponse.status, errorText)
+              const attachmentDetails = await attachmentDetailsResponse.json()
+              const downloadUrl = attachmentDetails.download_url
+              
+              if (downloadUrl) {
+                console.log(`📎 Downloading attachment from URL: ${downloadUrl.substring(0, 100)}...`)
+                // Step 2: Download the actual attachment content from download_url
+                const downloadResponse = await fetch(downloadUrl)
+                
+                if (downloadResponse.ok) {
+                  attachmentBuffer = Buffer.from(await downloadResponse.arrayBuffer())
+                  console.log(`✅ Downloaded attachment content: ${attachmentBuffer.length} bytes`)
+                } else {
+                  const errorText = await downloadResponse.text()
+                  console.error(`❌ Failed to download attachment from URL:`, downloadResponse.status, errorText)
+                }
+              } else {
+                console.error(`❌ No download_url in attachment details:`, attachmentDetails)
+              }
             }
           } catch (fetchError: any) {
             console.error(`❌ Error fetching attachment ${attachment.id}:`, fetchError.message)
+            console.error(`❌ Error stack:`, fetchError.stack)
           }
         }
         
