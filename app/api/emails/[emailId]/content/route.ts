@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 
 export const runtime = 'nodejs'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function GET(
   request: NextRequest,
@@ -17,16 +14,25 @@ export async function GET(
     }
 
     // Fetch inbound email content using Resend Receiving API
+    // Use direct API call since SDK types may not include receiving API
     console.log('📧 [content API] Fetching email content for:', emailId)
-    const { data: emailData, error: receivingError } = await resend.emails.receiving.get(emailId)
+    const response = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    })
 
-    if (receivingError) {
-      console.error('❌ [content API] Failed to fetch email content from Resend Receiving API:', JSON.stringify(receivingError, null, 2))
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('❌ [content API] Failed to fetch email content from Resend Receiving API:', response.status, errorText)
       return NextResponse.json(
-        { error: 'Email content not available', details: receivingError.message || 'Unknown error' },
-        { status: 404 }
+        { error: 'Email content not available', details: errorText },
+        { status: response.status }
       )
     }
+
+    const emailData = await response.json()
 
     if (!emailData) {
       console.log('⚠️ [content API] No emailData returned from Receiving API')

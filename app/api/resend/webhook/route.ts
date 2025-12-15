@@ -410,13 +410,22 @@ async function handleInboundEmail(body: any) {
     console.log('📧 No content in webhook payload, fetching from Resend Receiving API...')
     console.log('📧 Using email_id:', emailId)
     try {
-      // Use Resend SDK's receiving API for inbound emails
-      const { data: emailData, error: receivingError } = await resend.emails.receiving.get(emailId)
+      // Use direct API call to Receiving API endpoint
+      const response = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      })
       
-      if (receivingError) {
-        console.error('❌ Failed to fetch email from Resend Receiving API:', JSON.stringify(receivingError, null, 2))
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ Failed to fetch email from Resend Receiving API:', response.status, errorText)
         console.log('⚠️ Email content not available via API. Will store email_id for later fetching.')
-      } else if (emailData) {
+      } else {
+        const emailData = await response.json()
+        
+        if (emailData) {
         console.log('✅ Fetched email from Resend Receiving API')
         console.log('📧 Full emailData keys:', Object.keys(emailData))
         console.log('📧 emailData structure:', JSON.stringify({
@@ -443,15 +452,16 @@ async function handleInboundEmail(body: any) {
                emailData.body ||
                text
         
-        console.log('📧 Content extracted - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
-        if (text) {
-          console.log('📧 Text preview (first 200 chars):', text.substring(0, 200))
+          console.log('📧 Content extracted - hasHtml:', !!html, 'hasText:', !!text, 'htmlLength:', html?.length, 'textLength:', text?.length)
+          if (text) {
+            console.log('📧 Text preview (first 200 chars):', text.substring(0, 200))
+          }
+          if (html) {
+            console.log('📧 HTML preview (first 200 chars):', html.substring(0, 200))
+          }
+        } else {
+          console.log('⚠️ No emailData returned from Receiving API')
         }
-        if (html) {
-          console.log('📧 HTML preview (first 200 chars):', html.substring(0, 200))
-        }
-      } else {
-        console.log('⚠️ No emailData returned from Receiving API')
       }
     } catch (fetchError: any) {
       console.error('❌ Error fetching email from Resend Receiving API:', fetchError.message)
