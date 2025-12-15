@@ -4,6 +4,8 @@ import { createClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
 import OpenAI from 'openai'
 import { cleanEmailContent } from '@/lib/email-content-cleaner'
+// @ts-ignore - pdf2json doesn't have TypeScript types
+import PDFParser from 'pdf2json'
 
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
@@ -625,13 +627,119 @@ async function handleInboundEmail(body: any) {
   // But keep original for raw_email storage
   const cleanedEmailContent = cleanEmailContent(text || '', html || '')
   
+  // Process PDF attachments FIRST to extract text and line items
+  // This needs to happen before AI processing so we can use PDF content
+  const attachmentIds: string[] = []
+  let pdfTextContent: string = '' // Collect text from all PDFs for AI processing
+  const pdfLineItems: any[] = [] // Collect line items from all PDFs
+  let pdfBidData: any = { bidAmount: null, timeline: null, notes: null } // Data extracted from PDFs
+  
+  if (attachments && Array.isArray(attachments) && attachments.length > 0 && isBidSubmission) {
+    for (const attachment of attachments) {
+      // Only process PDF attachments
+      const filename = (attachment.filename || attachment.name || '').toLowerCase()
+      const contentType = (attachment.content_type || attachment.type || '').toLowerCase()
+      const isPdf = filename.endsWith('.pdf') || contentType === 'application/pdf'
+      
+      if (!isPdf) {
+        console.log('⏭️ Skipping non-PDF attachment:', filename || contentType)
+        continue
+      }
+      
+      try {
+        let attachmentBuffer: Buffer | null = null
+        
+        // Resend attachments can be base64 encoded or have a URL
+        if (attachment.content && attachment.encoding === 'base64') {
+          attachmentBuffer = Buffer.from(attachment.content, 'base64')
+        } else if (attachment.url) {
+          const attachmentResponse = await fetch(attachment.url)
+          attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
+        } else if (attachment.content) {
+          attachmentBuffer = Buffer.from(attachment.content)
+        }
+        
+        if (attachmentBuffer) {
+          // Extract text from PDF for AI processing
+          try {
+            const extractedText = await extractTextFromPDF(attachmentBuffer)
+            if (extractedText && extractedText.trim().length > 0) {
+              pdfTextContent += `\n\n=== PDF: ${attachment.filename || attachment.name} ===\n${extractedText}`
+              console.log(`✅ Extracted ${extractedText.length} characters from PDF: ${attachment.filename || attachment.name}`)
+              
+              // Parse PDF with AI to extract line items and bid data
+              try {
+                const parsedData = await parseBidPDFWithAI(extractedText, attachment.filename || attachment.name || 'bid.pdf', bidPackage.trade_category)
+                if (parsedData) {
+                  if (parsedData.lineItems && parsedData.lineItems.length > 0) {
+                    pdfLineItems.push(...parsedData.lineItems)
+                    console.log(`✅ Extracted ${parsedData.lineItems.length} line items from PDF`)
+                  }
+                  
+                  // Update PDF bid data with extracted information
+                  if (parsedData.total) pdfBidData.bidAmount = parsedData.total
+                  if (parsedData.timeline) pdfBidData.timeline = parsedData.timeline
+                  if (parsedData.notes) pdfBidData.notes = parsedData.notes
+                }
+              } catch (parseError) {
+                console.error('Error parsing PDF with AI:', parseError)
+              }
+            }
+          } catch (extractError) {
+            console.error('Error extracting text from PDF:', extractError)
+          }
+          
+          // Upload to Supabase storage
+          const fileName = `${Date.now()}-${attachment.filename || attachment.name || 'attachment'}`
+          const filePath = `${bidPackageId}/${fileName}`
+          
+          const { error: uploadError } = await supabase.storage
+            .from('bid-attachments')
+            .upload(filePath, attachmentBuffer, {
+              contentType: attachment.content_type || attachment.type || 'application/pdf'
+            })
+          
+          if (!uploadError) {
+            const { data: attachmentRecord } = await supabase
+              .from('bid_attachments')
+              .insert({
+                file_name: attachment.filename || attachment.name || fileName,
+                file_path: filePath,
+                file_size: attachment.size || attachment.length || attachmentBuffer.length,
+                file_type: attachment.content_type || attachment.type || 'application/pdf'
+              })
+              .select()
+              .single()
+            
+            if (attachmentRecord) {
+              attachmentIds.push(attachmentRecord.id)
+              console.log('✅ Processed PDF attachment:', fileName)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error processing PDF attachment:', error)
+      }
+    }
+  }
+  
+  // Combine email content with PDF text for comprehensive AI analysis
+  const combinedContentForAI = cleanedEmailContent + (pdfTextContent ? '\n\n' + pdfTextContent : '')
+  
   // Only run AI parsing if this is actually a bid submission
-  // Use cleaned content for better AI results (no quoted text)
-  const aiSummary = isBidSubmission ? await parseBidWithAI(cleanedEmailContent || emailContent, fromEmail, bidPackage.trade_category) : null
-  const bidData = isBidSubmission ? await extractBidData(cleanedEmailContent || emailContent, fromEmail) : { bidAmount: null, timeline: null, notes: null, phone: null, website: null, companyName: null }
+  // Use combined content (email + PDF) for better AI results
+  const aiSummary = isBidSubmission ? await parseBidWithAI(combinedContentForAI || emailContent, fromEmail, bidPackage.trade_category) : null
+  const bidData = isBidSubmission ? await extractBidData(combinedContentForAI || emailContent, fromEmail) : { bidAmount: null, timeline: null, notes: null, phone: null, website: null, companyName: null }
+  
+  // Merge PDF-extracted bid data (PDF data takes precedence if email didn't have it)
+  if (isBidSubmission && pdfBidData) {
+    if (!bidData.bidAmount && pdfBidData.bidAmount) bidData.bidAmount = pdfBidData.bidAmount
+    if (!bidData.timeline && pdfBidData.timeline) bidData.timeline = pdfBidData.timeline
+    if (!bidData.notes && pdfBidData.notes) bidData.notes = pdfBidData.notes
+  }
   
   // Extract categorized notes using AI (only if bid submission)
-  const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(cleanedEmailContent || emailContent, bidPackage.trade_category) : []
+  const categorizedNotes = isBidSubmission ? await extractCategorizedNotes(combinedContentForAI || emailContent, bidPackage.trade_category) : []
 
   // Detect clarifying questions (use cleaned content for better detection)
   const clarifyingQuestions = await detectClarifyingQuestions(cleanedEmailContent || emailContent)
@@ -809,71 +917,6 @@ async function handleInboundEmail(body: any) {
     }
   }
 
-  // Process PDF attachments only (only for bid submissions)
-  const attachmentIds: string[] = []
-  if (attachments && Array.isArray(attachments) && attachments.length > 0 && isBidSubmission) {
-    for (const attachment of attachments) {
-      // Only process PDF attachments
-      const filename = (attachment.filename || attachment.name || '').toLowerCase()
-      const contentType = (attachment.content_type || attachment.type || '').toLowerCase()
-      const isPdf = filename.endsWith('.pdf') || contentType === 'application/pdf'
-      
-      if (!isPdf) {
-        console.log('⏭️ Skipping non-PDF attachment:', filename || contentType)
-        continue
-      }
-      
-      try {
-        let attachmentBuffer: Buffer | null = null
-        
-        // Resend attachments can be base64 encoded or have a URL
-        if (attachment.content && attachment.encoding === 'base64') {
-          // Base64 encoded content
-          attachmentBuffer = Buffer.from(attachment.content, 'base64')
-        } else if (attachment.url) {
-          // URL to download
-          const attachmentResponse = await fetch(attachment.url)
-          attachmentBuffer = Buffer.from(await attachmentResponse.arrayBuffer())
-        } else if (attachment.content) {
-          // Plain content
-          attachmentBuffer = Buffer.from(attachment.content)
-        }
-        
-        if (attachmentBuffer) {
-          // Upload to Supabase storage
-          const fileName = `${Date.now()}-${attachment.filename || attachment.name || 'attachment'}`
-          const filePath = `${bidPackageId}/${fileName}`
-          
-          const { error: uploadError } = await supabase.storage
-            .from('bid-attachments')
-            .upload(filePath, attachmentBuffer, {
-              contentType: attachment.content_type || attachment.type || 'application/pdf'
-            })
-          
-          if (!uploadError) {
-            // Create attachment record (will link to bid after bid is created)
-            const { data: attachmentRecord } = await supabase
-              .from('bid_attachments')
-              .insert({
-                file_name: attachment.filename || attachment.name || fileName,
-                file_path: filePath,
-                file_size: attachment.size || attachment.length || attachmentBuffer.length,
-                file_type: attachment.content_type || attachment.type || 'application/pdf'
-              })
-              .select()
-              .single()
-            
-            if (attachmentRecord) {
-              attachmentIds.push(attachmentRecord.id)
-              console.log('✅ Processed PDF attachment:', fileName)
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error processing PDF attachment:', error)
-      }
-    }
-  }
 
   // Store the bid in the database (only if bid submission)
   let bidId: string | null = null
@@ -905,6 +948,39 @@ async function handleInboundEmail(body: any) {
           .from('bid_attachments')
           .update({ bid_id: bid.id })
           .in('id', attachmentIds)
+      }
+      
+      // Create line items from PDF parsing if any were extracted
+      if (pdfLineItems.length > 0) {
+        try {
+          const lineItemsToInsert = pdfLineItems
+            .filter(item => item.description && item.description.trim() !== '' && item.amount)
+            .map((item, index) => ({
+              bid_id: bid.id,
+              item_number: index + 1,
+              description: item.description.trim(),
+              category: item.category || null,
+              quantity: item.quantity || null,
+              unit: item.unit || null,
+              unit_price: item.unitPrice || null,
+              amount: item.amount,
+              notes: item.notes || null,
+            }))
+          
+          if (lineItemsToInsert.length > 0) {
+            const { error: lineItemsError } = await supabase
+              .from('bid_line_items')
+              .insert(lineItemsToInsert)
+            
+            if (lineItemsError) {
+              console.error('Error storing line items:', lineItemsError)
+            } else {
+              console.log(`✅ Stored ${lineItemsToInsert.length} line items from PDF`)
+            }
+          }
+        } catch (error) {
+          console.error('Error processing line items:', error)
+        }
       }
       
       // Create notification for bid received
@@ -1384,6 +1460,192 @@ async function extractBidData(emailContent: string, senderEmail: string) {
       timeline: null,
       notes: null,
     }
+  }
+}
+
+/**
+ * Extract text from PDF buffer
+ */
+async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser()
+    let timeoutId: NodeJS.Timeout | null = null
+    let resolved = false
+
+    timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        reject(new Error('PDF parsing timed out'))
+      }
+    }, 30000)
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+    }
+
+    pdfParser.on('pdfParser_dataError', (errData: any) => {
+      cleanup()
+      if (resolved) return
+      resolved = true
+      reject(new Error(errData?.parserError || 'PDF parsing error'))
+    })
+
+    pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+      cleanup()
+      if (resolved) return
+      
+      try {
+        let text = ''
+        
+        if (pdfData.Pages && Array.isArray(pdfData.Pages)) {
+          pdfData.Pages.forEach((page: any, pageIndex: number) => {
+            text += `\n=== PAGE ${pageIndex + 1} ===\n`
+            
+            if (page.Texts && Array.isArray(page.Texts)) {
+              const sortedTexts = page.Texts.sort((a: any, b: any) => {
+                const yDiff = a.y - b.y
+                if (Math.abs(yDiff) > 0.5) return yDiff
+                return a.x - b.x
+              })
+              
+              sortedTexts.forEach((textItem: any) => {
+                if (textItem.R && Array.isArray(textItem.R)) {
+                  textItem.R.forEach((r: any) => {
+                    if (r.T) {
+                      try {
+                        text += decodeURIComponent(r.T) + ' '
+                      } catch {
+                        text += (r.T || '') + ' '
+                      }
+                    }
+                  })
+                }
+              })
+              text += '\n'
+            }
+          })
+        }
+        
+        resolved = true
+        resolve(text.trim())
+      } catch (error: any) {
+        resolved = true
+        reject(new Error(`Error extracting text: ${error.message}`))
+      }
+    })
+
+    try {
+      pdfParser.parseBuffer(buffer)
+    } catch (error: any) {
+      cleanup()
+      if (resolved) return
+      resolved = true
+      reject(new Error(`Failed to start PDF parsing: ${error.message}`))
+    }
+  })
+}
+
+/**
+ * Parse bid PDF with AI to extract line items and bid data
+ */
+async function parseBidPDFWithAI(extractedText: string, fileName: string, tradeCategory: string): Promise<any> {
+  const systemPrompt = `You are an expert at parsing construction bids and quotes from subcontractors.
+
+Your task is to extract structured data from the bid document text provided.
+
+EXTRACTION RULES:
+1. LINE ITEMS: Parse each line item carefully:
+   - Description: What work or materials are being charged
+   - Category: Classify as 'labor', 'materials', 'equipment', 'permits', or 'other'
+   - Quantity: Number of units (if specified)
+   - Unit: Unit of measurement (hours, sq ft, each, lump sum, etc.)
+   - Unit Price: Price per unit (if specified)
+   - Amount: Total for this line item (REQUIRED)
+   - Notes: Any additional details about this line item
+2. TOTALS: Extract subtotal, tax, and total amounts.
+3. TIMELINE: Look for any mentioned timeline, completion date, or duration.
+4. NOTES: Any general notes, terms, or conditions.
+
+IMPORTANT:
+- If a field is not present, use null
+- For amounts, always return numbers (not strings with $ signs)
+- Be conservative - only extract what you can clearly identify
+- The 'amount' field in line items is required
+
+Return your analysis as a valid JSON object matching this exact structure:
+{
+  "lineItems": [
+    {
+      "description": "string",
+      "category": "labor|materials|equipment|permits|other|null",
+      "quantity": "number or null",
+      "unit": "string or null",
+      "unitPrice": "number or null",
+      "amount": "number (required)",
+      "notes": "string or null"
+    }
+  ],
+  "subtotal": "number or null",
+  "tax": "number or null",
+  "total": "number or null",
+  "timeline": "string or null",
+  "notes": "string or null"
+}
+
+Return ONLY the JSON object, no markdown formatting or extra text.`
+
+  const userPrompt = `Parse this bid document and extract all relevant information.
+
+File name: ${fileName}
+Trade category: ${tradeCategory}
+
+Document text:
+${extractedText}`
+
+  try {
+    let response
+    try {
+      response = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' },
+      })
+    } catch (formatError: any) {
+      console.warn('response_format failed, retrying without it:', formatError.message)
+      response = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+      })
+    }
+
+    const content = response.choices[0]?.message?.content
+    if (!content) {
+      throw new Error('No response from AI')
+    }
+
+    // Try to parse JSON
+    let jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0])
+    }
+
+    throw new Error('No valid JSON found in AI response')
+  } catch (error: any) {
+    console.error('Error parsing bid PDF with AI:', error)
+    return null
   }
 }
 

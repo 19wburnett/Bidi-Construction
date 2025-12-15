@@ -140,11 +140,19 @@ export function cleanEmailContent(text: string, html?: string): string {
         .replace(/<style[^>]*>.*?<\/style>/gi, '')
         .replace(/<script[^>]*>.*?<\/script>/gi, '')
         .replace(/<[^>]+>/g, ' ')
+        // Decode HTML entities (must decode &amp; last to avoid double-decoding)
         .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")      // Decode numeric apostrophe entity
+        .replace(/&#x27;/g, "'")     // Decode hex apostrophe entity
+        .replace(/&apos;/g, "'")     // Decode apostrophe entity (alternative)
+        .replace(/&#8217;/g, "'")    // Decode right single quotation mark (smart apostrophe)
+        .replace(/&#8216;/g, "'")    // Decode left single quotation mark
+        .replace(/&#8220;/g, '"')    // Decode left double quotation mark
+        .replace(/&#8221;/g, '"')    // Decode right double quotation mark
+        .replace(/&amp;/g, '&')      // Decode ampersand last
         .replace(/\s+/g, ' ')
         .trim()
       
