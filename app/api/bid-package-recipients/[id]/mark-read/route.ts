@@ -32,39 +32,61 @@ export async function POST(
     const supabase = await createServerSupabaseClient()
 
     // Get the recipient to verify access
-    const { data: recipient, error: recipientError } = await supabase
+    // First try without join to see if recipient exists at all
+    const { data: recipientExists, error: checkError } = await supabase
       .from('bid_package_recipients')
-      .select(`
-        id,
-        bid_package_id,
-        is_from_gc,
-        bid_packages!inner (
-          jobs!inner (
-            id,
-            user_id
-          )
-        )
-      `)
+      .select('id, bid_package_id, is_from_gc')
       .eq('id', recipientId)
       .single()
 
-    if (recipientError || !recipient) {
+    if (checkError || !recipientExists) {
+      console.error('Recipient not found:', { recipientId, error: checkError })
       return NextResponse.json(
-        { error: 'Recipient not found' },
+        { error: 'Recipient not found', recipientId },
+        { status: 404 }
+      )
+    }
+
+    // Verify access by manually joining bid_packages and jobs
+    // (Don't rely on foreign key relationship syntax which may not exist)
+    const { data: bidPackage, error: packageError } = await supabase
+      .from('bid_packages')
+      .select('id, job_id')
+      .eq('id', recipientExists.bid_package_id)
+      .single()
+
+    if (packageError || !bidPackage) {
+      console.error('Bid package not found:', { 
+        recipientId, 
+        bidPackageId: recipientExists.bid_package_id,
+        error: packageError 
+      })
+      return NextResponse.json(
+        { error: 'Bid package not found', recipientId },
         { status: 404 }
       )
     }
 
     // Verify user has access to this job
-    const bidPackage = Array.isArray(recipient.bid_packages)
-      ? recipient.bid_packages[0]
-      : recipient.bid_packages
-    
-    const job = Array.isArray(bidPackage?.jobs)
-      ? bidPackage.jobs[0]
-      : bidPackage?.jobs
+    const { data: job, error: jobError } = await supabase
+      .from('jobs')
+      .select('id, user_id')
+      .eq('id', bidPackage.job_id)
+      .single()
 
-    if (!job || job.user_id !== user.id) {
+    if (jobError || !job) {
+      console.error('Job not found:', { 
+        recipientId, 
+        jobId: bidPackage.job_id,
+        error: jobError 
+      })
+      return NextResponse.json(
+        { error: 'Job not found', recipientId },
+        { status: 404 }
+      )
+    }
+
+    if (job.user_id !== user.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 403 }
@@ -73,7 +95,7 @@ export async function POST(
 
     // Only mark incoming emails as read (not GC-sent emails)
     // If it's already read, no need to update
-    if (recipient.is_from_gc) {
+    if (recipientExists.is_from_gc) {
       return NextResponse.json({ 
         success: true, 
         message: 'GC-sent emails do not need read tracking' 

@@ -1028,10 +1028,20 @@ async function handleInboundEmail(body: any) {
       
       // Link attachments to bid
       if (attachmentIds.length > 0) {
-        await supabase
+        const { data: updatedAttachments, error: updateError } = await supabase
           .from('bid_attachments')
           .update({ bid_id: bid.id })
           .in('id', attachmentIds)
+          .select()
+        
+        if (updateError) {
+          console.error('❌ Error linking attachments to bid:', updateError)
+          console.error('Attachment IDs that failed to link:', attachmentIds)
+        } else {
+          console.log(`✅ Successfully linked ${updatedAttachments?.length || 0} attachment(s) to bid ${bid.id}`)
+        }
+      } else {
+        console.log('ℹ️ No attachments to link to bid')
       }
       
       // Create line items from PDF parsing if any were extracted

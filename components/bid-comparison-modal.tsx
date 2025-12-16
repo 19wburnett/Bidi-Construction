@@ -133,12 +133,14 @@ export default function BidComparisonModal({
   const [emailStatuses, setEmailStatuses] = useState<Record<string, any>>({})
   const [allRecipients, setAllRecipients] = useState<any[]>([])
   const [emailThreads, setEmailThreads] = useState<Record<string, any>>({})
-  const [activeTab, setActiveTab] = useState<'details' | 'comparison'>('details')
+  const [activeTab, setActiveTab] = useState<'details' | 'comparison' | 'conversation'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
   const [responseText, setResponseText] = useState('')
   const [sendingResponse, setSendingResponse] = useState(false)
   const [takeoffSearchTerm, setTakeoffSearchTerm] = useState('')
+  const [bidsSearchTerm, setBidsSearchTerm] = useState('')
+  const [emailsSearchTerm, setEmailsSearchTerm] = useState('')
   const [comparisonMode, setComparisonMode] = useState<'takeoff' | 'bids'>('takeoff')
   const [selectedComparisonBidIds, setSelectedComparisonBidIds] = useState<Set<string>>(new Set())
   const [comparisonBidLineItems, setComparisonBidLineItems] = useState<Record<string, BidLineItem[]>>({})
@@ -163,16 +165,46 @@ export default function BidComparisonModal({
   const { user } = useAuth()
   const supabase = createClient()
 
+  // Helper to validate if an ID is a valid UUID (recipient ID format)
+  const isValidRecipientId = useCallback((id: any): boolean => {
+    if (!id || typeof id !== 'string') return false
+    // UUID format: 8-4-4-4-12 hex characters
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    return uuidRegex.test(id)
+  }, [])
+
   // Mark incoming emails as read when viewing a thread
-  const markEmailAsRead = useCallback(async (recipientId: string) => {
+  const markEmailAsRead = useCallback(async (recipientId: string, message?: any) => {
+    // Validate recipient ID before making API call
+    if (!isValidRecipientId(recipientId)) {
+      console.warn('Skipping mark as read - invalid recipient ID:', recipientId)
+      return
+    }
+    
+    // Double-check: Never mark GC messages as read
+    if (message) {
+      const isFromGC = message.isFromGC ?? message.is_from_gc ?? false
+      if (isFromGC) {
+        console.debug('Skipping mark as read - GC message:', recipientId)
+        return
+      }
+      
+      // Skip if already marked as read
+      if (message.read_by_gc_at) {
+        console.debug('Skipping mark as read - already read:', recipientId)
+        return
+      }
+    }
+    
     try {
       const response = await fetch(`/api/bid-package-recipients/${recipientId}/mark-read`, {
         method: 'POST'
       })
       if (response.ok) {
+        const readTimestamp = new Date().toISOString()
         // Update local state to reflect read status
         setAllRecipients(prev => prev.map(r => 
-          r.id === recipientId ? { ...r, read_by_gc_at: new Date().toISOString() } : r
+          r.id === recipientId ? { ...r, read_by_gc_at: readTimestamp } : r
         ))
         // Update threads
         setEmailThreads(prev => {
@@ -181,20 +213,62 @@ export default function BidComparisonModal({
             const thread = updated[threadId]
             if (thread.messages) {
               thread.messages = thread.messages.map((m: any) =>
-                m.id === recipientId ? { ...m, read_by_gc_at: new Date().toISOString() } : m
+                m.id === recipientId ? { ...m, read_by_gc_at: readTimestamp } : m
               )
               if (thread.latest_message?.id === recipientId) {
-                thread.latest_message = { ...thread.latest_message, read_by_gc_at: new Date().toISOString() }
+                thread.latest_message = { ...thread.latest_message, read_by_gc_at: readTimestamp }
               }
             }
           })
           return updated
         })
+      } else if (response.status === 404) {
+        // Recipient not found - might have been deleted or doesn't exist
+        // Update local state optimistically so UI reflects read status
+        // (even though we can't persist it to the database)
+        const readTimestamp = new Date().toISOString()
+        
+        // Update local state to reflect read status (optimistic update)
+        setAllRecipients(prev => prev.map(r => 
+          r.id === recipientId ? { ...r, read_by_gc_at: readTimestamp } : r
+        ))
+        // Update threads
+        setEmailThreads(prev => {
+          const updated = { ...prev }
+          Object.keys(updated).forEach(threadId => {
+            const thread = updated[threadId]
+            if (thread.messages) {
+              thread.messages = thread.messages.map((m: any) =>
+                m.id === recipientId ? { ...m, read_by_gc_at: readTimestamp } : m
+              )
+              if (thread.latest_message?.id === recipientId) {
+                thread.latest_message = { ...thread.latest_message, read_by_gc_at: readTimestamp }
+              }
+            }
+          })
+          return updated
+        })
+        
+        // Log with message context for debugging
+        const messageInfo = message ? {
+          isFromGC: message.isFromGC ?? message.is_from_gc ?? false,
+          status: message.status,
+          email: message.subcontractor_email
+        } : 'no message context'
+        console.debug('Recipient not found for mark-read (optimistically marked as read locally):', {
+          recipientId,
+          messageInfo
+        })
+      } else {
+        // Log other errors but don't show to user
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        console.warn('Failed to mark email as read:', response.status, errorData)
       }
     } catch (error) {
-      console.error('Error marking email as read:', error)
+      // Network errors - silently ignore
+      console.debug('Error marking email as read (network error):', error)
     }
-  }, [])
+  }, [isValidRecipientId])
 
   // Calculate unread count for incoming emails across all threads
   const unreadCount = useMemo(() => {
@@ -230,16 +304,27 @@ export default function BidComparisonModal({
     const threadId = selectedEmailRecipient.thread_id || 
       `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
     const thread = emailThreads[threadId]
-    const threadMessages = thread?.messages || [selectedEmailRecipient]
     
-    // Mark all unread incoming messages in this thread as read
-    threadMessages.forEach((message: any) => {
-      const isIncoming = !(message.isFromGC ?? message.is_from_gc ?? false)
-      if (isIncoming && !message.read_by_gc_at) {
-        markEmailAsRead(message.id)
+    // If thread exists with messages, mark all unread incoming messages
+    if (thread?.messages && Array.isArray(thread.messages)) {
+      thread.messages.forEach((message: any) => {
+        const isFromGC = message.isFromGC ?? message.is_from_gc ?? false
+        const isIncoming = !isFromGC
+        // Only mark as read if it's incoming, unread, and has a valid recipient ID
+        // Double-check: never mark GC messages as read
+        if (isIncoming && !isFromGC && !message.read_by_gc_at && isValidRecipientId(message.id)) {
+          markEmailAsRead(message.id, message)
+        }
+      })
+    } else {
+      // If no thread data yet, mark the selected recipient itself if it's unread
+      const isFromGC = selectedEmailRecipient.isFromGC ?? selectedEmailRecipient.is_from_gc ?? false
+      const isIncoming = !isFromGC
+      if (isIncoming && !isFromGC && !selectedEmailRecipient.read_by_gc_at && isValidRecipientId(selectedEmailRecipient.id)) {
+        markEmailAsRead(selectedEmailRecipient.id, selectedEmailRecipient)
       }
-    })
-  }, [selectedEmailRecipient?.id, emailThreads, markEmailAsRead])
+    }
+  }, [selectedEmailRecipient?.id, emailThreads, markEmailAsRead, isValidRecipientId])
 
   // Poll for email updates every 10 seconds when modal is open
   useEffect(() => {
@@ -554,10 +639,7 @@ export default function BidComparisonModal({
   useEffect(() => {
     if (comparisonMode === 'bids' && selectedComparisonBidIds.size > 0) {
       loadComparisonBidLineItems(Array.from(selectedComparisonBidIds))
-      // Trigger AI analysis when bids are selected
-      if (selectedBidId && selectedComparisonBidIds.size > 0) {
-        generateAIComparison()
-      }
+      // AI analysis will now be triggered manually
     } else {
       setComparisonBidLineItems({})
       setAiAnalysis(null)
@@ -567,6 +649,22 @@ export default function BidComparisonModal({
 
   // Calculate selectedBid and filteredTakeoffItems before useEffects that depend on them
   const selectedBid = bids.find(b => b.id === selectedBidId)
+  
+  // Find the recipient associated with the selected bid
+  const bidRecipient = useMemo(() => {
+    if (!selectedBidId) return null
+    
+    // Find recipient where bid_id matches or bids array contains this bid
+    const recipient = allRecipients.find((r: any) => {
+      // Check if recipient has this bid_id
+      if (r.bid_id === selectedBidId) return true
+      // Check if recipient's bids array contains this bid
+      if (r.bids && Array.isArray(r.bids) && r.bids.some((b: any) => b.id === selectedBidId)) return true
+      return false
+    })
+    
+    return recipient || null
+  }, [selectedBidId, allRecipients])
   
   // Get the category of the selected bid
   const getSelectedBidCategory = () => {
@@ -601,8 +699,7 @@ export default function BidComparisonModal({
 
   useEffect(() => {
     if (comparisonMode === 'takeoff' && selectedBidId && filteredTakeoffItems.length > 0 && bidLineItems.length > 0 && selectedTakeoffItemIds.size > 0) {
-      // Trigger AI analysis for takeoff comparison
-      generateTakeoffAIComparison()
+      // AI analysis will now be triggered manually
     } else if (comparisonMode !== 'takeoff') {
       setTakeoffAIMatches(null)
       setTakeoffAIAnalysis(null)
@@ -1272,139 +1369,244 @@ export default function BidComparisonModal({
               {/* Left Sidebar: Bids & Emails List */}
               <div className="w-[320px] border-r flex flex-col bg-gray-50/50 overflow-hidden">
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
-                  <div className="p-3 border-b bg-white">
-                    <div className="flex items-center justify-between mb-2">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                        Bids
-                        {bids.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {bids.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                        Emails
-                        {unreadCount > 0 ? (
-                          <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
-                            {unreadCount}
-                          </Badge>
-                        ) : allRecipients.length > 0 ? (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        ) : null}
-                      </TabsTrigger>
-                    </TabsList>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={loadData}
-                        disabled={loading}
-                        className="ml-2 h-8 w-8 p-0"
-                        title="Refresh data"
-                      >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                      </Button>
+                  <div className="border-b bg-white">
+                    <div className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                          Bids
+                          {bids.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {bids.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                          Emails
+                          {allRecipients.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {allRecipients.length}
+                            </Badge>
+                          )}
+                          {unreadCount > 0 && (
+                            <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
+                              {unreadCount}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                      </TabsList>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={loadData}
+                          disabled={loading}
+                          className="ml-2 h-8 w-8 p-0"
+                          title="Refresh data"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        </Button>
+                      </div>
                     </div>
+                    {/* Search Bar - Bids */}
+                    {leftSideTab === 'bids' && (
+                      <div className="relative px-3 pb-3 border-b bg-white">
+                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="Search bids..."
+                          value={bidsSearchTerm}
+                          onChange={(e) => setBidsSearchTerm(e.target.value)}
+                          className="pl-8 h-9 text-sm"
+                        />
+                      </div>
+                    )}
+                    {/* Search Bar - Emails */}
+                    {leftSideTab === 'emails' && (
+                      <div className="relative px-3 pb-3 border-b bg-white">
+                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="Search emails..."
+                          value={emailsSearchTerm}
+                          onChange={(e) => setEmailsSearchTerm(e.target.value)}
+                          className="pl-8 h-9 text-sm"
+                        />
+                      </div>
+                    )}
                   </div>
                   
                   <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
-                    {bids.length === 0 && (
-                      <div className="text-center py-8 text-gray-500">
-                        <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                        <p className="text-sm">No bids received yet</p>
-                      </div>
-                    )}
-                    {bids.map((bid) => {
-                      const bidPackage = (bid.bid_packages as any)
-                      return (
-                      <div
-                        key={bid.id}
-                        onClick={() => {
-                          setSelectedBidId(bid.id)
-                          setSelectedEmailRecipient(null)
-                          setResponseText('')
-                          setLeftSideTab('bids')
-                        }}
-                        className={`
-                          cursor-pointer rounded-lg p-4 border transition-all hover:shadow-sm
-                          ${selectedBidId === bid.id 
-                            ? 'border-orange-400 bg-white shadow-md ring-1 ring-orange-400/20' 
-                            : 'bg-white border-gray-200 hover:border-orange-200'
-                          }
-                        `}
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
-                              {bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'}
-                            </h4>
-                            <p className="text-xs text-gray-500 truncate max-w-[160px]">
-                              {bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email}
-                            </p>
-                          </div>
-                          {bid.subcontractors?.trade_category && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bid.subcontractors.trade_category}
-                            </Badge>
-                          )}
-                          {!bid.subcontractors?.trade_category && bid.gc_contacts?.trade_category && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bid.gc_contacts.trade_category}
-                            </Badge>
-                          )}
-                          {!bid.subcontractors?.trade_category && !bid.gc_contacts?.trade_category && bidPackage && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bidPackage.trade_category}
-                            </Badge>
-                          )}
+                      {bids.length === 0 && (
+                        <div className="text-center py-8 text-gray-500">
+                          <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                          <p className="text-sm">No bids received yet</p>
                         </div>
+                      )}
+                      {(() => {
+                        // Filter bids based on search term
+                        const filteredBids = bids.filter((bid) => {
+                          if (!bidsSearchTerm) return true
+                          const searchLower = bidsSearchTerm.toLowerCase()
+                          const subcontractorName = (bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown').toLowerCase()
+                          const subcontractorEmail = (bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email || '').toLowerCase()
+                          const tradeCategory = (bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || '').toLowerCase()
+                          const bidAmount = bid.bid_amount?.toLocaleString() || ''
+                          return (
+                            subcontractorName.includes(searchLower) ||
+                            subcontractorEmail.includes(searchLower) ||
+                            tradeCategory.includes(searchLower) ||
+                            bidAmount.includes(searchLower)
+                          )
+                        })
                         
-                        <div className="flex items-baseline gap-1 mb-2">
-                          <span className="text-lg font-bold text-gray-900">
-                            ${bid.bid_amount?.toLocaleString() ?? '0.00'}
-                          </span>
-                          <span className="text-xs text-gray-500">total</span>
-                        </div>
-                        
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(bid.created_at).toLocaleDateString()}
-                          </div>
-                          {bid.subcontractors?.google_review_score && (
-                            <div className="flex items-center gap-1 text-orange-600">
-                              <span>★</span>
-                              {bid.subcontractors.google_review_score}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      )
-                    })}
-                  </TabsContent>
-                  
-                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
-                    {allRecipients.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                        <p className="text-sm">No emails sent</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {Object.entries(allRecipients.reduce((acc: any, r: any) => {
-                          const key = r.bid_packages?.trade_category || 'Other'
-                          if (!acc[key]) acc[key] = []
-                          acc[key].push(r)
+                        // Organize bids by subcontractor
+                        const bidsBySubcontractor = filteredBids.reduce((acc: any, bid: Bid) => {
+                          const subcontractorName = bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'
+                          if (!acc[subcontractorName]) acc[subcontractorName] = []
+                          acc[subcontractorName].push(bid)
                           return acc
-                        }, {})).map(([category, recipients]: [string, any]) => (
-                          <div key={category}>
+                        }, {})
+                        
+                        // Sort subcontractors alphabetically
+                        const sortedSubcontractors = Object.keys(bidsBySubcontractor).sort()
+                        
+                        if (filteredBids.length === 0 && bids.length > 0) {
+                          return (
+                            <div className="text-center py-8 text-gray-500">
+                              <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                              <p className="text-sm">No bids match your search</p>
+                            </div>
+                          )
+                        }
+                        
+                        return sortedSubcontractors.map((subcontractorName) => (
+                          <div key={subcontractorName}>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
-                              {category}
+                              {subcontractorName}
                             </h3>
                             <div className="space-y-2">
-                              {recipients.map((recipient: any) => {
+                              {bidsBySubcontractor[subcontractorName].map((bid: Bid) => {
+                                const bidPackage = (bid.bid_packages as any)
+                                return (
+                                  <div
+                                    key={bid.id}
+                                    onClick={() => {
+                                      setSelectedBidId(bid.id)
+                                      setSelectedEmailRecipient(null)
+                                      setResponseText('')
+                                      setLeftSideTab('bids')
+                                    }}
+                                    className={`
+                                      cursor-pointer rounded-lg p-4 border transition-all hover:shadow-sm
+                                      ${selectedBidId === bid.id 
+                                        ? 'border-orange-400 bg-white shadow-md ring-1 ring-orange-400/20' 
+                                        : 'bg-white border-gray-200 hover:border-orange-200'
+                                      }
+                                    `}
+                                  >
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div>
+                                        <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
+                                          {bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'}
+                                        </h4>
+                                        <p className="text-xs text-gray-500 truncate max-w-[160px]">
+                                          {bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email}
+                                        </p>
+                                      </div>
+                                      {bid.subcontractors?.trade_category && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bid.subcontractors.trade_category}
+                                        </Badge>
+                                      )}
+                                      {!bid.subcontractors?.trade_category && bid.gc_contacts?.trade_category && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bid.gc_contacts.trade_category}
+                                        </Badge>
+                                      )}
+                                      {!bid.subcontractors?.trade_category && !bid.gc_contacts?.trade_category && bidPackage && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bidPackage.trade_category}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex items-baseline gap-1 mb-2">
+                                      <span className="text-lg font-bold text-gray-900">
+                                        ${bid.bid_amount?.toLocaleString() ?? '0.00'}
+                                      </span>
+                                      <span className="text-xs text-gray-500">total</span>
+                                    </div>
+                                    
+                                    <div className="flex items-center justify-between text-xs text-gray-500">
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="h-3 w-3" />
+                                        {new Date(bid.created_at).toLocaleDateString()}
+                                      </div>
+                                      {bid.subcontractors?.google_review_score && (
+                                        <div className="flex items-center gap-1 text-orange-600">
+                                          <span>★</span>
+                                          {bid.subcontractors.google_review_score}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      })()}
+                  </TabsContent>
+                  
+                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-4 min-h-0">
+                      {allRecipients.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                          <p className="text-sm">No emails sent</p>
+                        </div>
+                      ) : (
+                        (() => {
+                          // Filter recipients based on search term
+                          const filteredRecipients = allRecipients.filter((r: any) => {
+                            if (!emailsSearchTerm) return true
+                            const searchLower = emailsSearchTerm.toLowerCase()
+                            const subcontractorName = (r.subcontractor_name || r.subcontractors?.name || r.subcontractor_email || '').toLowerCase()
+                            const subcontractorEmail = (r.subcontractor_email || '').toLowerCase()
+                            const tradeCategory = (r.bid_packages?.trade_category || 'Other').toLowerCase()
+                            const status = (r.status || '').toLowerCase()
+                            const responseText = (r.response_text || '').toLowerCase()
+                            return (
+                              subcontractorName.includes(searchLower) ||
+                              subcontractorEmail.includes(searchLower) ||
+                              tradeCategory.includes(searchLower) ||
+                              status.includes(searchLower) ||
+                              responseText.includes(searchLower)
+                            )
+                          })
+                          
+                          if (filteredRecipients.length === 0 && allRecipients.length > 0) {
+                            return (
+                              <div className="text-center py-8 text-gray-500">
+                                <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                                <p className="text-sm">No emails match your search</p>
+                              </div>
+                            )
+                          }
+                          
+                          const groupedRecipients = filteredRecipients.reduce((acc: any, r: any) => {
+                            const key = r.bid_packages?.trade_category || 'Other'
+                            if (!acc[key]) acc[key] = []
+                            acc[key].push(r)
+                            return acc
+                          }, {})
+                          
+                          return Object.entries(groupedRecipients).map(([category, recipients]: [string, any]) => (
+                            <div key={category}>
+                              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
+                                {category}
+                              </h3>
+                              <div className="space-y-2">
+                                {recipients.map((recipient: any) => {
                                 // Check if this thread has any unread messages
                                 const threadId = recipient.thread_id || `thread-${recipient.bid_package_id || recipient.bid_packages?.id}-${recipient.subcontractor_email}`
                                 const thread = emailThreads[threadId]
@@ -1428,13 +1630,17 @@ export default function BidComparisonModal({
                                     // Mark all unread messages in thread as read when viewing
                                     if (hasUnreadInThread && thread?.messages) {
                                       thread.messages.forEach((m: any) => {
-                                        const msgIsIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
-                                        if (msgIsIncoming && !m.read_by_gc_at) {
-                                          markEmailAsRead(m.id)
+                                        const isFromGC = m.isFromGC ?? m.is_from_gc ?? false
+                                        const msgIsIncoming = !isFromGC
+                                        if (msgIsIncoming && !isFromGC && !m.read_by_gc_at && isValidRecipientId(m.id)) {
+                                          markEmailAsRead(m.id, m)
                                         }
                                       })
-                                    } else if (isIncoming && !recipient.read_by_gc_at) {
-                                      markEmailAsRead(recipient.id)
+                                    } else if (isIncoming && !recipient.read_by_gc_at && isValidRecipientId(recipient.id)) {
+                                      const isFromGC = recipient.isFromGC ?? recipient.is_from_gc ?? false
+                                      if (!isFromGC) {
+                                        markEmailAsRead(recipient.id, recipient)
+                                      }
                                     }
                                   }}
                                   className={`
@@ -1494,11 +1700,11 @@ export default function BidComparisonModal({
                                 </div>
                                 )
                               })}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))
+                        })()
+                      )}
                   </TabsContent>
                 </Tabs>
               </div>
@@ -1693,6 +1899,25 @@ export default function BidComparisonModal({
                                         {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
+                                    {/* View Bid button for messages with bids */}
+                                    {!isFromGC && message.bids && message.bids.length > 0 && (
+                                      <div className="mt-3 pt-3 border-t border-gray-200">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setSelectedBidId(message.bids[0].id)
+                                            setSelectedEmailRecipient(null)
+                                            setLeftSideTab('bids')
+                                          }}
+                                          className="h-7 text-xs bg-white hover:bg-orange-50 border-orange-300 text-orange-700 hover:text-orange-800"
+                                        >
+                                          <FileText className="h-3 w-3 mr-1.5" />
+                                          View Bid
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                   <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
                                     {formatChatTime(new Date(messageTime))}
@@ -1828,36 +2053,9 @@ export default function BidComparisonModal({
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-3xl font-bold text-gray-900">
-                            ${selectedBid.bid_amount?.toLocaleString() ?? '0.00'}
-                          </div>
-                          <div className="text-sm text-gray-500">Total Bid Amount</div>
-                          <div className="flex flex-col gap-2 mt-4 items-end">
-                            {/* Status Badge */}
-                            {selectedBid.status === 'accepted' && (
-                              <Badge variant="default" className="bg-green-600 mb-2">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Accepted
-                              </Badge>
-                            )}
-                            {selectedBid.status === 'declined' && (
-                              <Badge variant="destructive" className="mb-2">
-                                <XCircle className="h-3 w-3 mr-1" />
-                                Declined
-                                {selectedBid.decline_reason && (
-                                  <span className="ml-1">({selectedBid.decline_reason})</span>
-                                )}
-                              </Badge>
-                            )}
-                            {selectedBid.status === 'pending' && (
-                              <Badge variant="outline" className="mb-2">
-                                Pending
-                              </Badge>
-                            )}
-                            
+                        <div className="flex items-start gap-6">
                             {/* Action Buttons */}
-                            <div className="flex gap-2 justify-end flex-wrap">
+                          <div className="flex gap-2 flex-wrap">
                               {/* Always show Decline button if not already declined */}
                               {selectedBid.status !== 'declined' && (
                                 <Popover open={showDeclinePopover} onOpenChange={setShowDeclinePopover}>
@@ -1926,6 +2124,12 @@ export default function BidComparisonModal({
                                 </Button>
                               )}
                             </div>
+                          {/* Bid Amount */}
+                          <div className="text-right">
+                            <div className="text-3xl font-bold text-gray-900">
+                              ${selectedBid.bid_amount?.toLocaleString() ?? '0.00'}
+                            </div>
+                            <div className="text-sm text-gray-500">Total Bid Amount</div>
                           </div>
                         </div>
                       </div>
@@ -2286,10 +2490,7 @@ export default function BidComparisonModal({
                                 <div className="space-y-4">
                                   <Card className="flex flex-col h-full overflow-hidden">
                                     <CardHeader className="py-3 px-4 border-b bg-gray-50 flex flex-row items-center justify-between">
-                                      <div className="grid grid-cols-2 gap-4 font-medium text-sm flex-1">
-                                        <div className="text-blue-700">Your Takeoff</div>
-                                        <div className="text-green-700">Bidder Line Item</div>
-                                      </div>
+                                      <CardTitle className="text-base font-semibold">Item Comparison</CardTitle>
                                       <div className="flex items-center gap-2">
                                         {loadingTakeoffAI && (
                                           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -2298,20 +2499,35 @@ export default function BidComparisonModal({
                                           </div>
                                         )}
                                         <div className="flex items-center gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => generateTakeoffAIComparison()}
+                                            disabled={loadingTakeoffAI || !selectedBidId || filteredTakeoffItems.length === 0 || bidLineItems.length === 0 || selectedTakeoffItemIds.size === 0}
+                                            className="flex items-center gap-2"
+                                          >
+                                            {loadingTakeoffAI ? (
+                                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+                                            ) : (
+                                              <GitCompare className="h-4 w-4" />
+                                            )}
+                                            {loadingTakeoffAI ? 'Analyzing...' : 'Run AI Analysis'}
+                                          </Button>
                                           {isTakeoffCached && (
                                             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                                               Cached
                                             </Badge>
                                           )}
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => setShowAISidebar(!showAISidebar)}
-                                            className="flex items-center gap-2"
-                                          >
-                                            <GitCompare className="h-4 w-4" />
-                                            {showAISidebar ? 'Hide' : 'Show'} AI Analysis
-                                          </Button>
+                                          {takeoffAIAnalysis && (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => setShowAISidebar(!showAISidebar)}
+                                              className="flex items-center gap-2"
+                                            >
+                                              {showAISidebar ? 'Hide' : 'Show'} AI Analysis
+                                            </Button>
+                                          )}
                                           {isTakeoffCached && (
                                             <Button
                                               variant="ghost"
@@ -2320,7 +2536,7 @@ export default function BidComparisonModal({
                                               className="text-xs"
                                               title="Refresh analysis"
                                             >
-                                              <Clock className="h-3 w-3" />
+                                              <RefreshCw className="h-3 w-3" />
                                             </Button>
                                           )}
                                         </div>
@@ -2335,104 +2551,237 @@ export default function BidComparisonModal({
                                           </div>
                                         </div>
                                       ) : (
-                                        <div className="divide-y">
-                                    {filteredTakeoffItems
-                                      .filter(item => selectedTakeoffItemIds.has(item.id))
-                                      .map(takeoffItem => {
-                                              // Use AI matches if available, otherwise fall back to simple matching
-                                              let aiMatch: any = null
-                                              if (takeoffAIMatches && takeoffAIMatches.length > 0) {
-                                                aiMatch = takeoffAIMatches.find((m: any) => m.takeoffItem.id === takeoffItem.id)
-                                              }
-                                              
-                                              const matchingBidItem = aiMatch?.bidItem || 
-                                                (aiMatch ? null : bidLineItems.find(bi => 
-                                                  bi.description.toLowerCase().includes(takeoffItem.description.toLowerCase()) ||
-                                                  takeoffItem.description.toLowerCase().includes(bi.description.toLowerCase())
-                                                ))
-                                              
-                                              const discrepancy = discrepancies.find(d => d.takeoffItem?.id === takeoffItem.id)
-                                              const hasVariance = aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance)
-                                              
+                                        <div className="overflow-y-auto">
+                                          {(() => {
+                                            const selectedTakeoffItems = filteredTakeoffItems.filter(item => selectedTakeoffItemIds.has(item.id))
+                                            
+                                            // Group items by category
+                                            const takeoffByCategory = selectedTakeoffItems.reduce((acc, item) => {
+                                              const cat = item.category || 'Uncategorized'
+                                              if (!acc[cat]) acc[cat] = []
+                                              acc[cat].push(item)
+                                              return acc
+                                            }, {} as Record<string, typeof selectedTakeoffItems>)
+                                            
+                                            const bidByCategory = bidLineItems.reduce((acc, item) => {
+                                              const cat = item.category || 'Uncategorized'
+                                              if (!acc[cat]) acc[cat] = []
+                                              acc[cat].push(item)
+                                              return acc
+                                            }, {} as Record<string, typeof bidLineItems>)
+                                            
+                                            // Get all unique categories
+                                            const allCategories = Array.from(new Set([
+                                              ...Object.keys(takeoffByCategory),
+                                              ...Object.keys(bidByCategory)
+                                            ])).sort()
+                                            
+                                            if (allCategories.length === 0) {
                                               return (
-                                                <div key={takeoffItem.id} className={`grid grid-cols-2 gap-4 p-4 ${discrepancy || hasVariance ? 'bg-orange-50/30' : ''}`}>
-                                                  {/* Takeoff Side */}
-                                                  <div className="pr-4 border-r">
-                                                    <div className="flex justify-between items-start">
-                                                      <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                          <div className="font-medium text-sm text-gray-900">{takeoffItem.description}</div>
-                                                          {aiMatch && aiMatch.confidence > 0 && (
-                                                            <Badge 
-                                                              variant="outline" 
-                                                              className={`text-xs ${
-                                                                aiMatch.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                aiMatch.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                'bg-orange-50 text-orange-700 border-orange-200'
-                                                              }`}
-                                                              title={aiMatch.notes || `${aiMatch.matchType} match`}
-                                                            >
-                                                              {aiMatch.confidence}% match
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                        <div className="text-xs text-gray-500 mt-1">
-                                                          {takeoffItem.quantity} {takeoffItem.unit} 
-                                                          {takeoffItem.unit_cost && ` @ $${takeoffItem.unit_cost}/unit`}
-                                                        </div>
-                                                      </div>
-                                                      {takeoffItem.unit_cost && (
-                                                        <div className="font-bold text-blue-600 ml-2">
-                                                          ${(takeoffItem.quantity * takeoffItem.unit_cost).toLocaleString()}
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  </div>
-
-                                                  {/* Bid Side */}
-                                                  <div className="pl-4">
-                                                    {matchingBidItem ? (
-                                                      <div className="flex justify-between items-start">
-                                                        <div className="flex-1">
-                                                          <div className="font-medium text-sm text-gray-900">{matchingBidItem.description}</div>
-                                                          <div className="text-xs text-gray-500 mt-1">
-                                                            {matchingBidItem.quantity} {matchingBidItem.unit}
-                                                            {matchingBidItem.unit_price && ` @ $${matchingBidItem.unit_price}/unit`}
-                                                          </div>
-                                                          {aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance) && (
-                                                            <div className="mt-2 space-y-1">
-                                                              {aiMatch.quantityVariance && aiMatch.quantityVariance > 20 && (
-                                                                <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                  Qty variance: {aiMatch.quantityVariance.toFixed(0)}%
-                                                                </Badge>
-                                                              )}
-                                                              {aiMatch.priceVariance && aiMatch.priceVariance > 15 && (
-                                                                <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                  Price variance: {aiMatch.priceVariance.toFixed(0)}%
-                                                                </Badge>
-                                                              )}
-                                                            </div>
-                                                          )}
-                                                          {discrepancy && !aiMatch && (
-                                                            <Badge variant="outline" className="mt-2 text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                              {discrepancy.type === 'quantity' ? `Qty mismatch (${discrepancy.percentage?.toFixed(0)}%)` : 'Price mismatch'}
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                        <div className={`font-bold ml-2 ${discrepancy || hasVariance ? 'text-orange-600' : 'text-green-600'}`}>
-                                                          ${matchingBidItem.amount.toLocaleString()}
-                                                        </div>
-                                                      </div>
-                                                    ) : (
-                                                      <div className="text-sm text-gray-400 italic flex items-center gap-2">
-                                                        <AlertCircle className="h-4 w-4" />
-                                                        {aiMatch ? 'No match found (AI analyzed)' : 'Not found in bid'}
-                                                      </div>
-                                                    )}
-                                                  </div>
+                                                <div className="p-12 text-center text-gray-500">
+                                                  <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                                                  <p className="font-medium">No items selected for comparison</p>
+                                                  <p className="text-sm mt-2">Select items from the left panel to compare</p>
                                                 </div>
                                               )
-                                            })}
+                                            }
+                                            
+                                            return (
+                                              <div className="space-y-6 p-4">
+                                                {allCategories.map(category => {
+                                                  const takeoffItemsInCat = takeoffByCategory[category] || []
+                                                  const bidItemsInCat = bidByCategory[category] || []
+                                                  
+                                                  // Calculate category totals
+                                                  const takeoffTotal = takeoffItemsInCat.reduce((sum, item) => 
+                                                    sum + (item.quantity * (item.unit_cost || 0)), 0
+                                                  )
+                                                  const bidTotal = bidItemsInCat.reduce((sum, item) => sum + item.amount, 0)
+                                                  
+                                                  // Build AI match map for this category
+                                                  const aiMatchMap = new Map<string, any>()
+                                                  if (takeoffAIMatches && takeoffAIMatches.length > 0) {
+                                                    takeoffItemsInCat.forEach(takeoffItem => {
+                                                      const match = takeoffAIMatches.find((m: any) => m.takeoffItem.id === takeoffItem.id)
+                                                      if (match) {
+                                                        aiMatchMap.set(takeoffItem.id, match)
+                                                      }
+                                                    })
+                                                  }
+                                                  
+                                                  return (
+                                                    <div key={category} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                                      {/* Category Header */}
+                                                      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200">
+                                                        <div className="flex items-center justify-between">
+                                                          <h3 className="font-semibold text-gray-900">{category}</h3>
+                                                          <div className="flex items-center gap-4 text-sm">
+                                                            <div className="flex items-center gap-2">
+                                                              <span className="text-gray-600">Takeoff:</span>
+                                                              <span className="font-bold text-blue-700">${takeoffTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                              <span className="text-gray-600">Bid:</span>
+                                                              <span className="font-bold text-green-700">${bidTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                            </div>
+                                                            {takeoffTotal > 0 && bidTotal > 0 && (
+                                                              <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600">Diff:</span>
+                                                                <span className={`font-bold ${bidTotal > takeoffTotal ? 'text-red-600' : 'text-green-600'}`}>
+                                                                  {bidTotal > takeoffTotal ? '+' : ''}${(bidTotal - takeoffTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                      
+                                                      {/* Items Grid */}
+                                                      <div className="grid grid-cols-2 gap-0">
+                                                        {/* Takeoff Items Column */}
+                                                        <div className="border-r border-gray-200 bg-blue-50/20">
+                                                          <div className="px-4 py-2 bg-blue-100/50 border-b border-gray-200">
+                                                            <h4 className="text-sm font-semibold text-blue-900">Takeoff Items ({takeoffItemsInCat.length})</h4>
+                                                          </div>
+                                                          <div className="divide-y divide-gray-200">
+                                                            {takeoffItemsInCat.length > 0 ? (
+                                                              takeoffItemsInCat.map(takeoffItem => {
+                                                                const aiMatch = aiMatchMap.get(takeoffItem.id)
+                                                                const hasVariance = aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance)
+                                                                
+                                                                return (
+                                                                  <div 
+                                                                    key={takeoffItem.id} 
+                                                                    className={`p-4 hover:bg-blue-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                  >
+                                                                    <div className="space-y-2">
+                                                                      <div className="flex items-start justify-between gap-2">
+                                                                        <div className="font-semibold text-sm text-gray-900 flex-1">{takeoffItem.description}</div>
+                                                                        {aiMatch && aiMatch.confidence > 0 && (
+                                                                          <Badge 
+                                                                            variant="outline" 
+                                                                            className={`text-xs flex-shrink-0 ${
+                                                                              aiMatch.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                              aiMatch.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                              'bg-orange-50 text-orange-700 border-orange-200'
+                                                                            }`}
+                                                                            title={aiMatch.notes || `${aiMatch.matchType} match`}
+                                                                          >
+                                                                            {aiMatch.confidence}%
+                                                                          </Badge>
+                                                                        )}
+                                                                      </div>
+                                                                      <div className="text-xs text-gray-600">
+                                                                        {takeoffItem.quantity} {takeoffItem.unit}
+                                                                        {takeoffItem.unit_cost && ` @ $${takeoffItem.unit_cost.toLocaleString()}/${takeoffItem.unit}`}
+                                                                      </div>
+                                                                      {takeoffItem.unit_cost && (
+                                                                        <div className="font-bold text-blue-700 text-base">
+                                                                          ${(takeoffItem.quantity * takeoffItem.unit_cost).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                        </div>
+                                                                      )}
+                                                                      {aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance) && (
+                                                                        <div className="mt-2 space-y-1">
+                                                                          {aiMatch.quantityVariance && aiMatch.quantityVariance > 20 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Qty: {aiMatch.quantityVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                          {aiMatch.priceVariance && aiMatch.priceVariance > 15 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Price: {aiMatch.priceVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                        </div>
+                                                                      )}
+                                                                    </div>
+                                                                  </div>
+                                                                )
+                                                              })
+                                                            ) : (
+                                                              <div className="p-8 text-center text-gray-400 text-sm">
+                                                                No takeoff items
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                        
+                                                        {/* Bid Items Column */}
+                                                        <div className="bg-green-50/20">
+                                                          <div className="px-4 py-2 bg-green-100/50 border-b border-gray-200">
+                                                            <h4 className="text-sm font-semibold text-green-900">Bid Items ({bidItemsInCat.length})</h4>
+                                                          </div>
+                                                          <div className="divide-y divide-gray-200">
+                                                            {bidItemsInCat.length > 0 ? (
+                                                              bidItemsInCat.map(bidItem => {
+                                                                // Find if this bid item is matched to any takeoff item
+                                                                const matchedTakeoff = takeoffAIMatches?.find((m: any) => m.bidItem?.id === bidItem.id)
+                                                                const hasVariance = matchedTakeoff && (matchedTakeoff.quantityVariance || matchedTakeoff.priceVariance)
+                                                                
+                                                                return (
+                                                                  <div 
+                                                                    key={bidItem.id} 
+                                                                    className={`p-4 hover:bg-green-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                  >
+                                                                    <div className="space-y-2">
+                                                                      <div className="flex items-start justify-between gap-2">
+                                                                        <div className="font-semibold text-sm text-gray-900 flex-1">{bidItem.description}</div>
+                                                                        {matchedTakeoff && matchedTakeoff.confidence > 0 && (
+                                                                          <Badge 
+                                                                            variant="outline" 
+                                                                            className={`text-xs flex-shrink-0 ${
+                                                                              matchedTakeoff.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                              matchedTakeoff.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                              'bg-orange-50 text-orange-700 border-orange-200'
+                                                                            }`}
+                                                                            title={matchedTakeoff.notes || `${matchedTakeoff.matchType} match`}
+                                                                          >
+                                                                            {matchedTakeoff.confidence}%
+                                                                          </Badge>
+                                                                        )}
+                                                                      </div>
+                                                                      {bidItem.notes && (
+                                                                        <div className="text-xs text-gray-600 italic">{bidItem.notes}</div>
+                                                                      )}
+                                                                      <div className="text-xs text-gray-600">
+                                                                        {bidItem.quantity} {bidItem.unit}
+                                                                        {bidItem.unit_price && ` @ $${bidItem.unit_price.toLocaleString()}/${bidItem.unit || 'unit'}`}
+                                                                      </div>
+                                                                      <div className={`font-bold text-base ${hasVariance ? 'text-orange-600' : 'text-green-700'}`}>
+                                                                        ${bidItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                      </div>
+                                                                      {matchedTakeoff && (matchedTakeoff.quantityVariance || matchedTakeoff.priceVariance) && (
+                                                                        <div className="mt-2 space-y-1">
+                                                                          {matchedTakeoff.quantityVariance && matchedTakeoff.quantityVariance > 20 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Qty: {matchedTakeoff.quantityVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                          {matchedTakeoff.priceVariance && matchedTakeoff.priceVariance > 15 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Price: {matchedTakeoff.priceVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                        </div>
+                                                                      )}
+                                                                    </div>
+                                                                  </div>
+                                                                )
+                                                              })
+                                                            ) : (
+                                                              <div className="p-8 text-center text-gray-400 text-sm">
+                                                                No bid items
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  )
+                                                })}
+                                              </div>
+                                            )
+                                          })()}
                                         </div>
                                       )}
                                     </CardContent>
@@ -2533,20 +2882,35 @@ export default function BidComparisonModal({
                                             </div>
                                           )}
                                           <div className="flex items-center gap-2">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => generateAIComparison()}
+                                              disabled={loadingAI || !selectedBidId || selectedComparisonBidIds.size === 0}
+                                              className="flex items-center gap-2"
+                                            >
+                                              {loadingAI ? (
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+                                              ) : (
+                                                <GitCompare className="h-4 w-4" />
+                                              )}
+                                              {loadingAI ? 'Analyzing...' : 'Run AI Analysis'}
+                                            </Button>
                                             {isCached && (
                                               <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                                                 Cached
                                               </Badge>
                                             )}
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() => setShowAISidebar(!showAISidebar)}
-                                              className="flex items-center gap-2"
-                                            >
-                                              <GitCompare className="h-4 w-4" />
-                                              {showAISidebar ? 'Hide' : 'Show'} AI Analysis
-                                            </Button>
+                                            {aiAnalysis && (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setShowAISidebar(!showAISidebar)}
+                                                className="flex items-center gap-2"
+                                              >
+                                                {showAISidebar ? 'Hide' : 'Show'} AI Analysis
+                                              </Button>
+                                            )}
                                             {isCached && (
                                               <Button
                                                 variant="ghost"
@@ -2555,7 +2919,7 @@ export default function BidComparisonModal({
                                                 className="text-xs"
                                                 title="Refresh analysis"
                                               >
-                                                <Clock className="h-3 w-3" />
+                                                <RefreshCw className="h-3 w-3" />
                                               </Button>
                                             )}
                                           </div>
@@ -2572,164 +2936,221 @@ export default function BidComparisonModal({
                                             </div>
                                           </div>
                                         ) : (
-                                          <div className="overflow-x-auto">
-                                            <table className="w-full text-sm">
-                                              <thead className="bg-gray-50 border-b">
-                                                <tr>
-                                                  <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
-                                                  <th className="px-4 py-3 text-center font-medium text-gray-700">Selected Bid</th>
-                                                  {Array.from(selectedComparisonBidIds).map(bidId => {
-                                                    const bid = bids.find(b => b.id === bidId)
+                                          <div className="overflow-y-auto">
+                                            {(() => {
+                                              // Group all items by category
+                                              const selectedBidByCategory = bidLineItems.reduce((acc, item) => {
+                                                const cat = item.category || 'Uncategorized'
+                                                if (!acc[cat]) acc[cat] = []
+                                                acc[cat].push(item)
+                                                return acc
+                                              }, {} as Record<string, typeof bidLineItems>)
+                                              
+                                              const comparisonBidsByCategory: Record<string, Record<string, BidLineItem[]>> = {}
+                                              Array.from(selectedComparisonBidIds).forEach(bidId => {
+                                                const compItems = comparisonBidLineItems[bidId] || []
+                                                compItems.forEach(item => {
+                                                  const cat = item.category || 'Uncategorized'
+                                                  if (!comparisonBidsByCategory[cat]) comparisonBidsByCategory[cat] = {}
+                                                  if (!comparisonBidsByCategory[cat][bidId]) comparisonBidsByCategory[cat][bidId] = []
+                                                  comparisonBidsByCategory[cat][bidId].push(item)
+                                                })
+                                              })
+                                              
+                                              // Get all unique categories
+                                              const allCategories = Array.from(new Set([
+                                                ...Object.keys(selectedBidByCategory),
+                                                ...Object.keys(comparisonBidsByCategory)
+                                              ])).sort()
+                                              
+                                              if (allCategories.length === 0) {
+                                                return (
+                                                  <div className="p-12 text-center text-gray-500">
+                                                    <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                                                    <p className="font-medium">No line items found in the selected bid</p>
+                                                  </div>
+                                                )
+                                              }
+                                              
+                                              // Build AI match maps for each comparison bid
+                                              const aiMatchMaps: Record<string, Map<string, any>> = {}
+                                              if (aiMatches && aiMatches.length > 0) {
+                                                Array.from(selectedComparisonBidIds).forEach(bidId => {
+                                                  const map = new Map<string, any>()
+                                                  bidLineItems.forEach(selectedItem => {
+                                                    const aiMatch = aiMatches.find((m: any) => m.selectedBidItem.id === selectedItem.id)
+                                                    if (aiMatch) {
+                                                      const match = aiMatch.comparisonItems.find((ci: any) => ci.bidId === bidId)
+                                                      if (match) {
+                                                        map.set(selectedItem.id, match)
+                                                      }
+                                                    }
+                                                  })
+                                                  aiMatchMaps[bidId] = map
+                                                })
+                                              }
+                                              
+                                              return (
+                                                <div className="space-y-6 p-4">
+                                                  {allCategories.map(category => {
+                                                    const selectedItemsInCat = selectedBidByCategory[category] || []
+                                                    const selectedTotal = selectedItemsInCat.reduce((sum, item) => sum + item.amount, 0)
+                                                    
                                                     return (
-                                                      <th key={bidId} className="px-4 py-3 text-center font-medium text-gray-700">
-                                                        {bid?.subcontractors?.name || bid?.gc_contacts?.name || bid?.subcontractor_email || 'Unknown'}
-                                                      </th>
+                                                      <div key={category} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                                        {/* Category Header */}
+                                                        <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200">
+                                                          <div className="flex items-center justify-between">
+                                                            <h3 className="font-semibold text-gray-900">{category}</h3>
+                                                            <div className="flex items-center gap-4 text-sm">
+                                                              <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600">Selected:</span>
+                                                                <span className="font-bold text-blue-700">${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                              </div>
+                                                              {Array.from(selectedComparisonBidIds).map(bidId => {
+                                                                const compItems = comparisonBidsByCategory[category]?.[bidId] || []
+                                                                const compTotal = compItems.reduce((sum, item) => sum + item.amount, 0)
+                                                                const bid = bids.find(b => b.id === bidId)
+                                                                return (
+                                                                  <div key={bidId} className="flex items-center gap-2">
+                                                                    <span className="text-gray-600 text-xs">{bid?.subcontractors?.name || bid?.gc_contacts?.name || 'Bid'}:</span>
+                                                                    <span className={`font-bold text-sm ${compTotal > selectedTotal ? 'text-red-600' : compTotal < selectedTotal ? 'text-green-600' : 'text-gray-900'}`}>
+                                                                      ${compTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                    </span>
+                                                                  </div>
+                                                                )
+                                                              })}
+                                                            </div>
+                                                          </div>
+                                                        </div>
+                                                        
+                                                        {/* Items Grid - Horizontal Scroll */}
+                                                        <div className="overflow-x-auto">
+                                                          <div className="flex gap-0 min-w-max">
+                                                            {/* Selected Bid Column */}
+                                                            <div className="flex-shrink-0 w-80 border-r-2 border-gray-300 bg-blue-50/20">
+                                                              <div className="px-4 py-2 bg-blue-100/50 border-b border-gray-200 sticky left-0 z-10">
+                                                                <h4 className="text-sm font-semibold text-blue-900">
+                                                                  {selectedBid?.subcontractors?.name || selectedBid?.gc_contacts?.name || 'Selected Bid'} ({selectedItemsInCat.length})
+                                                                </h4>
+                                                              </div>
+                                                              <div className="divide-y divide-gray-200">
+                                                                {selectedItemsInCat.length > 0 ? (
+                                                                  selectedItemsInCat.map(item => (
+                                                                    <div key={item.id} className="p-4 hover:bg-blue-50/50 transition-colors">
+                                                                      <div className="space-y-2">
+                                                                        <div className="font-semibold text-sm text-gray-900">{item.description}</div>
+                                                                        {item.notes && (
+                                                                          <div className="text-xs text-gray-600 italic">{item.notes}</div>
+                                                                        )}
+                                                                        <div className="text-xs text-gray-600">
+                                                                          {item.quantity} {item.unit}
+                                                                          {item.unit_price && ` @ $${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/${item.unit || 'unit'}`}
+                                                                        </div>
+                                                                        <div className="font-bold text-blue-700 text-base">
+                                                                          ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                        </div>
+                                                                      </div>
+                                                                    </div>
+                                                                  ))
+                                                                ) : (
+                                                                  <div className="p-8 text-center text-gray-400 text-sm">No items</div>
+                                                                )}
+                                                              </div>
+                                                            </div>
+                                                            
+                                                            {/* Comparison Bid Columns */}
+                                                            {Array.from(selectedComparisonBidIds).map(bidId => {
+                                                              const bid = bids.find(b => b.id === bidId)
+                                                              const compItems = comparisonBidsByCategory[category]?.[bidId] || []
+                                                              const aiMatchMap = aiMatchMaps[bidId] || new Map()
+                                                              
+                                                              return (
+                                                                <div key={bidId} className="flex-shrink-0 w-80 border-r-2 border-gray-300 bg-white last:border-r-0">
+                                                                  <div className="px-4 py-2 bg-gray-100/50 border-b border-gray-200 sticky left-0 z-10">
+                                                                    <h4 className="text-sm font-semibold text-gray-900">
+                                                                      {bid?.subcontractors?.name || bid?.gc_contacts?.name || 'Unknown'} ({compItems.length})
+                                                                    </h4>
+                                                                  </div>
+                                                                  <div className="divide-y divide-gray-200">
+                                                                    {compItems.length > 0 ? (
+                                                                      compItems.map(compItem => {
+                                                                        // Check if this item matches any selected item via AI
+                                                                        let match: any = null
+                                                                        for (const [selectedItemId, matchData] of aiMatchMap.entries()) {
+                                                                          if (matchData.item?.id === compItem.id) {
+                                                                            match = matchData
+                                                                            break
+                                                                          }
+                                                                        }
+                                                                        
+                                                                        // Find corresponding selected item for comparison
+                                                                        const correspondingSelected = selectedItemsInCat.find(si => {
+                                                                          const m = aiMatchMap.get(si.id)
+                                                                          return m?.item?.id === compItem.id
+                                                                        })
+                                                                        
+                                                                        const isLower = correspondingSelected && compItem.amount < correspondingSelected.amount
+                                                                        const isHigher = correspondingSelected && compItem.amount > correspondingSelected.amount
+                                                                        const hasVariance = correspondingSelected && 
+                                                                          Math.abs(compItem.amount - correspondingSelected.amount) > correspondingSelected.amount * 0.1
+                                                                        
+                                                                        return (
+                                                                          <div 
+                                                                            key={compItem.id} 
+                                                                            className={`p-4 hover:bg-gray-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                          >
+                                                                            <div className="space-y-2">
+                                                                              <div className="flex items-start justify-between gap-2">
+                                                                                <div className="font-semibold text-sm text-gray-900 flex-1">{compItem.description}</div>
+                                                                                {match?.confidence && (
+                                                                                  <Badge 
+                                                                                    variant="outline" 
+                                                                                    className={`text-xs flex-shrink-0 ${
+                                                                                      match.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                                      match.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                                      'bg-orange-50 text-orange-700 border-orange-200'
+                                                                                    }`}
+                                                                                    title={match.notes || `${match.matchType} match`}
+                                                                                  >
+                                                                                    {match.confidence}%
+                                                                                  </Badge>
+                                                                                )}
+                                                                              </div>
+                                                                              {compItem.notes && (
+                                                                                <div className="text-xs text-gray-600 italic">{compItem.notes}</div>
+                                                                              )}
+                                                                              <div className="text-xs text-gray-600">
+                                                                                {compItem.quantity} {compItem.unit}
+                                                                                {compItem.unit_price && ` @ $${compItem.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/${compItem.unit || 'unit'}`}
+                                                                              </div>
+                                                                              <div className={`font-bold text-base ${isLower ? 'text-green-700' : isHigher ? 'text-red-600' : 'text-gray-900'}`}>
+                                                                                ${compItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                              </div>
+                                                                              {hasVariance && !match?.confidence && correspondingSelected && (
+                                                                                <Badge variant="outline" className="mt-1 text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                                  {((compItem.amount - correspondingSelected.amount) / correspondingSelected.amount * 100).toFixed(0)}% {isLower ? 'lower' : 'higher'}
+                                                                                </Badge>
+                                                                              )}
+                                                                            </div>
+                                                                          </div>
+                                                                        )
+                                                                      })
+                                                                    ) : (
+                                                                      <div className="p-8 text-center text-gray-400 text-sm">No items</div>
+                                                                    )}
+                                                                  </div>
+                                                                </div>
+                                                              )
+                                                            })}
+                                                          </div>
+                                                        </div>
+                                                      </div>
                                                     )
                                                   })}
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y">
-                                                {bidLineItems.length > 0 ? (
-                                                  bidLineItems.map(item => {
-                                                    // Use AI matches if available, otherwise fall back to simple matching
-                                                    let comparisonItems: Array<{ item: any; confidence?: number; matchType?: string; notes?: string } | null> = []
-                                                    
-                                                    if (aiMatches && aiMatches.length > 0) {
-                                                      const aiMatch = aiMatches.find((m: any) => m.selectedBidItem.id === item.id)
-                                                      if (aiMatch) {
-                                                        // Use AI-matched items
-                                                        comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                          const match = aiMatch.comparisonItems.find((ci: any) => ci.bidId === bidId)
-                                                          return match ? { item: match.item, confidence: match.confidence, matchType: match.matchType, notes: match.notes } : null
-                                                        })
-                                                      } else {
-                                                        // Fallback to simple matching
-                                                        comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                          const compItems = comparisonBidLineItems[bidId] || []
-                                                          const found = compItems.find(ci =>
-                                                            ci.description.toLowerCase().includes(item.description.toLowerCase()) ||
-                                                            item.description.toLowerCase().includes(ci.description.toLowerCase())
-                                                          )
-                                                          return found ? { item: found } : null
-                                                        })
-                                                      }
-                                                    } else {
-                                                      // Simple matching when AI not available
-                                                      comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                        const compItems = comparisonBidLineItems[bidId] || []
-                                                        const found = compItems.find(ci =>
-                                                          ci.description.toLowerCase().includes(item.description.toLowerCase()) ||
-                                                          item.description.toLowerCase().includes(ci.description.toLowerCase())
-                                                        )
-                                                        return found ? { item: found } : null
-                                                      })
-                                                    }
-
-                                                    const allAmounts = [item.amount, ...comparisonItems.map(ci => ci?.item?.amount).filter(Boolean)]
-                                                    const minAmount = Math.min(...allAmounts.map(a => a || Infinity))
-                                                    const maxAmount = Math.max(...allAmounts.map(a => a || Infinity))
-                                                    const hasVariance = maxAmount - minAmount > minAmount * 0.1 // 10% variance threshold
-
-                                                    return (
-                                                      <tr key={item.id} className={hasVariance ? 'bg-orange-50/30' : ''}>
-                                                        <td className="px-4 py-3 font-medium text-gray-900">
-                                                          <div className="flex items-center gap-2">
-                                                            {item.description}
-                                                            {comparisonItems.some(ci => ci?.confidence) && (
-                                                              <Badge 
-                                                                variant="outline" 
-                                                                className={`text-xs ${
-                                                                  comparisonItems.some(ci => ci?.confidence && ci.confidence >= 85) ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                  comparisonItems.some(ci => ci?.confidence && ci.confidence >= 70) ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                  'bg-orange-50 text-orange-700 border-orange-200'
-                                                                }`}
-                                                                title={comparisonItems.find(ci => ci?.confidence)?.notes || ''}
-                                                              >
-                                                                {Math.max(...comparisonItems.map(ci => ci?.confidence || 0))}% match
-                                                              </Badge>
-                                                            )}
-                                                          </div>
-                                                          {item.notes && (
-                                                            <div className="text-xs text-gray-500 font-normal mt-1">{item.notes}</div>
-                                                          )}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-center">
-                                                          <div className="font-semibold text-gray-900">
-                                                            ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                          </div>
-                                                          {item.unit_price && (
-                                                            <div className="text-xs text-gray-500">
-                                                              @ ${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/{item.unit || 'unit'}
-                                                            </div>
-                                                          )}
-                                                          {item.quantity && item.unit && (
-                                                            <div className="text-xs text-gray-500">
-                                                              {item.quantity} {item.unit}
-                                                            </div>
-                                                          )}
-                                                        </td>
-                                                        {comparisonItems.map((compItem, idx) => {
-                                                          const bidId = Array.from(selectedComparisonBidIds)[idx]
-                                                          const comp = compItem?.item
-                                                          const isLower = comp && comp.amount < item.amount
-                                                          const isHigher = comp && comp.amount > item.amount
-                                                          
-                                                          return (
-                                                            <td key={`${bidId}-${idx}`} className="px-4 py-3 text-center">
-                                                              {comp ? (
-                                                                <>
-                                                                  <div className={`font-semibold ${isLower ? 'text-green-600' : isHigher ? 'text-red-600' : 'text-gray-900'}`}>
-                                                                    ${comp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                                  </div>
-                                                                  {comp.unit_price && (
-                                                                    <div className="text-xs text-gray-500">
-                                                                      @ ${comp.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/{comp.unit || 'unit'}
-                                                                    </div>
-                                                                  )}
-                                                                  {comp.quantity && comp.unit && (
-                                                                    <div className="text-xs text-gray-500">
-                                                                      {comp.quantity} {comp.unit}
-                                                                    </div>
-                                                                  )}
-                                                                  {compItem?.confidence && (
-                                                                    <Badge 
-                                                                      variant="outline" 
-                                                                      className={`mt-1 text-xs ${
-                                                                        compItem.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                        compItem.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                        'bg-orange-50 text-orange-700 border-orange-200'
-                                                                      }`}
-                                                                      title={compItem.notes || `${compItem.matchType} match`}
-                                                                    >
-                                                                      {compItem.confidence}%
-                                                                    </Badge>
-                                                                  )}
-                                                                  {hasVariance && !compItem?.confidence && (
-                                                                    <Badge variant="outline" className="mt-1 text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                      {comp.amount && item.amount ? (
-                                                                        `${((comp.amount - item.amount) / item.amount * 100).toFixed(0)}%`
-                                                                      ) : '-'}
-                                                                    </Badge>
-                                                                  )}
-                                                                </>
-                                                              ) : (
-                                                                <div className="text-sm text-gray-400 italic">-</div>
-                                                              )}
-                                                            </td>
-                                                          )
-                                                        })}
-                                                      </tr>
-                                                    )
-                                                  })
-                                                ) : (
-                                                  <tr>
-                                                    <td colSpan={selectedComparisonBidIds.size + 2} className="px-4 py-12 text-center text-gray-500">
-                                                      No line items found in the selected bid.
-                                                    </td>
-                                                  </tr>
-                                                )}
-                                              </tbody>
-                                            </table>
+                                                </div>
+                                              )
+                                            })()}
                                           </div>
                                         )}
                                       </CardContent>
@@ -2761,6 +3182,286 @@ export default function BidComparisonModal({
                             )
                           )}
                         </TabsContent>
+
+                        {/* Email Conversation Tab */}
+                        {bidRecipient && (
+                          <TabsContent value="conversation" className="mt-0">
+                            <div className="flex flex-col h-full bg-white">
+                              {/* Chat Messages Container */}
+                              <div className="flex-1 overflow-y-auto px-4 py-6 space-y-3 bg-gray-50 min-h-[400px]">
+                                {(() => {
+                                  // Get thread for this recipient
+                                  const threadId = bidRecipient.thread_id || 
+                                    `thread-${bidRecipient.bid_package_id || bidRecipient.bid_packages?.id}-${bidRecipient.subcontractor_email}`
+                                  const thread = emailThreads[threadId]
+                                  const threadMessages = thread?.messages || [bidRecipient]
+                                  
+                                  // Sort messages by timestamp
+                                  const sortedMessages = [...threadMessages].sort((a, b) => {
+                                    const timeA = new Date(a.messageTimestamp || a.responded_at || a.sent_at || a.created_at).getTime()
+                                    const timeB = new Date(b.messageTimestamp || b.responded_at || b.sent_at || b.created_at).getTime()
+                                    return timeA - timeB
+                                  })
+                                  
+                                  if (sortedMessages.length === 0) {
+                                    return (
+                                      <div className="flex items-center justify-center h-full">
+                                        <p className="text-gray-400 text-sm">No messages yet</p>
+                                      </div>
+                                    )
+                                  }
+                                  
+                                  return sortedMessages.map((message: any, index: number) => {
+                                    const isFromGC = message.isFromGC ?? false
+                                    const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
+                                    const messageTime = message.responded_at || message.sent_at || message.created_at
+                                    
+                                    // Fetch email content if missing
+                                    if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
+                                      setFetchingEmailContent(prev => new Set(prev).add(message.id))
+                                      fetch(`/api/emails/${message.resend_email_id}/content`)
+                                        .then(res => res.json())
+                                        .then(data => {
+                                          if (data.content) {
+                                            setFetchedEmailContent(prev => ({
+                                              ...prev,
+                                              [message.id]: data.content
+                                            }))
+                                          }
+                                        })
+                                        .catch(err => console.error('Failed to fetch email content:', err))
+                                        .finally(() => {
+                                          setFetchingEmailContent(prev => {
+                                            const next = new Set(prev)
+                                            next.delete(message.id)
+                                            return next
+                                          })
+                                        })
+                                    }
+                                    
+                                    const senderName = isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')
+                                    const prevMessage = index > 0 ? sortedMessages[index - 1] : null
+                                    const showAvatar = !prevMessage || prevMessage.isFromGC !== isFromGC
+                                    const getInitials = (name: string) => {
+                                      if (!name) return '?'
+                                      const parts = name.trim().split(/\s+/)
+                                      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                                      return name.substring(0, 2).toUpperCase()
+                                    }
+                                    const formatChatTime = (date: Date) => {
+                                      const now = new Date()
+                                      const diffMs = now.getTime() - date.getTime()
+                                      const diffMins = Math.floor(diffMs / 60000)
+                                      const diffHours = Math.floor(diffMs / 3600000)
+                                      const diffDays = Math.floor(diffMs / 86400000)
+                                      if (diffMins < 1) return 'Just now'
+                                      if (diffMins < 60) return `${diffMins}m ago`
+                                      if (diffHours < 24) return `${diffHours}h ago`
+                                      if (diffDays < 7) return `${diffDays}d ago`
+                                      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                    }
+                                    
+                                    return (
+                                      <div
+                                        key={message.id || `message-${index}`}
+                                        className={`flex items-end gap-2 ${isFromGC ? 'flex-row-reverse' : 'flex-row'} ${showAvatar ? 'mt-4' : 'mt-1'}`}
+                                      >
+                                        {showAvatar ? (
+                                          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shadow-sm ${
+                                            isFromGC ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
+                                          }`}>
+                                            {isFromGC ? 'Y' : getInitials(senderName)}
+                                          </div>
+                                        ) : (
+                                          <div className="w-8" />
+                                        )}
+                                        
+                                        <div className={`flex flex-col max-w-[75%] ${isFromGC ? 'items-end' : 'items-start'}`}>
+                                          {showAvatar && (
+                                            <span className={`text-xs text-gray-500 mb-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                              {senderName}
+                                            </span>
+                                          )}
+                                          <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                                            isFromGC
+                                              ? 'bg-blue-600 text-white rounded-br-sm'
+                                              : 'bg-white text-gray-900 rounded-bl-sm border border-gray-200'
+                                          }`}>
+                                            {fetchingEmailContent.has(message.id) ? (
+                                              <div className="flex items-center gap-2">
+                                                <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
+                                                <span className="text-xs">Loading...</span>
+                                              </div>
+                                            ) : messageContent && containsHTML(messageContent) ? (
+                                              <div 
+                                                className="text-sm leading-relaxed max-w-none email-content"
+                                                dangerouslySetInnerHTML={{ __html: sanitizeHTML(messageContent) }}
+                                                style={{
+                                                  color: isFromGC ? 'white' : 'inherit',
+                                                  '--tw-prose-links': isFromGC ? 'white' : 'rgb(59 130 246)',
+                                                } as React.CSSProperties}
+                                              />
+                                            ) : (
+                                              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                                                {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                              </p>
+                                            )}
+                                          </div>
+                                          <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                            {formatChatTime(new Date(messageTime))}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )
+                                  })
+                                })()}
+                              </div>
+
+                              {/* Reply Input */}
+                              <div className="border-t bg-white p-3 flex-shrink-0">
+                                <div className="flex items-end gap-2">
+                                  <div className="flex-1 flex items-end gap-2">
+                                    <Textarea
+                                      value={responseText}
+                                      onChange={(e) => setResponseText(e.target.value)}
+                                      placeholder="Type a message..."
+                                      rows={1}
+                                      className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[44px] max-h-[120px] py-2.5 px-3 text-sm rounded-full"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                          e.preventDefault()
+                                          if (responseText.trim() && !sendingResponse) {
+                                            // Use bidRecipient for sending
+                                            const sendMessage = async () => {
+                                              if (!responseText.trim() || !bidRecipient?.id || sendingResponse) return
+                                              const bidPackageId = bidRecipient.bid_package_id || bidRecipient.bid_packages?.id
+                                              if (!bidPackageId) return
+
+                                              setSendingResponse(true)
+                                              setError('')
+                                              try {
+                                                const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({
+                                                    recipientId: bidRecipient.id,
+                                                    responseText: responseText.trim()
+                                                  })
+                                                })
+                                                if (res.ok) {
+                                                  await loadData()
+                                                  setResponseText('')
+                                                  // Reload email statuses
+                                                  try {
+                                                    const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                                    if (statusResponse.ok) {
+                                                      const statusData = await statusResponse.json()
+                                                      if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                        if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                          const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                          setAllRecipients(threadRecipients)
+                                                          const threadsMap: Record<string, any> = {}
+                                                          statusData.threads.forEach((thread: any) => {
+                                                            threadsMap[thread.thread_id] = thread
+                                                          })
+                                                          setEmailThreads(threadsMap)
+                                                        }
+                                                      }
+                                                    }
+                                                  } catch (e) {
+                                                    console.error('Error reloading email threads:', e)
+                                                  }
+                                                } else {
+                                                  const err = await res.json()
+                                                  setError(err.error || 'Failed to send')
+                                                }
+                                              } catch (e: any) {
+                                                setError(e.message || 'Failed to send message')
+                                              } finally {
+                                                setSendingResponse(false)
+                                              }
+                                            }
+                                            sendMessage()
+                                          }
+                                        }
+                                      }}
+                                      style={{
+                                        height: 'auto',
+                                        minHeight: '44px',
+                                      }}
+                                      onInput={(e) => {
+                                        const target = e.target as HTMLTextAreaElement
+                                        target.style.height = 'auto'
+                                        target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+                                      }}
+                                    />
+                                    <Button
+                                      size="icon"
+                                      disabled={sendingResponse || !responseText.trim()}
+                                      onClick={async () => {
+                                        if (!responseText.trim() || !bidRecipient?.id || sendingResponse) return
+                                        const bidPackageId = bidRecipient.bid_package_id || bidRecipient.bid_packages?.id
+                                        if (!bidPackageId) return
+
+                                        setSendingResponse(true)
+                                        setError('')
+                                        try {
+                                          const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                              recipientId: bidRecipient.id,
+                                              responseText: responseText.trim()
+                                            })
+                                          })
+                                          if (res.ok) {
+                                            await loadData()
+                                            setResponseText('')
+                                            // Reload email statuses
+                                            try {
+                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                              if (statusResponse.ok) {
+                                                const statusData = await statusResponse.json()
+                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                    setAllRecipients(threadRecipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.threads.forEach((thread: any) => {
+                                                      threadsMap[thread.thread_id] = thread
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                  }
+                                                }
+                                              }
+                                            } catch (e) {
+                                              console.error('Error reloading email threads:', e)
+                                            }
+                                          } else {
+                                            const err = await res.json()
+                                            setError(err.error || 'Failed to send')
+                                          }
+                                        } catch (e: any) {
+                                          setError(e.message || 'Failed to send message')
+                                        } finally {
+                                          setSendingResponse(false)
+                                        }
+                                      }}
+                                      className="h-[44px] w-[44px] rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                                    >
+                                      {sendingResponse ? (
+                                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                                      ) : (
+                                        <Mail className="h-4 w-4 text-white" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                                {error && <p className="text-sm text-red-600 mt-2 px-1">{error}</p>}
+                              </div>
+                            </div>
+                          </TabsContent>
+                        )}
                       </Tabs>
                     </div>
                   </div>
@@ -2970,139 +3671,244 @@ export default function BidComparisonModal({
               {/* Left Sidebar: Bids & Emails List */}
               <div className="w-[320px] border-r flex flex-col bg-gray-50/50 overflow-hidden">
                 <Tabs value={leftSideTab} onValueChange={(v) => setLeftSideTab(v as 'bids' | 'emails')} className="flex-1 flex flex-col min-h-0">
-                  <div className="p-3 border-b bg-white">
-                    <div className="flex items-center justify-between mb-2">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-                        Bids
-                        {bids.length > 0 && (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {bids.length}
-                          </Badge>
-                        )}
-                      </TabsTrigger>
-                      <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
-                        Emails
-                        {unreadCount > 0 ? (
-                          <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
-                            {unreadCount}
-                          </Badge>
-                        ) : allRecipients.length > 0 ? (
-                          <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
-                            {allRecipients.length}
-                          </Badge>
-                        ) : null}
-                      </TabsTrigger>
-                    </TabsList>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={loadData}
-                        disabled={loading}
-                        className="ml-2 h-8 w-8 p-0"
-                        title="Refresh data"
-                      >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                      </Button>
+                  <div className="border-b bg-white">
+                    <div className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="bids" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
+                          Bids
+                          {bids.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {bids.length}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="emails" className="data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+                          Emails
+                          {allRecipients.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 bg-gray-100 text-gray-600">
+                              {allRecipients.length}
+                            </Badge>
+                          )}
+                          {unreadCount > 0 && (
+                            <Badge variant="default" className="ml-2 bg-blue-600 text-white animate-pulse">
+                              {unreadCount}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                      </TabsList>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={loadData}
+                          disabled={loading}
+                          className="ml-2 h-8 w-8 p-0"
+                          title="Refresh data"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        </Button>
+                      </div>
                     </div>
+                    {/* Search Bar - Bids */}
+                    {leftSideTab === 'bids' && (
+                      <div className="relative px-3 pb-3 border-b bg-white">
+                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="Search bids..."
+                          value={bidsSearchTerm}
+                          onChange={(e) => setBidsSearchTerm(e.target.value)}
+                          className="pl-8 h-9 text-sm"
+                        />
+                      </div>
+                    )}
+                    {/* Search Bar - Emails */}
+                    {leftSideTab === 'emails' && (
+                      <div className="relative px-3 pb-3 border-b bg-white">
+                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="Search emails..."
+                          value={emailsSearchTerm}
+                          onChange={(e) => setEmailsSearchTerm(e.target.value)}
+                          className="pl-8 h-9 text-sm"
+                        />
+                      </div>
+                    )}
                   </div>
                   
                   <TabsContent value="bids" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
-                    {bids.length === 0 && (
-                      <div className="text-center py-8 text-gray-500">
-                        <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                        <p className="text-sm">No bids received yet</p>
-                      </div>
-                    )}
-                    {bids.map((bid) => {
-                      const bidPackage = (bid.bid_packages as any)
-                      return (
-                      <div
-                        key={bid.id}
-                        onClick={() => {
-                          setSelectedBidId(bid.id)
-                          setSelectedEmailRecipient(null)
-                          setResponseText('')
-                          setLeftSideTab('bids')
-                        }}
-                        className={`
-                          cursor-pointer rounded-lg p-4 border transition-all hover:shadow-sm
-                          ${selectedBidId === bid.id 
-                            ? 'border-orange-400 bg-white shadow-md ring-1 ring-orange-400/20' 
-                            : 'bg-white border-gray-200 hover:border-orange-200'
-                          }
-                        `}
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
-                              {bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'}
-                            </h4>
-                            <p className="text-xs text-gray-500 truncate max-w-[160px]">
-                              {bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email}
-                            </p>
-                          </div>
-                          {bid.subcontractors?.trade_category && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bid.subcontractors.trade_category}
-                            </Badge>
-                          )}
-                          {!bid.subcontractors?.trade_category && bid.gc_contacts?.trade_category && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bid.gc_contacts.trade_category}
-                            </Badge>
-                          )}
-                          {!bid.subcontractors?.trade_category && !bid.gc_contacts?.trade_category && bidPackage && (
-                            <Badge variant="outline" className="text-[10px]">
-                              {bidPackage.trade_category}
-                            </Badge>
-                          )}
+                      {bids.length === 0 && (
+                        <div className="text-center py-8 text-gray-500">
+                          <FileText className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                          <p className="text-sm">No bids received yet</p>
                         </div>
+                      )}
+                      {(() => {
+                        // Filter bids based on search term
+                        const filteredBids = bids.filter((bid) => {
+                          if (!bidsSearchTerm) return true
+                          const searchLower = bidsSearchTerm.toLowerCase()
+                          const subcontractorName = (bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown').toLowerCase()
+                          const subcontractorEmail = (bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email || '').toLowerCase()
+                          const tradeCategory = (bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || '').toLowerCase()
+                          const bidAmount = bid.bid_amount?.toLocaleString() || ''
+                          return (
+                            subcontractorName.includes(searchLower) ||
+                            subcontractorEmail.includes(searchLower) ||
+                            tradeCategory.includes(searchLower) ||
+                            bidAmount.includes(searchLower)
+                          )
+                        })
                         
-                        <div className="flex items-baseline gap-1 mb-2">
-                          <span className="text-lg font-bold text-gray-900">
-                            ${bid.bid_amount?.toLocaleString() ?? '0.00'}
-                          </span>
-                          <span className="text-xs text-gray-500">total</span>
-                        </div>
-                        
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {new Date(bid.created_at).toLocaleDateString()}
-                          </div>
-                          {bid.subcontractors?.google_review_score && (
-                            <div className="flex items-center gap-1 text-orange-600">
-                              <span>★</span>
-                              {bid.subcontractors.google_review_score}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      )
-                    })}
-                  </TabsContent>
-                  
-                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-3 min-h-0">
-                    {allRecipients.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                        <p className="text-sm">No emails sent</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {Object.entries(allRecipients.reduce((acc: any, r: any) => {
-                          const key = r.bid_packages?.trade_category || 'Other'
-                          if (!acc[key]) acc[key] = []
-                          acc[key].push(r)
+                        // Organize bids by subcontractor
+                        const bidsBySubcontractor = filteredBids.reduce((acc: any, bid: Bid) => {
+                          const subcontractorName = bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'
+                          if (!acc[subcontractorName]) acc[subcontractorName] = []
+                          acc[subcontractorName].push(bid)
                           return acc
-                        }, {})).map(([category, recipients]: [string, any]) => (
-                          <div key={category}>
+                        }, {})
+                        
+                        // Sort subcontractors alphabetically
+                        const sortedSubcontractors = Object.keys(bidsBySubcontractor).sort()
+                        
+                        if (filteredBids.length === 0 && bids.length > 0) {
+                          return (
+                            <div className="text-center py-8 text-gray-500">
+                              <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                              <p className="text-sm">No bids match your search</p>
+                            </div>
+                          )
+                        }
+                        
+                        return sortedSubcontractors.map((subcontractorName) => (
+                          <div key={subcontractorName}>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
-                              {category}
+                              {subcontractorName}
                             </h3>
                             <div className="space-y-2">
-                              {recipients.map((recipient: any) => {
+                              {bidsBySubcontractor[subcontractorName].map((bid: Bid) => {
+                                const bidPackage = (bid.bid_packages as any)
+                                return (
+                                  <div
+                                    key={bid.id}
+                                    onClick={() => {
+                                      setSelectedBidId(bid.id)
+                                      setSelectedEmailRecipient(null)
+                                      setResponseText('')
+                                      setLeftSideTab('bids')
+                                    }}
+                                    className={`
+                                      cursor-pointer rounded-lg p-4 border transition-all hover:shadow-sm
+                                      ${selectedBidId === bid.id 
+                                        ? 'border-orange-400 bg-white shadow-md ring-1 ring-orange-400/20' 
+                                        : 'bg-white border-gray-200 hover:border-orange-200'
+                                      }
+                                    `}
+                                  >
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div>
+                                        <h4 className="font-semibold text-sm text-gray-900 truncate max-w-[160px]">
+                                          {bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'}
+                                        </h4>
+                                        <p className="text-xs text-gray-500 truncate max-w-[160px]">
+                                          {bid.subcontractors?.email || bid.gc_contacts?.email || bid.subcontractor_email}
+                                        </p>
+                                      </div>
+                                      {bid.subcontractors?.trade_category && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bid.subcontractors.trade_category}
+                                        </Badge>
+                                      )}
+                                      {!bid.subcontractors?.trade_category && bid.gc_contacts?.trade_category && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bid.gc_contacts.trade_category}
+                                        </Badge>
+                                      )}
+                                      {!bid.subcontractors?.trade_category && !bid.gc_contacts?.trade_category && bidPackage && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {bidPackage.trade_category}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex items-baseline gap-1 mb-2">
+                                      <span className="text-lg font-bold text-gray-900">
+                                        ${bid.bid_amount?.toLocaleString() ?? '0.00'}
+                                      </span>
+                                      <span className="text-xs text-gray-500">total</span>
+                                    </div>
+                                    
+                                    <div className="flex items-center justify-between text-xs text-gray-500">
+                                      <div className="flex items-center gap-1">
+                                        <Calendar className="h-3 w-3" />
+                                        {new Date(bid.created_at).toLocaleDateString()}
+                                      </div>
+                                      {bid.subcontractors?.google_review_score && (
+                                        <div className="flex items-center gap-1 text-orange-600">
+                                          <span>★</span>
+                                          {bid.subcontractors.google_review_score}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      })()}
+                  </TabsContent>
+                  
+                  <TabsContent value="emails" className="flex-1 overflow-y-auto p-3 mt-0 space-y-4 min-h-0">
+                      {allRecipients.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <Mail className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                          <p className="text-sm">No emails sent</p>
+                        </div>
+                      ) : (
+                        (() => {
+                          // Filter recipients based on search term
+                          const filteredRecipients = allRecipients.filter((r: any) => {
+                            if (!emailsSearchTerm) return true
+                            const searchLower = emailsSearchTerm.toLowerCase()
+                            const subcontractorName = (r.subcontractor_name || r.subcontractors?.name || r.subcontractor_email || '').toLowerCase()
+                            const subcontractorEmail = (r.subcontractor_email || '').toLowerCase()
+                            const tradeCategory = (r.bid_packages?.trade_category || 'Other').toLowerCase()
+                            const status = (r.status || '').toLowerCase()
+                            const responseText = (r.response_text || '').toLowerCase()
+                            return (
+                              subcontractorName.includes(searchLower) ||
+                              subcontractorEmail.includes(searchLower) ||
+                              tradeCategory.includes(searchLower) ||
+                              status.includes(searchLower) ||
+                              responseText.includes(searchLower)
+                            )
+                          })
+                          
+                          if (filteredRecipients.length === 0 && allRecipients.length > 0) {
+                            return (
+                              <div className="text-center py-8 text-gray-500">
+                                <Search className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                                <p className="text-sm">No emails match your search</p>
+                              </div>
+                            )
+                          }
+                          
+                          const groupedRecipients = filteredRecipients.reduce((acc: any, r: any) => {
+                            const key = r.bid_packages?.trade_category || 'Other'
+                            if (!acc[key]) acc[key] = []
+                            acc[key].push(r)
+                            return acc
+                          }, {})
+                          
+                          return Object.entries(groupedRecipients).map(([category, recipients]: [string, any]) => (
+                            <div key={category}>
+                              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
+                                {category}
+                              </h3>
+                              <div className="space-y-2">
+                                {recipients.map((recipient: any) => {
                                 // Check if this thread has any unread messages
                                 const threadId = recipient.thread_id || `thread-${recipient.bid_package_id || recipient.bid_packages?.id}-${recipient.subcontractor_email}`
                                 const thread = emailThreads[threadId]
@@ -3126,13 +3932,17 @@ export default function BidComparisonModal({
                                     // Mark all unread messages in thread as read when viewing
                                     if (hasUnreadInThread && thread?.messages) {
                                       thread.messages.forEach((m: any) => {
-                                        const msgIsIncoming = !(m.isFromGC ?? m.is_from_gc ?? false)
-                                        if (msgIsIncoming && !m.read_by_gc_at) {
-                                          markEmailAsRead(m.id)
+                                        const isFromGC = m.isFromGC ?? m.is_from_gc ?? false
+                                        const msgIsIncoming = !isFromGC
+                                        if (msgIsIncoming && !isFromGC && !m.read_by_gc_at && isValidRecipientId(m.id)) {
+                                          markEmailAsRead(m.id, m)
                                         }
                                       })
-                                    } else if (isIncoming && !recipient.read_by_gc_at) {
-                                      markEmailAsRead(recipient.id)
+                                    } else if (isIncoming && !recipient.read_by_gc_at && isValidRecipientId(recipient.id)) {
+                                      const isFromGC = recipient.isFromGC ?? recipient.is_from_gc ?? false
+                                      if (!isFromGC) {
+                                        markEmailAsRead(recipient.id, recipient)
+                                      }
                                     }
                                   }}
                                   className={`
@@ -3192,11 +4002,11 @@ export default function BidComparisonModal({
                                 </div>
                                 )
                               })}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))
+                        })()
+                      )}
                   </TabsContent>
                 </Tabs>
               </div>
@@ -3391,6 +4201,25 @@ export default function BidComparisonModal({
                                         {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
                                       </p>
                                     )}
+                                    {/* View Bid button for messages with bids */}
+                                    {!isFromGC && message.bids && message.bids.length > 0 && (
+                                      <div className="mt-3 pt-3 border-t border-gray-200">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setSelectedBidId(message.bids[0].id)
+                                            setSelectedEmailRecipient(null)
+                                            setLeftSideTab('bids')
+                                          }}
+                                          className="h-7 text-xs bg-white hover:bg-orange-50 border-orange-300 text-orange-700 hover:text-orange-800"
+                                        >
+                                          <FileText className="h-3 w-3 mr-1.5" />
+                                          View Bid
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                   <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
                                     {formatChatTime(new Date(messageTime))}
@@ -3526,36 +4355,9 @@ export default function BidComparisonModal({
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-3xl font-bold text-gray-900">
-                            ${selectedBid.bid_amount?.toLocaleString() ?? '0.00'}
-                          </div>
-                          <div className="text-sm text-gray-500">Total Bid Amount</div>
-                          <div className="flex flex-col gap-2 mt-4 items-end">
-                            {/* Status Badge */}
-                            {selectedBid.status === 'accepted' && (
-                              <Badge variant="default" className="bg-green-600 mb-2">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Accepted
-                              </Badge>
-                            )}
-                            {selectedBid.status === 'declined' && (
-                              <Badge variant="destructive" className="mb-2">
-                                <XCircle className="h-3 w-3 mr-1" />
-                                Declined
-                                {selectedBid.decline_reason && (
-                                  <span className="ml-1">({selectedBid.decline_reason})</span>
-                                )}
-                              </Badge>
-                            )}
-                            {selectedBid.status === 'pending' && (
-                              <Badge variant="outline" className="mb-2">
-                                Pending
-                              </Badge>
-                            )}
-                            
+                        <div className="flex items-start gap-6">
                             {/* Action Buttons */}
-                            <div className="flex gap-2 justify-end flex-wrap">
+                          <div className="flex gap-2 flex-wrap">
                               {/* Always show Decline button if not already declined */}
                               {selectedBid.status !== 'declined' && (
                                 <Popover open={showDeclinePopover} onOpenChange={setShowDeclinePopover}>
@@ -3624,11 +4426,17 @@ export default function BidComparisonModal({
                                 </Button>
                               )}
                             </div>
+                          {/* Bid Amount */}
+                          <div className="text-right">
+                            <div className="text-3xl font-bold text-gray-900">
+                              ${selectedBid.bid_amount?.toLocaleString() ?? '0.00'}
+                            </div>
+                            <div className="text-sm text-gray-500">Total Bid Amount</div>
                           </div>
                         </div>
                       </div>
 
-                      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'details' | 'comparison')} className="w-full">
+                      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'details' | 'comparison' | 'conversation')} className="w-full">
                         <TabsList className="bg-transparent border-b rounded-none p-0 h-auto w-full justify-start gap-6">
                           <TabsTrigger 
                             value="details"
@@ -3642,6 +4450,14 @@ export default function BidComparisonModal({
                           >
                             Comparison Analysis
                           </TabsTrigger>
+                          {bidRecipient && (
+                            <TabsTrigger 
+                              value="conversation"
+                              className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-600 px-4 py-3"
+                            >
+                              Email Conversation
+                            </TabsTrigger>
+                          )}
                         </TabsList>
                       </Tabs>
                     </div>
@@ -3984,10 +4800,7 @@ export default function BidComparisonModal({
                                 <div className="space-y-4">
                                   <Card className="flex flex-col h-full overflow-hidden">
                                     <CardHeader className="py-3 px-4 border-b bg-gray-50 flex flex-row items-center justify-between">
-                                      <div className="grid grid-cols-2 gap-4 font-medium text-sm flex-1">
-                                        <div className="text-blue-700">Your Takeoff</div>
-                                        <div className="text-green-700">Bidder Line Item</div>
-                                      </div>
+                                      <CardTitle className="text-base font-semibold">Item Comparison</CardTitle>
                                       <div className="flex items-center gap-2">
                                         {loadingTakeoffAI && (
                                           <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -3996,20 +4809,35 @@ export default function BidComparisonModal({
                                           </div>
                                         )}
                                         <div className="flex items-center gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => generateTakeoffAIComparison()}
+                                            disabled={loadingTakeoffAI || !selectedBidId || filteredTakeoffItems.length === 0 || bidLineItems.length === 0 || selectedTakeoffItemIds.size === 0}
+                                            className="flex items-center gap-2"
+                                          >
+                                            {loadingTakeoffAI ? (
+                                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+                                            ) : (
+                                              <GitCompare className="h-4 w-4" />
+                                            )}
+                                            {loadingTakeoffAI ? 'Analyzing...' : 'Run AI Analysis'}
+                                          </Button>
                                           {isTakeoffCached && (
                                             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                                               Cached
                                             </Badge>
                                           )}
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => setShowAISidebar(!showAISidebar)}
-                                            className="flex items-center gap-2"
-                                          >
-                                            <GitCompare className="h-4 w-4" />
-                                            {showAISidebar ? 'Hide' : 'Show'} AI Analysis
-                                          </Button>
+                                          {takeoffAIAnalysis && (
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => setShowAISidebar(!showAISidebar)}
+                                              className="flex items-center gap-2"
+                                            >
+                                              {showAISidebar ? 'Hide' : 'Show'} AI Analysis
+                                            </Button>
+                                          )}
                                           {isTakeoffCached && (
                                             <Button
                                               variant="ghost"
@@ -4018,7 +4846,7 @@ export default function BidComparisonModal({
                                               className="text-xs"
                                               title="Refresh analysis"
                                             >
-                                              <Clock className="h-3 w-3" />
+                                              <RefreshCw className="h-3 w-3" />
                                             </Button>
                                           )}
                                         </div>
@@ -4033,104 +4861,237 @@ export default function BidComparisonModal({
                                           </div>
                                         </div>
                                       ) : (
-                                        <div className="divide-y">
-                                    {filteredTakeoffItems
-                                      .filter(item => selectedTakeoffItemIds.has(item.id))
-                                      .map(takeoffItem => {
-                                              // Use AI matches if available, otherwise fall back to simple matching
-                                              let aiMatch: any = null
-                                              if (takeoffAIMatches && takeoffAIMatches.length > 0) {
-                                                aiMatch = takeoffAIMatches.find((m: any) => m.takeoffItem.id === takeoffItem.id)
-                                              }
-                                              
-                                              const matchingBidItem = aiMatch?.bidItem || 
-                                                (aiMatch ? null : bidLineItems.find(bi => 
-                                                  bi.description.toLowerCase().includes(takeoffItem.description.toLowerCase()) ||
-                                                  takeoffItem.description.toLowerCase().includes(bi.description.toLowerCase())
-                                                ))
-                                              
-                                              const discrepancy = discrepancies.find(d => d.takeoffItem?.id === takeoffItem.id)
-                                              const hasVariance = aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance)
-                                              
+                                        <div className="overflow-y-auto">
+                                          {(() => {
+                                            const selectedTakeoffItems = filteredTakeoffItems.filter(item => selectedTakeoffItemIds.has(item.id))
+                                            
+                                            // Group items by category
+                                            const takeoffByCategory = selectedTakeoffItems.reduce((acc, item) => {
+                                              const cat = item.category || 'Uncategorized'
+                                              if (!acc[cat]) acc[cat] = []
+                                              acc[cat].push(item)
+                                              return acc
+                                            }, {} as Record<string, typeof selectedTakeoffItems>)
+                                            
+                                            const bidByCategory = bidLineItems.reduce((acc, item) => {
+                                              const cat = item.category || 'Uncategorized'
+                                              if (!acc[cat]) acc[cat] = []
+                                              acc[cat].push(item)
+                                              return acc
+                                            }, {} as Record<string, typeof bidLineItems>)
+                                            
+                                            // Get all unique categories
+                                            const allCategories = Array.from(new Set([
+                                              ...Object.keys(takeoffByCategory),
+                                              ...Object.keys(bidByCategory)
+                                            ])).sort()
+                                            
+                                            if (allCategories.length === 0) {
                                               return (
-                                                <div key={takeoffItem.id} className={`grid grid-cols-2 gap-4 p-4 ${discrepancy || hasVariance ? 'bg-orange-50/30' : ''}`}>
-                                                  {/* Takeoff Side */}
-                                                  <div className="pr-4 border-r">
-                                                    <div className="flex justify-between items-start">
-                                                      <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                          <div className="font-medium text-sm text-gray-900">{takeoffItem.description}</div>
-                                                          {aiMatch && aiMatch.confidence > 0 && (
-                                                            <Badge 
-                                                              variant="outline" 
-                                                              className={`text-xs ${
-                                                                aiMatch.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                aiMatch.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                'bg-orange-50 text-orange-700 border-orange-200'
-                                                              }`}
-                                                              title={aiMatch.notes || `${aiMatch.matchType} match`}
-                                                            >
-                                                              {aiMatch.confidence}% match
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                        <div className="text-xs text-gray-500 mt-1">
-                                                          {takeoffItem.quantity} {takeoffItem.unit} 
-                                                          {takeoffItem.unit_cost && ` @ $${takeoffItem.unit_cost}/unit`}
-                                                        </div>
-                                                      </div>
-                                                      {takeoffItem.unit_cost && (
-                                                        <div className="font-bold text-blue-600 ml-2">
-                                                          ${(takeoffItem.quantity * takeoffItem.unit_cost).toLocaleString()}
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  </div>
-
-                                                  {/* Bid Side */}
-                                                  <div className="pl-4">
-                                                    {matchingBidItem ? (
-                                                      <div className="flex justify-between items-start">
-                                                        <div className="flex-1">
-                                                          <div className="font-medium text-sm text-gray-900">{matchingBidItem.description}</div>
-                                                          <div className="text-xs text-gray-500 mt-1">
-                                                            {matchingBidItem.quantity} {matchingBidItem.unit}
-                                                            {matchingBidItem.unit_price && ` @ $${matchingBidItem.unit_price}/unit`}
-                                                          </div>
-                                                          {aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance) && (
-                                                            <div className="mt-2 space-y-1">
-                                                              {aiMatch.quantityVariance && aiMatch.quantityVariance > 20 && (
-                                                                <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                  Qty variance: {aiMatch.quantityVariance.toFixed(0)}%
-                                                                </Badge>
-                                                              )}
-                                                              {aiMatch.priceVariance && aiMatch.priceVariance > 15 && (
-                                                                <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                  Price variance: {aiMatch.priceVariance.toFixed(0)}%
-                                                                </Badge>
-                                                              )}
-                                                            </div>
-                                                          )}
-                                                          {discrepancy && !aiMatch && (
-                                                            <Badge variant="outline" className="mt-2 text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                              {discrepancy.type === 'quantity' ? `Qty mismatch (${discrepancy.percentage?.toFixed(0)}%)` : 'Price mismatch'}
-                                                            </Badge>
-                                                          )}
-                                                        </div>
-                                                        <div className={`font-bold ml-2 ${discrepancy || hasVariance ? 'text-orange-600' : 'text-green-600'}`}>
-                                                          ${matchingBidItem.amount.toLocaleString()}
-                                                        </div>
-                                                      </div>
-                                                    ) : (
-                                                      <div className="text-sm text-gray-400 italic flex items-center gap-2">
-                                                        <AlertCircle className="h-4 w-4" />
-                                                        {aiMatch ? 'No match found (AI analyzed)' : 'Not found in bid'}
-                                                      </div>
-                                                    )}
-                                                  </div>
+                                                <div className="p-12 text-center text-gray-500">
+                                                  <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                                                  <p className="font-medium">No items selected for comparison</p>
+                                                  <p className="text-sm mt-2">Select items from the left panel to compare</p>
                                                 </div>
                                               )
-                                            })}
+                                            }
+                                            
+                                            return (
+                                              <div className="space-y-6 p-4">
+                                                {allCategories.map(category => {
+                                                  const takeoffItemsInCat = takeoffByCategory[category] || []
+                                                  const bidItemsInCat = bidByCategory[category] || []
+                                                  
+                                                  // Calculate category totals
+                                                  const takeoffTotal = takeoffItemsInCat.reduce((sum, item) => 
+                                                    sum + (item.quantity * (item.unit_cost || 0)), 0
+                                                  )
+                                                  const bidTotal = bidItemsInCat.reduce((sum, item) => sum + item.amount, 0)
+                                                  
+                                                  // Build AI match map for this category
+                                                  const aiMatchMap = new Map<string, any>()
+                                                  if (takeoffAIMatches && takeoffAIMatches.length > 0) {
+                                                    takeoffItemsInCat.forEach(takeoffItem => {
+                                                      const match = takeoffAIMatches.find((m: any) => m.takeoffItem.id === takeoffItem.id)
+                                                      if (match) {
+                                                        aiMatchMap.set(takeoffItem.id, match)
+                                                      }
+                                                    })
+                                                  }
+                                                  
+                                                  return (
+                                                    <div key={category} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                                      {/* Category Header */}
+                                                      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200">
+                                                        <div className="flex items-center justify-between">
+                                                          <h3 className="font-semibold text-gray-900">{category}</h3>
+                                                          <div className="flex items-center gap-4 text-sm">
+                                                            <div className="flex items-center gap-2">
+                                                              <span className="text-gray-600">Takeoff:</span>
+                                                              <span className="font-bold text-blue-700">${takeoffTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                              <span className="text-gray-600">Bid:</span>
+                                                              <span className="font-bold text-green-700">${bidTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                            </div>
+                                                            {takeoffTotal > 0 && bidTotal > 0 && (
+                                                              <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600">Diff:</span>
+                                                                <span className={`font-bold ${bidTotal > takeoffTotal ? 'text-red-600' : 'text-green-600'}`}>
+                                                                  {bidTotal > takeoffTotal ? '+' : ''}${(bidTotal - takeoffTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                      
+                                                      {/* Items Grid */}
+                                                      <div className="grid grid-cols-2 gap-0">
+                                                        {/* Takeoff Items Column */}
+                                                        <div className="border-r border-gray-200 bg-blue-50/20">
+                                                          <div className="px-4 py-2 bg-blue-100/50 border-b border-gray-200">
+                                                            <h4 className="text-sm font-semibold text-blue-900">Takeoff Items ({takeoffItemsInCat.length})</h4>
+                                                          </div>
+                                                          <div className="divide-y divide-gray-200">
+                                                            {takeoffItemsInCat.length > 0 ? (
+                                                              takeoffItemsInCat.map(takeoffItem => {
+                                                                const aiMatch = aiMatchMap.get(takeoffItem.id)
+                                                                const hasVariance = aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance)
+                                                                
+                                                                return (
+                                                                  <div 
+                                                                    key={takeoffItem.id} 
+                                                                    className={`p-4 hover:bg-blue-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                  >
+                                                                    <div className="space-y-2">
+                                                                      <div className="flex items-start justify-between gap-2">
+                                                                        <div className="font-semibold text-sm text-gray-900 flex-1">{takeoffItem.description}</div>
+                                                                        {aiMatch && aiMatch.confidence > 0 && (
+                                                                          <Badge 
+                                                                            variant="outline" 
+                                                                            className={`text-xs flex-shrink-0 ${
+                                                                              aiMatch.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                              aiMatch.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                              'bg-orange-50 text-orange-700 border-orange-200'
+                                                                            }`}
+                                                                            title={aiMatch.notes || `${aiMatch.matchType} match`}
+                                                                          >
+                                                                            {aiMatch.confidence}%
+                                                                          </Badge>
+                                                                        )}
+                                                                      </div>
+                                                                      <div className="text-xs text-gray-600">
+                                                                        {takeoffItem.quantity} {takeoffItem.unit}
+                                                                        {takeoffItem.unit_cost && ` @ $${takeoffItem.unit_cost.toLocaleString()}/${takeoffItem.unit}`}
+                                                                      </div>
+                                                                      {takeoffItem.unit_cost && (
+                                                                        <div className="font-bold text-blue-700 text-base">
+                                                                          ${(takeoffItem.quantity * takeoffItem.unit_cost).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                        </div>
+                                                                      )}
+                                                                      {aiMatch && (aiMatch.quantityVariance || aiMatch.priceVariance) && (
+                                                                        <div className="mt-2 space-y-1">
+                                                                          {aiMatch.quantityVariance && aiMatch.quantityVariance > 20 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Qty: {aiMatch.quantityVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                          {aiMatch.priceVariance && aiMatch.priceVariance > 15 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Price: {aiMatch.priceVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                        </div>
+                                                                      )}
+                                                                    </div>
+                                                                  </div>
+                                                                )
+                                                              })
+                                                            ) : (
+                                                              <div className="p-8 text-center text-gray-400 text-sm">
+                                                                No takeoff items
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                        
+                                                        {/* Bid Items Column */}
+                                                        <div className="bg-green-50/20">
+                                                          <div className="px-4 py-2 bg-green-100/50 border-b border-gray-200">
+                                                            <h4 className="text-sm font-semibold text-green-900">Bid Items ({bidItemsInCat.length})</h4>
+                                                          </div>
+                                                          <div className="divide-y divide-gray-200">
+                                                            {bidItemsInCat.length > 0 ? (
+                                                              bidItemsInCat.map(bidItem => {
+                                                                // Find if this bid item is matched to any takeoff item
+                                                                const matchedTakeoff = takeoffAIMatches?.find((m: any) => m.bidItem?.id === bidItem.id)
+                                                                const hasVariance = matchedTakeoff && (matchedTakeoff.quantityVariance || matchedTakeoff.priceVariance)
+                                                                
+                                                                return (
+                                                                  <div 
+                                                                    key={bidItem.id} 
+                                                                    className={`p-4 hover:bg-green-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                  >
+                                                                    <div className="space-y-2">
+                                                                      <div className="flex items-start justify-between gap-2">
+                                                                        <div className="font-semibold text-sm text-gray-900 flex-1">{bidItem.description}</div>
+                                                                        {matchedTakeoff && matchedTakeoff.confidence > 0 && (
+                                                                          <Badge 
+                                                                            variant="outline" 
+                                                                            className={`text-xs flex-shrink-0 ${
+                                                                              matchedTakeoff.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                              matchedTakeoff.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                              'bg-orange-50 text-orange-700 border-orange-200'
+                                                                            }`}
+                                                                            title={matchedTakeoff.notes || `${matchedTakeoff.matchType} match`}
+                                                                          >
+                                                                            {matchedTakeoff.confidence}%
+                                                                          </Badge>
+                                                                        )}
+                                                                      </div>
+                                                                      {bidItem.notes && (
+                                                                        <div className="text-xs text-gray-600 italic">{bidItem.notes}</div>
+                                                                      )}
+                                                                      <div className="text-xs text-gray-600">
+                                                                        {bidItem.quantity} {bidItem.unit}
+                                                                        {bidItem.unit_price && ` @ $${bidItem.unit_price.toLocaleString()}/${bidItem.unit || 'unit'}`}
+                                                                      </div>
+                                                                      <div className={`font-bold text-base ${hasVariance ? 'text-orange-600' : 'text-green-700'}`}>
+                                                                        ${bidItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                      </div>
+                                                                      {matchedTakeoff && (matchedTakeoff.quantityVariance || matchedTakeoff.priceVariance) && (
+                                                                        <div className="mt-2 space-y-1">
+                                                                          {matchedTakeoff.quantityVariance && matchedTakeoff.quantityVariance > 20 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Qty: {matchedTakeoff.quantityVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                          {matchedTakeoff.priceVariance && matchedTakeoff.priceVariance > 15 && (
+                                                                            <Badge variant="outline" className="text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                              Price: {matchedTakeoff.priceVariance.toFixed(0)}%
+                                                                            </Badge>
+                                                                          )}
+                                                                        </div>
+                                                                      )}
+                                                                    </div>
+                                                                  </div>
+                                                                )
+                                                              })
+                                                            ) : (
+                                                              <div className="p-8 text-center text-gray-400 text-sm">
+                                                                No bid items
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  )
+                                                })}
+                                              </div>
+                                            )
+                                          })()}
                                         </div>
                                       )}
                                     </CardContent>
@@ -4231,20 +5192,35 @@ export default function BidComparisonModal({
                                             </div>
                                           )}
                                           <div className="flex items-center gap-2">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => generateAIComparison()}
+                                              disabled={loadingAI || !selectedBidId || selectedComparisonBidIds.size === 0}
+                                              className="flex items-center gap-2"
+                                            >
+                                              {loadingAI ? (
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></div>
+                                              ) : (
+                                                <GitCompare className="h-4 w-4" />
+                                              )}
+                                              {loadingAI ? 'Analyzing...' : 'Run AI Analysis'}
+                                            </Button>
                                             {isCached && (
                                               <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                                                 Cached
                                               </Badge>
                                             )}
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={() => setShowAISidebar(!showAISidebar)}
-                                              className="flex items-center gap-2"
-                                            >
-                                              <GitCompare className="h-4 w-4" />
-                                              {showAISidebar ? 'Hide' : 'Show'} AI Analysis
-                                            </Button>
+                                            {aiAnalysis && (
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setShowAISidebar(!showAISidebar)}
+                                                className="flex items-center gap-2"
+                                              >
+                                                {showAISidebar ? 'Hide' : 'Show'} AI Analysis
+                                              </Button>
+                                            )}
                                             {isCached && (
                                               <Button
                                                 variant="ghost"
@@ -4253,7 +5229,7 @@ export default function BidComparisonModal({
                                                 className="text-xs"
                                                 title="Refresh analysis"
                                               >
-                                                <Clock className="h-3 w-3" />
+                                                <RefreshCw className="h-3 w-3" />
                                               </Button>
                                             )}
                                           </div>
@@ -4270,164 +5246,221 @@ export default function BidComparisonModal({
                                             </div>
                                           </div>
                                         ) : (
-                                          <div className="overflow-x-auto">
-                                            <table className="w-full text-sm">
-                                              <thead className="bg-gray-50 border-b">
-                                                <tr>
-                                                  <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
-                                                  <th className="px-4 py-3 text-center font-medium text-gray-700">Selected Bid</th>
-                                                  {Array.from(selectedComparisonBidIds).map(bidId => {
-                                                    const bid = bids.find(b => b.id === bidId)
+                                          <div className="overflow-y-auto">
+                                            {(() => {
+                                              // Group all items by category
+                                              const selectedBidByCategory = bidLineItems.reduce((acc, item) => {
+                                                const cat = item.category || 'Uncategorized'
+                                                if (!acc[cat]) acc[cat] = []
+                                                acc[cat].push(item)
+                                                return acc
+                                              }, {} as Record<string, typeof bidLineItems>)
+                                              
+                                              const comparisonBidsByCategory: Record<string, Record<string, BidLineItem[]>> = {}
+                                              Array.from(selectedComparisonBidIds).forEach(bidId => {
+                                                const compItems = comparisonBidLineItems[bidId] || []
+                                                compItems.forEach(item => {
+                                                  const cat = item.category || 'Uncategorized'
+                                                  if (!comparisonBidsByCategory[cat]) comparisonBidsByCategory[cat] = {}
+                                                  if (!comparisonBidsByCategory[cat][bidId]) comparisonBidsByCategory[cat][bidId] = []
+                                                  comparisonBidsByCategory[cat][bidId].push(item)
+                                                })
+                                              })
+                                              
+                                              // Get all unique categories
+                                              const allCategories = Array.from(new Set([
+                                                ...Object.keys(selectedBidByCategory),
+                                                ...Object.keys(comparisonBidsByCategory)
+                                              ])).sort()
+                                              
+                                              if (allCategories.length === 0) {
+                                                return (
+                                                  <div className="p-12 text-center text-gray-500">
+                                                    <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                                                    <p className="font-medium">No line items found in the selected bid</p>
+                                                  </div>
+                                                )
+                                              }
+                                              
+                                              // Build AI match maps for each comparison bid
+                                              const aiMatchMaps: Record<string, Map<string, any>> = {}
+                                              if (aiMatches && aiMatches.length > 0) {
+                                                Array.from(selectedComparisonBidIds).forEach(bidId => {
+                                                  const map = new Map<string, any>()
+                                                  bidLineItems.forEach(selectedItem => {
+                                                    const aiMatch = aiMatches.find((m: any) => m.selectedBidItem.id === selectedItem.id)
+                                                    if (aiMatch) {
+                                                      const match = aiMatch.comparisonItems.find((ci: any) => ci.bidId === bidId)
+                                                      if (match) {
+                                                        map.set(selectedItem.id, match)
+                                                      }
+                                                    }
+                                                  })
+                                                  aiMatchMaps[bidId] = map
+                                                })
+                                              }
+                                              
+                                              return (
+                                                <div className="space-y-6 p-4">
+                                                  {allCategories.map(category => {
+                                                    const selectedItemsInCat = selectedBidByCategory[category] || []
+                                                    const selectedTotal = selectedItemsInCat.reduce((sum, item) => sum + item.amount, 0)
+                                                    
                                                     return (
-                                                      <th key={bidId} className="px-4 py-3 text-center font-medium text-gray-700">
-                                                        {bid?.subcontractors?.name || bid?.gc_contacts?.name || bid?.subcontractor_email || 'Unknown'}
-                                                      </th>
+                                                      <div key={category} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                                        {/* Category Header */}
+                                                        <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-3 border-b border-gray-200">
+                                                          <div className="flex items-center justify-between">
+                                                            <h3 className="font-semibold text-gray-900">{category}</h3>
+                                                            <div className="flex items-center gap-4 text-sm">
+                                                              <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600">Selected:</span>
+                                                                <span className="font-bold text-blue-700">${selectedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                                              </div>
+                                                              {Array.from(selectedComparisonBidIds).map(bidId => {
+                                                                const compItems = comparisonBidsByCategory[category]?.[bidId] || []
+                                                                const compTotal = compItems.reduce((sum, item) => sum + item.amount, 0)
+                                                                const bid = bids.find(b => b.id === bidId)
+                                                                return (
+                                                                  <div key={bidId} className="flex items-center gap-2">
+                                                                    <span className="text-gray-600 text-xs">{bid?.subcontractors?.name || bid?.gc_contacts?.name || 'Bid'}:</span>
+                                                                    <span className={`font-bold text-sm ${compTotal > selectedTotal ? 'text-red-600' : compTotal < selectedTotal ? 'text-green-600' : 'text-gray-900'}`}>
+                                                                      ${compTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                    </span>
+                                                                  </div>
+                                                                )
+                                                              })}
+                                                            </div>
+                                                          </div>
+                                                        </div>
+                                                        
+                                                        {/* Items Grid - Horizontal Scroll */}
+                                                        <div className="overflow-x-auto">
+                                                          <div className="flex gap-0 min-w-max">
+                                                            {/* Selected Bid Column */}
+                                                            <div className="flex-shrink-0 w-80 border-r-2 border-gray-300 bg-blue-50/20">
+                                                              <div className="px-4 py-2 bg-blue-100/50 border-b border-gray-200 sticky left-0 z-10">
+                                                                <h4 className="text-sm font-semibold text-blue-900">
+                                                                  {selectedBid?.subcontractors?.name || selectedBid?.gc_contacts?.name || 'Selected Bid'} ({selectedItemsInCat.length})
+                                                                </h4>
+                                                              </div>
+                                                              <div className="divide-y divide-gray-200">
+                                                                {selectedItemsInCat.length > 0 ? (
+                                                                  selectedItemsInCat.map(item => (
+                                                                    <div key={item.id} className="p-4 hover:bg-blue-50/50 transition-colors">
+                                                                      <div className="space-y-2">
+                                                                        <div className="font-semibold text-sm text-gray-900">{item.description}</div>
+                                                                        {item.notes && (
+                                                                          <div className="text-xs text-gray-600 italic">{item.notes}</div>
+                                                                        )}
+                                                                        <div className="text-xs text-gray-600">
+                                                                          {item.quantity} {item.unit}
+                                                                          {item.unit_price && ` @ $${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/${item.unit || 'unit'}`}
+                                                                        </div>
+                                                                        <div className="font-bold text-blue-700 text-base">
+                                                                          ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                        </div>
+                                                                      </div>
+                                                                    </div>
+                                                                  ))
+                                                                ) : (
+                                                                  <div className="p-8 text-center text-gray-400 text-sm">No items</div>
+                                                                )}
+                                                              </div>
+                                                            </div>
+                                                            
+                                                            {/* Comparison Bid Columns */}
+                                                            {Array.from(selectedComparisonBidIds).map(bidId => {
+                                                              const bid = bids.find(b => b.id === bidId)
+                                                              const compItems = comparisonBidsByCategory[category]?.[bidId] || []
+                                                              const aiMatchMap = aiMatchMaps[bidId] || new Map()
+                                                              
+                                                              return (
+                                                                <div key={bidId} className="flex-shrink-0 w-80 border-r-2 border-gray-300 bg-white last:border-r-0">
+                                                                  <div className="px-4 py-2 bg-gray-100/50 border-b border-gray-200 sticky left-0 z-10">
+                                                                    <h4 className="text-sm font-semibold text-gray-900">
+                                                                      {bid?.subcontractors?.name || bid?.gc_contacts?.name || 'Unknown'} ({compItems.length})
+                                                                    </h4>
+                                                                  </div>
+                                                                  <div className="divide-y divide-gray-200">
+                                                                    {compItems.length > 0 ? (
+                                                                      compItems.map(compItem => {
+                                                                        // Check if this item matches any selected item via AI
+                                                                        let match: any = null
+                                                                        for (const [selectedItemId, matchData] of aiMatchMap.entries()) {
+                                                                          if (matchData.item?.id === compItem.id) {
+                                                                            match = matchData
+                                                                            break
+                                                                          }
+                                                                        }
+                                                                        
+                                                                        // Find corresponding selected item for comparison
+                                                                        const correspondingSelected = selectedItemsInCat.find(si => {
+                                                                          const m = aiMatchMap.get(si.id)
+                                                                          return m?.item?.id === compItem.id
+                                                                        })
+                                                                        
+                                                                        const isLower = correspondingSelected && compItem.amount < correspondingSelected.amount
+                                                                        const isHigher = correspondingSelected && compItem.amount > correspondingSelected.amount
+                                                                        const hasVariance = correspondingSelected && 
+                                                                          Math.abs(compItem.amount - correspondingSelected.amount) > correspondingSelected.amount * 0.1
+                                                                        
+                                                                        return (
+                                                                          <div 
+                                                                            key={compItem.id} 
+                                                                            className={`p-4 hover:bg-gray-50/50 transition-colors ${hasVariance ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''}`}
+                                                                          >
+                                                                            <div className="space-y-2">
+                                                                              <div className="flex items-start justify-between gap-2">
+                                                                                <div className="font-semibold text-sm text-gray-900 flex-1">{compItem.description}</div>
+                                                                                {match?.confidence && (
+                                                                                  <Badge 
+                                                                                    variant="outline" 
+                                                                                    className={`text-xs flex-shrink-0 ${
+                                                                                      match.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
+                                                                                      match.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                                                                                      'bg-orange-50 text-orange-700 border-orange-200'
+                                                                                    }`}
+                                                                                    title={match.notes || `${match.matchType} match`}
+                                                                                  >
+                                                                                    {match.confidence}%
+                                                                                  </Badge>
+                                                                                )}
+                                                                              </div>
+                                                                              {compItem.notes && (
+                                                                                <div className="text-xs text-gray-600 italic">{compItem.notes}</div>
+                                                                              )}
+                                                                              <div className="text-xs text-gray-600">
+                                                                                {compItem.quantity} {compItem.unit}
+                                                                                {compItem.unit_price && ` @ $${compItem.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/${compItem.unit || 'unit'}`}
+                                                                              </div>
+                                                                              <div className={`font-bold text-base ${isLower ? 'text-green-700' : isHigher ? 'text-red-600' : 'text-gray-900'}`}>
+                                                                                ${compItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                                              </div>
+                                                                              {hasVariance && !match?.confidence && correspondingSelected && (
+                                                                                <Badge variant="outline" className="mt-1 text-xs border-orange-200 text-orange-700 bg-orange-50">
+                                                                                  {((compItem.amount - correspondingSelected.amount) / correspondingSelected.amount * 100).toFixed(0)}% {isLower ? 'lower' : 'higher'}
+                                                                                </Badge>
+                                                                              )}
+                                                                            </div>
+                                                                          </div>
+                                                                        )
+                                                                      })
+                                                                    ) : (
+                                                                      <div className="p-8 text-center text-gray-400 text-sm">No items</div>
+                                                                    )}
+                                                                  </div>
+                                                                </div>
+                                                              )
+                                                            })}
+                                                          </div>
+                                                        </div>
+                                                      </div>
                                                     )
                                                   })}
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y">
-                                                {bidLineItems.length > 0 ? (
-                                                  bidLineItems.map(item => {
-                                                    // Use AI matches if available, otherwise fall back to simple matching
-                                                    let comparisonItems: Array<{ item: any; confidence?: number; matchType?: string; notes?: string } | null> = []
-                                                    
-                                                    if (aiMatches && aiMatches.length > 0) {
-                                                      const aiMatch = aiMatches.find((m: any) => m.selectedBidItem.id === item.id)
-                                                      if (aiMatch) {
-                                                        // Use AI-matched items
-                                                        comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                          const match = aiMatch.comparisonItems.find((ci: any) => ci.bidId === bidId)
-                                                          return match ? { item: match.item, confidence: match.confidence, matchType: match.matchType, notes: match.notes } : null
-                                                        })
-                                                      } else {
-                                                        // Fallback to simple matching
-                                                        comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                          const compItems = comparisonBidLineItems[bidId] || []
-                                                          const found = compItems.find(ci =>
-                                                            ci.description.toLowerCase().includes(item.description.toLowerCase()) ||
-                                                            item.description.toLowerCase().includes(ci.description.toLowerCase())
-                                                          )
-                                                          return found ? { item: found } : null
-                                                        })
-                                                      }
-                                                    } else {
-                                                      // Simple matching when AI not available
-                                                      comparisonItems = Array.from(selectedComparisonBidIds).map(bidId => {
-                                                        const compItems = comparisonBidLineItems[bidId] || []
-                                                        const found = compItems.find(ci =>
-                                                          ci.description.toLowerCase().includes(item.description.toLowerCase()) ||
-                                                          item.description.toLowerCase().includes(ci.description.toLowerCase())
-                                                        )
-                                                        return found ? { item: found } : null
-                                                      })
-                                                    }
-
-                                                    const allAmounts = [item.amount, ...comparisonItems.map(ci => ci?.item?.amount).filter(Boolean)]
-                                                    const minAmount = Math.min(...allAmounts.map(a => a || Infinity))
-                                                    const maxAmount = Math.max(...allAmounts.map(a => a || Infinity))
-                                                    const hasVariance = maxAmount - minAmount > minAmount * 0.1 // 10% variance threshold
-
-                                                    return (
-                                                      <tr key={item.id} className={hasVariance ? 'bg-orange-50/30' : ''}>
-                                                        <td className="px-4 py-3 font-medium text-gray-900">
-                                                          <div className="flex items-center gap-2">
-                                                            {item.description}
-                                                            {comparisonItems.some(ci => ci?.confidence) && (
-                                                              <Badge 
-                                                                variant="outline" 
-                                                                className={`text-xs ${
-                                                                  comparisonItems.some(ci => ci?.confidence && ci.confidence >= 85) ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                  comparisonItems.some(ci => ci?.confidence && ci.confidence >= 70) ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                  'bg-orange-50 text-orange-700 border-orange-200'
-                                                                }`}
-                                                                title={comparisonItems.find(ci => ci?.confidence)?.notes || ''}
-                                                              >
-                                                                {Math.max(...comparisonItems.map(ci => ci?.confidence || 0))}% match
-                                                              </Badge>
-                                                            )}
-                                                          </div>
-                                                          {item.notes && (
-                                                            <div className="text-xs text-gray-500 font-normal mt-1">{item.notes}</div>
-                                                          )}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-center">
-                                                          <div className="font-semibold text-gray-900">
-                                                            ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                          </div>
-                                                          {item.unit_price && (
-                                                            <div className="text-xs text-gray-500">
-                                                              @ ${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/{item.unit || 'unit'}
-                                                            </div>
-                                                          )}
-                                                          {item.quantity && item.unit && (
-                                                            <div className="text-xs text-gray-500">
-                                                              {item.quantity} {item.unit}
-                                                            </div>
-                                                          )}
-                                                        </td>
-                                                        {comparisonItems.map((compItem, idx) => {
-                                                          const bidId = Array.from(selectedComparisonBidIds)[idx]
-                                                          const comp = compItem?.item
-                                                          const isLower = comp && comp.amount < item.amount
-                                                          const isHigher = comp && comp.amount > item.amount
-                                                          
-                                                          return (
-                                                            <td key={`${bidId}-${idx}`} className="px-4 py-3 text-center">
-                                                              {comp ? (
-                                                                <>
-                                                                  <div className={`font-semibold ${isLower ? 'text-green-600' : isHigher ? 'text-red-600' : 'text-gray-900'}`}>
-                                                                    ${comp.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                                  </div>
-                                                                  {comp.unit_price && (
-                                                                    <div className="text-xs text-gray-500">
-                                                                      @ ${comp.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}/{comp.unit || 'unit'}
-                                                                    </div>
-                                                                  )}
-                                                                  {comp.quantity && comp.unit && (
-                                                                    <div className="text-xs text-gray-500">
-                                                                      {comp.quantity} {comp.unit}
-                                                                    </div>
-                                                                  )}
-                                                                  {compItem?.confidence && (
-                                                                    <Badge 
-                                                                      variant="outline" 
-                                                                      className={`mt-1 text-xs ${
-                                                                        compItem.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
-                                                                        compItem.confidence >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                                                        'bg-orange-50 text-orange-700 border-orange-200'
-                                                                      }`}
-                                                                      title={compItem.notes || `${compItem.matchType} match`}
-                                                                    >
-                                                                      {compItem.confidence}%
-                                                                    </Badge>
-                                                                  )}
-                                                                  {hasVariance && !compItem?.confidence && (
-                                                                    <Badge variant="outline" className="mt-1 text-xs border-orange-200 text-orange-700 bg-orange-50">
-                                                                      {comp.amount && item.amount ? (
-                                                                        `${((comp.amount - item.amount) / item.amount * 100).toFixed(0)}%`
-                                                                      ) : '-'}
-                                                                    </Badge>
-                                                                  )}
-                                                                </>
-                                                              ) : (
-                                                                <div className="text-sm text-gray-400 italic">-</div>
-                                                              )}
-                                                            </td>
-                                                          )
-                                                        })}
-                                                      </tr>
-                                                    )
-                                                  })
-                                                ) : (
-                                                  <tr>
-                                                    <td colSpan={selectedComparisonBidIds.size + 2} className="px-4 py-12 text-center text-gray-500">
-                                                      No line items found in the selected bid.
-                                                    </td>
-                                                  </tr>
-                                                )}
-                                              </tbody>
-                                            </table>
+                                                </div>
+                                              )
+                                            })()}
                                           </div>
                                         )}
                                       </CardContent>
@@ -4459,6 +5492,286 @@ export default function BidComparisonModal({
                             )
                           )}
                         </TabsContent>
+
+                        {/* Email Conversation Tab */}
+                        {bidRecipient && (
+                          <TabsContent value="conversation" className="mt-0">
+                            <div className="flex flex-col h-full bg-white">
+                              {/* Chat Messages Container */}
+                              <div className="flex-1 overflow-y-auto px-4 py-6 space-y-3 bg-gray-50 min-h-[400px]">
+                                {(() => {
+                                  // Get thread for this recipient
+                                  const threadId = bidRecipient.thread_id || 
+                                    `thread-${bidRecipient.bid_package_id || bidRecipient.bid_packages?.id}-${bidRecipient.subcontractor_email}`
+                                  const thread = emailThreads[threadId]
+                                  const threadMessages = thread?.messages || [bidRecipient]
+                                  
+                                  // Sort messages by timestamp
+                                  const sortedMessages = [...threadMessages].sort((a, b) => {
+                                    const timeA = new Date(a.messageTimestamp || a.responded_at || a.sent_at || a.created_at).getTime()
+                                    const timeB = new Date(b.messageTimestamp || b.responded_at || b.sent_at || b.created_at).getTime()
+                                    return timeA - timeB
+                                  })
+                                  
+                                  if (sortedMessages.length === 0) {
+                                    return (
+                                      <div className="flex items-center justify-center h-full">
+                                        <p className="text-gray-400 text-sm">No messages yet</p>
+                                      </div>
+                                    )
+                                  }
+                                  
+                                  return sortedMessages.map((message: any, index: number) => {
+                                    const isFromGC = message.isFromGC ?? false
+                                    const messageContent = fetchedEmailContent[message.id] || message.response_text || message.notes || ''
+                                    const messageTime = message.responded_at || message.sent_at || message.created_at
+                                    
+                                    // Fetch email content if missing
+                                    if (!messageContent && message.resend_email_id && !fetchingEmailContent.has(message.id) && !fetchedEmailContent[message.id]) {
+                                      setFetchingEmailContent(prev => new Set(prev).add(message.id))
+                                      fetch(`/api/emails/${message.resend_email_id}/content`)
+                                        .then(res => res.json())
+                                        .then(data => {
+                                          if (data.content) {
+                                            setFetchedEmailContent(prev => ({
+                                              ...prev,
+                                              [message.id]: data.content
+                                            }))
+                                          }
+                                        })
+                                        .catch(err => console.error('Failed to fetch email content:', err))
+                                        .finally(() => {
+                                          setFetchingEmailContent(prev => {
+                                            const next = new Set(prev)
+                                            next.delete(message.id)
+                                            return next
+                                          })
+                                        })
+                                    }
+                                    
+                                    const senderName = isFromGC ? 'You' : (message.subcontractor_name || message.subcontractors?.name || message.subcontractor_email || 'Subcontractor')
+                                    const prevMessage = index > 0 ? sortedMessages[index - 1] : null
+                                    const showAvatar = !prevMessage || prevMessage.isFromGC !== isFromGC
+                                    const getInitials = (name: string) => {
+                                      if (!name) return '?'
+                                      const parts = name.trim().split(/\s+/)
+                                      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                                      return name.substring(0, 2).toUpperCase()
+                                    }
+                                    const formatChatTime = (date: Date) => {
+                                      const now = new Date()
+                                      const diffMs = now.getTime() - date.getTime()
+                                      const diffMins = Math.floor(diffMs / 60000)
+                                      const diffHours = Math.floor(diffMs / 3600000)
+                                      const diffDays = Math.floor(diffMs / 86400000)
+                                      if (diffMins < 1) return 'Just now'
+                                      if (diffMins < 60) return `${diffMins}m ago`
+                                      if (diffHours < 24) return `${diffHours}h ago`
+                                      if (diffDays < 7) return `${diffDays}d ago`
+                                      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                    }
+                                    
+                                    return (
+                                      <div
+                                        key={message.id || `message-${index}`}
+                                        className={`flex items-end gap-2 ${isFromGC ? 'flex-row-reverse' : 'flex-row'} ${showAvatar ? 'mt-4' : 'mt-1'}`}
+                                      >
+                                        {showAvatar ? (
+                                          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shadow-sm ${
+                                            isFromGC ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
+                                          }`}>
+                                            {isFromGC ? 'Y' : getInitials(senderName)}
+                                          </div>
+                                        ) : (
+                                          <div className="w-8" />
+                                        )}
+                                        
+                                        <div className={`flex flex-col max-w-[75%] ${isFromGC ? 'items-end' : 'items-start'}`}>
+                                          {showAvatar && (
+                                            <span className={`text-xs text-gray-500 mb-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                              {senderName}
+                                            </span>
+                                          )}
+                                          <div className={`rounded-2xl px-4 py-2.5 shadow-sm ${
+                                            isFromGC
+                                              ? 'bg-blue-600 text-white rounded-br-sm'
+                                              : 'bg-white text-gray-900 rounded-bl-sm border border-gray-200'
+                                          }`}>
+                                            {fetchingEmailContent.has(message.id) ? (
+                                              <div className="flex items-center gap-2">
+                                                <div className={`animate-spin rounded-full h-3 w-3 border-2 ${isFromGC ? 'border-white border-t-transparent' : 'border-gray-400 border-t-transparent'}`}></div>
+                                                <span className="text-xs">Loading...</span>
+                                              </div>
+                                            ) : messageContent && containsHTML(messageContent) ? (
+                                              <div 
+                                                className="text-sm leading-relaxed max-w-none email-content"
+                                                dangerouslySetInnerHTML={{ __html: sanitizeHTML(messageContent) }}
+                                                style={{
+                                                  color: isFromGC ? 'white' : 'inherit',
+                                                  '--tw-prose-links': isFromGC ? 'white' : 'rgb(59 130 246)',
+                                                } as React.CSSProperties}
+                                              />
+                                            ) : (
+                                              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                                                {messageContent || (isFromGC ? 'Email sent' : 'No message content available')}
+                                              </p>
+                                            )}
+                                          </div>
+                                          <span className={`text-xs text-gray-400 mt-1 px-1 ${isFromGC ? 'text-right' : 'text-left'}`}>
+                                            {formatChatTime(new Date(messageTime))}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )
+                                  })
+                                })()}
+                              </div>
+
+                              {/* Reply Input */}
+                              <div className="border-t bg-white p-3 flex-shrink-0">
+                                <div className="flex items-end gap-2">
+                                  <div className="flex-1 flex items-end gap-2">
+                                    <Textarea
+                                      value={responseText}
+                                      onChange={(e) => setResponseText(e.target.value)}
+                                      placeholder="Type a message..."
+                                      rows={1}
+                                      className="resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[44px] max-h-[120px] py-2.5 px-3 text-sm rounded-full"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                          e.preventDefault()
+                                          if (responseText.trim() && !sendingResponse) {
+                                            // Use bidRecipient for sending
+                                            const sendMessage = async () => {
+                                              if (!responseText.trim() || !bidRecipient?.id || sendingResponse) return
+                                              const bidPackageId = bidRecipient.bid_package_id || bidRecipient.bid_packages?.id
+                                              if (!bidPackageId) return
+
+                                              setSendingResponse(true)
+                                              setError('')
+                                              try {
+                                                const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json' },
+                                                  body: JSON.stringify({
+                                                    recipientId: bidRecipient.id,
+                                                    responseText: responseText.trim()
+                                                  })
+                                                })
+                                                if (res.ok) {
+                                                  await loadData()
+                                                  setResponseText('')
+                                                  // Reload email statuses
+                                                  try {
+                                                    const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                                    if (statusResponse.ok) {
+                                                      const statusData = await statusResponse.json()
+                                                      if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                        if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                          const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                          setAllRecipients(threadRecipients)
+                                                          const threadsMap: Record<string, any> = {}
+                                                          statusData.threads.forEach((thread: any) => {
+                                                            threadsMap[thread.thread_id] = thread
+                                                          })
+                                                          setEmailThreads(threadsMap)
+                                                        }
+                                                      }
+                                                    }
+                                                  } catch (e) {
+                                                    console.error('Error reloading email threads:', e)
+                                                  }
+                                                } else {
+                                                  const err = await res.json()
+                                                  setError(err.error || 'Failed to send')
+                                                }
+                                              } catch (e: any) {
+                                                setError(e.message || 'Failed to send message')
+                                              } finally {
+                                                setSendingResponse(false)
+                                              }
+                                            }
+                                            sendMessage()
+                                          }
+                                        }
+                                      }}
+                                      style={{
+                                        height: 'auto',
+                                        minHeight: '44px',
+                                      }}
+                                      onInput={(e) => {
+                                        const target = e.target as HTMLTextAreaElement
+                                        target.style.height = 'auto'
+                                        target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+                                      }}
+                                    />
+                                    <Button
+                                      size="icon"
+                                      disabled={sendingResponse || !responseText.trim()}
+                                      onClick={async () => {
+                                        if (!responseText.trim() || !bidRecipient?.id || sendingResponse) return
+                                        const bidPackageId = bidRecipient.bid_package_id || bidRecipient.bid_packages?.id
+                                        if (!bidPackageId) return
+
+                                        setSendingResponse(true)
+                                        setError('')
+                                        try {
+                                          const res = await fetch(`/api/bid-packages/${bidPackageId}/respond`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                              recipientId: bidRecipient.id,
+                                              responseText: responseText.trim()
+                                            })
+                                          })
+                                          if (res.ok) {
+                                            await loadData()
+                                            setResponseText('')
+                                            // Reload email statuses
+                                            try {
+                                              const statusResponse = await fetch(`/api/jobs/${jobId}/email-statuses`)
+                                              if (statusResponse.ok) {
+                                                const statusData = await statusResponse.json()
+                                                if (statusData.recipients && Array.isArray(statusData.recipients)) {
+                                                  if (statusData.threads && Array.isArray(statusData.threads)) {
+                                                    const threadRecipients = statusData.threads.map((thread: any) => thread.latest_message)
+                                                    setAllRecipients(threadRecipients)
+                                                    const threadsMap: Record<string, any> = {}
+                                                    statusData.threads.forEach((thread: any) => {
+                                                      threadsMap[thread.thread_id] = thread
+                                                    })
+                                                    setEmailThreads(threadsMap)
+                                                  }
+                                                }
+                                              }
+                                            } catch (e) {
+                                              console.error('Error reloading email threads:', e)
+                                            }
+                                          } else {
+                                            const err = await res.json()
+                                            setError(err.error || 'Failed to send')
+                                          }
+                                        } catch (e: any) {
+                                          setError(e.message || 'Failed to send message')
+                                        } finally {
+                                          setSendingResponse(false)
+                                        }
+                                      }}
+                                      className="h-[44px] w-[44px] rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                                    >
+                                      {sendingResponse ? (
+                                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                                      ) : (
+                                        <Mail className="h-4 w-4 text-white" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                                {error && <p className="text-sm text-red-600 mt-2 px-1">{error}</p>}
+                              </div>
+                            </div>
+                          </TabsContent>
+                        )}
                       </Tabs>
                     </div>
                   </div>
