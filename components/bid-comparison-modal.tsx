@@ -1459,16 +1459,16 @@ export default function BidComparisonModal({
                           )
                         })
                         
-                        // Organize bids by subcontractor
-                        const bidsBySubcontractor = filteredBids.reduce((acc: any, bid: Bid) => {
-                          const subcontractorName = bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'
-                          if (!acc[subcontractorName]) acc[subcontractorName] = []
-                          acc[subcontractorName].push(bid)
+                        // Organize bids by subcontractor type (trade_category)
+                        const bidsBySubcontractorType = filteredBids.reduce((acc: any, bid: Bid) => {
+                          const tradeCategory = bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || 'Uncategorized'
+                          if (!acc[tradeCategory]) acc[tradeCategory] = []
+                          acc[tradeCategory].push(bid)
                           return acc
                         }, {})
                         
-                        // Sort subcontractors alphabetically
-                        const sortedSubcontractors = Object.keys(bidsBySubcontractor).sort()
+                        // Sort subcontractor types alphabetically
+                        const sortedSubcontractorTypes = Object.keys(bidsBySubcontractorType).sort()
                         
                         if (filteredBids.length === 0 && bids.length > 0) {
                           return (
@@ -1479,13 +1479,13 @@ export default function BidComparisonModal({
                           )
                         }
                         
-                        return sortedSubcontractors.map((subcontractorName) => (
-                          <div key={subcontractorName}>
+                        return sortedSubcontractorTypes.map((tradeCategory) => (
+                          <div key={tradeCategory}>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
-                              {subcontractorName}
+                              {tradeCategory}
                             </h3>
                             <div className="space-y-2">
-                              {bidsBySubcontractor[subcontractorName].map((bid: Bid) => {
+                              {bidsBySubcontractorType[tradeCategory].map((bid: Bid) => {
                                 const bidPackage = (bid.bid_packages as any)
                                 return (
                                   <div
@@ -3761,16 +3761,16 @@ export default function BidComparisonModal({
                           )
                         })
                         
-                        // Organize bids by subcontractor
-                        const bidsBySubcontractor = filteredBids.reduce((acc: any, bid: Bid) => {
-                          const subcontractorName = bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown'
-                          if (!acc[subcontractorName]) acc[subcontractorName] = []
-                          acc[subcontractorName].push(bid)
+                        // Organize bids by subcontractor type (trade_category)
+                        const bidsBySubcontractorType = filteredBids.reduce((acc: any, bid: Bid) => {
+                          const tradeCategory = bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || 'Uncategorized'
+                          if (!acc[tradeCategory]) acc[tradeCategory] = []
+                          acc[tradeCategory].push(bid)
                           return acc
                         }, {})
                         
-                        // Sort subcontractors alphabetically
-                        const sortedSubcontractors = Object.keys(bidsBySubcontractor).sort()
+                        // Sort subcontractor types alphabetically
+                        const sortedSubcontractorTypes = Object.keys(bidsBySubcontractorType).sort()
                         
                         if (filteredBids.length === 0 && bids.length > 0) {
                           return (
@@ -3781,13 +3781,13 @@ export default function BidComparisonModal({
                           )
                         }
                         
-                        return sortedSubcontractors.map((subcontractorName) => (
-                          <div key={subcontractorName}>
+                        return sortedSubcontractorTypes.map((tradeCategory) => (
+                          <div key={tradeCategory}>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
-                              {subcontractorName}
+                              {tradeCategory}
                             </h3>
                             <div className="space-y-2">
-                              {bidsBySubcontractor[subcontractorName].map((bid: Bid) => {
+                              {bidsBySubcontractorType[tradeCategory].map((bid: Bid) => {
                                 const bidPackage = (bid.bid_packages as any)
                                 return (
                                   <div

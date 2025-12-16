@@ -844,6 +844,58 @@ export interface Database {
           updated_at?: string
         }
       }
+      budget_scenarios: {
+        Row: {
+          id: string
+          job_id: string
+          name: string
+          description: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+          created_by: string
+        }
+        Insert: {
+          id?: string
+          job_id: string
+          name: string
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          created_by: string
+        }
+        Update: {
+          id?: string
+          job_id?: string
+          name?: string
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+          created_by?: string
+        }
+      }
+      budget_scenario_bids: {
+        Row: {
+          id: string
+          scenario_id: string
+          bid_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          scenario_id: string
+          bid_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          scenario_id?: string
+          bid_id?: string
+          created_at?: string
+        }
+      }
     }
   }
 }

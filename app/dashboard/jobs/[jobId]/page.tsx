@@ -57,6 +57,7 @@ import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
 import BudgetSpreadsheet from '@/components/budget-spreadsheet'
 import ReportViewerModal from '@/components/report-viewer-modal'
 import JobTimeline from '@/components/job-timeline'
+import ScenarioComparisonModal from '@/components/scenario-comparison-modal'
 
 const PROJECT_TYPES = [
   'Residential',
@@ -130,6 +131,10 @@ export default function JobDetailPage() {
   const [selectedBidIdForModal, setSelectedBidIdForModal] = useState<string | null>(null)
   const [bidModalRefreshTrigger, setBidModalRefreshTrigger] = useState(0)
   const isSavingTakeoffRef = useRef(false)
+  // Budget scenarios state
+  const [scenarios, setScenarios] = useState<any[]>([])
+  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null)
+  const [showScenarioComparisonModal, setShowScenarioComparisonModal] = useState(false)
   
   // Plan editing state
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null)
@@ -260,6 +265,9 @@ export default function JobDetailPage() {
       if (bidsResult.error) throw bidsResult.error
       setBids(bidsResult.data || [])
 
+      // Load budget scenarios
+      await loadBudgetScenarios()
+
       // Load takeoff items from all plans
       await loadAggregatedTakeoffItems(plansData)
 
@@ -320,6 +328,162 @@ export default function JobDetailPage() {
     } catch (error) {
       console.error('Error loading accepted bids with line items:', error)
       setAcceptedBidsWithLineItems(acceptedBids.map(bid => ({ ...bid, bid_line_items: [] })))
+    }
+  }
+
+  async function loadBudgetScenarios() {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/budget-scenarios`)
+      if (!response.ok) {
+        console.error('Failed to load scenarios')
+        return
+      }
+
+      const data = await response.json()
+      const scenariosData = data.scenarios || []
+      setScenarios(scenariosData)
+
+      // Find active scenario
+      const activeScenario = scenariosData.find((s: any) => s.is_active)
+      setActiveScenarioId(activeScenario?.id || null)
+    } catch (error) {
+      console.error('Error loading budget scenarios:', error)
+    }
+  }
+
+  async function handleCreateScenario(name: string, description?: string) {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/budget-scenarios`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description,
+          bid_ids: []
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to create scenario')
+      }
+
+      await loadBudgetScenarios()
+    } catch (error) {
+      console.error('Error creating scenario:', error)
+      throw error
+    }
+  }
+
+  async function handleApplyScenario(scenarioId: string) {
+    try {
+      const response = await fetch(`/api/budget-scenarios/${scenarioId}/apply`, {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to apply scenario')
+      }
+
+      // Reload bids and scenarios
+      await loadJobData()
+    } catch (error) {
+      console.error('Error applying scenario:', error)
+      throw error
+    }
+  }
+
+  async function handleDeleteScenario(scenarioId: string) {
+    try {
+      const response = await fetch(`/api/budget-scenarios/${scenarioId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete scenario')
+      }
+
+      await loadBudgetScenarios()
+    } catch (error) {
+      console.error('Error deleting scenario:', error)
+      throw error
+    }
+  }
+
+  async function handleAddBidToScenario(bidId: string, scenarioId: string) {
+    try {
+      const scenario = scenarios.find(s => s.id === scenarioId)
+      if (!scenario) return
+
+      const currentBidIds = scenario.bids.map((b: any) => b.id)
+      if (currentBidIds.includes(bidId)) return // Already in scenario
+
+      const response = await fetch(`/api/budget-scenarios/${scenarioId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bid_ids: [...currentBidIds, bidId]
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to add bid to scenario')
+      }
+
+      await loadBudgetScenarios()
+    } catch (error) {
+      console.error('Error adding bid to scenario:', error)
+      throw error
+    }
+  }
+
+  async function handleRemoveBidFromScenario(bidId: string, scenarioId: string) {
+    try {
+      const scenario = scenarios.find(s => s.id === scenarioId)
+      if (!scenario) return
+
+      const currentBidIds = scenario.bids.map((b: any) => b.id).filter((id: string) => id !== bidId)
+
+      const response = await fetch(`/api/budget-scenarios/${scenarioId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bid_ids: currentBidIds
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to remove bid from scenario')
+      }
+
+      await loadBudgetScenarios()
+    } catch (error) {
+      console.error('Error removing bid from scenario:', error)
+      throw error
+    }
+  }
+
+  const handleEditScenario = (scenarioId: string) => {
+    // Open edit dialog - for now, we can use a simple prompt or create a proper modal
+    const scenario = scenarios.find(s => s.id === scenarioId)
+    if (!scenario) return
+
+    const newName = prompt('Edit scenario name:', scenario.name)
+    if (newName && newName.trim() && newName !== scenario.name) {
+      fetch(`/api/budget-scenarios/${scenarioId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newName.trim()
+        })
+      })
+        .then(response => {
+          if (response.ok) {
+            loadBudgetScenarios()
+          }
+        })
+        .catch(error => {
+          console.error('Error updating scenario:', error)
+        })
     }
   }
 
@@ -1773,6 +1937,23 @@ export default function JobDetailPage() {
                         acceptedBids={acceptedBidsWithLineItems}
                         takeoffItems={aggregatedTakeoffItems}
                         jobId={jobId}
+                        scenarios={scenarios}
+                        allBids={bids}
+                        activeScenarioId={activeScenarioId}
+                        onScenarioChange={setActiveScenarioId}
+                        onCreateScenario={handleCreateScenario}
+                        onApplyScenario={handleApplyScenario}
+                        onCompareScenarios={() => setShowScenarioComparisonModal(true)}
+                        onEditScenario={handleEditScenario}
+                        onDeleteScenario={handleDeleteScenario}
+                        onAddBidToScenario={handleAddBidToScenario}
+                        onRemoveBidFromScenario={handleRemoveBidFromScenario}
+                        bidPackages={bidPackages.map(pkg => ({ trade_category: pkg.trade_category }))}
+                        onCreateBidPackage={(tradeCategory) => {
+                          // Open bid package modal for this trade
+                          setShowPackageModal(true)
+                          // You might want to pre-fill the trade category in the modal
+                        }}
                         onBidClick={(bidId) => {
                           setSelectedBidIdForModal(bidId)
                           setShowBidComparisonModal(true)
@@ -2058,6 +2239,13 @@ export default function JobDetailPage() {
           refreshTrigger={bidModalRefreshTrigger}
         />
       )}
+
+      {/* Scenario Comparison Modal */}
+      <ScenarioComparisonModal
+        isOpen={showScenarioComparisonModal}
+        onClose={() => setShowScenarioComparisonModal(false)}
+        scenarios={scenarios}
+      />
     </>
   )
 }

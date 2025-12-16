@@ -1,11 +1,15 @@
 'use client'
 
 import React, { useState, useMemo, useCallback, useRef } from 'react'
+import { DndContext, DragOverlay, useDroppable, closestCenter, DragEndEvent, DragStartEvent, useDraggable } from '@dnd-kit/core'
 import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, DollarSign, Expand, Minimize2, Eye, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { exportToCSV, exportToExcel } from '@/lib/takeoff-export'
+import BudgetScenariosHeader from '@/components/budget-scenarios-header'
+import AvailableBidsPanel from '@/components/available-bids-panel'
+import BudgetGapAnalysis from '@/components/budget-gap-analysis'
 
 interface AcceptedBid {
   id: string
@@ -45,12 +49,34 @@ interface TakeoffItem {
   total_cost?: number | null
 }
 
+interface Scenario {
+  id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  bids: AcceptedBid[]
+}
+
 interface BudgetSpreadsheetProps {
   acceptedBids: AcceptedBid[]
   takeoffItems: TakeoffItem[]
   onBidClick?: (bidId: string) => void
   onViewBidsForTrade?: (tradeCategory: string) => void
   jobId?: string
+  // New props for scenarios
+  scenarios?: Scenario[]
+  allBids?: AcceptedBid[]
+  activeScenarioId?: string | null
+  onScenarioChange?: (scenarioId: string | null) => void
+  onCreateScenario?: (name: string, description?: string) => Promise<void>
+  onApplyScenario?: (scenarioId: string) => Promise<void>
+  onCompareScenarios?: () => void
+  onEditScenario?: (scenarioId: string) => void
+  onDeleteScenario?: (scenarioId: string) => Promise<void>
+  onAddBidToScenario?: (bidId: string, scenarioId: string) => Promise<void>
+  onRemoveBidFromScenario?: (bidId: string, scenarioId: string) => Promise<void>
+  onCreateBidPackage?: (tradeCategory: string) => void
+  bidPackages?: Array<{ trade_category: string }>
 }
 
 interface GroupedRow {
@@ -109,17 +135,112 @@ const normalizeCategory = (category: string): string => {
   return tradeToCategoryMap[normalized] || normalized || 'other'
 }
 
+// Droppable trade row wrapper component
+function DroppableTradeRow({ 
+  tradeCategory, 
+  children, 
+  rowRef,
+  className,
+  activeScenarioId
+}: { 
+  tradeCategory: string
+  children: React.ReactNode
+  rowRef?: (el: HTMLTableRowElement | null) => void
+  className?: string
+  activeScenarioId?: string | null
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `trade-drop-${tradeCategory}`,
+    data: {
+      type: 'trade',
+      tradeCategory
+    },
+    disabled: !activeScenarioId
+  })
+
+  const combinedRef = (el: HTMLTableRowElement | null) => {
+    setNodeRef(el)
+    if (rowRef) rowRef(el)
+  }
+
+  const isDroppable = !!activeScenarioId
+  const dropZoneClass = isOver && isDroppable 
+    ? 'ring-2 ring-orange-500 ring-offset-2 bg-orange-100 border-orange-300' 
+    : isDroppable 
+    ? 'hover:bg-orange-50/50 transition-colors' 
+    : ''
+
+  return (
+    <tr
+      ref={combinedRef}
+      className={`${className} ${dropZoneClass}`}
+      title={isDroppable ? `Drop bids here to add to scenario` : 'Select a scenario first to add bids'}
+    >
+      {children}
+    </tr>
+  )
+}
+
 export default function BudgetSpreadsheet({
   acceptedBids,
   takeoffItems,
   onBidClick,
   onViewBidsForTrade,
-  jobId
+  jobId,
+  scenarios = [],
+  allBids = [],
+  activeScenarioId = null,
+  onScenarioChange,
+  onCreateScenario,
+  onApplyScenario,
+  onCompareScenarios,
+  onEditScenario,
+  onDeleteScenario,
+  onAddBidToScenario,
+  onRemoveBidFromScenario,
+  onCreateBidPackage,
+  bidPackages = []
 }: BudgetSpreadsheetProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedTrades, setExpandedTrades] = useState<Set<string>>(new Set())
   const [expandedBids, setExpandedBids] = useState<Set<string>>(new Set())
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [showAvailableBids, setShowAvailableBids] = useState(false)
   const tradeRefs = useRef<Record<string, HTMLTableRowElement>>({})
+
+  // Determine which bids to use (scenario bids or accepted bids)
+  // When using a scenario, use scenario bids; otherwise use accepted bids
+  const bidsToUse = useMemo(() => {
+    if (activeScenarioId) {
+      const activeScenario = scenarios.find(s => s.id === activeScenarioId)
+      if (activeScenario?.bids) {
+        // Ensure scenario bids have the same structure as acceptedBids
+        return activeScenario.bids.map((bid: any) => ({
+          ...bid,
+          accepted_at: bid.accepted_at || new Date().toISOString() // Scenario bids are treated as accepted
+        }))
+      }
+      return []
+    }
+    return acceptedBids
+  }, [activeScenarioId, scenarios, acceptedBids])
+
+  // Get scenario bid IDs for highlighting
+  const scenarioBidIds = useMemo(() => {
+    if (activeScenarioId) {
+      const activeScenario = scenarios.find(s => s.id === activeScenarioId)
+      return new Set(activeScenario?.bids.map(b => b.id) || [])
+    }
+    return new Set<string>()
+  }, [activeScenarioId, scenarios])
+
+  // Map allBids to include status property for components that require it
+  const allBidsWithStatus = useMemo(() => {
+    return allBids.map(bid => ({
+      ...bid,
+      status: bid.accepted_at ? 'accepted' : 'pending'
+    }))
+  }, [allBids])
 
   // Format currency helper
   const formatCurrency = (amount: number | undefined | null): string => {
@@ -157,7 +278,7 @@ export default function BudgetSpreadsheet({
   const bidsByTrade = useMemo(() => {
     const grouped: Record<string, AcceptedBid[]> = {}
     
-    acceptedBids.forEach(bid => {
+    bidsToUse.forEach(bid => {
       const tradeCategory = getBidTradeCategory(bid)
       const normalizedTrade = normalizeCategory(tradeCategory)
       
@@ -168,7 +289,7 @@ export default function BudgetSpreadsheet({
     })
     
     return grouped
-  }, [acceptedBids, getBidTradeCategory])
+  }, [bidsToUse, getBidTradeCategory])
 
   // Match takeoff items to bids by category
   const matchTakeoffItemsToBids = useCallback((tradeCategory: string, bid: AcceptedBid): TakeoffItem[] => {
@@ -381,8 +502,8 @@ export default function BudgetSpreadsheet({
 
   // Calculate overall totals
   const overallTotal = useMemo(() => {
-    return acceptedBids.reduce((sum, bid) => sum + (bid.bid_amount || 0), 0)
-  }, [acceptedBids])
+    return bidsToUse.reduce((sum, bid) => sum + (bid.bid_amount || 0), 0)
+  }, [bidsToUse])
 
   const totalTakeoffEstimate = useMemo(() => {
     return takeoffItems.reduce((sum, item) => sum + calculateItemCost(item), 0)
@@ -466,22 +587,77 @@ export default function BudgetSpreadsheet({
     return exportItems
   }, [groupedRows])
 
+  // Handle drag and drop
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(event.active.id as string)
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveDragId(null)
+
+    if (!over || !activeScenarioId || !onAddBidToScenario) return
+
+    // Extract bid ID from drag data
+    const activeData = active.data.current
+    if (!activeData || activeData.type !== 'bid' || !activeData.bid) return
+
+    const bidId = activeData.bid.id
+    const dropZone = over.id as string
+
+    if (dropZone.startsWith('trade-drop-')) {
+      // Add bid to scenario
+      try {
+        await onAddBidToScenario(bidId, activeScenarioId)
+      } catch (error) {
+        console.error('Error adding bid to scenario:', error)
+      }
+    }
+  }
+
+  // Calculate gap count
+  const gapCount = useMemo(() => {
+    const tradesWithBids = new Set<string>()
+    bidsToUse.forEach(bid => {
+      const tradeCategory = getBidTradeCategory(bid)
+      const normalized = normalizeCategory(tradeCategory)
+      tradesWithBids.add(normalized)
+    })
+
+    const takeoffTrades = new Set<string>()
+    takeoffItems.forEach(item => {
+      const normalized = normalizeCategory(item.category)
+      takeoffTrades.add(normalized)
+    })
+
+    let gaps = 0
+    takeoffTrades.forEach(trade => {
+      if (!tradesWithBids.has(trade)) {
+        gaps++
+      }
+    })
+
+    return gaps
+  }, [bidsToUse, takeoffItems, getBidTradeCategory])
+
   // Render row
   const renderRow = useCallback((row: GroupedRow) => {
     const config = row.tradeCategory ? CATEGORY_CONFIG[row.tradeCategory] : null
 
     if (row.type === 'trade') {
       const isExpanded = expandedTrades.has(row.id)
+
       return (
         <React.Fragment key={row.id}>
-          <tr
-            ref={(el) => {
+          <DroppableTradeRow
+            tradeCategory={row.tradeCategory || ''}
+            rowRef={(el) => {
               if (el) tradeRefs.current[row.id] = el
             }}
-            className={`group cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-200`}
-            onClick={() => toggleTrade(row.id)}
+            activeScenarioId={activeScenarioId}
+            className="group cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-200"
           >
-            <td colSpan={10} className="p-0">
+            <td colSpan={10} className="p-0" onClick={() => toggleTrade(row.id)}>
               <div className={`flex items-center justify-between py-3 px-4 ${config?.bgColor || 'bg-gray-50'} border-l-4 ${config?.color?.replace('text-', 'border-') || 'border-gray-400'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`p-1 rounded-md hover:bg-black/5 transition-colors`}>
@@ -492,6 +668,11 @@ export default function BudgetSpreadsheet({
                     )}
                   </div>
                   <span className={`font-bold text-sm uppercase tracking-wide ${config?.color || 'text-gray-800'}`}>{row.name}</span>
+                  {activeScenarioId && (
+                    <Badge variant="outline" className="text-xs border-orange-300 text-orange-700 bg-orange-50">
+                      Drop bids here
+                    </Badge>
+                  )}
                   <Badge variant="secondary" className="ml-2 bg-white/50 text-xs font-normal border-gray-200 text-gray-600">
                     {(() => {
                       const acceptedBidsCount = row.children?.filter(child => child.status !== 'needs_bid').length || 0
@@ -512,7 +693,7 @@ export default function BudgetSpreadsheet({
                 </div>
               </div>
             </td>
-          </tr>
+          </DroppableTradeRow>
           {isExpanded && row.children?.map(child => renderRow(child))}
         </React.Fragment>
       )
@@ -680,55 +861,124 @@ export default function BudgetSpreadsheet({
   ])
 
   return (
-    <div className="space-y-4">
-      {/* Header with totals and controls */}
-      <div className="bg-gradient-to-r from-orange-50 to-orange-50/50 border border-orange-200 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-orange-600" />
-              <h3 className="font-bold text-lg text-orange-900">Total Budget</h3>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-orange-900">{formatCurrency(overallTotal)}</div>
-              <div className="text-xs text-orange-600">{acceptedBids.length} accepted {acceptedBids.length === 1 ? 'bid' : 'bids'}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-blue-900">{formatCurrency(totalTakeoffEstimate)}</div>
-              <div className="text-xs text-blue-600">Takeoff Estimate</div>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-green-900">{coveragePercentage}%</div>
-              <div className="text-xs text-green-600">Coverage</div>
-            </div>
-          </div>
-        </div>
+    <DndContext
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="space-y-4">
+        {/* Scenarios Header */}
+        {scenarios.length > 0 && onScenarioChange && onCreateScenario && onApplyScenario && (
+          <BudgetScenariosHeader
+            scenarios={scenarios}
+            activeScenarioId={activeScenarioId}
+            onScenarioChange={onScenarioChange}
+            onCreateScenario={onCreateScenario}
+            onApplyScenario={onApplyScenario}
+            onCompareScenarios={onCompareScenarios || (() => {})}
+            onEditScenario={onEditScenario}
+            onDeleteScenario={onDeleteScenario}
+            totalBudget={overallTotal}
+            coveragePercentage={coveragePercentage}
+            gapCount={gapCount}
+            bidCount={bidsToUse.length}
+          />
+        )}
 
-        {/* Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search items..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+        {/* Available Bids Panel and Gap Analysis */}
+        {(allBids.length > 0 || takeoffItems.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {allBids.length > 0 && (
+              <div className="lg:col-span-1">
+                <AvailableBidsPanel
+                  bids={allBidsWithStatus}
+                  scenarioBidIds={scenarioBidIds}
+                  onBidClick={onBidClick}
+                />
+              </div>
+            )}
+            {takeoffItems.length > 0 && (
+              <div className={allBids.length > 0 ? "lg:col-span-2" : "lg:col-span-3"}>
+                <BudgetGapAnalysis
+                  bids={allBidsWithStatus}
+                  scenarioBidIds={scenarioBidIds}
+                  takeoffItems={takeoffItems}
+                  bidPackages={bidPackages}
+                  onCreateBidPackage={onCreateBidPackage}
+                  onViewBids={onViewBidsForTrade}
+                  onAddToScenario={activeScenarioId && onAddBidToScenario ? async (tradeCategory: string) => {
+                    // Find bids for this trade category and add to scenario
+                    const tradeBids = allBids.filter(bid => {
+                      const bidTrade = getBidTradeCategory(bid)
+                      return bidTrade === tradeCategory
+                    })
+                    for (const bid of tradeBids) {
+                      if (!scenarioBidIds.has(bid.id)) {
+                        await onAddBidToScenario(bid.id, activeScenarioId)
+                      }
+                    }
+                  } : undefined}
+                />
+              </div>
+            )}
           </div>
-          <Button variant="outline" size="sm" onClick={expandAll}>
-            <Expand className="h-4 w-4 mr-1" /> Expand All
-          </Button>
-          <Button variant="outline" size="sm" onClick={collapseAll}>
-            <Minimize2 className="h-4 w-4 mr-1" /> Collapse All
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => exportToCSV(exportData())}>
-            <FileText className="h-4 w-4 mr-1" /> CSV
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => exportToExcel(exportData())}>
-            <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
-          </Button>
+        )}
+
+        {/* Header with totals and controls */}
+        <div className="bg-gradient-to-r from-orange-50 to-orange-50/50 border border-orange-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-orange-600" />
+                <h3 className="font-bold text-lg text-orange-900">
+                  {activeScenarioId ? 'Scenario Budget' : 'Total Budget'}
+                </h3>
+                {activeScenarioId && (
+                  <Badge variant="outline" className="ml-2 text-xs">
+                    {scenarios.find(s => s.id === activeScenarioId)?.name || 'Scenario'}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-orange-900">{formatCurrency(overallTotal)}</div>
+                <div className="text-xs text-orange-600">{bidsToUse.length} {bidsToUse.length === 1 ? 'bid' : 'bids'}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-blue-900">{formatCurrency(totalTakeoffEstimate)}</div>
+                <div className="text-xs text-blue-600">Takeoff Estimate</div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-green-900">{coveragePercentage}%</div>
+                <div className="text-xs text-green-600">Coverage</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search items..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={expandAll}>
+              <Expand className="h-4 w-4 mr-1" /> Expand All
+            </Button>
+            <Button variant="outline" size="sm" onClick={collapseAll}>
+              <Minimize2 className="h-4 w-4 mr-1" /> Collapse All
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => exportToCSV(exportData())}>
+              <FileText className="h-4 w-4 mr-1" /> CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => exportToExcel(exportData())}>
+              <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
+            </Button>
+          </div>
         </div>
-      </div>
 
       {/* Table */}
       <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
@@ -767,7 +1017,17 @@ export default function BudgetSpreadsheet({
           </p>
         </div>
       )}
+
+      {/* Drag Overlay */}
+      <DragOverlay>
+        {activeDragId ? (
+          <div className="bg-white border border-orange-300 rounded-lg p-3 shadow-lg">
+            <div className="text-sm font-medium">Dragging bid...</div>
+          </div>
+        ) : null}
+      </DragOverlay>
     </div>
+    </DndContext>
   )
 }
 
