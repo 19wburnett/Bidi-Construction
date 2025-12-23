@@ -1195,9 +1195,14 @@ async function handleInboundEmail(body: any) {
         console.log('✅ Recipient updated successfully with bid')
       }
     
+    // Create notification for email reply (if not a bid submission)
+    if (!isBidSubmission) {
+      await createNotification(supabase, bidPackageId, recipient.id, 'email_replied', null)
+    }
+    
     // Create notification for clarifying questions if detected
     if (clarifyingQuestions.hasQuestions) {
-      await createNotification(supabase, bidPackageId, recipient.id, 'clarifying_question')
+      await createNotification(supabase, bidPackageId, recipient.id, 'clarifying_question', bidId)
     }
   } else {
     console.log('⚠️ No original recipient found for bid submission, creating new record')
@@ -1432,38 +1437,87 @@ async function createNotification(
   supabase: any,
   bidPackageId: string,
   recipientId: string | null,
-  notificationType: 'bid_received' | 'email_opened' | 'clarifying_question' | 'email_bounced',
+  notificationType: 'bid_received' | 'email_opened' | 'clarifying_question' | 'email_bounced' | 'email_replied',
   bidId?: string | null
 ) {
   try {
-    // Get job owner from bid package
+    // Get job owner and job_id from bid package
     const { data: bidPackage } = await supabase
       .from('bid_packages')
-      .select('jobs!inner(user_id)')
+      .select('job_id, jobs!inner(user_id, name)')
       .eq('id', bidPackageId)
       .single()
 
     if (!bidPackage || !bidPackage.jobs) {
+      console.error('Could not find bid package or job for notification')
       return
     }
 
     const userId = bidPackage.jobs.user_id
+    const jobId = bidPackage.job_id
 
-    // Check if notifications table exists
-    const { error: insertError } = await supabase
+    // Set appropriate title and message based on notification type
+    let title = ''
+    let message = ''
+    
+    switch (notificationType) {
+      case 'bid_received':
+        title = 'New Bid Received'
+        message = 'You received a new bid'
+        break
+      case 'email_opened':
+        title = 'Email Opened'
+        message = 'A subcontractor opened your email'
+        break
+      case 'email_replied':
+        title = 'Email Reply Received'
+        message = 'A subcontractor replied to your email'
+        break
+      case 'clarifying_question':
+        title = 'Clarifying Questions'
+        message = 'A subcontractor has clarifying questions'
+        break
+      case 'email_bounced':
+        title = 'Email Bounced'
+        message = 'An email could not be delivered'
+        break
+    }
+
+    // Check if notification already exists for this event (prevent duplicates)
+    const { data: existingNotification } = await supabase
       .from('notifications')
-      .insert({
-        user_id: userId,
-        notification_type: notificationType,
-        bid_package_id: bidPackageId,
-        recipient_id: recipientId,
-        bid_id: bidId,
-        read: false,
-        dismissed: false
-      })
+      .select('id')
+      .eq('user_id', userId)
+      .eq('notification_type', notificationType)
+      .eq('bid_package_id', bidPackageId)
+      .eq('read', false)
+      .eq('dismissed', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
 
-    if (insertError) {
-      console.error('Error creating notification:', insertError)
+    // Only create if it's a new event or if the last one was read/dismissed
+    if (!existingNotification || notificationType === 'bid_received') {
+      const { error: insertError } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: userId,
+          job_id: jobId,
+          notification_type: notificationType,
+          bid_package_id: bidPackageId,
+          recipient_id: recipientId,
+          bid_id: bidId,
+          title: title,
+          message: message,
+          read: false,
+          dismissed: false
+        })
+
+      if (insertError) {
+        console.error('Error creating notification:', insertError)
+      } else {
+        console.log(`✅ Created ${notificationType} notification for user ${userId}`)
+      }
     }
   } catch (error) {
     console.error('Error in createNotification:', error)

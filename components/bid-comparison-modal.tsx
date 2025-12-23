@@ -43,6 +43,7 @@ interface BidComparisonModalProps {
   onClose: () => void
   inline?: boolean
   initialBidId?: string | null
+  initialRecipientId?: string | null
   refreshTrigger?: number
 }
 
@@ -121,6 +122,7 @@ export default function BidComparisonModal({
   onClose,
   inline = false,
   initialBidId = null,
+  initialRecipientId = null,
   refreshTrigger = 0
 }: BidComparisonModalProps) {
   const [selectedBidId, setSelectedBidId] = useState<string | null>(initialBidId)
@@ -293,9 +295,28 @@ export default function BidComparisonModal({
       loadData()
       if (initialBidId) {
         setSelectedBidId(initialBidId)
+        setActiveTab('details')
+        setLeftSideTab('bids')
+      }
+      if (initialRecipientId) {
+        // Set recipient after data loads
+        setLeftSideTab('emails')
+        setActiveTab('conversation')
       }
     }
-  }, [isOpen, jobId, initialBidId, refreshTrigger])
+  }, [isOpen, jobId, initialBidId, initialRecipientId, refreshTrigger])
+
+  // Select recipient when initialRecipientId is provided and data is loaded
+  useEffect(() => {
+    if (initialRecipientId && allRecipients.length > 0) {
+      const recipient = allRecipients.find((r: any) => r.id === initialRecipientId)
+      if (recipient) {
+        setSelectedEmailRecipient(recipient)
+        setLeftSideTab('emails')
+        setActiveTab('conversation')
+      }
+    }
+  }, [initialRecipientId, allRecipients])
 
   // Mark all unread messages in a thread as read when viewing it
   useEffect(() => {

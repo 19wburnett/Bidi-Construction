@@ -129,6 +129,7 @@ export default function JobDetailPage() {
   const [acceptedBidsWithLineItems, setAcceptedBidsWithLineItems] = useState<any[]>([])
   const [showBidComparisonModal, setShowBidComparisonModal] = useState(false)
   const [selectedBidIdForModal, setSelectedBidIdForModal] = useState<string | null>(null)
+  const [selectedRecipientIdForModal, setSelectedRecipientIdForModal] = useState<string | null>(null)
   const [bidModalRefreshTrigger, setBidModalRefreshTrigger] = useState(0)
   const isSavingTakeoffRef = useRef(false)
   // Budget scenarios state
@@ -157,13 +158,35 @@ export default function JobDetailPage() {
 
   const jobId = params.jobId as string
 
-  // Set active tab from query parameter
+  // Set active tab and open modals from query parameters
   useEffect(() => {
     const tab = searchParams.get('tab')
     if (tab && ['overview', 'plans', 'takeoff', 'bids', 'budget'].includes(tab)) {
       setActiveTab(tab)
     }
-  }, [searchParams])
+    
+    // Handle bidId parameter - open bid comparison modal with specific bid
+    const bidId = searchParams.get('bidId')
+    if (bidId && !showBidComparisonModal) {
+      setSelectedBidIdForModal(bidId)
+      setShowBidComparisonModal(true)
+      // Ensure we're on the bids tab
+      if (tab !== 'bids') {
+        setActiveTab('bids')
+      }
+    }
+    
+    // Handle recipientId parameter - open bid comparison modal and select email thread
+    const recipientId = searchParams.get('recipientId')
+    if (recipientId && !showBidComparisonModal) {
+      setSelectedRecipientIdForModal(recipientId)
+      setShowBidComparisonModal(true)
+      setActiveTab('bids')
+      setSelectedBidIdForModal(null) // Clear bid selection
+    } else if (!recipientId) {
+      setSelectedRecipientIdForModal(null)
+    }
+  }, [searchParams, showBidComparisonModal])
 
   useEffect(() => {
     if (user && jobId) {
@@ -2232,10 +2255,12 @@ export default function JobDetailPage() {
           onClose={() => {
             setShowBidComparisonModal(false)
             setSelectedBidIdForModal(null)
+            setSelectedRecipientIdForModal(null)
             // Reload job data to refresh accepted bids in budget view
             loadJobData()
           }}
           initialBidId={selectedBidIdForModal}
+          initialRecipientId={selectedRecipientIdForModal}
           refreshTrigger={bidModalRefreshTrigger}
         />
       )}

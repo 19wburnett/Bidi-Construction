@@ -98,27 +98,38 @@ export default function ProfileDropdown() {
           read,
           dismissed,
           created_at,
-          bids!inner(
+          job_id,
+          bid_id,
+          bid_package_id,
+          notification_type,
+          message,
+          title,
+          bids (
             id,
             job_id,
             bid_amount,
             seen,
             created_at,
-            subcontractor_email,
             subcontractors (
               id,
               name,
               email
-            ),
-            jobs!inner(
-              name
             )
+          ),
+          jobs (
+            id,
+            name
+          ),
+          bid_package_recipients:recipient_id (
+            id,
+            subcontractor_name,
+            subcontractor_email
           )
         `)
         .eq('user_id', userId)
         .eq('dismissed', false)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
       if (notificationError && notificationError.code === 'PGRST116') {
         // Notifications table doesn't exist, fall back to bids
@@ -133,18 +144,40 @@ export default function ProfileDropdown() {
 
       // If we have notification data, use it
       if (notificationData && notificationData.length > 0) {
-        const notifications = notificationData.map((notif: any) => ({
-          id: notif.bids.id,
-          notification_id: notif.id,
-          job_id: notif.bids.job_id,
-          job_title: notif.bids.jobs?.name || 'Job',
-          subcontractor_name: notif.bids.subcontractors?.name || notif.bids.subcontractor_email || 'Unknown Subcontractor',
-          bid_amount: notif.bids.bid_amount,
-          created_at: notif.bids.created_at,
-          read: notif.read,
-          seen: notif.bids.seen,
-          dismissed: notif.dismissed || false
-        }))
+        const notifications = notificationData
+          .filter((notif: any) => {
+            // Filter out notifications for bids that are already seen
+            if (notif.notification_type === 'bid_received' && notif.bids?.seen === true) {
+              return false
+            }
+            return true
+          })
+          .map((notif: any) => {
+            const jobName = notif.jobs?.name || 'Job'
+            const jobId = notif.job_id || notif.bids?.job_id || null
+            const bidId = notif.bid_id || notif.bids?.id || null
+            const subcontractorName = notif.bids?.subcontractors?.name || 
+                                     notif.bids?.subcontractors?.email ||
+                                     notif.bid_package_recipients?.subcontractor_name ||
+                                     notif.bid_package_recipients?.subcontractor_email ||
+                                     'Unknown Subcontractor'
+
+            return {
+              id: bidId || notif.id,
+              notification_id: notif.id,
+              job_id: jobId,
+              job_title: jobName,
+              subcontractor_name: subcontractorName,
+              bid_amount: notif.bids?.bid_amount || null,
+              created_at: notif.bids?.created_at || notif.created_at,
+              read: notif.read || false,
+              seen: notif.bids?.seen || false,
+              dismissed: notif.dismissed || false,
+              notification_type: notif.notification_type || 'bid_received',
+              message: notif.message || notif.title || 'New notification',
+              title: notif.title
+            }
+          })
         setNotifications(notifications)
       } else {
         await fetchNotificationsFromBids(userId)
@@ -164,7 +197,6 @@ export default function ProfileDropdown() {
           bid_amount,
           seen,
           created_at,
-          subcontractor_email,
           subcontractors (
             id,
             name,
@@ -177,8 +209,9 @@ export default function ProfileDropdown() {
           )
         `)
         .eq('jobs.user_id', userId)
+        .or('seen.is.null,seen.eq.false') // Only get unseen bids
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
       if (error) {
         return
@@ -188,7 +221,7 @@ export default function ProfileDropdown() {
         id: bid.id,
         job_id: bid.job_id,
         job_title: bid.jobs?.name || 'Job',
-        subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
+        subcontractor_name: bid.subcontractors?.name || bid.subcontractors?.email || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         read: bid.seen || false,

@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Bell, X } from 'lucide-react'
+import { Bell, X, Mail, MessageSquare, AlertCircle, DollarSign } from 'lucide-react'
 
 interface Notification {
   id: string
@@ -19,6 +19,10 @@ interface Notification {
   seen: boolean
   dismissed: boolean
   notification_id?: string
+  notification_type?: string
+  message?: string
+  title?: string
+  recipient_id?: string | null
 }
 
 export default function NotificationBell() {
@@ -30,11 +34,54 @@ export default function NotificationBell() {
   const router = useRouter()
 
   useEffect(() => {
-    // Only fetch if we have a user and haven't fetched yet
-    if (user && notifications.length === 0) {
-      fetchNotifications()
+    if (!user) return
+
+    // Initial fetch
+    fetchNotifications()
+
+    // Set up real-time subscription for notifications
+    const notificationChannel = supabase
+      .channel('notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Real-time notification update:', payload)
+          // Refresh notifications when changes occur
+          fetchNotifications()
+        }
+      )
+      .subscribe()
+
+    // Set up real-time subscription for bids (for unseen bids)
+    const bidsChannel = supabase
+      .channel('bids')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'bids',
+        },
+        (payload) => {
+          console.log('New bid received:', payload)
+          // Refresh notifications when new bid is inserted
+          fetchNotifications()
+        }
+      )
+      .subscribe()
+
+    // Cleanup subscriptions on unmount
+    return () => {
+      notificationChannel.unsubscribe()
+      bidsChannel.unsubscribe()
     }
-  }, [user]) // Only depend on user, not empty array
+  }, [user])
 
   const fetchNotifications = async () => {
     try {
@@ -55,6 +102,7 @@ export default function NotificationBell() {
           bid_package_id,
           notification_type,
           message,
+          title,
           bids (
             id,
             job_id,
@@ -62,7 +110,6 @@ export default function NotificationBell() {
             bid_amount,
             seen,
             created_at,
-            subcontractor_email,
             subcontractors (
               id,
               name,
@@ -72,12 +119,18 @@ export default function NotificationBell() {
           jobs (
             id,
             name
-          )
+          ),
+          bid_package_recipients:recipient_id (
+            id,
+            subcontractor_name,
+            subcontractor_email
+          ),
+          recipient_id
         `)
         .eq('user_id', user.id)
         .eq('dismissed', false)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
       // Processing notification data
 
@@ -95,33 +148,47 @@ export default function NotificationBell() {
 
       // If we have notification data, use it
       if (notificationData && notificationData.length > 0) {
-        const notifications = notificationData.map((notif: any) => {
-          // Get job info - prefer direct job_id relationship, fallback to bid's job_id
-          const jobName = notif.jobs?.name || 'Job'
-          const jobId = notif.job_id || notif.bids?.job_id || null
+        const notifications = notificationData
+          .filter((notif: any) => {
+            // Filter out notifications for bids that are already seen
+            if (notif.notification_type === 'bid_received' && notif.bids?.seen === true) {
+              return false
+            }
+            return true
+          })
+          .map((notif: any) => {
+            // Get job info - prefer direct job_id relationship, fallback to bid's job_id
+            const jobName = notif.jobs?.name || 'Job'
+            const jobId = notif.job_id || notif.bids?.job_id || null
 
-          // Get bid info if available
-          const bidId = notif.bid_id || notif.bids?.id || null
-          const bidAmount = notif.bids?.bid_amount || null
-          const subcontractorName = notif.bids?.subcontractors?.name || 
-                                   notif.bids?.subcontractor_email || 
-                                   'Unknown Subcontractor'
+            // Get bid info if available
+            const bidId = notif.bid_id || notif.bids?.id || null
+            const bidAmount = notif.bids?.bid_amount || null
+            
+            // Get subcontractor name from multiple sources
+            const subcontractorName = notif.bids?.subcontractors?.name || 
+                                     notif.bids?.subcontractors?.email ||
+                                     notif.bid_package_recipients?.subcontractor_name ||
+                                     notif.bid_package_recipients?.subcontractor_email ||
+                                     'Unknown Subcontractor'
 
-          return {
-            id: bidId || notif.id, // Use bid ID if available, otherwise notification ID
-            notification_id: notif.id,
-            job_id: jobId,
-            job_title: jobName,
-            subcontractor_name: subcontractorName,
-            bid_amount: bidAmount,
-            created_at: notif.bids?.created_at || notif.created_at,
-            read: notif.read || false,
-            seen: notif.bids?.seen || false,
-            dismissed: notif.dismissed || false,
-            notification_type: notif.notification_type,
-            message: notif.message
-          }
-        })
+            return {
+              id: bidId || notif.id, // Use bid ID if available, otherwise notification ID
+              notification_id: notif.id,
+              job_id: jobId,
+              job_title: jobName,
+              subcontractor_name: subcontractorName,
+              bid_amount: bidAmount,
+              created_at: notif.bids?.created_at || notif.created_at,
+              read: notif.read || false,
+              seen: notif.bids?.seen || false,
+              dismissed: notif.dismissed || false,
+              notification_type: notif.notification_type || 'bid_received',
+              message: notif.message || notif.title || 'New notification',
+              title: notif.title,
+              recipient_id: notif.recipient_id || null
+            }
+          })
         // Processed notifications
         setNotifications(notifications)
       } else {
@@ -139,7 +206,7 @@ export default function NotificationBell() {
     try {
       // Fetching notifications from bids for user
       
-      // Fallback: Get recent bids for user's jobs
+      // Fallback: Get recent UNSEEN bids for user's jobs
       const { data: bidsData, error } = await supabase
         .from('bids')
         .select(`
@@ -148,7 +215,6 @@ export default function NotificationBell() {
           bid_amount,
           seen,
           created_at,
-          subcontractor_email,
           subcontractors (
             id,
             name,
@@ -161,8 +227,9 @@ export default function NotificationBell() {
           )
         `)
         .eq('jobs.user_id', userId)
+        .or('seen.is.null,seen.eq.false') // Only get unseen bids
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(20)
 
       // Processing bids data
 
@@ -175,7 +242,7 @@ export default function NotificationBell() {
         id: bid.id,
         job_id: bid.job_id,
         job_title: bid.jobs?.name || 'Job',
-          subcontractor_name: bid.subcontractors?.name || bid.subcontractor_email || 'Unknown Subcontractor',
+          subcontractor_name: bid.subcontractors?.name || bid.subcontractors?.email || 'Unknown Subcontractor',
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         read: false, // Mark all as unread for fallback
@@ -292,6 +359,43 @@ export default function NotificationBell() {
     return `${Math.floor(diffInMinutes / 1440)}d ago`
   }
 
+  const getNotificationIcon = (type?: string) => {
+    switch (type) {
+      case 'bid_received':
+        return <DollarSign className="h-4 w-4 text-green-600" />
+      case 'email_opened':
+        return <Mail className="h-4 w-4 text-blue-600" />
+      case 'email_replied':
+        return <MessageSquare className="h-4 w-4 text-purple-600" />
+      case 'clarifying_question':
+        return <AlertCircle className="h-4 w-4 text-orange-600" />
+      case 'email_bounced':
+        return <AlertCircle className="h-4 w-4 text-red-600" />
+      default:
+        return <Bell className="h-4 w-4 text-gray-600" />
+    }
+  }
+
+  const getNotificationMessage = (notification: Notification) => {
+    if (notification.title) return notification.title
+    if (notification.message) return notification.message
+    
+    switch (notification.notification_type) {
+      case 'bid_received':
+        return `New bid on ${notification.job_title}`
+      case 'email_opened':
+        return `${notification.subcontractor_name} opened your email`
+      case 'email_replied':
+        return `${notification.subcontractor_name} replied to your email`
+      case 'clarifying_question':
+        return `${notification.subcontractor_name} has clarifying questions`
+      case 'email_bounced':
+        return `Email to ${notification.subcontractor_name} bounced`
+      default:
+        return `New notification for ${notification.job_title}`
+    }
+  }
+
   const unreadCount = notifications.filter(n => !n.read && !n.dismissed).length
 
   const handleBellClick = () => {
@@ -377,28 +481,62 @@ export default function NotificationBell() {
                     onClick={() => {
                       // Mark as read when clicked
                       markAsRead(notification.notification_id || notification.id)
-                      window.location.href = `/dashboard/jobs/${notification.job_id}`
+                      
+                      // Navigate based on notification type
+                      let url = `/dashboard/jobs/${notification.job_id}`
+                      
+                      if (notification.notification_type === 'bid_received' && notification.id) {
+                        // For bid notifications, add bidId to URL
+                        url += `?bidId=${notification.id}&tab=bids`
+                      } else if (notification.notification_type === 'email_replied' || 
+                                 notification.notification_type === 'email_opened' ||
+                                 notification.notification_type === 'clarifying_question') {
+                        // For email notifications, add recipientId if available
+                        // We need to get recipientId from the notification
+                        const recipientId = (notification as any).recipient_id
+                        if (recipientId) {
+                          url += `?recipientId=${recipientId}&tab=bids`
+                        } else {
+                          url += `?tab=bids`
+                        }
+                      } else {
+                        url += `?tab=bids`
+                      }
+                      
+                      router.push(url)
                       setIsOpen(false)
                     }}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            New bid on {notification.job_title}
+                          <div className="flex-shrink-0 mt-0.5">
+                            {getNotificationIcon(notification.notification_type)}
+                          </div>
+                          <p className="text-sm font-medium text-gray-900 truncate flex-1">
+                            {getNotificationMessage(notification)}
                           </p>
                           {!notification.read ? (
                             <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" title="Unread notification"></div>
-                          ) : !notification.seen ? (
+                          ) : !notification.seen && notification.notification_type === 'bid_received' ? (
                             <div className="w-2 h-2 bg-yellow-500 rounded-full flex-shrink-0" title="Unseen bid"></div>
                           ) : null}
                         </div>
-                        <p className="text-sm text-gray-600 truncate">
-                          {notification.subcontractor_name}
-                        </p>
-                        {notification.bid_amount && (
-                          <p className="text-sm font-semibold text-green-600">
-                            {formatCurrency(notification.bid_amount)}
+                        {notification.notification_type === 'bid_received' && (
+                          <>
+                            <p className="text-sm text-gray-600 truncate mt-1">
+                              {notification.subcontractor_name}
+                            </p>
+                            {notification.bid_amount && (
+                              <p className="text-sm font-semibold text-green-600 mt-1">
+                                {formatCurrency(notification.bid_amount)}
+                              </p>
+                            )}
+                          </>
+                        )}
+                        {notification.notification_type !== 'bid_received' && (
+                          <p className="text-sm text-gray-600 truncate mt-1">
+                            {notification.job_title}
                           </p>
                         )}
                       </div>
