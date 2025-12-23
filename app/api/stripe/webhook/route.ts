@@ -6,57 +6,108 @@ import { createClient } from '@supabase/supabase-js'
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16',
-})
+// Validate required environment variables
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
+if (!stripeSecretKey) {
+  console.error('STRIPE_SECRET_KEY is not set')
+}
+
+if (!webhookSecret) {
+  console.error('STRIPE_WEBHOOK_SECRET is not set')
+}
+
+const stripe = stripeSecretKey ? new Stripe(stripeSecretKey, {
+  apiVersion: '2023-10-16',
+}) : null
 
 export async function POST(request: NextRequest) {
-  const body = await request.text()
-  const signature = request.headers.get('stripe-signature')!
-
-  console.log('Webhook received:', {
-    hasBody: !!body,
-    hasSignature: !!signature,
-    hasWebhookSecret: !!webhookSecret,
-    nodeEnv: process.env.NODE_ENV
-  })
-
-  let event: Stripe.Event
-
-  // Always try to verify signature if webhook secret exists
-  if (webhookSecret) {
-    try {
-      event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
-      console.log('Webhook signature verified successfully')
-    } catch (err) {
-      console.error('Webhook signature verification failed:', err)
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
-    }
-  } else {
-    console.log('No webhook secret found, skipping signature verification')
-    event = JSON.parse(body)
-  }
-
-  console.log('Webhook event type:', event.type)
-  console.log('Webhook event data:', JSON.stringify(event.data, null, 2))
-
-      const supabase = await createServerSupabaseClient()
-      
-      // Use service role for webhook operations to bypass RLS
-      const supabaseAdmin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        {
-          auth: {
-            autoRefreshToken: false,
-            persistSession: false
-          }
-        }
-      )
-
   try {
+    // Validate Stripe is configured
+    if (!stripe) {
+      console.error('Stripe is not configured - STRIPE_SECRET_KEY missing')
+      return NextResponse.json(
+        { error: 'Webhook endpoint not configured' },
+        { status: 500 }
+      )
+    }
+
+    const body = await request.text()
+    const signature = request.headers.get('stripe-signature')
+
+    console.log('Webhook received:', {
+      hasBody: !!body,
+      hasSignature: !!signature,
+      hasWebhookSecret: !!webhookSecret,
+      nodeEnv: process.env.NODE_ENV
+    })
+
+    // Validate signature header exists when webhook secret is configured
+    if (webhookSecret && !signature) {
+      console.error('Missing stripe-signature header')
+      return NextResponse.json(
+        { error: 'Missing signature header' },
+        { status: 400 }
+      )
+    }
+
+    let event: Stripe.Event
+
+    // Always try to verify signature if webhook secret exists
+    if (webhookSecret) {
+      try {
+        event = stripe.webhooks.constructEvent(body, signature!, webhookSecret)
+        console.log('Webhook signature verified successfully')
+      } catch (err: any) {
+        console.error('Webhook signature verification failed:', err)
+        return NextResponse.json(
+          { error: 'Invalid signature', details: err.message },
+          { status: 400 }
+        )
+      }
+    } else {
+      console.warn('No webhook secret found, skipping signature verification')
+      try {
+        event = JSON.parse(body) as Stripe.Event
+      } catch (parseError: any) {
+        console.error('Failed to parse webhook body:', parseError)
+        return NextResponse.json(
+          { error: 'Invalid JSON body' },
+          { status: 400 }
+        )
+      }
+    }
+
+    console.log('Webhook event type:', event.type)
+    console.log('Webhook event data:', JSON.stringify(event.data, null, 2))
+
+    // Validate Supabase environment variables
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Supabase environment variables not configured')
+      return NextResponse.json(
+        { error: 'Database not configured' },
+        { status: 500 }
+      )
+    }
+
+    const supabase = await createServerSupabaseClient()
+    
+    // Use service role for webhook operations to bypass RLS
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      supabaseServiceKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    )
+
     switch (event.type) {
       case 'checkout.session.completed':
         const session = event.data.object as Stripe.Checkout.Session
@@ -95,6 +146,7 @@ export async function POST(request: NextRequest) {
 
             if (creditPurchaseError) {
               console.error('Error creating credit purchase record:', creditPurchaseError)
+              // Log but don't fail - Stripe payment is already complete
             } else {
               // Add credits to user's account
               // First get current credits, then update
@@ -106,8 +158,9 @@ export async function POST(request: NextRequest) {
 
               if (fetchError) {
                 console.error('Error fetching current user credits:', fetchError)
+                // Log but don't fail - payment is complete
               } else {
-                const newCredits = (currentUser.credits || 0) + creditsToPurchase
+                const newCredits = (currentUser?.credits || 0) + creditsToPurchase
                 
                 const { error: updateCreditsError } = await supabaseAdmin
                   .from('users')
@@ -120,6 +173,7 @@ export async function POST(request: NextRequest) {
                 
                 if (updateCreditsError) {
                   console.error('Error updating user credits:', updateCreditsError)
+                  // Log but don't fail - payment is complete
                 } else {
                   console.log(`✅ Credits purchased: ${creditsToPurchase} credits added to user ${userId} (total: ${newCredits})`)
                 }
@@ -311,13 +365,31 @@ export async function POST(request: NextRequest) {
 
       default:
         console.log(`Unhandled event type: ${event.type}`)
+        // Return 200 for unhandled events - Stripe expects 200-299 for success
+        // We acknowledge receipt even if we don't process the event
+        return NextResponse.json(
+          { received: true, message: `Event type ${event.type} acknowledged but not processed` },
+          { status: 200 }
+        )
     }
 
-    return NextResponse.json({ received: true })
-  } catch (error) {
-    console.error('Error processing webhook:', error)
+    // Return success response for all handled events
     return NextResponse.json(
-      { error: 'Webhook processing failed' },
+      { received: true, eventType: event.type },
+      { status: 200 }
+    )
+  } catch (error: any) {
+    console.error('Error processing webhook:', error)
+    console.error('Error stack:', error?.stack)
+    
+    // Return 500 for unexpected errors - Stripe will retry
+    // But we should log extensively to debug
+    return NextResponse.json(
+      { 
+        error: 'Webhook processing failed',
+        message: error?.message || 'Unknown error',
+        eventType: (error as any)?.event?.type || 'unknown'
+      },
       { status: 500 }
     )
   }

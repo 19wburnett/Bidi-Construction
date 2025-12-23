@@ -726,7 +726,7 @@ export class ModelOrchestrator {
       unit: this.validateUnit(item.unit) || 'EA',
       unit_cost: typeof item.unit_cost === 'number' ? item.unit_cost : parseFloat(item.unit_cost) || 0,
       location: item.location || '',
-      category: this.validateCategory(item.category) || 'other',
+      category: this.validateCategory(item.category, item) || 'other',
       subcategory: item.subcategory || 'Uncategorized',
       cost_code: item.cost_code || '',
       cost_code_description: item.cost_code_description || '',
@@ -802,14 +802,79 @@ export class ModelOrchestrator {
   }
   
   /**
-   * Validate category
+   * Validate category and map invalid values (like "master") to correct categories
    */
-  private validateCategory(category: string | undefined): TakeoffItemSchema['category'] | null {
+  private validateCategory(category: string | undefined, item?: any): TakeoffItemSchema['category'] | null {
     const validCategories: TakeoffItemSchema['category'][] = ['structural', 'exterior', 'interior', 'mep', 'finishes', 'other']
-    if (category && validCategories.includes(category as TakeoffItemSchema['category'])) {
-      return category as TakeoffItemSchema['category']
+    
+    // If category is valid, return it
+    if (category && validCategories.includes(category.toLowerCase() as TakeoffItemSchema['category'])) {
+      return category.toLowerCase() as TakeoffItemSchema['category']
     }
+    
+    // If category is "master" or invalid, try to infer from item properties
+    if (category?.toLowerCase() === 'master' && item) {
+      return this.inferCategoryFromItem(item)
+    }
+    
     return null
+  }
+  
+  /**
+   * Infer category from item properties when category is invalid
+   */
+  private inferCategoryFromItem(item: any): TakeoffItemSchema['category'] {
+    const subcategory = (item.subcategory || '').toLowerCase()
+    const costCode = (item.cost_code || '').toString()
+    const name = (item.name || '').toLowerCase()
+    const description = (item.description || '').toLowerCase()
+    const subcontractor = (item.subcontractor || '').toLowerCase()
+    
+    // Check subcategory first
+    if (subcategory.includes('foundation') || subcategory.includes('framing') || subcategory.includes('concrete') || subcategory.includes('slab') || subcategory.includes('earthwork')) {
+      return 'structural'
+    }
+    if (subcategory.includes('roof') || subcategory.includes('siding') || subcategory.includes('window') || subcategory.includes('door') || subcategory.includes('cladding')) {
+      return 'exterior'
+    }
+    if (subcategory.includes('drywall') || subcategory.includes('wall') || subcategory.includes('ceiling') || subcategory.includes('flooring') || subcategory.includes('insulation')) {
+      return 'interior'
+    }
+    if (subcategory.includes('electrical') || subcategory.includes('plumbing') || subcategory.includes('hvac') || subcategory.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcategory.includes('paint') || subcategory.includes('finish') || subcategory.includes('trim') || subcategory.includes('tile')) {
+      return 'finishes'
+    }
+    
+    // Check cost code ranges
+    if (costCode.match(/^(0[1-2]|03)/)) return 'structural' // 01-03 divisions
+    if (costCode.match(/^(0[4-7]|08)/)) return 'exterior' // 04-08 divisions
+    if (costCode.match(/^(09|10)/)) return 'interior' // 09-10 divisions
+    if (costCode.match(/^(15|16)/)) return 'mep' // 15-16 divisions
+    if (costCode.match(/^(09|12)/)) return 'finishes' // 09, 12 divisions
+    
+    // Check subcontractor
+    if (subcontractor.includes('electrical') || subcontractor.includes('plumbing') || subcontractor.includes('hvac') || subcontractor.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcontractor.includes('concrete') || subcontractor.includes('framing') || subcontractor.includes('excavation')) {
+      return 'structural'
+    }
+    if (subcontractor.includes('drywall') || subcontractor.includes('insulation')) {
+      return 'interior'
+    }
+    
+    // Check name/description keywords
+    const text = `${name} ${description}`.toLowerCase()
+    if (text.match(/\b(foundation|footing|framing|concrete|slab|excavation|earthwork|structural)\b/)) return 'structural'
+    if (text.match(/\b(roof|siding|window|door|exterior|cladding)\b/)) return 'exterior'
+    if (text.match(/\b(drywall|wall|ceiling|flooring|interior|insulation)\b/)) return 'interior'
+    if (text.match(/\b(electrical|plumbing|hvac|mechanical|fixture|outlet|switch)\b/)) return 'mep'
+    if (text.match(/\b(paint|finish|trim|tile|cabinet)\b/)) return 'finishes'
+    
+    // Default to 'other' if we can't determine
+    return 'other'
   }
   
   /**

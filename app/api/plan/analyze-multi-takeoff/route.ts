@@ -109,6 +109,7 @@ Return a JSON object with this EXACT structure:
       "unit_cost": 2.50,
       "location": "Specific location (e.g., 'North Wall', 'Kitchen', 'Floor Plan Sheet 1')",
       "category": "structural|exterior|interior|mep|finishes|other",
+      "⚠️ CRITICAL: 'master' is NOT a valid category. 'MasterFormat' refers to the cost code standard name, NOT a category field. Always use one of: structural, exterior, interior, mep, finishes, or other.",
       "subcategory": "One of the subcategories listed above (e.g., 'Foundation', 'Framing', 'Windows', 'Electrical')",
       "cost_code": "Procore cost code (e.g., '3,300', '6,100', '8,500')",
       "cost_code_description": "Description from cost code (e.g., 'Footings', 'Rough Carpentry', 'Windows')",

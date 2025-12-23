@@ -1,30 +1,10 @@
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import { aiGateway } from './ai-gateway-provider'
+import { getGatewayModel } from './ai-gateway-models'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { grokAdapter, initGrok, callGrok } from './providers/grokAdapter'
 
 // Enhanced AI Provider System with Specialized Models
 // This system uses 5+ specialized models with different strengths for maximum accuracy
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '')
-
-// XAI/Grok integration for additional redundancy
-const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY
-
-// Initialize Grok adapter if API key is available
-if (xaiApiKey) {
-  try {
-    initGrok({
-      apiKey: xaiApiKey,
-      baseUrl: process.env.GROK_BASE_URL || 'https://api.x.ai/v1'
-    })
-    console.log('✅ Grok adapter initialized')
-  } catch (error) {
-    console.warn('⚠️ Failed to initialize Grok adapter:', error)
-  }
-}
+// Now using Vercel AI Gateway for unified API management
 
 // Model specializations for different construction analysis tasks
 export const MODEL_SPECIALIZATIONS = {
@@ -278,7 +258,7 @@ export class EnhancedAIProvider {
     // Get the 3 priority models: GPT-4o, Claude Sonnet, Grok
     const selectedModels = this.getBestModelsForTask(options.taskType, 3)
     
-    // Filter out disabled providers and check API key availability
+    // Filter out disabled providers and check AI Gateway API key
     const enabledModels = selectedModels.filter(model => {
       // Check environment flags
       if (model.includes('gpt') && process.env.ENABLE_OPENAI === 'false') return false
@@ -286,19 +266,15 @@ export class EnhancedAIProvider {
       if (model.includes('gemini')) return false // Gemini disabled - model not available
       if (model.includes('grok') && process.env.ENABLE_XAI === 'false') return false
       
-      // Check API key availability
-      if (model.includes('gpt') && !process.env.OPENAI_API_KEY) return false
-      if (model.includes('claude') && !process.env.ANTHROPIC_API_KEY) return false
-      // Gemini disabled - always filter out
-      if (model.includes('gemini')) return false
-      if (model.includes('grok') && !process.env.XAI_API_KEY) return false
+      // Check AI Gateway API key (required for all providers)
+      if (!process.env.AI_GATEWAY_API_KEY) return false
       
       return true
     })
     
     console.log(`🚀 Running ${enabledModels.length} models in PARALLEL for ${options.taskType}:`, enabledModels)
     console.log(`Environment: MAX_MODELS=${process.env.MAX_MODELS_PER_ANALYSIS || '3'}, ENABLE_XAI=${process.env.ENABLE_XAI}`)
-    console.log(`API Keys available: OPENAI=${!!process.env.OPENAI_API_KEY}, ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY}, XAI=${!!process.env.XAI_API_KEY}`)
+    console.log(`AI Gateway API Key: ${!!process.env.AI_GATEWAY_API_KEY ? '✅ Configured' : '❌ Missing'}`)
     
     // Run all models in PARALLEL (not sequential fallback)
     // Goal: Get ALL findings from all 3 models, then combine them
@@ -415,40 +391,18 @@ export class EnhancedAIProvider {
     }
   }
 
-  // Enhanced OpenAI analysis
+  // Enhanced OpenAI analysis (via AI Gateway)
   private async analyzeWithOpenAI(
     images: string[],
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
-    console.log(`OpenAI analysis starting with model: ${model}`)
+    console.log(`OpenAI analysis starting with model: ${model} (via AI Gateway)`)
     
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured')
+    if (!process.env.AI_GATEWAY_API_KEY) {
+      throw new Error('AI Gateway API key not configured')
     }
     
-    const imageContent = images.map(img => {
-      if (img.startsWith('http://') || img.startsWith('https://')) {
-        return {
-          type: 'image_url' as const,
-          image_url: { url: img, detail: 'high' as const }
-        }
-      }
-
-      if (img.startsWith('data:')) {
-        return {
-          type: 'image_url' as const,
-          image_url: { url: img, detail: 'high' as const }
-        }
-      }
-
-      // Assume bare base64 payload
-      return {
-        type: 'image_url' as const,
-        image_url: { url: `data:image/jpeg;base64,${img}`, detail: 'high' as const }
-      }
-    })
-
     try {
       // Set model-specific token limits
       let maxTokens = options.maxTokens || 8192
@@ -474,48 +428,28 @@ export class EnhancedAIProvider {
       const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
       const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(model)
       
-      const requestConfig: any = {
+      const response = await aiGateway.generate({
         model: model,
-        messages: [
-          { role: 'system', content: this.buildSpecializedPrompt(options) },
-          { 
-            role: 'user', 
-            content: [
-              { type: 'text', text: options.userPrompt },
-              ...imageContent
-            ] 
-          }
-        ],
-        max_completion_tokens: maxTokens,
-        response_format: { type: 'json_object' }
-      }
+        system: this.buildSpecializedPrompt(options),
+        prompt: options.userPrompt,
+        images: images,
+        maxTokens: maxTokens,
+        temperature: supportsCustomTemperature ? (options.temperature || 0.2) : undefined,
+        responseFormat: { type: 'json_object' }
+      })
       
-      // Only add temperature for models that support custom values
-      if (supportsCustomTemperature) {
-        requestConfig.temperature = options.temperature || 0.2
-      }
-      // Models without custom temperature support will use default (1.0)
-      
-      const response = await openai.chat.completions.create(requestConfig)
-      
-      const content = response.choices[0].message.content || ''
-      const finishReason = response.choices[0].finish_reason
-      const reasoningTokens = (response.usage as any)?.completion_tokens_details?.reasoning_tokens || 0
-      const completionTokens = response.usage?.completion_tokens || 0
+      const content = response.content || ''
+      const finishReason = response.finishReason
       
       console.log(`OpenAI ${model} response received: ${content.length} chars, finish_reason: ${finishReason}`)
-      console.log(`Token usage: ${completionTokens} completion tokens (${reasoningTokens} reasoning + ${completionTokens - reasoningTokens} output)`)
+      if (response.usage) {
+        console.log(`Token usage: ${response.usage.totalTokens} total tokens`)
+      }
       
       // Check if response is empty and log details
       if (!content || content.length === 0) {
         console.warn(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}`)
-        console.warn(`Token breakdown: ${reasoningTokens} reasoning tokens used, ${completionTokens - reasoningTokens} output tokens`)
-        if (isReasoningModel && reasoningTokens >= maxTokens * 0.9) {
-          console.error(`⚠️ CRITICAL: Reasoning model exhausted token budget. Increase max_completion_tokens or reduce prompt size.`)
-        }
-        console.warn(`Response object:`, JSON.stringify(response, null, 2))
-        // Throw error for empty responses - don't treat as success
-        throw new Error(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}. All ${completionTokens} tokens were used for reasoning, leaving 0 for output.`)
+        throw new Error(`OpenAI ${model} returned empty response. Finish reason: ${finishReason}.`)
       }
       
       return {
@@ -524,7 +458,7 @@ export class EnhancedAIProvider {
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
         content: content,
         finishReason: finishReason,
-        tokensUsed: response.usage?.total_tokens,
+        tokensUsed: response.usage?.totalTokens,
         confidence: this.calculateConfidence(content),
         taskType: options.taskType
       }
@@ -534,83 +468,48 @@ export class EnhancedAIProvider {
     }
   }
 
-  // Enhanced Claude analysis
+  // Enhanced Claude analysis (via AI Gateway)
   private async analyzeWithClaude(
     images: string[],
     options: EnhancedAnalysisOptions,
     model: string
   ): Promise<EnhancedAIResponse> {
-    console.log(`Claude analysis starting with model: ${model}`)
+    console.log(`Claude analysis starting with model: ${model} (via AI Gateway)`)
     
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error('Anthropic API key not configured')
+    if (!process.env.AI_GATEWAY_API_KEY) {
+      throw new Error('AI Gateway API key not configured')
     }
     
-    const imageContent = await Promise.all(images.map(async img => {
-      let mediaType: 'image/jpeg' | 'image/png' = 'image/jpeg'
-      let base64Data: string
-
-      if (img.startsWith('http://') || img.startsWith('https://')) {
-        const response = await fetch(img)
-        if (!response.ok) {
-          throw new Error(`Failed to fetch image for Claude (${response.status} ${response.statusText})`)
-        }
-        const contentType = response.headers.get('content-type') || ''
-        if (contentType.includes('png')) {
-          mediaType = 'image/png'
-        }
-        const buffer = Buffer.from(await response.arrayBuffer())
-        base64Data = buffer.toString('base64')
-      } else if (img.startsWith('data:')) {
-        mediaType = img.includes('image/png') ? 'image/png' : 'image/jpeg'
-        base64Data = img.split(',')[1] || ''
-      } else {
-        // Assume bare base64 payload
-        base64Data = img
-      }
-
-      return {
-        type: 'image' as const,
-        source: {
-          type: 'base64' as const,
-          media_type: mediaType,
-          data: base64Data
-        }
-      }
-    }))
-
     // Set model-specific token limits for Claude
     let maxTokens = options.maxTokens || 8192
     if (model === 'claude-3-haiku-20240307') {
       maxTokens = Math.min(maxTokens, 4096) // Claude-3-haiku max is 4096
     }
     
-    const response = await anthropic.messages.create({
-      model: model,
-      max_tokens: maxTokens,
-      temperature: options.temperature || 0.2,
-      system: this.buildSpecializedPrompt(options),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: options.userPrompt },
-            ...imageContent
-          ]
-        }
-      ]
-    })
+    try {
+      const response = await aiGateway.generate({
+        model: model,
+        system: this.buildSpecializedPrompt(options),
+        prompt: options.userPrompt,
+        images: images,
+        maxTokens: maxTokens,
+        temperature: options.temperature || 0.2,
+        responseFormat: { type: 'json_object' }
+      })
 
-    const textContent = response.content.find(c => c.type === 'text')
-    return {
-      provider: 'anthropic',
-      model: model,
-      specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
-      content: (textContent as any)?.text || '',
-      finishReason: response.stop_reason || 'unknown',
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
-      confidence: this.calculateConfidence((textContent as any)?.text || ''),
-      taskType: options.taskType
+      return {
+        provider: 'anthropic',
+        model: model,
+        specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
+        content: response.content || '',
+        finishReason: response.finishReason || 'unknown',
+        tokensUsed: response.usage?.totalTokens,
+        confidence: this.calculateConfidence(response.content || ''),
+        taskType: options.taskType
+      }
+    } catch (error) {
+      console.error(`Claude ${model} failed:`, error)
+      throw error
     }
   }
 
@@ -625,6 +524,8 @@ export class EnhancedAIProvider {
     if (!process.env.GOOGLE_GEMINI_API_KEY) {
       throw new Error('Google Gemini API key not configured')
     }
+    
+    const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
     
     const parts: any[] = [
       { text: `${this.buildSpecializedPrompt(options)}\n\n${options.userPrompt}\n\nIMPORTANT: Respond with ONLY a JSON object, no other text.` }
@@ -670,7 +571,7 @@ export class EnhancedAIProvider {
     }
   }
 
-  // Enhanced XAI/Grok analysis using standardized adapter
+  // Enhanced XAI/Grok analysis (via AI Gateway)
   // Supports both image and text-only modes (text fallback when vision model unavailable)
   private async analyzeWithXAI(
     images: string[],
@@ -678,16 +579,17 @@ export class EnhancedAIProvider {
     model: string,
     inputType: 'images' | 'text' = 'images'
   ): Promise<EnhancedAIResponse> {
-    console.log(`XAI analysis starting with model: ${model} (input: ${inputType})`)
+    console.log(`XAI analysis starting with model: ${model} (input: ${inputType}, via AI Gateway)`)
     
-    if (!xaiApiKey) {
-      throw new Error('XAI API key not configured')
+    if (!process.env.AI_GATEWAY_API_KEY) {
+      throw new Error('AI Gateway API key not configured')
     }
 
     // Determine if we should use text-only mode
     const useTextOnly = inputType === 'text' && options.extractedText && options.extractedText.length > 0
 
-    let userContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+    let promptText = options.userPrompt
+    let imagesToUse: string[] = []
 
     if (useTextOnly && options.extractedText) {
       // TEXT-ONLY MODE: Use extracted PDF text instead of images
@@ -699,107 +601,45 @@ export class EnhancedAIProvider {
       
       // Don't truncate userPrompt - it contains critical instructions
       // Instead, be more aggressive with text truncation to leave room
-      const textPrompt = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
-      userContent = textPrompt
+      promptText = `${options.userPrompt}\n\n=== EXTRACTED TEXT FROM PDF ===\n${truncatedText}\n${options.extractedText.length > maxTextLength ? '\n...(text truncated to fit context window)' : ''}`
     } else {
-      // IMAGE MODE: Use images (will try vision model first)
-      const imageContent = images.map(img => {
-        if (img.startsWith('http://') || img.startsWith('https://')) {
-          return {
-            type: 'image_url' as const,
-            image_url: { url: img, detail: 'high' as const }
-          }
-        }
-
-        if (img.startsWith('data:')) {
-          return {
-            type: 'image_url' as const,
-            image_url: { url: img, detail: 'high' as const }
-          }
-        }
-
-        // Assume bare base64 payload
-        return {
-          type: 'image_url' as const,
-          image_url: { url: `data:image/jpeg;base64,${img}`, detail: 'high' as const }
-        }
-      })
-
-      userContent = [
-        { type: 'text', text: options.userPrompt },
-        ...imageContent
-      ]
+      // IMAGE MODE: Use images
+      imagesToUse = images
     }
 
     try {
       // Always use text-only model (grok-2-1212) - vision model not available
       const selectedModel = 'grok-2-1212'
       
-      // Call Grok adapter
-      const response = await callGrok({
+      const response = await aiGateway.generate({
+        model: selectedModel,
         system: this.buildSpecializedPrompt(options),
-        user: userContent,
-        max_tokens: Math.min(options.maxTokens || 8192, 4096), // Grok limit is 4096
+        prompt: promptText,
+        images: imagesToUse,
+        maxTokens: Math.min(options.maxTokens || 8192, 4096), // Grok limit is 4096
         temperature: options.temperature || 0.2,
-        json_schema: {
-          type: 'object',
-          properties: {
-            items: {
-              type: 'array',
-              items: { type: 'object' }
-            },
-            issues: {
-              type: 'array',
-              items: { type: 'object' }
-            }
-          },
-          required: ['items']
-        }
+        responseFormat: { type: 'json_object' }
       })
 
-      // Return with actual model used
-      const actualModel = response.model || selectedModel
       return {
         provider: 'xai',
-        model: actualModel, // Always grok-2-1212 (text-only model)
+        model: selectedModel,
         specialization: MODEL_SPECIALIZATIONS[model as ModelSpecialization] || 'general',
         content: response.content,
-        finishReason: response.finish_reason,
-        tokensUsed: response.usage.total_tokens,
+        finishReason: response.finishReason,
+        tokensUsed: response.usage?.totalTokens,
         confidence: this.calculateConfidence(response.content),
         taskType: options.taskType
       }
     } catch (error: any) {
       // Enhanced error logging for debugging
-      console.error(`[Grok Error] Type: ${error?.type || 'unknown'}, Message: ${error?.message || String(error)}`)
+      console.error(`[Grok Error] Message: ${error?.message || String(error)}`)
       if (error?.stack) {
         console.error(`[Grok Error] Stack: ${error.stack.substring(0, 500)}`)
       }
       
-      // Handle normalized Grok errors
-      if (error.type && error.message) {
-        console.error(`Grok API error (${error.type}):`, error.message)
-        
-        // Map error types to actionable messages
-        if (error.type === 'auth_error') {
-          throw new Error('XAI API authentication failed. Check your XAI_API_KEY.')
-        } else if (error.type === 'rate_limit') {
-          throw new Error(`Grok rate limit exceeded. Retry after ${error.retry_after || 'some time'}.`)
-        } else if (error.type === 'context_overflow') {
-          console.error('⚠️ Grok context overflow - text may be too long even after truncation')
-          throw new Error('Grok context window exceeded. Text was truncated but still too long. Consider reducing extracted text size.')
-        } else if (error.type === 'model_not_found') {
-          throw new Error(`Grok model not found: ${model}. Using grok-2-1212.`)
-        }
-      }
-      
-      // Log unknown errors for debugging
-      if (!error.type) {
-        console.error(`[Grok Unknown Error] Full error:`, JSON.stringify(error, null, 2).substring(0, 1000))
-      }
-      
-      // Re-throw original error
-      throw error
+      // Re-throw with context
+      throw new Error(`XAI/Grok analysis failed: ${error.message || String(error)}`)
     }
   }
 
@@ -1043,6 +883,11 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
       
       // Strategy 4b: Try to infer category/subcategory from item name if still missing
       items.forEach(item => {
+        // Fix "master" category issue - map to correct category
+        if (item.category?.toLowerCase() === 'master') {
+          item.category = this.inferCategoryFromItem(item) || 'other'
+        }
+        
         if (item.category === 'other' || !item.category) {
           const nameLower = item.name.toLowerCase()
           
@@ -1122,6 +967,79 @@ OUTPUT: Detailed cost breakdowns with pricing sources.`
     
     console.log(`Final extraction result: ${items.length} items`)
     return items
+  }
+
+  // Helper to infer category from item properties when category is invalid (e.g., "master")
+  private inferCategoryFromItem(item: any): string {
+    const subcategory = (item.subcategory || '').toLowerCase()
+    const costCode = (item.cost_code || '').toString()
+    const name = (item.name || '').toLowerCase()
+    const description = (item.description || '').toLowerCase()
+    const subcontractor = (item.subcontractor || '').toLowerCase()
+    
+    // Check subcategory first
+    if (subcategory.includes('foundation') || subcategory.includes('framing') || subcategory.includes('concrete') || 
+        subcategory.includes('slab') || subcategory.includes('earthwork') || subcategory.includes('sitework') ||
+        subcategory.includes('general requirements')) {
+      return 'structural'
+    }
+    if (subcategory.includes('roof') || subcategory.includes('siding') || subcategory.includes('window') || 
+        subcategory.includes('door') || subcategory.includes('cladding') || subcategory.includes('doors & windows')) {
+      return 'exterior'
+    }
+    if (subcategory.includes('drywall') || subcategory.includes('wall') || subcategory.includes('ceiling') || 
+        subcategory.includes('flooring') || subcategory.includes('insulation') || subcategory.includes('finishes')) {
+      return 'interior'
+    }
+    if (subcategory.includes('electrical') || subcategory.includes('plumbing') || subcategory.includes('hvac') || 
+        subcategory.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcategory.includes('paint') || subcategory.includes('finish') || subcategory.includes('trim') || 
+        subcategory.includes('tile')) {
+      return 'finishes'
+    }
+    
+    // Check cost code ranges (CSI 16-division format)
+    if (costCode.match(/^(01|02|03)/)) return 'structural' // 01-03 divisions
+    if (costCode.match(/^(04|05|06|07|08)/)) return 'exterior' // 04-08 divisions  
+    if (costCode.match(/^(09|10)/)) return 'interior' // 09-10 divisions
+    if (costCode.match(/^(15|16)/)) return 'mep' // 15-16 divisions
+    if (costCode.match(/^(09|12)/)) return 'finishes' // 09, 12 divisions
+    
+    // Check subcontractor
+    if (subcontractor.includes('electrical') || subcontractor.includes('electrician') || 
+        subcontractor.includes('plumbing') || subcontractor.includes('hvac') || subcontractor.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcontractor.includes('concrete') || subcontractor.includes('framing') || 
+        subcontractor.includes('excavation') || subcontractor.includes('earthwork')) {
+      return 'structural'
+    }
+    if (subcontractor.includes('drywall') || subcontractor.includes('insulation')) {
+      return 'interior'
+    }
+    
+    // Check name/description keywords
+    const text = `${name} ${description}`.toLowerCase()
+    if (text.match(/\b(foundation|footing|framing|concrete|slab|excavation|earthwork|structural|site clearing|rough grading|final grading|backfilling|erosion control|temporary utilities|sanitary facilities|temporary barriers|project cleanup)\b/)) {
+      return 'structural'
+    }
+    if (text.match(/\b(roof|siding|window|door|exterior|cladding|waterproofing)\b/)) {
+      return 'exterior'
+    }
+    if (text.match(/\b(drywall|wall|ceiling|flooring|interior|insulation|gypsum)\b/)) {
+      return 'interior'
+    }
+    if (text.match(/\b(electrical|plumbing|hvac|mechanical|fixture|outlet|switch|lighting|rough-in)\b/)) {
+      return 'mep'
+    }
+    if (text.match(/\b(paint|finish|trim|tile|cabinet)\b/)) {
+      return 'finishes'
+    }
+    
+    // Default to 'other' if we can't determine
+    return 'other'
   }
 
   // Helper to infer category from item name

@@ -43,6 +43,7 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
       "unit_cost": 2.50,
       "location": "Specific location",
       "category": "structural|exterior|interior|mep|finishes|other",
+      "IMPORTANT: 'master' is NOT a valid category. Use one of: structural, exterior, interior, mep, finishes, or other. 'MasterFormat' refers to the cost code standard, NOT the category field.",
       "subcontractor": "Trade Type (e.g. Electrical, Plumbing, Framing)",
       "subcategory": "Specific subcategory",
       "cost_code": "The standardized cost code",
@@ -231,7 +232,9 @@ TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
 - Provide realistic unit_cost pricing for each item
 
 3-LEVEL CATEGORIZATION:
-LEVEL 1: CATEGORY (structural, exterior, interior, mep, finishes, other)
+LEVEL 1: CATEGORY - MUST be one of: structural, exterior, interior, mep, finishes, or other
+  ⚠️ CRITICAL: "master" is NOT a valid category. "MasterFormat" refers to the cost code standard name, NOT a category.
+  ⚠️ NEVER use "master" as a category - always use one of the 6 valid categories listed above.
 LEVEL 2: SUBCATEGORY (specific work type)
 LEVEL 3: LINE ITEMS (individual materials with ${standardName} cost codes)
 
@@ -246,6 +249,7 @@ EXPECTED COVERAGE: For a 19-page plan, expect 5-15 items per page minimum
 BE SPECIFIC: "2x6 Top Plate" not just "lumber"
 SHOW YOUR MATH: Include dimensions used for calculations
 USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
+ASSIGN CATEGORIES: Every item MUST have a category from: structural, exterior, interior, mep, finishes, or other. NEVER use "master" as a category.
 ASSIGN SUBCATEGORIES: Every item must have a subcategory
 ASSIGN COST CODES: Use the ${standardName} cost codes provided in the reference section
 INCLUDE LOCATIONS: Specify where each item is located

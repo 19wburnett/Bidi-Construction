@@ -5,10 +5,10 @@
  * Handles rate limits, timeouts, and provider degradation gracefully.
  */
 
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import { aiGateway } from '../ai-gateway-provider'
 
 // Provider degradation tracking (in-memory, resets on server restart)
+// Note: AI Gateway handles rate limiting, but we keep this for monitoring
 const providerDegradation: Map<string, number> = new Map()
 const DEGRADATION_TTL = 30 * 60 * 1000 // 30 minutes
 
@@ -26,17 +26,8 @@ export interface LLMResponse {
   tokensUsed?: number
 }
 
-// Initialize clients
-const anthropic = process.env.ANTHROPIC_API_KEY 
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null
-
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null
-
-// XAI/Grok uses OpenAI-compatible API
-const xaiApiKey = process.env.XAI_API_KEY
+// Check AI Gateway API key
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 
 /**
  * Check if a provider is currently degraded (recently failed)
@@ -73,14 +64,14 @@ async function probeProvider(provider: string): Promise<boolean> {
     const testPrompt = { role: 'user' as const, content: 'Say "ok"' }
     
     if (provider === 'anthropic') {
-      if (!anthropic) return false
-      // For probe, just try without timeout - it's fast anyway
+      // Using AI Gateway - probe by attempting a small call
+      if (!hasAIGatewayKey) return false
       try {
         await Promise.race([
-          anthropic.messages.create({
+          aiGateway.generate({
             model: 'claude-3-haiku-20240307',
-            max_tokens: 5,
-            messages: [testPrompt]
+            prompt: 'Say "ok"',
+            maxTokens: 5
           }),
           new Promise((_, reject) => 
             setTimeout(() => reject(new Error('timeout')), 3000)
@@ -95,14 +86,14 @@ async function probeProvider(provider: string): Promise<boolean> {
     }
     
     if (provider === 'openai') {
-      if (!openai) return false
-      // For probe, use Promise.race for timeout
+      // Using AI Gateway - probe by attempting a small call
+      if (!hasAIGatewayKey) return false
       try {
         await Promise.race([
-          openai.chat.completions.create({
+          aiGateway.generate({
             model: 'gpt-4o-mini',
-            messages: [testPrompt],
-            max_tokens: 5
+            prompt: 'Say "ok"',
+            maxTokens: 5
           }),
           new Promise((_, reject) => 
             setTimeout(() => reject(new Error('timeout')), 3000)
@@ -116,29 +107,22 @@ async function probeProvider(provider: string): Promise<boolean> {
     }
     
     if (provider === 'xai') {
-      if (!xaiApiKey) return false
-      // Use direct fetch for probe (grok-beta deprecated, use grok-2-1212)
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 3000)
+      // Using AI Gateway - probe by attempting a small call
+      if (!hasAIGatewayKey) return false
       try {
-        const response = await fetch('https://api.x.ai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${xaiApiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
+        await Promise.race([
+          aiGateway.generate({
             model: 'grok-2-1212',
-            messages: [testPrompt],
-            max_completion_tokens: 5
+            prompt: 'Say "ok"',
+            maxTokens: 5
           }),
-          signal: controller.signal
-        })
-        clearTimeout(timeout)
-        if (!response.ok) return false
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('timeout')), 3000)
+          )
+        ])
         return true
-      } catch (e) {
-        clearTimeout(timeout)
+      } catch (error: any) {
+        if (error?.message === 'timeout') return false
         return false
       }
     }
@@ -162,59 +146,31 @@ async function callAnthropic(
   images: string[],
   options: LLMCallOptions
 ): Promise<LLMResponse> {
-  if (!anthropic) {
-    throw new Error('Anthropic API key not configured')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured')
   }
 
   // Use sonnet-4 which works, fallback to haiku if needed
   const model = 'claude-sonnet-4-20250514' // Latest working Sonnet model
-  
-  const messages: any[] = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: userPrompt },
-        ...images.map(img => ({
-          type: 'image' as const,
-          source: {
-            type: 'base64' as const,
-            media_type: 'image/png' as const,
-            data: img.replace(/^data:image\/\w+;base64,/, '')
-          }
-        }))
-      ]
-    }
-  ]
-
-  // Anthropic SDK doesn't support signal in body, use timeout in options
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 60000)
 
   try {
-    const response = await anthropic.messages.create(
-      {
-        model,
-        max_tokens: options.maxTokens || 4096,
-        temperature: options.temperature ?? 0.2,
-        system: systemPrompt,
-        messages
-      },
-      {
-        signal: controller.signal as any
-      }
-    )
-
-    clearTimeout(timeout)
+    const response = await aiGateway.generate({
+      model,
+      system: systemPrompt,
+      prompt: userPrompt,
+      images: images,
+      maxTokens: options.maxTokens || 4096,
+      temperature: options.temperature ?? 0.2,
+    })
 
     return {
       provider: 'anthropic',
       model,
-      content: response.content[0]?.type === 'text' ? response.content[0].text : '',
-      finishReason: response.stop_reason || 'stop',
-      tokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0)
+      content: response.content,
+      finishReason: response.finishReason || 'stop',
+      tokensUsed: response.usage?.totalTokens
     }
   } catch (error: any) {
-    clearTimeout(timeout)
     
     if (error?.status === 429 || error?.name === 'AbortError') {
       markProviderDegraded('anthropic')
@@ -225,7 +181,7 @@ async function callAnthropic(
 }
 
 /**
- * Call OpenAI GPT
+ * Call OpenAI GPT (via AI Gateway)
  */
 async function callOpenAI(
   systemPrompt: string,
@@ -233,59 +189,38 @@ async function callOpenAI(
   images: string[],
   options: LLMCallOptions
 ): Promise<LLMResponse> {
-  if (!openai) {
-    throw new Error('OpenAI API key not configured')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured')
   }
 
   const model = 'gpt-4o' // Use GPT-4o for reliability
-  
-  const messages: any[] = [
-    {
-      role: 'system',
-      content: systemPrompt
-    },
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: userPrompt },
-        ...images.map(img => ({
-          type: 'image_url' as const,
-          image_url: { url: img, detail: 'high' }
-        }))
-      ]
-    }
-  ]
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 60000)
 
   try {
-    const response = await openai.chat.completions.create(
-      {
-        model,
-        messages,
-        max_tokens: options.maxTokens || 4096,
-        temperature: options.temperature ?? 0.2
-      },
-      { 
-        signal: controller.signal,
-        timeout: options.timeoutMs || 60000
-      }
-    )
+    const response = await aiGateway.generate({
+      model: model,
+      system: systemPrompt,
+      prompt: userPrompt,
+      images: images,
+      maxTokens: options.maxTokens || 4096,
+      temperature: options.temperature ?? 0.2
+    })
 
     clearTimeout(timeout)
 
     return {
       provider: 'openai',
       model,
-      content: response.choices[0]?.message?.content || '',
-      finishReason: response.choices[0]?.finish_reason || 'stop',
-      tokensUsed: (response.usage?.prompt_tokens || 0) + (response.usage?.completion_tokens || 0)
+      content: response.content || '',
+      finishReason: response.finishReason || 'stop',
+      tokensUsed: response.usage?.totalTokens
     }
   } catch (error: any) {
     clearTimeout(timeout)
     
-    if (error?.status === 429 || error?.name === 'AbortError') {
+    if (error?.message?.includes('429') || error?.name === 'AbortError') {
       markProviderDegraded('openai')
     }
     
@@ -294,7 +229,7 @@ async function callOpenAI(
 }
 
 /**
- * Call xAI Grok
+ * Call xAI Grok (via AI Gateway)
  */
 async function callXAI(
   systemPrompt: string,
@@ -302,72 +237,39 @@ async function callXAI(
   images: string[],
   options: LLMCallOptions
 ): Promise<LLMResponse> {
-  if (!xaiApiKey) {
-    throw new Error('xAI API key not configured')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured')
   }
 
   // grok-beta was deprecated on 2025-09-15, use grok-2-1212
   const model = 'grok-2-1212'
-  
-  // XAI uses direct fetch API with different format
-  const imageContent = images.map(img => {
-    // Handle both data URLs and base64 strings
-    const url = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`
-    return {
-      type: 'image_url' as const,
-      image_url: { url: url, detail: 'high' as const }
-    }
-  })
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 60000)
 
   try {
-    // XAI requires direct fetch with max_completion_tokens (not max_tokens)
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { 
-            role: 'user', 
-            content: [
-              { type: 'text', text: userPrompt },
-              ...imageContent
-            ] 
-          }
-        ],
-        max_completion_tokens: Math.min(options.maxTokens || 4096, 4096), // XAI limit
-        temperature: options.temperature ?? 0.2
-      }),
-      signal: controller.signal
+    const response = await aiGateway.generate({
+      model: model,
+      system: systemPrompt,
+      prompt: userPrompt,
+      images: images,
+      maxTokens: Math.min(options.maxTokens || 4096, 4096), // XAI limit
+      temperature: options.temperature ?? 0.2
     })
 
     clearTimeout(timeout)
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`XAI API error: ${response.status} ${response.statusText} - ${errorText}`)
-    }
-
-    const data = await response.json()
-
     return {
       provider: 'xai',
       model,
-      content: data.choices[0]?.message?.content || '',
-      finishReason: data.choices[0]?.finish_reason || 'stop',
-      tokensUsed: (data.usage?.prompt_tokens || 0) + (data.usage?.completion_tokens || 0)
+      content: response.content || '',
+      finishReason: response.finishReason || 'stop',
+      tokensUsed: response.usage?.totalTokens
     }
   } catch (error: any) {
     clearTimeout(timeout)
     
-    if (error?.status === 429 || error?.name === 'AbortError') {
+    if (error?.message?.includes('429') || error?.name === 'AbortError') {
       markProviderDegraded('xai')
     }
     
@@ -395,7 +297,7 @@ export async function callAnalysisLLM(
   const providers: Array<{ name: string; callFn: () => Promise<LLMResponse> }> = []
   
   // Add Anthropic if available and not degraded
-  if (anthropic && !isProviderDegraded('anthropic')) {
+  if (hasAIGatewayKey && !isProviderDegraded('anthropic')) {
     providers.push({
       name: 'anthropic',
       callFn: () => callAnthropic(systemPrompt, userPrompt, images, opts)
@@ -403,7 +305,7 @@ export async function callAnalysisLLM(
   }
   
   // Add OpenAI if available and not degraded
-  if (openai && !isProviderDegraded('openai')) {
+  if (hasAIGatewayKey && !isProviderDegraded('openai')) {
     providers.push({
       name: 'openai',
       callFn: () => callOpenAI(systemPrompt, userPrompt, images, opts)
@@ -411,7 +313,7 @@ export async function callAnalysisLLM(
   }
   
   // Add xAI if available and not degraded
-  if (xaiApiKey && !isProviderDegraded('xai')) {
+  if (hasAIGatewayKey && !isProviderDegraded('xai')) {
     providers.push({
       name: 'xai',
       callFn: () => callXAI(systemPrompt, userPrompt, images, opts)
@@ -419,7 +321,7 @@ export async function callAnalysisLLM(
   }
 
   if (providers.length === 0) {
-    throw new Error('No LLM providers available. Please configure at least one API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or XAI_API_KEY)')
+    throw new Error('No LLM providers available. Please configure AI_GATEWAY_API_KEY in your environment variables.')
   }
 
   // Try each provider in order

@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 // @ts-ignore - pdf2json doesn't have TypeScript types  
 import PDFParser from 'pdf2json'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-})
+import { extractTextWithOCR } from '@/lib/ingestion/pdf-ocr-extractor'
 
 export interface ParsedLineItem {
   description: string
@@ -135,6 +132,133 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
       reject(new Error(`Failed to start PDF parsing: ${error.message || 'Unknown error'}`))
     }
   })
+}
+
+/**
+ * Convert PDF to images for OCR (using PDF.co just for conversion)
+ * Returns array of image URLs
+ */
+async function convertPDFToImagesForOCR(buffer: Buffer, fileName: string): Promise<string[]> {
+  const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY
+
+  if (!PDF_CO_API_KEY) {
+    return []
+  }
+
+  try {
+    // Step 1: Upload PDF to PDF.co
+    const uploadFormData = new FormData()
+    const uint8Array = new Uint8Array(buffer)
+    const blob = new Blob([uint8Array], { type: 'application/pdf' })
+    uploadFormData.append('file', blob, fileName)
+
+    const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {
+      method: 'POST',
+      headers: {
+        'x-api-key': PDF_CO_API_KEY,
+      },
+      body: uploadFormData,
+    })
+
+    if (!uploadResponse.ok) {
+      throw new Error(`PDF.co upload failed: ${uploadResponse.statusText}`)
+    }
+
+    const uploadData = await uploadResponse.json()
+    const fileUrl = uploadData.url
+
+    // Step 2: Convert pages to PNG images
+    const convertResponse = await fetch('https://api.pdf.co/v1/pdf/convert/to/png', {
+      method: 'POST',
+      headers: {
+        'x-api-key': PDF_CO_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: fileUrl,
+        async: false,
+        pages: '', // All pages
+        name: `${fileName}-page`,
+      }),
+    })
+
+    if (!convertResponse.ok) {
+      throw new Error(`PDF.co conversion failed: ${convertResponse.statusText}`)
+    }
+
+    const convertData = await convertResponse.json()
+
+    if (convertData.error) {
+      throw new Error(`PDF.co error: ${convertData.message}`)
+    }
+
+    return convertData.urls || []
+  } catch (error) {
+    console.error('[Parse Invoice] Error converting PDF to images:', error)
+    return []
+  }
+}
+
+/**
+ * Extract text from PDF images using GPT-4 Vision via aiGateway
+ */
+async function extractTextWithGPT4Vision(imageUrls: string[]): Promise<string> {
+  if (!imageUrls || imageUrls.length === 0) {
+    return ''
+  }
+
+  try {
+    const pages: string[] = []
+
+    // Process each page image
+    for (let i = 0; i < imageUrls.length; i++) {
+      const imageUrl = imageUrls[i]
+      
+      try {
+        // Use messages format for vision API compatibility
+        const response = await aiGateway.generate({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert at extracting text from document images. Extract ALL visible text from the image, preserving structure, formatting, and layout as much as possible. Include all numbers, dates, addresses, line items, totals, and any other text content. Return only the extracted text, no explanations or markdown formatting.'
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Extract all text from this invoice/bid document page. Include everything: headers, company info, line items, totals, notes, and any other text.'
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: imageUrl,
+                    detail: 'high' as const
+                  }
+                }
+              ]
+            }
+          ],
+          maxTokens: 4000,
+          temperature: 0.1,
+        })
+
+        const pageText = response.content || ''
+        if (pageText.trim().length > 0) {
+          pages.push(`\n=== PAGE ${i + 1} ===\n${pageText}`)
+        }
+      } catch (pageError: any) {
+        console.warn(`[Parse Invoice] Failed to extract text from page ${i + 1} with GPT-4 Vision:`, pageError.message)
+        // Continue with next page
+      }
+    }
+
+    return pages.join('\n')
+  } catch (error: any) {
+    console.error('[Parse Invoice] Error extracting text with GPT-4 Vision:', error)
+    throw error
+  }
 }
 
 /**
@@ -316,31 +440,27 @@ ${extractedText}`
     // Try with response_format first, but handle if it fails
     let response
     try {
-      response = await openai.chat.completions.create({
+      response = await aiGateway.generate({
         model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+        system: systemPrompt,
+        prompt: userPrompt,
         temperature: 0.1, // Low temperature for more consistent extraction
-        max_tokens: 4000,
-        response_format: { type: 'json_object' }, // Request JSON format explicitly
+        maxTokens: 4000,
+        responseFormat: { type: 'json_object' }, // Request JSON format explicitly
       })
     } catch (formatError: any) {
       // If response_format causes an error, retry without it
       console.warn('[Parse Invoice] response_format failed, retrying without it:', formatError.message)
-      response = await openai.chat.completions.create({
+      response = await aiGateway.generate({
         model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+        system: systemPrompt,
+        prompt: userPrompt,
         temperature: 0.1,
-        max_tokens: 4000,
+        maxTokens: 4000,
       })
     }
 
-    const content = response.choices[0]?.message?.content
+    const content = response.content
     if (!content) {
       throw new Error('No response from AI')
     }
@@ -348,10 +468,10 @@ ${extractedText}`
     // Log the raw response for debugging (first 1000 chars)
     console.log('[Parse Invoice] Raw AI response (first 1000 chars):', content.substring(0, 1000))
     console.log('[Parse Invoice] Raw AI response length:', content.length)
-    console.log('[Parse Invoice] Finish reason:', response.choices[0]?.finish_reason)
+    console.log('[Parse Invoice] Finish reason:', response.finishReason)
 
     // Check if response was truncated or incomplete
-    if (response.choices[0]?.finish_reason === 'length') {
+    if (response.finishReason === 'length') {
       console.warn('[Parse Invoice] WARNING: AI response was truncated due to token limit')
     }
 
@@ -541,21 +661,73 @@ export async function POST(request: NextRequest) {
       extractedText = await extractTextFromPDF(buffer)
     } catch (pdfError: any) {
       console.error('[Parse Invoice] PDF extraction failed:', pdfError)
-      return NextResponse.json(
-        { error: pdfError.message || 'Failed to extract text from PDF. The file may be image-based, encrypted, or corrupted.' },
-        { status: 400 }
-      )
+      // Don't return error yet - try OCR fallback
+      extractedText = ''
     }
     
+    // If insufficient text extracted, try OCR for scanned PDFs
     if (!extractedText || extractedText.trim().length < 50) {
       const extractedLength = extractedText?.length || 0
-      console.warn(`[Parse Invoice] Insufficient text extracted: ${extractedLength} characters`)
-      return NextResponse.json(
-        { 
-          error: `Could not extract sufficient text from PDF (only ${extractedLength} characters found). The file may be image-based (scanned document) or corrupted. Please use a PDF with selectable text or convert the scanned document to text first.` 
-        },
-        { status: 400 }
-      )
+      console.warn(`[Parse Invoice] Insufficient text extracted: ${extractedLength} characters. Attempting OCR...`)
+      
+      let ocrSuccess = false
+      
+      // Option 1: Try GPT-4 Vision OCR via aiGateway (if PDF can be converted to images)
+      // Note: This still requires PDF-to-image conversion, which currently uses PDF.co
+      // but GPT-4 Vision provides better OCR quality for invoices
+      if (process.env.PDF_CO_API_KEY) {
+        try {
+          // First, convert PDF to images using PDF.co (just for conversion, not OCR)
+          const imageUrls = await convertPDFToImagesForOCR(buffer, file.name)
+          
+          if (imageUrls && imageUrls.length > 0) {
+            console.log(`[Parse Invoice] Converted PDF to ${imageUrls.length} images, using GPT-4 Vision for OCR...`)
+            const visionText = await extractTextWithGPT4Vision(imageUrls)
+            
+            if (visionText && visionText.trim().length > 50) {
+              extractedText = visionText + (extractedText ? `\n\n--- Additional extracted text ---\n${extractedText}` : '')
+              console.log(`[Parse Invoice] GPT-4 Vision OCR extracted ${visionText.length} characters`)
+              ocrSuccess = true
+            }
+          }
+        } catch (visionError: any) {
+          console.warn('[Parse Invoice] GPT-4 Vision OCR failed, trying PDF.co OCR:', visionError.message)
+        }
+      }
+      
+      // Option 2: Fallback to PDF.co OCR if GPT-4 Vision didn't work
+      if (!ocrSuccess && process.env.PDF_CO_API_KEY) {
+        try {
+          const ocrPages = await extractTextWithOCR(buffer, file.name)
+          
+          if (ocrPages && ocrPages.length > 0) {
+            // Combine OCR text from all pages
+            const ocrText = ocrPages
+              .map(page => `\n=== PAGE ${page.pageNumber} ===\n${page.text}`)
+              .join('\n')
+            
+            // Merge with any existing text (OCR takes precedence)
+            extractedText = ocrText + (extractedText ? `\n\n--- Additional extracted text ---\n${extractedText}` : '')
+            
+            console.log(`[Parse Invoice] PDF.co OCR extracted ${ocrText.length} characters from ${ocrPages.length} pages`)
+            ocrSuccess = true
+          }
+        } catch (ocrError: any) {
+          console.error('[Parse Invoice] PDF.co OCR extraction failed:', ocrError)
+        }
+      }
+      
+      // Final check - if still insufficient text, return error
+      if (!ocrSuccess && (!extractedText || extractedText.trim().length < 50)) {
+        const finalLength = extractedText?.length || 0
+        console.warn(`[Parse Invoice] Insufficient text extracted after OCR attempts: ${finalLength} characters`)
+        return NextResponse.json(
+          { 
+            error: `Could not extract sufficient text from PDF (only ${finalLength} characters found). The file may be image-based (scanned document) or corrupted. ${process.env.PDF_CO_API_KEY ? 'Both GPT-4 Vision and PDF.co OCR were attempted but failed.' : 'OCR is not configured (PDF_CO_API_KEY not set).'} Please use a PDF with selectable text or convert the scanned document to text first.` 
+          },
+          { status: 400 }
+        )
+      }
     }
     
     console.log(`[Parse Invoice] Extracted ${extractedText.length} characters of text`)

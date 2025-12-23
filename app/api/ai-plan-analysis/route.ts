@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 // @ts-ignore - pdf2json doesn't have TypeScript types  
 import PDFParser from 'pdf2json'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-})
 
 interface AIAnalysisResult {
   trade: string
@@ -448,11 +444,8 @@ Return your analysis in the following JSON format (no markdown, just raw JSON):
 }`
 
   try {
-    // Build message content with BOTH text and images
-    const messageContent: any[] = [
-      {
-        type: 'text',
-        text: `Construction Plan: ${fileName}
+    // Build text prompt
+    const textPrompt = `Construction Plan: ${fileName}
 
 === EXTRACTED TEXT FROM PDF ===
 ${extractedText.slice(0, 8000)}${extractedText.length > 8000 ? '\n\n...(additional text truncated)' : ''}
@@ -471,39 +464,26 @@ COUNT specific ${trade} elements you can see:
 - ${trade === 'Flooring' ? 'Room areas, flooring type zones, transition locations, dimensions' : ''}
 
 Provide specific counts and verify with text when possible.`
-      }
-    ]
 
     // Add ALL page images (limit to 10 for token management)
     const maxImages = Math.min(imageUrls.length, 10)
     const imagesToAnalyze = imageUrls.slice(0, maxImages)
-    
-    for (let i = 0; i < imagesToAnalyze.length; i++) {
-      messageContent.push({
-        type: 'image_url',
-        image_url: {
-          url: imagesToAnalyze[i],
-          detail: 'high' // Use high detail for construction plans
-        }
-      })
-    }
 
     console.log(`Analyzing ${imagesToAnalyze.length} images + ${extractedText.length} chars of text for ${trade}`)
 
-    const completion = await openai.chat.completions.create({
+    const completion = await aiGateway.generate({
       model: 'gpt-4o', // GPT-4o supports vision
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: messageContent },
-      ],
+      system: systemPrompt,
+      prompt: textPrompt,
+      images: imagesToAnalyze,
       temperature: 0.7,
-      max_tokens: 4096,
-      response_format: { type: 'json_object' },
+      maxTokens: 4096,
+      responseFormat: { type: 'json_object' },
     })
 
-    const responseText = completion.choices[0]?.message?.content
+    const responseText = completion.content
     if (!responseText) {
-      throw new Error('No response from OpenAI')
+      throw new Error('No response from AI Gateway')
     }
 
     const analysis = JSON.parse(responseText)

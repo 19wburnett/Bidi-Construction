@@ -990,6 +990,12 @@ ${scopingNotes}`
   }
 
   private normalizeConsensusItem(item: any): TakeoffItem {
+    // Fix "master" category issue - map to correct category based on item properties
+    let category = item.category || ''
+    if (category.toLowerCase() === 'master') {
+      category = this.inferCategoryFromItem(item) || 'other'
+    }
+    
     return {
       name: item.name || '',
       description: item.description || '',
@@ -1000,7 +1006,7 @@ ${scopingNotes}`
       unit_cost_notes: item.unit_cost_notes,
       location: item.location || '',
       industry: item.industry || 'other',
-      category: item.category || '',
+      category: category,
       subcategory: item.subcategory || '',
       cost_code: item.cost_code || '',
       cost_code_description: item.cost_code_description || '',
@@ -1010,6 +1016,63 @@ ${scopingNotes}`
       confidence: typeof item.confidence === 'number' ? item.confidence : 0.5,
       notes: item.notes
     }
+  }
+  
+  /**
+   * Infer category from item properties when category is invalid (e.g., "master")
+   */
+  private inferCategoryFromItem(item: any): string {
+    const subcategory = (item.subcategory || '').toLowerCase()
+    const costCode = (item.cost_code || '').toString()
+    const name = (item.name || '').toLowerCase()
+    const description = (item.description || '').toLowerCase()
+    const subcontractor = (item.subcontractor || '').toLowerCase()
+    
+    // Check subcategory first
+    if (subcategory.includes('foundation') || subcategory.includes('framing') || subcategory.includes('concrete') || subcategory.includes('slab') || subcategory.includes('earthwork') || subcategory.includes('sitework')) {
+      return 'structural'
+    }
+    if (subcategory.includes('roof') || subcategory.includes('siding') || subcategory.includes('window') || subcategory.includes('door') || subcategory.includes('cladding') || subcategory.includes('doors & windows')) {
+      return 'exterior'
+    }
+    if (subcategory.includes('drywall') || subcategory.includes('wall') || subcategory.includes('ceiling') || subcategory.includes('flooring') || subcategory.includes('insulation') || subcategory.includes('finishes')) {
+      return 'interior'
+    }
+    if (subcategory.includes('electrical') || subcategory.includes('plumbing') || subcategory.includes('hvac') || subcategory.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcategory.includes('paint') || subcategory.includes('finish') || subcategory.includes('trim') || subcategory.includes('tile')) {
+      return 'finishes'
+    }
+    
+    // Check cost code ranges (CSI 16-division format)
+    if (costCode.match(/^(01|02|03)/)) return 'structural' // 01-03 divisions
+    if (costCode.match(/^(04|05|06|07|08)/)) return 'exterior' // 04-08 divisions  
+    if (costCode.match(/^(09|10)/)) return 'interior' // 09-10 divisions
+    if (costCode.match(/^(15|16)/)) return 'mep' // 15-16 divisions
+    if (costCode.match(/^(09|12)/)) return 'finishes' // 09, 12 divisions
+    
+    // Check subcontractor
+    if (subcontractor.includes('electrical') || subcontractor.includes('electrician') || subcontractor.includes('plumbing') || subcontractor.includes('hvac') || subcontractor.includes('mechanical')) {
+      return 'mep'
+    }
+    if (subcontractor.includes('concrete') || subcontractor.includes('framing') || subcontractor.includes('excavation') || subcontractor.includes('earthwork')) {
+      return 'structural'
+    }
+    if (subcontractor.includes('drywall') || subcontractor.includes('insulation')) {
+      return 'interior'
+    }
+    
+    // Check name/description keywords
+    const text = `${name} ${description}`.toLowerCase()
+    if (text.match(/\b(foundation|footing|framing|concrete|slab|excavation|earthwork|structural|site clearing|rough grading|final grading|backfilling|erosion control)\b/)) return 'structural'
+    if (text.match(/\b(roof|siding|window|door|exterior|cladding|waterproofing)\b/)) return 'exterior'
+    if (text.match(/\b(drywall|wall|ceiling|flooring|interior|insulation|gypsum)\b/)) return 'interior'
+    if (text.match(/\b(electrical|plumbing|hvac|mechanical|fixture|outlet|switch|lighting|rough-in)\b/)) return 'mep'
+    if (text.match(/\b(paint|finish|trim|tile|cabinet)\b/)) return 'finishes'
+    
+    // Default to 'other' if we can't determine
+    return 'other'
   }
 
   private normalizeConsensusIssue(issue: any): AnalysisItem {

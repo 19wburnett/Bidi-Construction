@@ -1,11 +1,7 @@
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 import type { PlanChatDeterministicResult } from './deterministicEngine'
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
-
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 const TAKEOFF_MODE_SYSTEM_PROMPT = `You are BidiPal, the estimator assistant inside Bidi.
@@ -99,8 +95,8 @@ export async function generatePlanChatAnswer(
   result: PlanChatDeterministicResult,
   recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<string> {
-  if (!openaiClient) {
-    throw new Error('OpenAI client is not configured. Please add an API key.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key is not configured. Please add AI_GATEWAY_API_KEY to your environment variables.')
   }
 
   const isTakeoffQuestion =
@@ -128,13 +124,13 @@ export async function generatePlanChatAnswer(
   messages.push({ role: 'user', content: userContent })
 
   try {
-    const completion = await openaiClient.chat.completions.create({
+    const response = await aiGateway.generate({
       model: OPENAI_MODEL,
       messages: messages as any,
-      max_completion_tokens: 600,
+      maxTokens: 600,
     })
 
-    let answer = completion.choices[0]?.message?.content?.trim()
+    let answer = response.content?.trim()
 
     // If answer is empty or just repeats the scope description, build a better fallback
     if (!answer || answer.length < 10) {

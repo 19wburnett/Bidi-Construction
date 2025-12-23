@@ -17,7 +17,8 @@ import {
   RefreshCcw,
   ArrowUpDown,
   Filter,
-  Calendar
+  Calendar,
+  Sparkles
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -1328,6 +1329,12 @@ The Bidi Team`
               <CardDescription>Search, filter, and maintain your subcontractor network.</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Link href="/admin/subcontractors/enrich">
+                <Button variant="default" size="sm" className="bg-purple-600 hover:bg-purple-700">
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Enrich with Firecrawl
+                </Button>
+              </Link>
               <Button
                 variant="secondary"
                 size="sm"

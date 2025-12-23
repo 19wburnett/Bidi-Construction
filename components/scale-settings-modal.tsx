@@ -27,19 +27,133 @@ interface ScaleSettingsModalProps {
   onCalibrationComplete?: () => void
   numPages?: number
   onApplyCurrentToAll?: () => void
+  /** Rendered page dimensions in pixels (for automatic scale calculation) */
+  pageDimensions?: { width: number; height: number }
+  /** PDF native dimensions in points (72 DPI) - used to calculate effective DPI */
+  pdfNativeDimensions?: { width: number; height: number }
 }
 
-const PRESET_SCALES: { label: string; value: string; pixelsPerUnit: number; unit: Unit }[] = [
-  // Architectural (feet)
-  { label: '1/8" = 1\'', value: '1/8" = 1\'', pixelsPerUnit: 96, unit: 'ft' },
-  { label: '1/4" = 1\'', value: '1/4" = 1\'', pixelsPerUnit: 48, unit: 'ft' },
-  { label: '1/2" = 1\'', value: '1/2" = 1\'', pixelsPerUnit: 24, unit: 'ft' },
-  { label: '1" = 1\'', value: '1" = 1\'', pixelsPerUnit: 12, unit: 'ft' },
-  // Metric (meters)
-  { label: '1:100', value: '1:100', pixelsPerUnit: 100, unit: 'm' },
-  { label: '1:50', value: '1:50', pixelsPerUnit: 50, unit: 'm' },
-  { label: '1:20', value: '1:20', pixelsPerUnit: 20, unit: 'm' }
+const PRESET_SCALES: { label: string; value: string; pixelsPerUnit?: number; unit: Unit; scaleRatio?: number }[] = [
+  // Architectural (feet) - scaleRatio is inches on plan per foot in real life
+  { label: '1/8" = 1\'', value: '1/8" = 1\'', unit: 'ft', scaleRatio: 1/8 },
+  { label: '1/4" = 1\'', value: '1/4" = 1\'', unit: 'ft', scaleRatio: 1/4 },
+  { label: '1/2" = 1\'', value: '1/2" = 1\'', unit: 'ft', scaleRatio: 1/2 },
+  { label: '1" = 1\'', value: '1" = 1\'', unit: 'ft', scaleRatio: 1 },
+  // Metric (meters) - scaleRatio is the denominator (1:100 means 1/100)
+  { label: '1:100', value: '1:100', unit: 'm', scaleRatio: 1/100 },
+  { label: '1:50', value: '1:50', unit: 'm', scaleRatio: 1/50 },
+  { label: '1:20', value: '1:20', unit: 'm', scaleRatio: 1/20 }
 ]
+
+/**
+ * Calculate pixelsPerUnit from scale ratio using actual rendered page dimensions
+ * @param scaleRatio - For architectural: inches on plan per foot (e.g., 1/4 for "1/4" = 1'")
+ *                     For metric: unit on plan per unit in real life (e.g., 1/100 for "1:100")
+ * @param unit - The unit type ('ft', 'in', 'm', 'cm', 'mm')
+ * @param renderedWidth - Rendered page width in pixels
+ * @param pdfNativeWidth - PDF native width in points (72 DPI)
+ * @returns pixelsPerUnit or null if calculation not possible
+ */
+function calculatePixelsPerUnitFromRatio(
+  scaleRatio: number,
+  unit: Unit,
+  renderedWidth?: number,
+  pdfNativeWidth?: number
+): number | null {
+  // If we don't have dimensions, return null (will use manual input)
+  if (!renderedWidth || !pdfNativeWidth) {
+    return null
+  }
+
+  // Calculate effective DPI: (rendered width in pixels) / (physical width in inches)
+  // PDF native width is in points, where 72 points = 1 inch
+  const physicalWidthInches = pdfNativeWidth / 72
+  const effectiveDPI = renderedWidth / physicalWidthInches
+
+  if (unit === 'ft') {
+    // For architectural scales like "1/4" = 1'":
+    // scaleRatio is inches on plan per foot (e.g., 1/4)
+    // 1/4 inch on plan = 1 foot in real life
+    // So pixels per foot = (effectiveDPI * scaleRatio)
+    return effectiveDPI * scaleRatio
+  } else if (unit === 'in') {
+    // For inch-based scales
+    // scaleRatio is inches on plan per inch in real life
+    return effectiveDPI * scaleRatio
+  } else if (unit === 'm') {
+    // For metric scales like "1:100":
+    // scaleRatio is unit on plan per unit in real life (e.g., 1/100)
+    // 1 mm on plan = 100 mm = 0.1 m in real life
+    // So 1 mm on plan = 0.1 m
+    // 1 mm = 1/25.4 inches
+    // pixels per meter = (effectiveDPI / 25.4) / (scaleRatio * 1000) 
+    // But actually, if scaleRatio is 1/100, then 1 unit on plan = 100 units in real life
+    // If we measure in mm on plan, then: 1 mm on plan = 100 mm = 0.1 m
+    // So pixelsPerMeter = (effectiveDPI / 25.4) / 0.1 = effectiveDPI * 10 / 25.4
+    // But we need to account for the scale ratio
+    // If scaleRatio = 1/100, then 1 mm on plan = 100 mm = 0.1 m
+    // So pixelsPerMeter = (effectiveDPI / 25.4) / (scaleRatio * 1000)
+    // = (effectiveDPI / 25.4) / (0.01 * 1000) = (effectiveDPI / 25.4) / 10
+    // Actually, let's think: 1:100 means 1 unit on plan = 100 units in real life
+    // If we use mm: 1 mm on plan = 100 mm = 0.1 m
+    // pixelsPerMeter = (effectiveDPI * 1mm in inches) / 0.1m
+    // = (effectiveDPI / 25.4) / 0.1 = effectiveDPI * 10 / 25.4
+    // But we need to multiply by scaleRatio to get the right conversion
+    // Actually, scaleRatio = 1/100, so we need to divide by it
+    // pixelsPerMeter = (effectiveDPI / 25.4) / (scaleRatio * 1000)
+    // Let's simplify: for 1:100, scaleRatio = 1/100
+    // 1 mm on plan = 100 mm = 0.1 m
+    // pixelsPerMeter = (effectiveDPI / 25.4) / 0.1 = effectiveDPI * 10 / 25.4
+    // But we need to account for scaleRatio
+    // If scaleRatio = 1/100, then pixelsPerMeter = effectiveDPI * 10 / 25.4 / (1/100)
+    // = effectiveDPI * 10 / 25.4 * 100 = effectiveDPI * 1000 / 25.4
+    // That doesn't seem right...
+    
+    // Let me reconsider: For 1:100 scale
+    // 1 unit on plan = 100 units in real life
+    // If we measure 1 mm on the plan, that represents 100 mm = 0.1 m in real life
+    // So to get pixels per meter:
+    // - 1 mm on plan = 0.1 m in real life
+    // - 1 mm = 1/25.4 inches
+    // - 1 mm on plan in pixels = effectiveDPI / 25.4
+    // - So pixelsPerMeter = (effectiveDPI / 25.4) / 0.1 = effectiveDPI * 10 / 25.4
+    // But this doesn't use scaleRatio...
+    
+    // Actually, I think the issue is that for metric scales, the ratio is already
+    // in the format we need. Let me use a simpler approach:
+    // For 1:100, if we measure 1 mm on plan, it's 100 mm = 0.1 m in real life
+    // So pixelsPerMeter = (effectiveDPI / 25.4) / 0.1 = effectiveDPI * 10 / 25.4
+    // But we need to account for the scale ratio
+    // If scaleRatio = 1/100, then we need to divide by it
+    // pixelsPerMeter = (effectiveDPI / 25.4) / (scaleRatio * 1000)
+    // = (effectiveDPI / 25.4) / ((1/100) * 1000) = (effectiveDPI / 25.4) / 10
+    // = effectiveDPI / 254
+    
+    // Actually, let me use a more direct approach:
+    // For metric scales, scaleRatio represents the fraction (e.g., 1/100 for 1:100)
+    // 1 mm on plan = (1 / scaleRatio) mm in real life = (1 / scaleRatio) / 1000 m
+    // 1 mm = 1/25.4 inches
+    // pixelsPerMeter = (effectiveDPI / 25.4) / ((1 / scaleRatio) / 1000)
+    // = (effectiveDPI / 25.4) * (scaleRatio * 1000)
+    // = effectiveDPI * scaleRatio * 1000 / 25.4
+    return (effectiveDPI * scaleRatio * 1000) / 25.4
+  } else if (unit === 'cm') {
+    // For metric scales in cm:
+    // 1 mm on plan = (1 / scaleRatio) mm in real life = (1 / scaleRatio) / 10 cm
+    // pixelsPerCm = (effectiveDPI / 25.4) / ((1 / scaleRatio) / 10)
+    // = (effectiveDPI / 25.4) * (scaleRatio * 10)
+    // = effectiveDPI * scaleRatio * 10 / 25.4
+    return (effectiveDPI * scaleRatio * 10) / 25.4
+  } else if (unit === 'mm') {
+    // For metric scales in mm:
+    // 1 mm on plan = (1 / scaleRatio) mm in real life
+    // pixelsPerMm = (effectiveDPI / 25.4) / (1 / scaleRatio)
+    // = (effectiveDPI / 25.4) * scaleRatio
+    return (effectiveDPI * scaleRatio) / 25.4
+  }
+  
+  return null
+}
 
 export default function ScaleSettingsModal({ 
   open, 
@@ -50,7 +164,9 @@ export default function ScaleSettingsModal({
   calibrationPoints,
   onCalibrationComplete,
   numPages,
-  onApplyCurrentToAll
+  onApplyCurrentToAll,
+  pageDimensions,
+  pdfNativeDimensions
 }: ScaleSettingsModalProps) {
   const [mode, setMode] = useState<'ratio' | 'calibration'>('ratio')
   const [applyToAllPages, setApplyToAllPages] = useState(false)
@@ -69,7 +185,7 @@ export default function ScaleSettingsModal({
       const hasCalibrationPoints = calibrationPoints && Array.isArray(calibrationPoints) && calibrationPoints.length === 2
       
       if (hasCalibrationPoints) {
-        setMode('calibration')
+        setMode(prev => prev !== 'calibration' ? 'calibration' : prev)
         // Don't reset calibration distance if user already entered it
         if (!calibrationDistance.trim()) {
           setCalibrationDistance('')
@@ -80,21 +196,23 @@ export default function ScaleSettingsModal({
         const hasOnePoint = calibrationPoints && Array.isArray(calibrationPoints) && calibrationPoints.length === 1
         
         if (!hasOnePoint) {
-          setPreset(current?.ratio || '1/4" = 1\'')
-          setUnit(current?.unit || 'ft')
+          const currentRatio = current?.ratio || '1/4" = 1\''
+          const currentUnit = current?.unit || 'ft'
+          setPreset(prev => prev !== currentRatio ? currentRatio : prev)
+          setUnit(prev => prev !== currentUnit ? currentUnit : prev)
           setCustomPixels('')
           setCalibrationDistance('')
           setCalibrationUnit('ft')
           setCalibrationFeet('')
           setCalibrationInches('')
-          setMode('ratio')
+          setMode(prev => prev !== 'ratio' ? 'ratio' : prev)
         } else {
           // We have 1 point, so we're in calibration mode waiting for the second point
-          setMode('calibration')
+          setMode(prev => prev !== 'calibration' ? 'calibration' : prev)
         }
       }
     }
-  }, [open, current?.ratio, current?.unit, calibrationPoints])
+  }, [open, current?.ratio, current?.unit, calibrationPoints, calibrationDistance])
 
   const calibrationDistanceInfo = useMemo(() => {
     if (calibrationUnit === 'ft') {
@@ -183,13 +301,29 @@ export default function ScaleSettingsModal({
   }, [calibrationPoints, calibrationDistanceValue])
 
   const computedPixelsPerUnit = useMemo(() => {
+    // Manual override takes precedence
     if (customPixels.trim()) {
       const n = Number(customPixels)
       return Number.isFinite(n) && n > 0 ? n : undefined
     }
+    
+    // Try to calculate from scale ratio using actual page dimensions
     const found = PRESET_SCALES.find(p => p.value === preset)
+    if (found && found.scaleRatio !== undefined && pageDimensions && pdfNativeDimensions) {
+      const calculated = calculatePixelsPerUnitFromRatio(
+        found.scaleRatio,
+        found.unit,
+        pageDimensions.width,
+        pdfNativeDimensions.width
+      )
+      if (calculated !== null) {
+        return calculated
+      }
+    }
+    
+    // Fallback to hardcoded value if available (for backwards compatibility)
     return found?.pixelsPerUnit
-  }, [preset, customPixels])
+  }, [preset, customPixels, pageDimensions, pdfNativeDimensions])
 
   const handleApply = () => {
     if (mode === 'ratio') {
@@ -319,9 +453,21 @@ export default function ScaleSettingsModal({
 
             <div className="text-xs text-gray-600">
               {computedPixelsPerUnit ? (
-                <span>Computed: {computedPixelsPerUnit.toFixed(2)} px per {unit}</span>
+                <span>
+                  {pageDimensions && pdfNativeDimensions ? (
+                    <span className="text-green-600">✓ Auto-calculated: {computedPixelsPerUnit.toFixed(2)} px per {unit}</span>
+                  ) : (
+                    <span>Computed: {computedPixelsPerUnit.toFixed(2)} px per {unit}</span>
+                  )}
+                </span>
               ) : (
-                <span>Enter a valid number for pixels per unit or choose a preset.</span>
+                <span>
+                  {pageDimensions && pdfNativeDimensions ? (
+                    <span>Select a scale ratio to auto-calculate, or enter pixels per unit manually.</span>
+                  ) : (
+                    <span>Enter a valid number for pixels per unit or choose a preset.</span>
+                  )}
+                </span>
               )}
             </div>
           </TabsContent>

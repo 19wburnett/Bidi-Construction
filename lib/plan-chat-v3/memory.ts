@@ -8,15 +8,11 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 
 type GenericSupabase = SupabaseClient<any, any, any>
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
-
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 export interface ConversationTurn {
@@ -71,7 +67,7 @@ export async function generateConversationSummary(
     return ''
   }
 
-  if (!openaiClient) {
+  if (!hasAIGatewayKey) {
     // Fallback: create a simple text summary
     return turns
       .map(
@@ -86,29 +82,21 @@ export async function generateConversationSummary(
       .map((turn) => `User: ${turn.user_message}\nAssistant: ${turn.assistant_message}`)
       .join('\n\n')
 
-    const completion = await openaiClient.chat.completions.create({
+    const completion = await aiGateway.generate({
       model: OPENAI_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a conversation summarizer. Compress the following conversation into a concise summary (300-600 tokens) that preserves:
+      system: `You are a conversation summarizer. Compress the following conversation into a concise summary (300-600 tokens) that preserves:
 - Key topics discussed
 - Important decisions or findings
 - Questions asked and answers given
 - Any specific items, pages, or quantities mentioned
 
 Be concise but preserve essential context.`,
-        },
-        {
-          role: 'user',
-          content: `Summarize this conversation:\n\n${conversationText}`,
-        },
-      ],
-      max_completion_tokens: 600,
+      prompt: `Summarize this conversation:\n\n${conversationText}`,
+      maxTokens: 600,
       temperature: 0.3,
     })
 
-    const summary = completion.choices[0]?.message?.content?.trim() || ''
+    const summary = completion.content?.trim() || ''
     return summary
   } catch (error) {
     console.error('[PlanChatV3] Failed to generate conversation summary:', error)

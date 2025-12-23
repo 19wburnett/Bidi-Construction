@@ -36,12 +36,8 @@ export default function MasqueradeBanner() {
       }
     }
 
+    // Check status once on mount - no need to poll since status is stored in cookies
     checkStatus()
-    
-    // Poll for status changes every 2 seconds
-    const interval = setInterval(checkStatus, 2000)
-    
-    return () => clearInterval(interval)
   }, [])
 
   const handleStopMasquerade = async () => {

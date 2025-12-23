@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 import { buildTakeoffSystemPrompt, buildTakeoffUserPrompt } from '@/lib/takeoff-prompts'
 import { CostCodeStandard } from '@/lib/cost-code-helpers'
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
 
 export async function POST(request: NextRequest) {
   let planId: string | undefined
@@ -79,33 +75,20 @@ export async function POST(request: NextRequest) {
       }
     }))
 
-    // Use OpenAI Vision API to analyze the plan for takeoff
-    const response = await openai.chat.completions.create({
+    // Use AI Gateway to analyze the plan for takeoff
+    const response = await aiGateway.generate({
       model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: buildTakeoffSystemPrompt('takeoff', job?.project_type?.toLowerCase() || 'residential', costCodeStandard)
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: buildTakeoffUserPrompt(images.length, undefined, undefined, undefined, drawings, costCodeStandard)
-            },
-            ...imageContent
-          ]
-        }
-      ],
-      max_tokens: 4096,
+      system: buildTakeoffSystemPrompt('takeoff', job?.project_type?.toLowerCase() || 'residential', costCodeStandard),
+      prompt: buildTakeoffUserPrompt(images.length, undefined, undefined, undefined, drawings, costCodeStandard),
+      images: images,
+      maxTokens: 4096,
       temperature: 0.2, // Very low temperature for precise, consistent analysis
-      response_format: { type: "json_object" } // Force JSON output
+      responseFormat: { type: "json_object" } // Force JSON output
     })
 
-    const aiContent = response.choices[0]?.message?.content
+    const aiContent = response.content
     if (!aiContent) {
-      throw new Error('No response from AI')
+      throw new Error('No response from AI Gateway')
     }
 
     // Check if AI is refusing or unable to complete the task

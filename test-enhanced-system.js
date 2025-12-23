@@ -40,45 +40,48 @@ const testEnhancedSystem = async () => {
   console.log('\n🔌 Testing API Connectivity...')
   
   try {
-    // Test OpenAI
-    if (process.env.OPENAI_API_KEY) {
-      console.log('  ✅ OpenAI API key configured')
+    // Test AI Gateway
+    if (process.env.AI_GATEWAY_API_KEY) {
+      console.log('  ✅ AI Gateway API key configured')
+      console.log('  📝 Individual provider keys configured in AI Gateway dashboard')
+    } else {
+      console.log('  ❌ AI Gateway API key not configured')
     }
     
-    // Test Anthropic  
-    if (process.env.ANTHROPIC_API_KEY) {
-      console.log('  ✅ Anthropic API key configured')
-    }
-    
-    // Test Google
-    if (process.env.GOOGLE_GEMINI_API_KEY) {
-      console.log('  ✅ Google Gemini API key configured')
-    }
-    
-    // Test PDF.co
+    // Test PDF.co (still needed for PDF processing)
     if (process.env.PDF_CO_API_KEY) {
       console.log('  ✅ PDF.co API key configured')
+    } else {
+      console.log('  ⚠️ PDF.co API key not configured (needed for PDF processing)')
     }
     
-    // Test XAI (bonus)
-    if (process.env.XAI_API_KEY) {
-      console.log('  ✅ XAI API key configured (bonus model available!)')
-    }
+    const hasGateway = !!process.env.AI_GATEWAY_API_KEY
+    const hasPDFCo = !!process.env.PDF_CO_API_KEY
     
-    console.log('\n🎉 All systems ready for enhanced multi-model analysis!')
-    console.log('\n📊 Expected Performance:')
-    console.log('  • 5+ specialized AI models')
-    console.log('  • 95%+ accuracy vs. 70% for generic AI')
-    console.log('  • Consensus validation')
-    console.log('  • Disagreement detection')
-    console.log('  • Specialized insights')
-    
-    return {
-      success: true,
-      message: 'Enhanced multi-model system ready!',
-      models: 5,
-      accuracy: '95%+',
-      consensus: 'enabled'
+    if (hasGateway) {
+      console.log('\n🎉 AI Gateway system ready for enhanced multi-model analysis!')
+      console.log('\n📊 Expected Performance:')
+      console.log('  • 5+ specialized AI models via AI Gateway')
+      console.log('  • 95%+ accuracy vs. 70% for generic AI')
+      console.log('  • Consensus validation')
+      console.log('  • Disagreement detection')
+      console.log('  • Specialized insights')
+      console.log('  • Unified cost tracking and rate limiting')
+      
+      return {
+        success: true,
+        message: 'AI Gateway system ready!',
+        models: 5,
+        accuracy: '95%+',
+        consensus: 'enabled',
+        hasPDFCo
+      }
+    } else {
+      return {
+        success: false,
+        message: 'AI Gateway API key required',
+        hasPDFCo
+      }
     }
     
   } catch (error) {

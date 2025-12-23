@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import { aiGateway } from './ai-gateway-provider'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
 import { extractTextWithOCR } from '@/lib/ingestion/pdf-ocr-extractor'
@@ -12,10 +12,7 @@ const MAX_CHUNK_CHAR_LENGTH = 900
 const MIN_CHUNK_CHAR_LENGTH = 250
 const BATCH_SIZE = 20
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 
 export interface PlanTextChunkRecord {
   id: string
@@ -56,8 +53,8 @@ export async function ingestPlanTextChunks(
   supabase: GenericSupabase,
   planId: string
 ): Promise<PlanTextIngestionResult> {
-  if (!openaiClient) {
-    throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY to enable embeddings.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured. Set AI_GATEWAY_API_KEY to enable embeddings.')
   }
 
   const { data: plan, error: planError } = await supabase
@@ -206,8 +203,8 @@ export async function retrievePlanTextChunks(
   query: string,
   limit = 6
 ): Promise<PlanTextChunkRecord[]> {
-  if (!openaiClient) {
-    throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY to enable embeddings.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured. Set AI_GATEWAY_API_KEY to enable embeddings.')
   }
 
   const sanitizedQuery = query.trim()
@@ -519,20 +516,16 @@ function splitIntoSentences(text: string): string[] {
 }
 
 async function embedChunks(texts: string[]): Promise<number[][]> {
-  if (!openaiClient) {
-    throw new Error('OpenAI API key not configured')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key not configured. Set AI_GATEWAY_API_KEY to enable embeddings.')
   }
 
   const embeddings: number[][] = []
   for (let index = 0; index < texts.length; index += BATCH_SIZE) {
     const batch = texts.slice(index, index + BATCH_SIZE).map((text) => text.slice(0, MAX_CHUNK_CHAR_LENGTH))
-    const response = await openaiClient.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: batch,
-      encoding_format: 'float',
-    })
+    const response = await aiGateway.embeddings(EMBEDDING_MODEL, batch)
 
-    response.data.forEach((entry) => {
+    response.forEach((entry) => {
       if (!entry.embedding || entry.embedding.length !== EMBEDDING_DIMENSION) {
         throw new Error(`Embedding dimension mismatch. Expected ${EMBEDDING_DIMENSION}, got ${entry.embedding?.length}`)
       }

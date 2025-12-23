@@ -1,10 +1,4 @@
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
-import { GoogleGenAI } from '@google/genai'
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const gemini = new GoogleGenAI({ apiKey: process.env.GOOGLE_GEMINI_API_KEY })
+import { aiGateway } from './ai-gateway-provider'
 
 export interface AnalysisOptions {
   maxTokens?: number
@@ -27,39 +21,25 @@ export async function analyzeWithOpenAI(
   images: string[], // ALL plan page images as base64 data URLs
   options: AnalysisOptions
 ): Promise<AIResponse> {
-  // Convert each image to OpenAI's format
-  // IMPORTANT: Sending ALL images to OpenAI
-  const imageContent = images.map(img => ({
-    type: 'image_url' as const,
-    image_url: { url: img, detail: 'high' as const }
-  }))
-
   // Use gpt-4o for vision analysis (most reliable vision model)
   // GPT-5 may not support vision API yet, or may need different parameters
   const model = process.env.OPENAI_MODEL || 'gpt-4o' // Configurable via env
   
-  const response = await openai.chat.completions.create({
+  const response = await aiGateway.generate({
     model: model,
-    messages: [
-      { role: 'system', content: options.systemPrompt },
-      { 
-        role: 'user', 
-        content: [
-          { type: 'text', text: options.userPrompt },
-          ...imageContent
-        ] 
-      }
-    ],
-    max_completion_tokens: options.maxTokens || 4096,
+    system: options.systemPrompt,
+    prompt: options.userPrompt,
+    images: images,
+    maxTokens: options.maxTokens || 4096,
     temperature: options.temperature || 0.2,
-    response_format: { type: 'json_object' }
+    responseFormat: { type: 'json_object' }
   })
 
   return {
     provider: 'openai',
-    content: response.choices[0].message.content || '',
-    finishReason: response.choices[0].finish_reason,
-    tokensUsed: response.usage?.total_tokens
+    content: response.content || '',
+    finishReason: response.finishReason,
+    tokensUsed: response.usage?.totalTokens
   }
 }
 
@@ -67,43 +47,21 @@ export async function analyzeWithClaude(
   images: string[], // ALL plan page images as base64 data URLs
   options: AnalysisOptions
 ): Promise<AIResponse> {
-  // IMPORTANT: Sending ALL images to Claude
-  const imageContent = images.map(img => {
-    const base64Data = img.split(',')[1] || img
-    const mediaType = img.includes('jpeg') ? 'image/jpeg' : 'image/png'
-    
-    return {
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: mediaType as 'image/jpeg' | 'image/png',
-        data: base64Data
-      }
-    }
-  })
-
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-5', // Claude 4.5 Sonnet - Latest model
-    max_tokens: options.maxTokens || 4096,
-    temperature: options.temperature || 0.2,
+  const response = await aiGateway.generate({
+    model: 'claude-sonnet-4-20250514', // Claude Sonnet 4 - Latest model
     system: options.systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: options.userPrompt },
-          ...imageContent
-        ]
-      }
-    ]
+    prompt: options.userPrompt,
+    images: images,
+    maxTokens: options.maxTokens || 4096,
+    temperature: options.temperature || 0.2,
+    responseFormat: { type: 'json_object' }
   })
 
-  const textContent = response.content.find(c => c.type === 'text')
   return {
     provider: 'claude',
-    content: (textContent as any)?.text || '',
-    finishReason: response.stop_reason || 'unknown',
-    tokensUsed: response.usage.input_tokens + response.usage.output_tokens
+    content: response.content || '',
+    finishReason: response.finishReason || 'unknown',
+    tokensUsed: response.usage?.totalTokens
   }
 }
 
@@ -111,43 +69,27 @@ export async function analyzeWithGemini(
   images: string[], // ALL plan page images as base64 data URLs
   options: AnalysisOptions
 ): Promise<AIResponse> {
-  // Use gemini-2.5-flash - Latest model with vision support
-  // IMPORTANT: Sending ALL images to Gemini
-  const parts: any[] = [
-    { text: `${options.systemPrompt}\n\n${options.userPrompt}\n\nIMPORTANT: Respond with ONLY a JSON object, no other text.` }
-  ]
+  const prompt = `${options.systemPrompt}\n\n${options.userPrompt}\n\nIMPORTANT: Respond with ONLY a JSON object, no other text.`
   
-  // Add all images as parts
-  images.forEach(img => {
-    parts.push({
-      inlineData: {
-        mimeType: img.includes('jpeg') ? 'image/jpeg' : 'image/png',
-        data: img.split(',')[1] || img
-      }
-    })
+  const response = await aiGateway.generate({
+    model: 'gemini-2.5-flash', // Latest model with vision support
+    prompt: prompt,
+    images: images,
+    maxTokens: options.maxTokens || 4096,
+    temperature: options.temperature || 0.2,
+    responseFormat: { type: 'json_object' }
   })
-
-  const response = await gemini.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: parts,
-    config: {
-      maxOutputTokens: options.maxTokens || 4096,
-      temperature: options.temperature || 0.2
-    }
-  })
-  
-  const text = response.text || ''
   
   // Ensure we got a response
-  if (!text || text.trim().length === 0) {
+  if (!response.content || response.content.trim().length === 0) {
     throw new Error('Gemini returned empty response')
   }
   
   return {
     provider: 'gemini',
-    content: text,
-    finishReason: 'stop',
-    tokensUsed: undefined
+    content: response.content,
+    finishReason: response.finishReason || 'stop',
+    tokensUsed: response.usage?.totalTokens
   }
 }
 

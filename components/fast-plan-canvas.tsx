@@ -161,6 +161,8 @@ interface FastPlanCanvasProps {
   calibrationPoints?: { x: number; y: number }[]
   isCalibrating?: boolean
   onSetCalibrating?: (calibrating: boolean) => void
+  /** Callback to provide page dimensions for scale calculations */
+  onPageDimensionsChange?: (dimensions: { rendered: { width: number; height: number } | null; native: { width: number; height: number } | null; pageNumber: number }) => void
   /** Optional MIME type (e.g., 'image/png') for reliable image detection with signed URLs */
   fileType?: string
   searchQuery?: string
@@ -317,6 +319,7 @@ export default function FastPlanCanvas({
   calibrationPoints: externalCalibrationPoints,
   isCalibrating: externalIsCalibrating,
   onSetCalibrating,
+  onPageDimensionsChange,
   fileType,
   searchQuery,
   currentMatchIndex,
@@ -422,6 +425,8 @@ export default function FastPlanCanvas({
   const [pageInputValue, setPageInputValue] = useState('1')
   // Track actual PDF page dimensions (stored at base scale, i.e., multiplied by scale prop)
   const [pageDimensions, setPageDimensions] = useState<Map<number, { width: number; height: number }>>(new Map())
+  // Track PDF native dimensions (in points, 72 DPI) for scale calculations
+  const [pdfNativeDimensions, setPdfNativeDimensions] = useState<Map<number, { width: number; height: number }>>(new Map())
   // Legacy pageHeights for backwards compatibility - derived from pageDimensions
   const pageHeights = useMemo(() => {
     const heights = new Map<number, number>()
@@ -635,6 +640,31 @@ export default function FastPlanCanvas({
       console.warn('Failed to save visibility settings to localStorage:', error)
     }
   }, [visibilitySettings])
+
+  // Store callback in ref to avoid dependency issues
+  const onPageDimensionsChangeRef = useRef(onPageDimensionsChange)
+  useEffect(() => {
+    onPageDimensionsChangeRef.current = onPageDimensionsChange
+  }, [onPageDimensionsChange])
+
+  // Notify parent of current page dimensions when they change
+  useEffect(() => {
+    if (!onPageDimensionsChangeRef.current) return
+    
+    const renderedDims = pageDimensions.get(currentPage)
+    const nativeDims = pdfNativeDimensions.get(currentPage)
+    
+    if (renderedDims || nativeDims) {
+      // Use requestAnimationFrame to defer the state update and avoid "update during render" error
+      requestAnimationFrame(() => {
+        onPageDimensionsChangeRef.current?.({
+          rendered: renderedDims || null,
+          native: nativeDims || null,
+          pageNumber: currentPage
+        })
+      })
+    }
+  }, [currentPage, pageDimensions, pdfNativeDimensions])
   
   useEffect(() => {
     if (typeof window !== 'undefined' && !workerReady) {
@@ -2419,33 +2449,15 @@ export default function FastPlanCanvas({
       // Store coordinates at base scale (not zoomed)
       onCommentPinClick(baseWorldX, baseWorldY, pageNumber)
     } else if (selectedTool === 'item' || selectedTool === 'item_select') {
-      // When placing items (selectedItemType is set), prioritize placement over selection
-      // Only check for existing items if we're not in placement mode, or if we're very close
+      // When placing items (selectedItemType is set), always place a new item
+      // Don't detect existing items when in placement mode to allow placing items close together
       const isPlacingMode = selectedTool === 'item' && selectedItemType !== null
       
-      // When placing, use very strict detection (only detect if directly on top)
+      // When placing, completely skip item detection to allow placing items close together
       // When selecting/editing, use normal detection
       let clickedItem: Drawing | null = null
-      if (isPlacingMode) {
-        // In placing mode, only detect items if we're VERY close (within 5 units)
-        // This prevents accidental selection when placing items near existing ones
-        for (const d of drawings) {
-          if (d.type === 'item' && d.pageNumber === pageNumber) {
-            const geom = d.geometry
-            if (geom && typeof geom.x !== 'undefined' && typeof geom.y !== 'undefined') {
-              const itemX = geom.x
-              const itemY = geom.y
-              const dist = Math.sqrt(Math.pow(world.x - itemX, 2) + Math.pow(world.y - itemY, 2))
-              // Very strict threshold when placing - only detect if directly on top
-              if (dist <= 5) {
-                clickedItem = d
-                break
-              }
-            }
-          }
-        }
-      } else {
-        // Normal mode - use standard detection
+      if (!isPlacingMode) {
+        // Only detect items when NOT in placement mode
         clickedItem = drawings.find(d => 
           d.type === 'item' && d.pageNumber === pageNumber && isPointInItem(world.x, world.y, d, false)
         ) || null
@@ -2473,30 +2485,17 @@ export default function FastPlanCanvas({
             
             onSelectedItemsChange(newSelection)
           }
-        } else if (onItemSave) {
-          // Clicking on existing item - only allow quick tagging if explicitly selected via sidebar
-          // Otherwise, always edit the item or place a new one
-          if (selectedItemType) {
-            // Item type is selected (via sidebar plus button) and we detected an item (very close)
-            // In this case, edit the item since we're directly on top of it
-            const itemX = clickedItem.geometry.x || baseWorldX
-            const itemY = clickedItem.geometry.y || baseWorldY
-            if (onItemPinClick) {
-              onItemPinClick(itemX, itemY, pageNumber)
-            }
-          } else {
-            // No item type selected - clicking on existing item should edit it
-            // This allows users to edit items or place new ones without auto-selecting type
-            const itemX = clickedItem.geometry.x || baseWorldX
-            const itemY = clickedItem.geometry.y || baseWorldY
-            if (onItemPinClick) {
-              onItemPinClick(itemX, itemY, pageNumber)
-              // The parent should handle setting editingItem
-            }
+        } else {
+          // No item type selected - clicking on existing item should edit it
+          const itemX = clickedItem.geometry.x || baseWorldX
+          const itemY = clickedItem.geometry.y || baseWorldY
+          if (onItemPinClick) {
+            onItemPinClick(itemX, itemY, pageNumber)
+            // The parent should handle setting editingItem
           }
         }
       } else {
-        // Clicked on empty space
+        // Clicked on empty space (or in placement mode, always treat as empty space)
         if (selectedTool === 'item_select') {
           // Clear selection if clicking empty space without modifier
           if (onSelectedItemsChange && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
@@ -2504,6 +2503,7 @@ export default function FastPlanCanvas({
           }
         } else if (selectedItemType) {
           // If item type is already selected, directly place item without opening modal
+          // This works even if there's an item nearby - we always place a new one
           if (onItemSave) {
             onItemSave(
               {
@@ -2653,7 +2653,11 @@ export default function FastPlanCanvas({
             // Finalize the closed measurement
             const finalized = finalizeMeasurementFromDrawing(closedMeasurement)
             if (finalized) {
-              onDrawingsChange([...drawings, finalized])
+              // Check if measurement already exists (by ID) to prevent duplicates
+              const alreadyExists = drawings.some(d => d.id === finalized.id)
+              if (!alreadyExists) {
+                onDrawingsChange([...drawings, finalized])
+              }
             }
             
             setCurrentMeasurement(null)
@@ -2725,12 +2729,18 @@ export default function FastPlanCanvas({
       const screenY = e.clientY - rect.top
 
       // Pan the viewport
-      setViewport(prev => ({
-        ...prev,
-        panX: prev.panX + (screenX - lastPanPoint.x),
-        panY: prev.panY + (screenY - lastPanPoint.y)
-      }))
-      setLastPanPoint({ x: screenX, y: screenY })
+      const deltaX = screenX - lastPanPoint.x
+      const deltaY = screenY - lastPanPoint.y
+      
+      // Only update if there's actual movement (avoid unnecessary re-renders)
+      if (Math.abs(deltaX) > 0.1 || Math.abs(deltaY) > 0.1) {
+        setViewport(prev => ({
+          ...prev,
+          panX: prev.panX + deltaX,
+          panY: prev.panY + deltaY
+        }))
+        setLastPanPoint({ x: screenX, y: screenY })
+      }
     } else if (selectedTool === 'measurement_edit' && editingMeasurement && isAdjustingMeasurement) {
       const container = containerRef.current
       if (!container) return
@@ -2751,17 +2761,22 @@ export default function FastPlanCanvas({
         return
       }
 
-      updatedPoints[pointXIndex] = baseWorldX
-      updatedPoints[pointYIndex] = baseWorldY
+      // Only update if the point actually changed (avoid unnecessary re-renders)
+      const currentX = updatedPoints[pointXIndex]
+      const currentY = updatedPoints[pointYIndex]
+      if (Math.abs(currentX - baseWorldX) > 0.1 || Math.abs(currentY - baseWorldY) > 0.1) {
+        updatedPoints[pointXIndex] = baseWorldX
+        updatedPoints[pointYIndex] = baseWorldY
 
-      setEditingMeasurement(prev =>
-        prev
-          ? {
-              ...prev,
-              points: updatedPoints
-            }
-          : prev
-      )
+        setEditingMeasurement(prev =>
+          prev
+            ? {
+                ...prev,
+                points: updatedPoints
+              }
+            : prev
+        )
+      }
     } else if (isDrawingMeasurement && currentMeasurement) {
       // Update preview point for measurement
       const container = containerRef.current
@@ -2789,24 +2804,30 @@ export default function FastPlanCanvas({
             // Snap to start point
             baseWorldX = startX
             baseWorldY = startY
-            setIsSnappingToStart(true)
+            setIsSnappingToStart(prev => prev !== true ? true : prev)
           } else {
-            setIsSnappingToStart(false)
+            setIsSnappingToStart(prev => prev !== false ? false : prev)
           }
         } else {
-          setIsSnappingToStart(false)
+          setIsSnappingToStart(prev => prev !== false ? false : prev)
         }
         
         const updatedPoints = [...points]
-        updatedPoints[updatedPoints.length - 2] = baseWorldX
-        updatedPoints[updatedPoints.length - 1] = baseWorldY
-        setCurrentMeasurement({
-          ...currentMeasurement,
-          geometry: {
-            ...currentMeasurement.geometry,
-            points: updatedPoints
-          }
-        })
+        const lastX = updatedPoints[updatedPoints.length - 2]
+        const lastY = updatedPoints[updatedPoints.length - 1]
+        
+        // Only update if the point actually changed (avoid unnecessary re-renders)
+        if (Math.abs(lastX - baseWorldX) > 0.1 || Math.abs(lastY - baseWorldY) > 0.1) {
+          updatedPoints[updatedPoints.length - 2] = baseWorldX
+          updatedPoints[updatedPoints.length - 1] = baseWorldY
+          setCurrentMeasurement({
+            ...currentMeasurement,
+            geometry: {
+              ...currentMeasurement.geometry,
+              points: updatedPoints
+            }
+          })
+        }
       }
     }
     
@@ -2821,11 +2842,13 @@ export default function FastPlanCanvas({
         const world = screenToWorld(screenX, screenY)
         
         const hoveredMeasurement = getMeasurementAtPoint(currentPage, world.x, world.y)
-        setHoveredMeasurementId(hoveredMeasurement?.id || null)
+        const newHoveredId = hoveredMeasurement?.id || null
+        // Only update if the hovered measurement actually changed to prevent infinite loops
+        setHoveredMeasurementId(prev => prev !== newHoveredId ? newHoveredId : prev)
       }
     } else if (isPanning || isDrawingMeasurement) {
       // Clear hover when panning or drawing
-      setHoveredMeasurementId(null)
+      setHoveredMeasurementId(prev => prev !== null ? null : prev)
     }
     // Comment hover detection is now handled by HTML elements via onMouseEnter/onMouseLeave
   }, [isPanning, lastPanPoint, screenToWorld, isDrawingMeasurement, currentMeasurement, selectedTool, editingMeasurement, isAdjustingMeasurement, currentPage, getMeasurementAtPoint])
@@ -2982,7 +3005,11 @@ export default function FastPlanCanvas({
 
     const finalized = finalizeMeasurementFromDrawing(currentMeasurement)
     if (finalized) {
-      onDrawingsChange([...drawings, finalized])
+      // Check if measurement already exists (by ID) to prevent duplicates
+      const alreadyExists = drawings.some(d => d.id === finalized.id)
+      if (!alreadyExists) {
+        onDrawingsChange([...drawings, finalized])
+      }
     }
 
     setCurrentMeasurement(null)
@@ -3355,6 +3382,13 @@ export default function FastPlanCanvas({
                             if (!componentIsMounted.current) return
                             // Verify document instance hasn't changed (prevent stale updates)
                             const currentInstanceId = documentInstanceId.current
+                            // Store PDF native dimensions (in points, 72 DPI)
+                            setPdfNativeDimensions((prev: Map<number, { width: number; height: number }>) => {
+                              if (documentInstanceId.current !== currentInstanceId) return prev
+                              const newDimensions = new Map(prev)
+                              newDimensions.set(pageNum, { width: page.width, height: page.height })
+                              return newDimensions
+                            })
                             // Calculate dimensions based on constrained width (612) and PDF aspect ratio
                             // react-pdf scales the PDF to fit the specified width, so we use that as base
                             const baseWidth = 612

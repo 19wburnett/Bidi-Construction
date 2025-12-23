@@ -49,11 +49,9 @@ const REQUIRED_QA_KEYS = [
  * Check if API keys are available
  */
 function checkApiKeys(): boolean {
-  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY
-  const hasOpenAI = !!process.env.OPENAI_API_KEY
-  const hasXAI = !!process.env.XAI_API_KEY
+  const hasAIGateway = !!process.env.AI_GATEWAY_API_KEY
   
-  return hasAnthropic || hasOpenAI || hasXAI
+  return hasAIGateway
 }
 
 /**
@@ -72,9 +70,9 @@ async function runE2ETest() {
   
   // Check API keys
   if (!checkApiKeys()) {
-    console.log('⏭️  Skipping test - no LLM provider API keys configured')
-    console.log('   Set at least one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, XAI_API_KEY')
-    return { skipped: true, reason: 'No API keys' }
+    console.log('⏭️  Skipping test - AI Gateway API key not configured')
+    console.log('   Set AI_GATEWAY_API_KEY in your environment variables')
+    return { skipped: true, reason: 'No AI Gateway API key' }
   }
   
   if (!TEST_PLAN_ID) {

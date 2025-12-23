@@ -274,7 +274,7 @@ export default function AdminDashboardPage() {
                   <li>• Refreshes embeddings stored in `plan_text_chunks`</li>
                   <li>• Reports chunk counts and warnings</li>
                 </ul>
-                <Link href="/admin/plan-text-ingestion">
+                <Link href="/admin/plan_text_ingestion">
                   <Button className="w-full" variant="secondary">
                     <Layers className="h-4 w-4 mr-2" />
                     Launch Plan Text Ingestion

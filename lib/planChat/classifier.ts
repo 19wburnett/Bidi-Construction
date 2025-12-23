@@ -1,10 +1,6 @@
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
-
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 export type PlanChatQuestionClassification = {
@@ -47,28 +43,20 @@ Do not answer the question. Do not explain. Return JSON only.`
 export async function classifyPlanChatQuestion(
   question: string
 ): Promise<PlanChatQuestionClassification> {
-  if (!openaiClient) {
-    throw new Error('OpenAI client is not configured. Please add an API key.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key is not configured. Please add AI_GATEWAY_API_KEY to your environment variables.')
   }
 
   try {
-    const completion = await openaiClient.chat.completions.create({
+    const completion = await aiGateway.generate({
       model: OPENAI_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: CLASSIFIER_SYSTEM_PROMPT,
-        },
-        {
-          role: 'user',
-          content: question,
-        },
-      ],
-      response_format: { type: 'json_object' },
-      max_completion_tokens: 200,
+      system: CLASSIFIER_SYSTEM_PROMPT,
+      prompt: question,
+      responseFormat: { type: 'json_object' },
+      maxTokens: 200,
     })
 
-    const content = completion.choices[0]?.message?.content
+    const content = completion.content
     if (!content) {
       throw new Error('Classifier returned empty response')
     }

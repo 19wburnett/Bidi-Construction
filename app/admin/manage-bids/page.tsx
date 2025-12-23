@@ -206,6 +206,7 @@ export default function ManageBidsPage() {
     status: 'pending'
   })
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [isSubPopoverOpen, setIsSubPopoverOpen] = useState(false)
   
   const [formData, setFormData] = useState({
     item_number: 1,
@@ -1544,7 +1545,7 @@ export default function ManageBidsPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="subcontractor_id" className="text-sm font-medium">Subcontractor or Contact *</Label>
-                  <Popover>
+                  <Popover open={isSubPopoverOpen} onOpenChange={setIsSubPopoverOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
@@ -1562,8 +1563,8 @@ export default function ManageBidsPage() {
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[400px] p-0 z-[10001]" align="start">
-                      <Command>
+                    <PopoverContent className="w-[400px] p-0 z-[100001]" align="start">
+                      <Command shouldFilter={true}>
                         <CommandInput placeholder="Search subcontractors or contacts..." />
                         <CommandList>
                           <CommandEmpty>No subcontractor or contact found.</CommandEmpty>
@@ -1572,13 +1573,14 @@ export default function ManageBidsPage() {
                               {contacts.map((contact) => (
                                 <CommandItem
                                   key={`contact-${contact.id}`}
-                                  value={contact.name}
+                                  value={`${contact.name} ${contact.email} ${contact.trade_category || ''}`}
                                   onSelect={() => {
                                     setBidFormData(prev => ({ 
                                       ...prev, 
                                       contact_id: contact.id,
                                       subcontractor_id: ''
                                     }))
+                                    setIsSubPopoverOpen(false)
                                   }}
                                   className="cursor-pointer"
                                 >
@@ -1601,13 +1603,14 @@ export default function ManageBidsPage() {
                             {subcontractors.map((sub) => (
                               <CommandItem
                                 key={sub.id}
-                                value={sub.name}
+                                value={`${sub.name} ${sub.email}`}
                                 onSelect={() => {
                                   setBidFormData(prev => ({ 
                                     ...prev, 
                                     subcontractor_id: sub.id,
                                     contact_id: ''
                                   }))
+                                  setIsSubPopoverOpen(false)
                                 }}
                                 className="cursor-pointer"
                               >

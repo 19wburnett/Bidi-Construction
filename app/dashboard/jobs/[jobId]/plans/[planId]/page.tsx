@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
@@ -159,6 +159,23 @@ export default function EnhancedPlanViewer() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
   const [isCalibrating, setIsCalibrating] = useState(false)
+  // Store page dimensions for scale calculations
+  const [currentPageDimensions, setCurrentPageDimensions] = useState<{
+    rendered: { width: number; height: number } | null
+    native: { width: number; height: number } | null
+  } | null>(null)
+  
+  // Stable callback for page dimensions changes
+  const handlePageDimensionsChange = useCallback((dims: {
+    rendered: { width: number; height: number } | null
+    native: { width: number; height: number } | null
+    pageNumber: number
+  }) => {
+    setCurrentPageDimensions({
+      rendered: dims.rendered,
+      native: dims.native
+    })
+  }, [])
   
   // Modal states
   const [showShareModal, setShowShareModal] = useState(false)
@@ -364,7 +381,16 @@ export default function EnhancedPlanViewer() {
           if (mergedMeasurements.length === 0) {
             return nonMeasurements
           }
-          return [...nonMeasurements, ...mergedMeasurements]
+          // Deduplicate by ID to prevent duplicates
+          const seenIds = new Set<string>()
+          const uniqueMeasurements = mergedMeasurements.filter(m => {
+            if (seenIds.has(m.id)) {
+              return false
+            }
+            seenIds.add(m.id)
+            return true
+          })
+          return [...nonMeasurements, ...uniqueMeasurements]
         })
       } catch (error) {
         console.error('Error loading measurements:', error)
@@ -776,7 +802,19 @@ export default function EnhancedPlanViewer() {
             const syncedIds = new Set(syncedMeasurements.map(m => m.id))
             const currentMeasurements = current.filter(isMeasurementDrawing)
             const localOnlyMeasurements = currentMeasurements.filter(m => !syncedIds.has(m.id))
-            return [...nonMeasurements, ...syncedMeasurements, ...localOnlyMeasurements]
+            
+            // Deduplicate by ID to prevent duplicates
+            const allMeasurements = [...syncedMeasurements, ...localOnlyMeasurements]
+            const seenIds = new Set<string>()
+            const uniqueMeasurements = allMeasurements.filter(m => {
+              if (seenIds.has(m.id)) {
+                return false
+              }
+              seenIds.add(m.id)
+              return true
+            })
+            
+            return [...nonMeasurements, ...uniqueMeasurements]
           })
         } catch (error) {
           console.error('Failed to sync measurements:', error)
@@ -974,27 +1012,65 @@ export default function EnhancedPlanViewer() {
         createdAt: editingItem?.createdAt || new Date().toISOString()
       }
 
-      // Save using item persistence
+      // Optimistically update UI immediately for better UX
+      const tempId = newDrawing.id
+      if (editingItem) {
+        // Update existing item - show immediately
+        setDrawings(prev => prev.map(d => d.id === editingItem.id ? newDrawing : d))
+      } else {
+        // Create new item - show immediately
+        setDrawings(prev => [...prev, newDrawing])
+      }
+
+      // Save using item persistence (async, but UI already updated)
       if (itemPersistenceRef.current) {
         if (editingItem) {
           // Update existing item
           const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItem.id)
           updatedItems.push(newDrawing)
-          await itemPersistenceRef.current.syncItems(updatedItems)
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).then(savedItems => {
+            // Update the item with the real database ID if it changed
+            const savedItem = savedItems.find(i => i.id === tempId || (editingItem && i.id === editingItem.id))
+            if (savedItem && savedItem.id !== tempId) {
+              setDrawings(prev => prev.map(d => 
+                d.id === tempId ? { ...d, id: savedItem.id } : d
+              ))
+            }
+          }).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+            // For now, we'll keep it visible and let the user retry
+          })
         } else {
           // Create new item
           const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
-          await itemPersistenceRef.current.syncItems(updatedItems)
+          // Don't await - let it save in background
+          itemPersistenceRef.current.syncItems(updatedItems).then(savedItems => {
+            // Update the item with the real database ID if it changed
+            const savedItem = savedItems.find(i => 
+              (i.geometry?.x === newDrawing.geometry.x && 
+               i.geometry?.y === newDrawing.geometry.y &&
+               i.pageNumber === newDrawing.pageNumber) ||
+              i.id === tempId
+            )
+            if (savedItem && savedItem.id !== tempId) {
+              setDrawings(prev => prev.map(d => 
+                d.id === tempId ? { ...d, id: savedItem.id } : d
+              ))
+            }
+          }).catch(err => {
+            console.error('Error saving item to database:', err)
+            // Optionally revert the optimistic update on error
+            // For now, we'll keep it visible and let the user retry
+          })
         }
-        // Reload items
-        const items = await itemPersistenceRef.current.loadItems()
-        setDrawings(prev => [...prev.filter(d => d.type !== 'item'), ...items])
       } else {
         // Fallback to old method
         if (editingItem) {
-          await handleDrawingsChange(drawings.map(d => d.id === editingItem.id ? newDrawing : d))
+          handleDrawingsChange(drawings.map(d => d.id === editingItem.id ? newDrawing : d))
         } else {
-          await handleDrawingsChange([...drawings, newDrawing])
+          handleDrawingsChange([...drawings, newDrawing])
         }
       }
       
@@ -1620,6 +1696,27 @@ export default function EnhancedPlanViewer() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Memoize scale settings modal props to prevent unnecessary re-renders
+  // IMPORTANT: These hooks must be called before any early returns to follow Rules of Hooks
+  const currentScaleSetting = useMemo(() => {
+    // Use same helper logic as fast-plan-canvas to handle key mismatches
+    if (!measurementScaleSettings) return undefined
+    const setting = measurementScaleSettings[currentPage] || 
+                   measurementScaleSettings[String(currentPage) as any] ||
+                   measurementScaleSettings[Number(currentPage)]
+    return setting
+  }, [measurementScaleSettings, currentPage])
+
+  const memoizedPageDimensions = useMemo(() => {
+    const rendered = currentPageDimensions?.rendered
+    return rendered ? { width: rendered.width, height: rendered.height } : undefined
+  }, [currentPageDimensions?.rendered?.width, currentPageDimensions?.rendered?.height])
+
+  const memoizedPdfNativeDimensions = useMemo(() => {
+    const native = currentPageDimensions?.native
+    return native ? { width: native.width, height: native.height } : undefined
+  }, [currentPageDimensions?.native?.width, currentPageDimensions?.native?.height])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1795,6 +1892,7 @@ export default function EnhancedPlanViewer() {
                 calibrationPoints={calibrationPoints}
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
+                onPageDimensionsChange={handlePageDimensionsChange}
                 fileType={plan?.file_type}
                 searchQuery={searchQuery}
                 currentMatchIndex={searchCurrentMatch}
@@ -2173,14 +2271,7 @@ export default function EnhancedPlanViewer() {
             setCalibrationPoints([])
           }
         }}
-        current={(() => {
-          // Use same helper logic as fast-plan-canvas to handle key mismatches
-          if (!measurementScaleSettings) return undefined
-          const setting = measurementScaleSettings[currentPage] || 
-                         measurementScaleSettings[String(currentPage) as any] ||
-                         measurementScaleSettings[Number(currentPage)]
-          return setting
-        })()}
+        current={currentScaleSetting}
         numPages={pdfNumPages || plan?.num_pages || undefined}
         onApplyCurrentToAll={async () => {
           try {
@@ -2307,6 +2398,8 @@ export default function EnhancedPlanViewer() {
           setIsCalibrating(false)
           setCalibrationPoints([])
         }}
+        pageDimensions={memoizedPageDimensions}
+        pdfNativeDimensions={memoizedPdfNativeDimensions}
       />
 
       {/* PDF Search Component */}

@@ -12,7 +12,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 import { classifyPlanChatQuestion } from '@/lib/planChat/classifier'
 import { buildPlanContext } from './context-builder'
 import { selectSystemPrompt, buildUserPrompt } from './prompts'
@@ -27,11 +27,7 @@ import {
 
 type GenericSupabase = SupabaseClient<any, any, any>
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
-
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 export interface AnswerResult {
@@ -58,8 +54,8 @@ export async function generateAnswer(
   jobId: string | null,
   userQuestion: string
 ): Promise<AnswerResult> {
-  if (!openaiClient) {
-    throw new Error('OpenAI client is not configured. Please add an API key.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key is not configured. Please add AI_GATEWAY_API_KEY to your environment variables.')
   }
 
   // Step 1: Classify the question
@@ -118,7 +114,7 @@ export async function generateAnswer(
     notes: context.notes,
   })
 
-  // Step 5: Call LLM
+  // Step 5: Call LLM via AI Gateway
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: systemPrompt },
   ]
@@ -144,22 +140,14 @@ export async function generateAnswer(
     const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
     const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(OPENAI_MODEL)
 
-    const requestConfig: any = {
+    const response = await aiGateway.generate({
       model: OPENAI_MODEL,
       messages: messages as any,
-      max_completion_tokens: mode === 'TAKEOFF' ? 500 : 1500, // Generous limits for natural responses
-    }
+      maxTokens: mode === 'TAKEOFF' ? 500 : 1500, // Generous limits for natural responses
+      temperature: supportsCustomTemperature ? (mode === 'TAKEOFF' ? 0.3 : 0.6) : undefined
+    })
 
-    // Only add temperature for models that support custom values
-    if (supportsCustomTemperature) {
-      // Use moderate temperature for conversational responses
-      requestConfig.temperature = mode === 'TAKEOFF' ? 0.3 : 0.6
-    }
-    // Models without custom temperature support will use default (1.0)
-
-    const completion = await openaiClient.chat.completions.create(requestConfig)
-
-    let answer = completion.choices[0]?.message?.content?.trim()
+    let answer = response.content?.trim()
 
     // Log what we got from LLM for debugging
     if (process.env.NODE_ENV === 'development' || process.env.PLAN_CHAT_V3_DEBUG === 'true') {

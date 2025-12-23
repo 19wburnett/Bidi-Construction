@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import { aiGateway } from '@/lib/ai-gateway-provider'
 import { callAnalysisLLM } from '@/lib/llm/providers'
 
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small'
@@ -6,10 +6,7 @@ const EMBEDDING_DIMENSION = 1536
 const BATCH_SIZE = 100
 const EMBEDDING_SIMILARITY_THRESHOLD = 0.75
 
-const openaiClient =
-  typeof process.env.OPENAI_API_KEY === 'string' && process.env.OPENAI_API_KEY.length > 0
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null
+const hasAIGatewayKey = !!process.env.AI_GATEWAY_API_KEY
 
 export interface TakeoffItem {
   id: string
@@ -68,20 +65,16 @@ function cosineSimilarity(a: number[], b: number[]): number {
  * Generate embeddings for text descriptions
  */
 async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  if (!openaiClient) {
-    throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY to enable embeddings.')
+  if (!hasAIGatewayKey) {
+    throw new Error('AI Gateway API key is not configured. Please add AI_GATEWAY_API_KEY to your environment variables.')
   }
 
   const embeddings: number[][] = []
   for (let index = 0; index < texts.length; index += BATCH_SIZE) {
     const batch = texts.slice(index, index + BATCH_SIZE)
-    const response = await openaiClient.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input: batch,
-      encoding_format: 'float',
-    })
+    const response = await aiGateway.embeddings(EMBEDDING_MODEL, batch)
 
-    response.data.forEach((entry) => {
+    response.forEach((entry) => {
       if (!entry.embedding || entry.embedding.length !== EMBEDDING_DIMENSION) {
         throw new Error(`Embedding dimension mismatch. Expected ${EMBEDDING_DIMENSION}, got ${entry.embedding?.length}`)
       }

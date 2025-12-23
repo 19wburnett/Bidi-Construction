@@ -4,21 +4,30 @@ require('dotenv').config()
 // Test API keys and model availability
 const testAPIKeys = async () => {
   console.log('🔑 Testing API Keys...')
-  console.log('=' * 50)
+  console.log('='.repeat(50))
   
   // Check environment variables
   const apiKeys = {
+    AI_GATEWAY_API_KEY: !!process.env.AI_GATEWAY_API_KEY,
+    PDF_CO_API_KEY: !!process.env.PDF_CO_API_KEY
+  }
+  
+  // Legacy keys (for AI Gateway configuration only)
+  const legacyKeys = {
     OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
     ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
     GOOGLE_GEMINI_API_KEY: !!process.env.GOOGLE_GEMINI_API_KEY,
     XAI_API_KEY: !!process.env.XAI_API_KEY,
-    PDF_CO_API_KEY: !!process.env.PDF_CO_API_KEY
   }
   
-  console.log('API Keys Status:')
-  Object.entries(apiKeys).forEach(([key, hasKey]) => {
-    console.log(`  ${hasKey ? '✅' : '❌'} ${key}`)
+  console.log('AI Gateway API Key Status:')
+  console.log(`  ${apiKeys.AI_GATEWAY_API_KEY ? '✅' : '❌'} AI_GATEWAY_API_KEY (Required)`)
+  
+  console.log('\nProvider API Keys (for BYOK mode only - optional):')
+  Object.entries(legacyKeys).forEach(([key, hasKey]) => {
+    console.log(`  ${hasKey ? '✅' : '⚠️'} ${key} (optional - only needed for BYOK mode)`)
   })
+  console.log('  📝 Note: AI Gateway works automatically without these! Only configure if using BYOK mode.')
   
   console.log('\n🤖 Model Configuration:')
   console.log(`  OpenAI Model: ${process.env.OPENAI_MODEL || 'gpt-4o'}`)
@@ -31,72 +40,73 @@ const testAPIKeys = async () => {
   console.log(`  Max Models: ${process.env.MAX_MODELS_PER_ANALYSIS || '5'}`)
   console.log(`  Enable XAI: ${process.env.ENABLE_XAI || 'true'}`)
   
-  // Test OpenAI API
-  if (apiKeys.OPENAI_API_KEY) {
-    console.log('\n🧪 Testing OpenAI API...')
+  // Test AI Gateway
+  if (apiKeys.AI_GATEWAY_API_KEY) {
+    console.log('\n🧪 Testing AI Gateway...')
     try {
-      const OpenAI = require('openai')
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+      const { aiGateway } = require('./lib/ai-gateway-provider')
       
       // Test with a simple completion
-      const response = await openai.chat.completions.create({
+      const response = await aiGateway.generate({
         model: process.env.OPENAI_MODEL || 'gpt-4o',
-        messages: [{ role: 'user', content: 'Hello, this is a test.' }],
-        max_completion_tokens: 10
+        prompt: 'Hello, this is a test.',
+        maxTokens: 10
       })
       
-      console.log(`  ✅ OpenAI API working: ${response.choices[0].message.content}`)
+      console.log(`  ✅ AI Gateway working: ${response.content}`)
     } catch (error) {
-      console.log(`  ❌ OpenAI API failed: ${error.message}`)
+      console.log(`  ❌ AI Gateway failed: ${error.message}`)
+    }
+  } else {
+    console.log('\n⚠️  AI_GATEWAY_API_KEY not set. Cannot test AI Gateway.')
+  }
+  
+  // Test Anthropic via AI Gateway (if configured)
+  if (apiKeys.AI_GATEWAY_API_KEY) {
+    console.log('\n🧪 Testing Anthropic via AI Gateway...')
+    try {
+      const { aiGateway } = require('./lib/ai-gateway-provider')
+      
+      const response = await aiGateway.generate({
+        model: 'claude-sonnet-4-20250514',
+        prompt: 'Hello, this is a test.',
+        maxTokens: 10
+      })
+      
+      console.log(`  ✅ Anthropic via AI Gateway working: ${response.content}`)
+    } catch (error) {
+      console.log(`  ❌ Anthropic via AI Gateway failed: ${error.message}`)
     }
   }
   
-  // Test Anthropic API
-  if (apiKeys.ANTHROPIC_API_KEY) {
-    console.log('\n🧪 Testing Anthropic API...')
+  // Test Google Gemini via AI Gateway (if configured)
+  if (apiKeys.AI_GATEWAY_API_KEY) {
+    console.log('\n🧪 Testing Google Gemini via AI Gateway...')
     try {
-      const Anthropic = require('@anthropic-ai/sdk')
-      const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+      const { aiGateway } = require('./lib/ai-gateway-provider')
       
-      const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 10,
-        messages: [{ role: 'user', content: 'Hello, this is a test.' }]
+      const response = await aiGateway.generate({
+        model: 'gemini-2.5-flash',
+        prompt: 'Hello, this is a test.',
+        maxTokens: 10
       })
       
-      console.log(`  ✅ Anthropic API working: ${response.content[0].text}`)
+      console.log(`  ✅ Google Gemini via AI Gateway working: ${response.content}`)
     } catch (error) {
-      console.log(`  ❌ Anthropic API failed: ${error.message}`)
-    }
-  }
-  
-  // Test Google Gemini API
-  if (apiKeys.GOOGLE_GEMINI_API_KEY) {
-    console.log('\n🧪 Testing Google Gemini API...')
-    try {
-      const { GoogleGenerativeAI } = require('@google/generative-ai')
-      const gemini = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY)
-      
-      const model = gemini.getGenerativeModel({ 
-        model: 'gemini-1.5-pro-latest'
-      })
-      
-      const response = await model.generateContent('Hello, this is a test.')
-      console.log(`  ✅ Google Gemini API working: ${response.response.text()}`)
-    } catch (error) {
-      console.log(`  ❌ Google Gemini API failed: ${error.message}`)
+      console.log(`  ❌ Google Gemini via AI Gateway failed: ${error.message}`)
     }
   }
   
   console.log('\n🎯 Summary:')
-  const workingAPIs = Object.values(apiKeys).filter(Boolean).length
-  console.log(`  Working APIs: ${workingAPIs}/5`)
-  console.log(`  Ready for enhanced analysis: ${workingAPIs >= 2 ? '✅' : '❌'}`)
+  const hasGateway = apiKeys.AI_GATEWAY_API_KEY
+  console.log(`  AI Gateway: ${hasGateway ? '✅ Configured' : '❌ Not configured'}`)
+  console.log(`  Ready for enhanced analysis: ${hasGateway ? '✅' : '❌'}`)
+  console.log('\n📝 Note: AI Gateway works automatically with just AI_GATEWAY_API_KEY! Provider keys are only needed for BYOK mode (optional).')
   
   return {
-    success: workingAPIs >= 2,
-    workingAPIs,
-    totalAPIs: 5
+    success: hasGateway,
+    hasGateway,
+    legacyKeysConfigured: Object.values(legacyKeys).filter(Boolean).length
   }
 }
 

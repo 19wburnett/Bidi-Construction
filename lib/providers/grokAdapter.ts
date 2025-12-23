@@ -1,14 +1,18 @@
 /**
  * Grok (xAI) Provider Adapter
  * 
- * Standardized adapter for Grok/xAI API with:
+ * Standardized adapter for Grok/xAI API via AI Gateway with:
  * - Healthcheck and model enumeration
  * - JSON mode support
  * - Large-context handling
  * - Function/tool-calling shim
  * - Normalized usage and cost estimation
  * - Error normalization
+ * 
+ * Now uses Vercel AI Gateway instead of direct XAI API calls
  */
+
+import { aiGateway } from '../ai-gateway-provider'
 
 export interface GrokAuth {
   apiKey: string
@@ -72,18 +76,21 @@ class GrokAdapter {
 
   /**
    * Initialize the adapter with authentication
+   * Note: Now uses AI Gateway, so API key is AI_GATEWAY_API_KEY
    */
   init(auth: GrokAuth): void {
-    if (!auth.apiKey) {
-      throw new Error('Grok API key is required')
+    // For backward compatibility, we still accept the auth object
+    // but we'll use AI Gateway instead
+    if (!process.env.AI_GATEWAY_API_KEY) {
+      throw new Error('AI Gateway API key is required. Please set AI_GATEWAY_API_KEY in your environment variables.')
     }
 
-    this.apiKey = auth.apiKey
-    this.baseUrl = auth.baseUrl || 'https://api.x.ai/v1'
+    this.apiKey = process.env.AI_GATEWAY_API_KEY
+    this.baseUrl = auth.baseUrl || 'https://ai-gateway.vercel.sh/v1'
     this.orgId = auth.orgId
     this.initialized = true
 
-    console.log(`✅ Grok adapter initialized (baseUrl: ${this.baseUrl})`)
+    console.log(`✅ Grok adapter initialized (using AI Gateway)`)
   }
 
   /**
@@ -275,36 +282,47 @@ class GrokAdapter {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          ...(this.orgId && { 'X-Organization-Id': this.orgId })
-        },
-        body: JSON.stringify(requestBody)
-      })
-
-      if (!response.ok) {
-        const error = await this.normalizeError(response)
-        throw error
+      // Use AI Gateway instead of direct XAI API
+      // Extract images from user content if present
+      let images: string[] = []
+      let promptText = ''
+      
+      if (typeof user === 'string') {
+        promptText = user
+      } else if (Array.isArray(user)) {
+        // Extract text and images
+        const textParts = user.filter((item: any) => item.type === 'text')
+        const imageParts = user.filter((item: any) => item.type === 'image_url')
+        promptText = textParts.map((item: any) => item.text).join(' ')
+        images = imageParts.map((item: any) => item.image_url.url)
       }
 
-      const data = await response.json()
+      // Build system prompt with JSON schema instructions
+      let systemPrompt = system || ''
+      if (json_schema) {
+        systemPrompt += `\n\nIMPORTANT: Respond with ONLY valid JSON matching this schema: ${JSON.stringify(json_schema)}. Do not include any markdown, code blocks, or explanatory text.`
+      } else {
+        systemPrompt += '\n\nIMPORTANT: Respond with ONLY a valid JSON object. Do not include markdown code blocks or any other text.'
+      }
 
-      // Extract content
-      const content = data.choices?.[0]?.message?.content || ''
-      const finishReason = data.choices?.[0]?.finish_reason || 'stop'
-      const model = data.model || 'grok-2-1212'
+      const response = await aiGateway.generate({
+        model: selectedModel,
+        system: systemPrompt,
+        prompt: promptText,
+        images: images,
+        maxTokens: Math.min(max_tokens, 4096),
+        temperature: temperature,
+        responseFormat: { type: 'json_object' }
+      })
 
-      // Normalize usage
-      const usage = this.normalizeUsage(data.usage || {})
+      // Normalize usage from AI Gateway response
+      const usage = this.normalizeUsageFromGateway(response.usage)
 
       return {
-        content,
-        finish_reason: finishReason,
+        content: response.content,
+        finish_reason: response.finishReason,
         usage,
-        model
+        model: selectedModel
       }
     } catch (error: any) {
       // If it's already a normalized GrokError, rethrow
@@ -322,7 +340,7 @@ class GrokAdapter {
   }
 
   /**
-   * Normalize usage statistics and estimate cost
+   * Normalize usage statistics and estimate cost from raw API response
    */
   private normalizeUsage(rawUsage: any): GrokUsage {
     const promptTokens = rawUsage.prompt_tokens || 0
@@ -333,6 +351,32 @@ class GrokAdapter {
     // Input: $0.10 per 1M tokens
     // Output: $0.40 per 1M tokens
     // These are estimates - actual pricing may vary
+    const inputCostPerMillion = 0.10
+    const outputCostPerMillion = 0.40
+
+    const costEst = 
+      (promptTokens / 1_000_000) * inputCostPerMillion +
+      (completionTokens / 1_000_000) * outputCostPerMillion
+
+    return {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: totalTokens,
+      cost_est: costEst
+    }
+  }
+
+  /**
+   * Normalize usage from AI Gateway response format
+   */
+  private normalizeUsageFromGateway(gatewayUsage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number }): GrokUsage {
+    const promptTokens = gatewayUsage?.promptTokens || 0
+    const completionTokens = gatewayUsage?.completionTokens || 0
+    const totalTokens = gatewayUsage?.totalTokens || (promptTokens + completionTokens)
+
+    // Grok pricing (as of 2025 - verify with xAI docs):
+    // Input: $0.10 per 1M tokens
+    // Output: $0.40 per 1M tokens
     const inputCostPerMillion = 0.10
     const outputCostPerMillion = 0.40
 
