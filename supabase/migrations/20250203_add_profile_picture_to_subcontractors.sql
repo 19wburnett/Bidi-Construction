@@ -8,3 +8,4 @@ ADD COLUMN IF NOT EXISTS profile_picture_url TEXT;
 COMMENT ON COLUMN subcontractors.profile_picture_url IS 'URL to subcontractor logo, profile picture, or favicon';
 
 
+
