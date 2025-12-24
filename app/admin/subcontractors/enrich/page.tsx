@@ -27,6 +27,10 @@ import {
   Eye,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   MapPin,
   Link as LinkIcon,
   ImageIcon,
@@ -124,6 +128,7 @@ export default function SubcontractorEnrichmentPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [isCheckingAdmin, setIsCheckingAdmin] = useState(true)
   const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [enriching, setEnriching] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -138,6 +143,11 @@ export default function SubcontractorEnrichmentPage() {
     total: number
     currentName: string
   } | null>(null)
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [tradeCategories, setTradeCategories] = useState<string[]>([])
 
   // Detail view state
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
@@ -187,10 +197,39 @@ export default function SubcontractorEnrichmentPage() {
       setLoading(true)
       setError(null)
 
-      const { data, error: fetchError } = await supabase
+      // Build query with server-side filtering
+      let query = supabase
         .from('subcontractors')
-        .select('*')
+        .select('*', { count: 'exact' })
+
+      // Apply search filter
+      if (searchTerm) {
+        query = query.or(`name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,location.ilike.%${searchTerm}%`)
+      }
+
+      // Apply trade filter
+      if (tradeFilter !== 'all') {
+        query = query.eq('trade_category', tradeFilter)
+      }
+
+      // Apply status filter
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'none') {
+          query = query.is('enrichment_status', null)
+        } else {
+          query = query.eq('enrichment_status', statusFilter)
+        }
+      }
+
+      // Apply pagination
+      const from = (currentPage - 1) * pageSize
+      const to = from + pageSize - 1
+
+      query = query
         .order('created_at', { ascending: false })
+        .range(from, to)
+
+      const { data, error: fetchError, count } = await query
 
       if (fetchError) {
         console.error('Failed to fetch subcontractors:', fetchError)
@@ -199,11 +238,28 @@ export default function SubcontractorEnrichmentPage() {
       }
 
       setSubcontractors(data ?? [])
+      setTotalCount(count ?? 0)
     } catch (err) {
       console.error('Unexpected error fetching subcontractors', err)
       setError('Unexpected error fetching subcontractors.')
     } finally {
       setLoading(false)
+    }
+  }, [supabase, searchTerm, tradeFilter, statusFilter, currentPage, pageSize])
+
+  // Fetch trade categories once for the filter dropdown
+  const fetchTradeCategories = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from('subcontractors')
+        .select('trade_category')
+      
+      if (data) {
+        const uniqueTrades = Array.from(new Set(data.map(d => d.trade_category))).filter(Boolean).sort()
+        setTradeCategories(uniqueTrades as string[])
+      }
+    } catch (err) {
+      console.error('Error fetching trade categories:', err)
     }
   }, [supabase])
 
@@ -220,23 +276,38 @@ export default function SubcontractorEnrichmentPage() {
   useEffect(() => {
     if (!authLoading && isAdmin) {
       fetchSubcontractors()
+      fetchTradeCategories()
     }
-  }, [authLoading, fetchSubcontractors, isAdmin])
+  }, [authLoading, fetchSubcontractors, fetchTradeCategories, isAdmin])
 
-  const filteredSubcontractors = subcontractors.filter((sub) => {
-    const matchesSearch =
-      !searchTerm ||
-      sub.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.location.toLowerCase().includes(searchTerm.toLowerCase())
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, tradeFilter, statusFilter, pageSize])
 
-    const matchesTrade = tradeFilter === 'all' || sub.trade_category === tradeFilter
+  // Debounce search input
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
 
-    const matchesStatus = statusFilter === 'all' || sub.enrichment_status === statusFilter || 
-      (statusFilter === 'none' && !sub.enrichment_status)
+  // Use debounced search for actual filtering
+  useEffect(() => {
+    if (isAdmin) {
+      fetchSubcontractors()
+    }
+  }, [debouncedSearch, tradeFilter, statusFilter, currentPage, pageSize])
 
-    return matchesSearch && matchesTrade && matchesStatus
-  })
+  // For pagination, we use the fetched data directly (server-side filtered)
+  const filteredSubcontractors = subcontractors
+
+  // Calculate pagination info
+  const totalPages = Math.ceil(totalCount / pageSize)
+  const showingFrom = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const showingTo = Math.min(currentPage * pageSize, totalCount)
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -502,8 +573,6 @@ export default function SubcontractorEnrichmentPage() {
     if (confidence >= 0.5) return 'text-yellow-600'
     return 'text-red-600'
   }
-
-  const tradeCategories = Array.from(new Set(subcontractors.map((s) => s.trade_category))).sort()
 
   if (authLoading || isCheckingAdmin) {
     return (
@@ -776,20 +845,83 @@ export default function SubcontractorEnrichmentPage() {
                 </div>
               </div>
 
+              {/* Pagination Controls - Top */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-muted-foreground">
+                    Showing {showingFrom}-{showingTo} of {totalCount}
+                  </span>
+                  <select
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    <option value={10}>10 per page</option>
+                    <option value={25}>25 per page</option>
+                    <option value={50}>50 per page</option>
+                    <option value={100}>100 per page</option>
+                  </select>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1 || loading}
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1 || loading}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="px-3 text-sm">
+                    Page {currentPage} of {totalPages || 1}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages || loading}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage >= totalPages || loading}
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
               {/* Subcontractors List */}
               <div className="border rounded-lg overflow-hidden">
                 <div className="bg-muted/50 p-4 border-b">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      checked={
-                        filteredSubcontractors.length > 0 &&
-                        filteredSubcontractors.every((sub) => selectedIds.includes(sub.id))
-                      }
-                      onCheckedChange={handleSelectAll}
-                    />
-                    <span className="text-sm font-medium">
-                      Select All ({filteredSubcontractors.length} shown)
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        checked={
+                          filteredSubcontractors.length > 0 &&
+                          filteredSubcontractors.every((sub) => selectedIds.includes(sub.id))
+                        }
+                        onCheckedChange={handleSelectAll}
+                      />
+                      <span className="text-sm font-medium">
+                        Select All on Page ({filteredSubcontractors.length})
+                      </span>
+                    </div>
+                    {selectedIds.length > 0 && (
+                      <span className="text-sm text-purple-600 font-medium">
+                        {selectedIds.length} total selected
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="max-h-[600px] overflow-y-auto">
@@ -983,6 +1115,52 @@ export default function SubcontractorEnrichmentPage() {
                   )}
                 </div>
               </div>
+
+              {/* Pagination Controls - Bottom */}
+              {totalCount > pageSize && (
+                <div className="flex items-center justify-between mt-4">
+                  <span className="text-sm text-muted-foreground">
+                    Showing {showingFrom}-{showingTo} of {totalCount}
+                  </span>
+                  <div className="flex items-center space-x-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(1)}
+                      disabled={currentPage === 1 || loading}
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1 || loading}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="px-3 text-sm">
+                      Page {currentPage} of {totalPages || 1}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage >= totalPages || loading}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(totalPages)}
+                      disabled={currentPage >= totalPages || loading}
+                    >
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
