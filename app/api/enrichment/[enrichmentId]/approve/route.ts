@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 
@@ -40,8 +40,11 @@ export async function POST(
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
+    // Create admin client for operations that need to bypass RLS
+    const supabaseAdmin = createAdminSupabaseClient()
+
     // Fetch the enrichment
-    const { data: enrichment, error: fetchError } = await supabase
+    const { data: enrichment, error: fetchError } = await supabaseAdmin
       .from('subcontractor_enrichments')
       .select('*')
       .eq('id', enrichmentId)
@@ -91,7 +94,7 @@ export async function POST(
     }
 
     // Build notes from enrichment sources
-    const existingNotes = await supabase
+    const existingNotes = await supabaseAdmin
       .from('subcontractors')
       .select('notes')
       .eq('id', enrichment.subcontractor_id)
@@ -117,7 +120,7 @@ export async function POST(
     updatePayload.enrichment_updated_at = new Date().toISOString()
 
     // Apply updates to subcontractor
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('subcontractors')
       .update(updatePayload)
       .eq('id', enrichment.subcontractor_id)
@@ -128,7 +131,7 @@ export async function POST(
     }
 
     // Mark enrichment as approved
-    const { error: approveError } = await supabase
+    const { error: approveError } = await supabaseAdmin
       .from('subcontractor_enrichments')
       .update({
         status: 'approved',
@@ -142,7 +145,7 @@ export async function POST(
     }
 
     // Fetch the updated subcontractor
-    const { data: updatedSubcontractor } = await supabase
+    const { data: updatedSubcontractor } = await supabaseAdmin
       .from('subcontractors')
       .select('*')
       .eq('id', enrichment.subcontractor_id)

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase-server'
 import { enrichSubcontractorFree, EnrichmentResults, EnrichmentSources } from '@/lib/free-enrichment'
 import { downloadAndUploadImage } from '@/lib/enrichment-image-handler'
 
@@ -52,8 +52,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Subcontractor not found' }, { status: 404 })
     }
 
+    // Create admin client for operations that need to bypass RLS
+    const supabaseAdmin = createAdminSupabaseClient()
+
     // Create enrichment record with 'running' status
-    const { data: enrichmentRecord, error: insertError } = await supabase
+    const { data: enrichmentRecord, error: insertError } = await supabaseAdmin
       .from('subcontractor_enrichments')
       .insert({
         subcontractor_id: subcontractorId,
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update subcontractor enrichment status
-    await supabase
+    await supabaseAdmin
       .from('subcontractors')
       .update({ enrichment_status: 'running', enrichment_updated_at: new Date().toISOString() })
       .eq('id', subcontractorId)
@@ -96,7 +99,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Update enrichment record with results
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseAdmin
         .from('subcontractor_enrichments')
         .update({
           status: 'complete',
@@ -110,7 +113,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Update subcontractor enrichment status
-      await supabase
+      await supabaseAdmin
         .from('subcontractors')
         .update({ 
           enrichment_status: 'complete', 
@@ -136,17 +139,17 @@ export async function POST(request: NextRequest) {
       // Update enrichment record with error
       const errorMessage = enrichError instanceof Error ? enrichError.message : 'Unknown error'
       
-      await supabase
+      await supabaseAdmin
         .from('subcontractor_enrichments')
         .update({
-          status: 'complete',
+          status: 'error',
           error_message: errorMessage,
           results_json: {},
           sources_json: {},
         })
         .eq('id', enrichmentRecord.id)
 
-      await supabase
+      await supabaseAdmin
         .from('subcontractors')
         .update({ 
           enrichment_status: 'error', 
@@ -204,6 +207,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
+    // Create admin client for operations that need to bypass RLS
+    const supabaseAdmin = createAdminSupabaseClient()
+
     // Fetch all subcontractors
     const { data: subcontractors, error: batchFetchError } = await supabase
       .from('subcontractors')
@@ -236,7 +242,7 @@ export async function PUT(request: NextRequest) {
 
       try {
         // Create enrichment record
-        const { data: enrichmentRecord, error: insertError } = await supabase
+        const { data: enrichmentRecord, error: insertError } = await supabaseAdmin
           .from('subcontractor_enrichments')
           .insert({
             subcontractor_id: subcontractor.id,
@@ -255,7 +261,7 @@ export async function PUT(request: NextRequest) {
         }
 
         // Update subcontractor status
-        await supabase
+        await supabaseAdmin
           .from('subcontractors')
           .update({ enrichment_status: 'running', enrichment_updated_at: new Date().toISOString() })
           .eq('id', subcontractor.id)
@@ -278,7 +284,7 @@ export async function PUT(request: NextRequest) {
         }
 
         // Update enrichment record
-        await supabase
+        await supabaseAdmin
           .from('subcontractor_enrichments')
           .update({
             status: 'complete',
@@ -288,7 +294,7 @@ export async function PUT(request: NextRequest) {
           .eq('id', enrichmentRecord.id)
 
         // Update subcontractor status
-        await supabase
+        await supabaseAdmin
           .from('subcontractors')
           .update({ 
             enrichment_status: 'complete', 
@@ -318,7 +324,7 @@ export async function PUT(request: NextRequest) {
         console.error(`Error enriching ${subcontractor.name}:`, error)
         
         // Update subcontractor status to error
-        await supabase
+        await supabaseAdmin
           .from('subcontractors')
           .update({ 
             enrichment_status: 'error', 

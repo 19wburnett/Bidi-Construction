@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase-server'
 
 export const runtime = 'nodejs'
 
@@ -40,8 +40,11 @@ export async function GET(
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
     }
 
+    // Create admin client for operations that need to bypass RLS
+    const supabaseAdmin = createAdminSupabaseClient()
+
     // Fetch the latest enrichment for this subcontractor
-    const { data: enrichment, error: fetchError } = await supabase
+    const { data: enrichment, error: fetchError } = await supabaseAdmin
       .from('subcontractor_enrichments')
       .select('*')
       .eq('subcontractor_id', subcontractorId)
@@ -62,7 +65,7 @@ export async function GET(
     }
 
     // Also fetch the subcontractor for context
-    const { data: subcontractor } = await supabase
+    const { data: subcontractor } = await supabaseAdmin
       .from('subcontractors')
       .select('id, name, trade_category, location, website_url, phone, profile_picture_url, enrichment_status')
       .eq('id', subcontractorId)
