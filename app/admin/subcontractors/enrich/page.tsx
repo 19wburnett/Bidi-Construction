@@ -1223,14 +1223,35 @@ export default function SubcontractorEnrichmentPage() {
                     <ImageIcon className="h-4 w-4" />
                     <span>Extracted Logo</span>
                   </Label>
-                  <div className="p-4 bg-muted/50 rounded-lg flex justify-center">
-                    <Image
+                  <div className="p-4 bg-muted/50 rounded-lg flex flex-col items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                       src={selectedEnrichment.results_json.logo_url}
                       alt="Extracted logo"
-                      width={120}
-                      height={120}
-                      className="rounded-lg object-contain max-h-[120px]"
+                      className="rounded-lg object-contain max-h-[120px] max-w-[200px]"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement
+                        target.style.display = 'none'
+                        const fallback = target.nextElementSibling as HTMLElement
+                        if (fallback) fallback.style.display = 'flex'
+                      }}
                     />
+                    <div 
+                      className="hidden flex-col items-center justify-center p-4 bg-muted rounded-lg text-muted-foreground"
+                      style={{ display: 'none' }}
+                    >
+                      <ImageIcon className="h-8 w-8 mb-2" />
+                      <span className="text-xs">Failed to load image</span>
+                    </div>
+                    <a
+                      href={selectedEnrichment.results_json.logo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline flex items-center"
+                    >
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      View original URL
+                    </a>
                   </div>
                   {selectedEnrichment.sources_json?.logo_url && (
                     <p className={`text-xs ${getConfidenceColor(selectedEnrichment.sources_json.logo_url.confidence)}`}>

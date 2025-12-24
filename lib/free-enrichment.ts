@@ -355,11 +355,21 @@ export function extractProfileData(
       }
     }
     
-    // Extract og:image for logo
+    // Helper to validate logo URL
+    const isValidLogoUrl = (url: string | undefined): boolean => {
+      if (!url) return false
+      // Skip data URIs, tiny images, and tracking pixels
+      if (url.startsWith('data:')) return false
+      if (url.includes('1x1') || url.includes('pixel') || url.includes('tracking')) return false
+      if (url.includes('.gif') && url.includes('spacer')) return false
+      return true
+    }
+
+    // Extract og:image for logo (best quality)
     if (!results.logo_url) {
       const ogImage = $('meta[property="og:image"]').attr('content')
-      if (ogImage) {
-        results.logo_url = makeAbsoluteUrl(ogImage, page.url)
+      if (isValidLogoUrl(ogImage)) {
+        results.logo_url = makeAbsoluteUrl(ogImage!, page.url)
         sources.logo_url = {
           source_url: page.url,
           confidence: 0.9,
@@ -367,12 +377,38 @@ export function extractProfileData(
       }
     }
     
-    // Look for logo in img tags
+    // Try Twitter image as alternative
     if (!results.logo_url) {
-      const logoImg = $('img[class*="logo"], img[id*="logo"], img[alt*="logo"], header img').first()
-      const logoSrc = logoImg.attr('src')
-      if (logoSrc) {
-        results.logo_url = makeAbsoluteUrl(logoSrc, page.url)
+      const twitterImage = $('meta[name="twitter:image"]').attr('content')
+      if (isValidLogoUrl(twitterImage)) {
+        results.logo_url = makeAbsoluteUrl(twitterImage!, page.url)
+        sources.logo_url = {
+          source_url: page.url,
+          confidence: 0.85,
+        }
+      }
+    }
+    
+    // Look for logo in img tags - prioritize larger images
+    if (!results.logo_url) {
+      // First try explicit logo images
+      let logoImg = $('img[class*="logo"], img[id*="logo"]').first()
+      let logoSrc = logoImg.attr('src')
+      
+      // If not found, try header images
+      if (!isValidLogoUrl(logoSrc)) {
+        logoImg = $('header img, .header img, nav img, .navbar img').first()
+        logoSrc = logoImg.attr('src')
+      }
+      
+      // Try alt text containing company name or logo
+      if (!isValidLogoUrl(logoSrc)) {
+        logoImg = $('img[alt*="logo" i]').first()
+        logoSrc = logoImg.attr('src')
+      }
+      
+      if (isValidLogoUrl(logoSrc)) {
+        results.logo_url = makeAbsoluteUrl(logoSrc!, page.url)
         sources.logo_url = {
           source_url: page.url,
           confidence: 0.7,

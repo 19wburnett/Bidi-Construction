@@ -5,7 +5,7 @@
  * Used for subcontractor profile pictures/logos
  */
 
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
 const STORAGE_BUCKET = 'subcontractor-assets'
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
@@ -106,7 +106,7 @@ export async function uploadImageToStorage(
   contentType: string
 ): Promise<ImageUploadResult> {
   try {
-    const supabase = await createServerSupabaseClient()
+    const supabase = createAdminSupabaseClient()
     
     const extension = getExtensionFromContentType(contentType)
     const fileName = `${subcontractorId}/logo.${extension}`
@@ -207,7 +207,7 @@ export async function downloadAndUploadImage(
  */
 export async function ensureStorageBucketExists(): Promise<boolean> {
   try {
-    const supabase = await createServerSupabaseClient()
+    const supabase = createAdminSupabaseClient()
     
     // Check if bucket exists
     const { data: buckets, error: listError } = await supabase.storage.listBuckets()
