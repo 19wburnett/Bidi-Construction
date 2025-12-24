@@ -434,7 +434,7 @@ export default function SubcontractorEnrichmentPage() {
     setDetailDialogOpen(true)
 
     try {
-      const response = await fetch(`/api/enrichment/${subcontractor.id}/latest`)
+      const response = await fetch(`/api/enrichment/by-subcontractor/${subcontractor.id}/latest`)
       const data = await response.json()
 
       if (response.ok && data.enrichment) {
