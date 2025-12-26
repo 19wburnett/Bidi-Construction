@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { 
@@ -40,7 +41,8 @@ import {
   X,
   Search,
   Camera,
-  ImageIcon
+  ImageIcon,
+  ChevronDown
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -142,6 +144,8 @@ export default function JobDetailPage() {
   const [editingTitle, setEditingTitle] = useState('')
   const [isUpdatingTitle, setIsUpdatingTitle] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [statusPopoverOpen, setStatusPopoverOpen] = useState(false)
+  const [updatingStatus, setUpdatingStatus] = useState(false)
 
   const [editForm, setEditForm] = useState<EditFormState>({
     name: '',
@@ -188,13 +192,84 @@ export default function JobDetailPage() {
     }
   }, [searchParams, showBidComparisonModal])
 
-  useEffect(() => {
-    if (user && jobId) {
-      loadJobData()
-    }
-  }, [user, jobId])
+  const loadBudgetScenarios = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/budget-scenarios`)
+      if (!response.ok) {
+        console.error('Failed to load scenarios')
+        return
+      }
 
-  async function loadJobData() {
+      const data = await response.json()
+      const scenariosData = data.scenarios || []
+      setScenarios(scenariosData)
+
+      // Find active scenario
+      const activeScenario = scenariosData.find((s: any) => s.is_active)
+      setActiveScenarioId(activeScenario?.id || null)
+    } catch (error) {
+      console.error('Error loading budget scenarios:', error)
+    }
+  }, [jobId])
+
+  const loadAggregatedTakeoffItems = useCallback(async (plansList: Plan[]) => {
+    if (!user) return
+    
+    setLoadingTakeoff(true)
+    try {
+      // Fetch the latest takeoff analysis for this job
+      const { data: takeoffAnalysis, error: takeoffError } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('id, items')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (takeoffError) {
+        console.error('Error fetching takeoff analysis:', takeoffError)
+        return
+      }
+
+      if (!takeoffAnalysis) {
+        setAggregatedTakeoffItems([])
+        return
+      }
+
+      setTakeoffAnalysisId(takeoffAnalysis.id)
+
+      let itemsArray: any[] = []
+      try {
+        if (typeof takeoffAnalysis.items === 'string') {
+          const parsed = JSON.parse(takeoffAnalysis.items)
+          itemsArray = parsed.takeoffs || parsed.items || (Array.isArray(parsed) ? parsed : [])
+        } else if (Array.isArray(takeoffAnalysis.items)) {
+          itemsArray = takeoffAnalysis.items
+        }
+      } catch (parseError) {
+        console.error('Error parsing takeoff items:', parseError)
+      }
+
+      // If items don't have plan_name but have plan_id, we can enrich them from plansList
+      const enrichedItems = itemsArray.map((item: any) => {
+        if (item.plan_id && !item.plan_name) {
+           const plan = plansList.find(p => p.id === item.plan_id)
+           if (plan) {
+             return { ...item, plan_name: plan.title || plan.file_name }
+           }
+        }
+        return item
+      })
+
+      setAggregatedTakeoffItems(enrichedItems)
+    } catch (error) {
+      console.error('Error loading aggregated takeoff items:', error)
+    } finally {
+      setLoadingTakeoff(false)
+    }
+  }, [user, jobId, supabase])
+
+  const loadJobData = useCallback(async () => {
     try {
       if (!user) {
         return
@@ -299,18 +374,9 @@ export default function JobDetailPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user, jobId, supabase, loadBudgetScenarios, loadAggregatedTakeoffItems])
 
-  // Load accepted bids with line items when bids change
-  useEffect(() => {
-    if (bids.length > 0) {
-      loadAcceptedBidsWithLineItems(bids)
-    } else {
-      setAcceptedBidsWithLineItems([])
-    }
-  }, [bids])
-
-  async function loadAcceptedBidsWithLineItems(allBids: any[]) {
+  const loadAcceptedBidsWithLineItems = useCallback(async (allBids: any[]) => {
     const acceptedBids = allBids.filter(bid => bid.status === 'accepted')
     
     if (acceptedBids.length === 0) {
@@ -352,27 +418,16 @@ export default function JobDetailPage() {
       console.error('Error loading accepted bids with line items:', error)
       setAcceptedBidsWithLineItems(acceptedBids.map(bid => ({ ...bid, bid_line_items: [] })))
     }
-  }
+  }, [supabase])
 
-  async function loadBudgetScenarios() {
-    try {
-      const response = await fetch(`/api/jobs/${jobId}/budget-scenarios`)
-      if (!response.ok) {
-        console.error('Failed to load scenarios')
-        return
-      }
-
-      const data = await response.json()
-      const scenariosData = data.scenarios || []
-      setScenarios(scenariosData)
-
-      // Find active scenario
-      const activeScenario = scenariosData.find((s: any) => s.is_active)
-      setActiveScenarioId(activeScenario?.id || null)
-    } catch (error) {
-      console.error('Error loading budget scenarios:', error)
+  // Load accepted bids with line items when bids change
+  useEffect(() => {
+    if (bids.length > 0) {
+      loadAcceptedBidsWithLineItems(bids)
+    } else {
+      setAcceptedBidsWithLineItems([])
     }
-  }
+  }, [bids, loadAcceptedBidsWithLineItems])
 
   async function handleCreateScenario(name: string, description?: string) {
     try {
@@ -507,63 +562,6 @@ export default function JobDetailPage() {
         .catch(error => {
           console.error('Error updating scenario:', error)
         })
-    }
-  }
-
-  async function loadAggregatedTakeoffItems(plansList: Plan[]) {
-    if (!user) return
-    
-    setLoadingTakeoff(true)
-    try {
-      // Fetch the latest takeoff analysis for this job
-      const { data: takeoffAnalysis, error: takeoffError } = await supabase
-        .from('plan_takeoff_analysis')
-        .select('id, items')
-        .eq('job_id', jobId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (takeoffError) {
-        console.error('Error fetching takeoff analysis:', takeoffError)
-        return
-      }
-
-      if (!takeoffAnalysis) {
-        setAggregatedTakeoffItems([])
-        return
-      }
-
-      setTakeoffAnalysisId(takeoffAnalysis.id)
-
-      let itemsArray: any[] = []
-      try {
-        if (typeof takeoffAnalysis.items === 'string') {
-          const parsed = JSON.parse(takeoffAnalysis.items)
-          itemsArray = parsed.takeoffs || parsed.items || (Array.isArray(parsed) ? parsed : [])
-        } else if (Array.isArray(takeoffAnalysis.items)) {
-          itemsArray = takeoffAnalysis.items
-        }
-      } catch (parseError) {
-        console.error('Error parsing takeoff items:', parseError)
-      }
-
-      // If items don't have plan_name but have plan_id, we can enrich them from plansList
-      const enrichedItems = itemsArray.map((item: any) => {
-        if (item.plan_id && !item.plan_name) {
-           const plan = plansList.find(p => p.id === item.plan_id)
-           if (plan) {
-             return { ...item, plan_name: plan.title || plan.file_name }
-           }
-        }
-        return item
-      })
-
-      setAggregatedTakeoffItems(enrichedItems)
-    } catch (error) {
-      console.error('Error loading aggregated takeoff items:', error)
-    } finally {
-      setLoadingTakeoff(false)
     }
   }
 
@@ -750,6 +748,44 @@ export default function JobDetailPage() {
       [field]: value
     }))
     setEditError(null)
+  }
+
+  const handleQuickStatusUpdate = async (newStatus: Job['status']) => {
+    if (!user || !job || newStatus === job.status) {
+      setStatusPopoverOpen(false)
+      return
+    }
+
+    setUpdatingStatus(true)
+    try {
+      const response = await fetch(`/api/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: newStatus
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to update status')
+      }
+
+      // Update local state immediately for better UX
+      setJob(prev => prev ? { ...prev, status: newStatus } : null)
+      setStatusPopoverOpen(false)
+      
+      // Reload job data to ensure consistency
+      await loadJobData()
+    } catch (error) {
+      console.error('Error updating status:', error)
+      alert('Failed to update status. Please try again.')
+    } finally {
+      setUpdatingStatus(false)
+    }
   }
 
   const handleUpdateJob = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1222,9 +1258,49 @@ export default function JobDetailPage() {
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge className={getStatusColor(job.status)}>
-                  {formatStatus(job.status)}
-                </Badge>
+                {(jobRole === 'owner' || (job.user_id === user?.id)) ? (
+                  <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors hover:opacity-80 ${getStatusColor(job.status)} ${updatingStatus ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        disabled={updatingStatus}
+                      >
+                        {formatStatus(job.status)}
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-2" align="end">
+                      <div className="space-y-1">
+                        <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">
+                          Change Status
+                        </div>
+                        {JOB_STATUSES.map((statusOption) => (
+                          <button
+                            key={statusOption}
+                            onClick={() => handleQuickStatusUpdate(statusOption)}
+                            disabled={updatingStatus || statusOption === job.status}
+                            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                              statusOption === job.status
+                                ? 'bg-orange-50 text-orange-700 font-medium cursor-default'
+                                : 'hover:bg-gray-100 text-gray-700 cursor-pointer'
+                            } ${updatingStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>{formatStatus(statusOption)}</span>
+                              {statusOption === job.status && (
+                                <Check className="h-4 w-4 text-orange-600" />
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <Badge className={getStatusColor(job.status)}>
+                    {formatStatus(job.status)}
+                  </Badge>
+                )}
                 {(jobRole === 'owner' || (job.user_id === user?.id)) && (
                   <Button variant="outline" size="sm" onClick={openEditDialog}>
                     <Edit className="h-4 w-4 mr-2" />

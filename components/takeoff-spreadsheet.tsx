@@ -300,6 +300,11 @@ export default function TakeoffSpreadsheet({
         }
       }
 
+      // Normalize cost_type
+      const costType = item.cost_type && ['labor', 'materials', 'allowance', 'other'].includes(item.cost_type.toLowerCase())
+        ? item.cost_type.toLowerCase() as 'labor' | 'materials' | 'allowance' | 'other'
+        : undefined
+
       // Ensure item has required fields and normalize structure
       return {
         id: item.id || `item-${Math.random().toString(36).substr(2, 9)}`,
@@ -314,6 +319,7 @@ export default function TakeoffSpreadsheet({
         subcontractor: item.subcontractor || undefined,
         cost_code: item.cost_code || item.costCode || undefined,
         cost_code_description: item.cost_code_description || item.costCodeDescription || undefined,
+        cost_type: costType,
         location: location || undefined,
         notes: item.notes || undefined,
         dimensions: item.dimensions || undefined,
@@ -474,6 +480,8 @@ export default function TakeoffSpreadsheet({
     // For subcontractor field, use special value for unassigned instead of empty string
     if (field === 'subcontractor') {
       setEditValue(currentValue || '__unassigned__')
+    } else if (field === 'cost_type') {
+      setEditValue(currentValue || '__none__')
     } else if (field === 'quantity' || field === 'unit_cost') {
       // For numeric fields, show the number without formatting
       setEditValue(currentValue !== undefined && currentValue !== null ? String(currentValue) : '')
@@ -511,6 +519,11 @@ export default function TakeoffSpreadsheet({
       updated.subcontractor = editValue === '__unassigned__' ? undefined : (editValue || undefined)
     } else if (editingCell.field === 'location') {
       updated.location = editValue.trim() || undefined
+    } else if (editingCell.field === 'cost_type') {
+      const costType = editValue && ['labor', 'materials', 'allowance', 'other'].includes(editValue.toLowerCase())
+        ? editValue.toLowerCase() as 'labor' | 'materials' | 'allowance' | 'other'
+        : undefined
+      updated.cost_type = costType
     } else if (editingCell.field === 'page') {
       const pageNum = parseInt(editValue, 10)
       if (!isNaN(pageNum) && pageNum > 0) {
@@ -621,6 +634,7 @@ export default function TakeoffSpreadsheet({
       total_cost: 0,
       category: targetCategory,
       subcontractor: targetSubcontractor,
+      cost_type: undefined,
       user_created: true
     }
     
@@ -696,6 +710,7 @@ export default function TakeoffSpreadsheet({
       unit: 'unit',
       category: categoryKey,
       subcontractor: name.trim(),
+      cost_type: undefined,
       user_created: true
     }
     
@@ -756,7 +771,7 @@ export default function TakeoffSpreadsheet({
             className={`group cursor-pointer hover:bg-gray-50 transition-colors border-b border-gray-200`}
             onClick={() => toggleCategory(row.id)}
           >
-            <td colSpan={12} className="p-0">
+            <td colSpan={13} className="p-0">
               <div className={`flex items-center justify-between py-3 px-4 ${config?.bgColor || 'bg-gray-50'} border-l-4 ${config?.color?.replace('text-', 'border-') || 'border-gray-400'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`p-1 rounded-md hover:bg-black/5 transition-colors`}>
@@ -813,6 +828,7 @@ export default function TakeoffSpreadsheet({
                 <span className="text-xs text-gray-400 font-normal">({row.quantity?.toLocaleString()} items)</span>
               </span>
             </td>
+            <td className="py-2 px-4"></td>
             <td className="py-2 px-4"></td>
             <td className="py-2 px-4"></td>
             <td className="py-2 px-4"></td>
@@ -1029,6 +1045,62 @@ export default function TakeoffSpreadsheet({
               <Badge variant="outline" className="font-normal text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200">
                 {item.subcontractor || 'Unassigned'}
               </Badge>
+            </div>
+          )}
+        </td>
+        <td className="py-2 px-4 text-sm">
+          {isEditing && editingCell?.field === 'cost_type' ? (
+            <Select
+              value={editValue || '__none__'}
+              onValueChange={(value) => {
+                setEditValue(value)
+                const item = normalizedItems.find(i => i.id === row.id)
+                if (item && onItemsChange) {
+                  const costType = value && value !== '__none__' && ['labor', 'materials', 'allowance', 'other'].includes(value.toLowerCase())
+                    ? value.toLowerCase() as 'labor' | 'materials' | 'allowance' | 'other'
+                    : undefined
+                  const updated = { ...item, cost_type: costType, user_modified: true }
+                  const updatedItems = normalizedItems.map(i => (i.id === row.id ? updated : i))
+                  onItemsChange(updatedItems)
+                  setEditingCell(null)
+                  setEditValue('')
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 w-full text-sm" onClick={(e) => e.stopPropagation()}>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent onClick={(e) => e.stopPropagation()}>
+                <SelectItem value="__none__">None</SelectItem>
+                <SelectItem value="labor">Labor</SelectItem>
+                <SelectItem value="materials">Materials</SelectItem>
+                <SelectItem value="allowance">Allowance</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <div
+              className={`${editable ? 'cursor-pointer hover:text-orange-600' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (editable) startEdit(row.id, 'cost_type', item.cost_type || '')
+              }}
+            >
+              {item.cost_type ? (
+                <Badge 
+                  variant="outline" 
+                  className={`font-normal text-xs ${
+                    item.cost_type === 'labor' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                    item.cost_type === 'materials' ? 'bg-green-50 text-green-700 border-green-200' :
+                    item.cost_type === 'allowance' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                    'bg-gray-50 text-gray-700 border-gray-200'
+                  }`}
+                >
+                  {item.cost_type.charAt(0).toUpperCase() + item.cost_type.slice(1)}
+                </Badge>
+              ) : (
+                <span className="text-gray-400 text-xs italic">Add type</span>
+              )}
             </div>
           )}
         </td>
@@ -1381,6 +1453,7 @@ export default function TakeoffSpreadsheet({
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Cost Code</th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Description</th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[150px]">Subcontractor</th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Cost Type</th>
                 <th className="py-3 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Quantity</th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Unit</th>
                 <th className="py-3 px-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Unit Cost</th>

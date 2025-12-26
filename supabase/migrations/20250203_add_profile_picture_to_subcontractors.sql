@@ -10,3 +10,4 @@ COMMENT ON COLUMN subcontractors.profile_picture_url IS 'URL to subcontractor lo
 
 
 
+

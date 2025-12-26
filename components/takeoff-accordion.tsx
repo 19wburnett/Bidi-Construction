@@ -36,6 +36,7 @@ export interface TakeoffItem {
   subcontractor?: string
   cost_code?: string
   cost_code_description?: string
+  cost_type?: 'labor' | 'materials' | 'allowance' | 'other'
   location?: string
   notes?: string
   dimensions?: string

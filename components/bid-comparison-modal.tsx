@@ -33,7 +33,8 @@ import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { modalBackdrop, modalContent } from '@/lib/animations'
 import { BidComparisonAISidebar } from '@/components/bid-comparison-ai-sidebar'
 
@@ -158,7 +159,10 @@ export default function BidComparisonModal({
   const [takeoffAIError, setTakeoffAIError] = useState<string | null>(null)
   const [isCached, setIsCached] = useState(false)
   const [isTakeoffCached, setIsTakeoffCached] = useState(false)
-  const [showDeclinePopover, setShowDeclinePopover] = useState(false)
+  const [showDeclineDialog, setShowDeclineDialog] = useState(false)
+  const [declineReason, setDeclineReason] = useState<string>('')
+  const [declineNotes, setDeclineNotes] = useState<string>('')
+  const [sendDeclineEmail, setSendDeclineEmail] = useState(false)
   const [customDeclineReason, setCustomDeclineReason] = useState<string>('')
   const [processingBidAction, setProcessingBidAction] = useState(false)
   const [fetchedEmailContent, setFetchedEmailContent] = useState<Record<string, string>>({})
@@ -1140,20 +1144,22 @@ export default function BidComparisonModal({
     }
   }
 
-  const handleDeclineBid = async (reason: string) => {
+  const handleDeclineBid = async (reason: string, notes?: string, sendEmail?: boolean) => {
     if (!selectedBid || processingBidAction || !reason || !reason.trim()) {
       return
     }
 
     setProcessingBidAction(true)
-    setShowDeclinePopover(false) // Close popover
+    setShowDeclineDialog(false) // Close dialog
     try {
       const response = await fetch('/api/bids/decline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           bidId: selectedBid.id,
-          declineReason: reason.trim()
+          declineReason: reason.trim(),
+          declineNotes: notes?.trim() || '',
+          sendEmail: sendEmail || false
         })
       })
 
@@ -1166,6 +1172,9 @@ export default function BidComparisonModal({
 
       // Refresh data
       setCustomDeclineReason('')
+      setDeclineReason('')
+      setDeclineNotes('')
+      setSendDeclineEmail(false)
       await loadData()
       
       // Keep the same bid selected
@@ -1175,6 +1184,23 @@ export default function BidComparisonModal({
     } finally {
       setProcessingBidAction(false)
     }
+  }
+
+  const handleOpenDeclineDialog = () => {
+    // Open dialog directly when decline button is clicked
+    setDeclineReason('')
+    setDeclineNotes('')
+    setSendDeclineEmail(false)
+    setShowDeclineDialog(true)
+  }
+
+  const handleSubmitDecline = () => {
+    if (!declineReason.trim() && !declineNotes.trim()) {
+      setError('Please provide a decline reason or notes')
+      return
+    }
+    const finalReason = declineReason.trim() || declineNotes.trim() || 'Other'
+    handleDeclineBid(finalReason, declineNotes, sendDeclineEmail)
   }
 
   const declineReasons = [
@@ -2079,46 +2105,95 @@ export default function BidComparisonModal({
                           <div className="flex gap-2 flex-wrap">
                               {/* Always show Decline button if not already declined */}
                               {selectedBid.status !== 'declined' && (
-                                <Popover open={showDeclinePopover} onOpenChange={setShowDeclinePopover}>
-                                  <PopoverTrigger asChild>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={processingBidAction}
-                                      className="border-red-200 text-red-600 hover:bg-red-50"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <XCircle className="h-4 w-4 mr-2" />
-                                      Decline
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-2" align="end">
-                                    <div className="space-y-1">
-                                      <div className="px-2 py-1.5 text-sm font-semibold text-gray-700 border-b mb-1">
-                                        Select Decline Reason
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={processingBidAction}
+                                    className="border-red-200 text-red-600 hover:bg-red-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenDeclineDialog()
+                                    }}
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Decline
+                                  </Button>
+                                  <Dialog open={showDeclineDialog} onOpenChange={setShowDeclineDialog}>
+                                    <DialogContent className="sm:max-w-[500px]">
+                                      <DialogHeader>
+                                        <DialogTitle>Decline Bid</DialogTitle>
+                                        <DialogDescription>
+                                          Select a reason for declining this bid and add any additional notes. You can optionally send this feedback to the subcontractor.
+                                        </DialogDescription>
+                                      </DialogHeader>
+                                      <div className="space-y-4 py-4">
+                                        <div className="space-y-2">
+                                          <Label htmlFor="decline-reason">Decline Reason</Label>
+                                          <Select
+                                            value={declineReason}
+                                            onValueChange={setDeclineReason}
+                                            disabled={processingBidAction}
+                                          >
+                                            <SelectTrigger id="decline-reason">
+                                              <SelectValue placeholder="Select a reason..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {declineReasons.map((reason) => (
+                                                <SelectItem key={reason} value={reason}>
+                                                  {reason}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label htmlFor="decline-notes">Additional Notes (Optional)</Label>
+                                          <Textarea
+                                            id="decline-notes"
+                                            placeholder="Add any additional details or feedback..."
+                                            value={declineNotes}
+                                            onChange={(e) => setDeclineNotes(e.target.value)}
+                                            disabled={processingBidAction}
+                                            rows={4}
+                                          />
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <Checkbox
+                                            id="send-email"
+                                            checked={sendDeclineEmail}
+                                            onCheckedChange={(checked) => setSendDeclineEmail(checked === true)}
+                                            disabled={processingBidAction}
+                                          />
+                                          <Label htmlFor="send-email" className="text-sm font-normal cursor-pointer">
+                                            Send feedback to {selectedBid.subcontractors?.name || selectedBid.gc_contacts?.name || selectedBid.subcontractor_email}
+                                          </Label>
+                                        </div>
                                       </div>
-                                      {declineReasons.map((reason) => (
-                                        <button
-                                          key={reason}
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            if (reason === 'Other') {
-                                              const customReason = prompt('Please provide a custom decline reason:')
-                                              if (customReason && customReason.trim()) {
-                                                handleDeclineBid(customReason.trim())
-                                              }
-                                            } else {
-                                              handleDeclineBid(reason)
-                                            }
+                                      <DialogFooter>
+                                        <Button
+                                          variant="outline"
+                                          onClick={() => {
+                                            setShowDeclineDialog(false)
+                                            setDeclineReason('')
+                                            setDeclineNotes('')
+                                            setSendDeclineEmail(false)
                                           }}
-                                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-red-50 hover:text-red-700 transition-colors"
+                                          disabled={processingBidAction}
                                         >
-                                          {reason}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          variant="destructive"
+                                          onClick={handleSubmitDecline}
+                                          disabled={processingBidAction || (!declineReason.trim() && !declineNotes.trim())}
+                                        >
+                                          {processingBidAction ? 'Declining...' : 'Decline Bid'}
+                                        </Button>
+                                      </DialogFooter>
+                                    </DialogContent>
+                                  </Dialog>
+                                </>
                               )}
                               {/* Always show Accept button if not already accepted */}
                               {selectedBid.status !== 'accepted' && (
@@ -4381,46 +4456,95 @@ export default function BidComparisonModal({
                           <div className="flex gap-2 flex-wrap">
                               {/* Always show Decline button if not already declined */}
                               {selectedBid.status !== 'declined' && (
-                                <Popover open={showDeclinePopover} onOpenChange={setShowDeclinePopover}>
-                                  <PopoverTrigger asChild>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={processingBidAction}
-                                      className="border-red-200 text-red-600 hover:bg-red-50"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <XCircle className="h-4 w-4 mr-2" />
-                                      Decline
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-2" align="end">
-                                    <div className="space-y-1">
-                                      <div className="px-2 py-1.5 text-sm font-semibold text-gray-700 border-b mb-1">
-                                        Select Decline Reason
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={processingBidAction}
+                                    className="border-red-200 text-red-600 hover:bg-red-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenDeclineDialog()
+                                    }}
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Decline
+                                  </Button>
+                                  <Dialog open={showDeclineDialog} onOpenChange={setShowDeclineDialog}>
+                                    <DialogContent className="sm:max-w-[500px]">
+                                      <DialogHeader>
+                                        <DialogTitle>Decline Bid</DialogTitle>
+                                        <DialogDescription>
+                                          Select a reason for declining this bid and add any additional notes. You can optionally send this feedback to the subcontractor.
+                                        </DialogDescription>
+                                      </DialogHeader>
+                                      <div className="space-y-4 py-4">
+                                        <div className="space-y-2">
+                                          <Label htmlFor="decline-reason">Decline Reason</Label>
+                                          <Select
+                                            value={declineReason}
+                                            onValueChange={setDeclineReason}
+                                            disabled={processingBidAction}
+                                          >
+                                            <SelectTrigger id="decline-reason">
+                                              <SelectValue placeholder="Select a reason..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {declineReasons.map((reason) => (
+                                                <SelectItem key={reason} value={reason}>
+                                                  {reason}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <Label htmlFor="decline-notes">Additional Notes (Optional)</Label>
+                                          <Textarea
+                                            id="decline-notes"
+                                            placeholder="Add any additional details or feedback..."
+                                            value={declineNotes}
+                                            onChange={(e) => setDeclineNotes(e.target.value)}
+                                            disabled={processingBidAction}
+                                            rows={4}
+                                          />
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <Checkbox
+                                            id="send-email"
+                                            checked={sendDeclineEmail}
+                                            onCheckedChange={(checked) => setSendDeclineEmail(checked === true)}
+                                            disabled={processingBidAction}
+                                          />
+                                          <Label htmlFor="send-email" className="text-sm font-normal cursor-pointer">
+                                            Send feedback to {selectedBid.subcontractors?.name || selectedBid.gc_contacts?.name || selectedBid.subcontractor_email}
+                                          </Label>
+                                        </div>
                                       </div>
-                                      {declineReasons.map((reason) => (
-                                        <button
-                                          key={reason}
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            if (reason === 'Other') {
-                                              const customReason = prompt('Please provide a custom decline reason:')
-                                              if (customReason && customReason.trim()) {
-                                                handleDeclineBid(customReason.trim())
-                                              }
-                                            } else {
-                                              handleDeclineBid(reason)
-                                            }
+                                      <DialogFooter>
+                                        <Button
+                                          variant="outline"
+                                          onClick={() => {
+                                            setShowDeclineDialog(false)
+                                            setDeclineReason('')
+                                            setDeclineNotes('')
+                                            setSendDeclineEmail(false)
                                           }}
-                                          className="w-full text-left px-3 py-2 text-sm rounded hover:bg-red-50 hover:text-red-700 transition-colors"
+                                          disabled={processingBidAction}
                                         >
-                                          {reason}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          variant="destructive"
+                                          onClick={handleSubmitDecline}
+                                          disabled={processingBidAction || (!declineReason.trim() && !declineNotes.trim())}
+                                        >
+                                          {processingBidAction ? 'Declining...' : 'Decline Bid'}
+                                        </Button>
+                                      </DialogFooter>
+                                    </DialogContent>
+                                  </Dialog>
+                                </>
                               )}
                               {/* Always show Accept button if not already accepted */}
                               {selectedBid.status !== 'accepted' && (

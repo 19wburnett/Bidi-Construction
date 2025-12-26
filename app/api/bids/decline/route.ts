@@ -1,5 +1,8 @@
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { NextRequest, NextResponse } from 'next/server'
+import { Resend } from 'resend'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,9 +18,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { bidId, declineReason } = body
+    const { bidId, declineReason, declineNotes, sendEmail } = body
 
-    console.log('Decline bid request:', { bidId, declineReason })
+    console.log('Decline bid request:', { bidId, declineReason, declineNotes, sendEmail })
 
     if (!bidId) {
       return NextResponse.json(
@@ -36,7 +39,7 @@ export async function POST(request: NextRequest) {
     // Fetch the bid to verify ownership and get job_id
     const { data: bid, error: bidError } = await supabase
       .from('bids')
-      .select('id, job_id, bid_package_id, status, subcontractors (name, email)')
+      .select('id, job_id, bid_package_id, status, subcontractor_email, subcontractors (name, email), gc_contacts (name, email)')
       .eq('id', bidId)
       .single()
     
@@ -85,7 +88,7 @@ export async function POST(request: NextRequest) {
 
     const { data: job, error: jobError } = await supabase
       .from('jobs')
-      .select('user_id')
+      .select('user_id, name, location')
       .eq('id', jobId)
       .single()
 
@@ -107,10 +110,22 @@ export async function POST(request: NextRequest) {
 
     // Allow changing status even if already accepted/declined
     // Update bid status to declined
+    // Combine decline reason and notes for storage
+    const declineReasonText = declineReason.trim()
+    const declineNotesText = declineNotes?.trim() || ''
+    const combinedDeclineReason = declineNotesText 
+      ? `${declineReasonText}\n\nAdditional Notes:\n${declineNotesText}`
+      : declineReasonText
+    
     const updateData: any = {
       status: 'declined',
       declined_at: new Date().toISOString(),
-      decline_reason: declineReason.trim()
+      decline_reason: combinedDeclineReason
+    }
+    
+    // Also store notes separately in the notes field if they exist
+    if (declineNotesText) {
+      updateData.notes = declineNotesText
     }
     
     // Clear accepted fields if switching from accepted
@@ -131,10 +146,122 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Send email notification if requested
+    let emailSent = false
+    let emailError = null
+    if (sendEmail) {
+      try {
+        // Handle subcontractors - can be object or array depending on query
+        const subcontractor = Array.isArray(bid.subcontractors) 
+          ? bid.subcontractors[0] 
+          : bid.subcontractors
+        const gcContact = Array.isArray(bid.gc_contacts) 
+          ? bid.gc_contacts[0] 
+          : bid.gc_contacts
+        
+        const subcontractorName = subcontractor?.name || gcContact?.name || 'Subcontractor'
+        const subcontractorEmail = subcontractor?.email || gcContact?.email || bid.subcontractor_email
+        
+        if (!subcontractorEmail) {
+          console.warn('No email address found for subcontractor')
+          emailError = 'No email address found for subcontractor'
+        } else {
+          // Helper function to escape HTML
+          const escapeHtml = (text: string): string => {
+            return String(text || '')
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#039;')
+          }
+
+          // Build email content
+          const declineReasonText = escapeHtml(declineReason.trim())
+          const declineNotesText = escapeHtml(declineNotes?.trim() || '')
+          const combinedFeedback = declineNotesText 
+            ? `${declineReasonText}\n\nAdditional Notes:\n${declineNotesText}`
+            : declineReasonText
+          const subcontractorNameEscaped = escapeHtml(subcontractorName)
+          const jobNameEscaped = escapeHtml(job.name || 'Construction Project')
+          const jobLocationEscaped = job.location ? escapeHtml(job.location) : ''
+
+          const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="background-color: #f97316; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
+                <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
+              </div>
+              
+              <div style="background-color: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px;">
+                <p style="margin-top: 0;">Hello ${subcontractorNameEscaped},</p>
+                
+                <p>Thank you for submitting your bid for the following project:</p>
+                
+                <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f97316;">
+                  <h2 style="margin-top: 0; color: #1e293b;">${jobNameEscaped}</h2>
+                  ${jobLocationEscaped ? `<p style="color: #64748b; margin-bottom: 0;">📍 ${jobLocationEscaped}</p>` : ''}
+                </div>
+                
+                <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                  <h3 style="margin-top: 0; color: #dc2626;">Bid Status Update</h3>
+                  <p style="margin-bottom: 0;">Unfortunately, we have decided to decline your bid for this project.</p>
+                </div>
+                
+                ${combinedFeedback ? `
+                  <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h3 style="margin-top: 0; color: #1e293b;">Feedback</h3>
+                    <div style="white-space: pre-wrap; color: #475569; line-height: 1.8;">${combinedFeedback.replace(/\n/g, '<br>')}</div>
+                  </div>
+                ` : ''}
+                
+                <p style="margin-top: 30px;">We appreciate your interest and time spent preparing your bid. We hope to work with you on future projects.</p>
+                
+                <p style="margin-top: 30px;">Best regards,<br>The Bidi Team</p>
+              </div>
+              
+              <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; margin-top: 20px;">
+                <p style="margin: 0; font-size: 14px;">
+                  © ${new Date().getFullYear()} Bidi. All rights reserved.
+                </p>
+              </div>
+            </body>
+            </html>
+          `
+
+          const { data: emailData, error: emailSendError } = await resend.emails.send({
+            from: 'Bidi <noreply@bidicontracting.com>',
+            to: [subcontractorEmail],
+            subject: `Bid Status Update: ${jobNameEscaped}`,
+            html: emailHtml
+          })
+
+          if (emailSendError) {
+            console.error('Error sending decline email:', emailSendError)
+            emailError = emailSendError.message
+          } else {
+            emailSent = true
+            console.log('Decline email sent successfully:', emailData)
+          }
+        }
+      } catch (err: any) {
+        console.error('Error sending decline email:', err)
+        emailError = err.message || 'Failed to send email'
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Bid declined successfully',
-      bidId
+      bidId,
+      emailSent,
+      emailError: emailError || undefined
     })
 
   } catch (error: any) {
