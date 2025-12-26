@@ -1,5 +1,29 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+
+/**
+ * Create an admin Supabase client that bypasses RLS
+ * Use this for admin operations that need to update any record
+ */
+export const createAdminSupabaseClient = () => {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  
+  if (!serviceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+  }
+  
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
+}
 
 /**
  * Get the effective user ID (masqueraded user if masquerading, otherwise actual user)
@@ -69,7 +93,6 @@ export const getAuthenticatedUser = async () => {
     // If masquerading, return the masqueraded user info
     if (masqueradeUserId) {
       // Use service role to get user info
-      const { createClient } = await import('@supabase/supabase-js')
       const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
       
       if (serviceRoleKey) {
