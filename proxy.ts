@@ -36,7 +36,7 @@ export default async function proxy(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
 
     // Define public paths
-    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate']
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate', '/sitemap.xml', '/robots.txt']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
                          request.nextUrl.pathname.startsWith('/auth') || 
                          request.nextUrl.pathname.startsWith('/share') ||
@@ -71,7 +71,7 @@ export default async function proxy(request: NextRequest) {
     return response
   } catch (error) {
     // On error, allow access to public paths, redirect others to login
-    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate']
+    const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate', '/sitemap.xml', '/robots.txt']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
                          request.nextUrl.pathname.startsWith('/auth') || 
                          request.nextUrl.pathname.startsWith('/share') ||
