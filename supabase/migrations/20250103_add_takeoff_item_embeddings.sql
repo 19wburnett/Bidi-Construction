@@ -124,3 +124,4 @@ CREATE TRIGGER update_takeoff_embedding_timestamp
   FOR EACH ROW
   EXECUTE FUNCTION update_takeoff_embedding_timestamp();
 
+

@@ -96,3 +96,4 @@ export function getBlogCategories(): string[] {
   return Array.from(new Set(blogPosts.map(post => post.category)))
 }
 
+

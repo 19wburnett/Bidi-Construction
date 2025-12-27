@@ -81,10 +81,21 @@ export default function Footer() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-gray-800 pt-8 text-center">
-          <p className="text-gray-400 font-medium">
-            © 2025 BIDI. All rights reserved.
-          </p>
+        <div className="border-t border-gray-800 pt-8">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-gray-400 font-medium">
+              © 2025 BIDI. All rights reserved.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 text-sm">
+              <a href="/terms" className="text-gray-400 hover:text-white transition-colors">
+                Terms of Service
+              </a>
+              <span className="text-gray-600">|</span>
+              <a href="/privacy" className="text-gray-400 hover:text-white transition-colors">
+                Privacy Policy
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </footer>

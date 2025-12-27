@@ -8,3 +8,4 @@ export default function PublicPagesLayout({
   return <PublicLayout>{children}</PublicLayout>
 }
 
+

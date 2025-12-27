@@ -154,3 +154,4 @@ Once you have these, I can help calculate the total square footage needed."
 - Measurement calculator integration
 - Visual highlighting of modified items
 
+
