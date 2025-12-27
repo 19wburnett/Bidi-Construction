@@ -55,13 +55,13 @@ async function sendAdminQueueNotification(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Bidi <noreply@savewithbidi.com>',
+      from: 'BIDI <noreply@savewithbidi.com>',
       to: adminEmails,
       subject: `🔔 New AI ${taskTypeDisplay} Request Queued`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background-color: #3b82f6; color: white; padding: 20px; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
+            <h1 style="margin: 0; font-size: 24px;">BIDI</h1>
             <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
           </div>
           
@@ -106,10 +106,10 @@ async function sendAdminQueueNotification(
           
           <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
             <p style="margin: 0; font-size: 14px;">
-              © 2024 Bidi. All rights reserved.
+              © 2024 BIDI. All rights reserved.
             </p>
             <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
-              This is an automated notification from the Bidi platform.
+              This is an automated notification from the BIDI platform.
             </p>
           </div>
         </div>

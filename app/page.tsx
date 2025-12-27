@@ -54,7 +54,7 @@ export default function HomePage() {
         data={{
           '@context': 'https://schema.org',
           '@type': 'LocalBusiness',
-          name: 'Bidi Construction',
+          name: 'BIDI Construction',
           description: 'AI-powered construction estimating and automated bid management platform serving General Contractors across the United States.',
           url: process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com',
           areaServed: {
@@ -520,7 +520,7 @@ export default function HomePage() {
                             {/* Pulse effect */}
                             <div className="absolute inset-0 bg-orange rounded-lg sm:rounded-xl animate-ping opacity-20"></div>
                           </div>
-                          <span className="text-[10px] sm:text-xs font-semibold text-gray-700 text-center font-bidi">Bidi</span>
+                          <span className="text-[10px] sm:text-xs font-semibold text-gray-700 text-center font-bidi">BIDI</span>
           </div>
 
                         {/* Animated Connection Line */}

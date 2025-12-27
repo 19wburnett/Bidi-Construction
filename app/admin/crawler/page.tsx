@@ -222,8 +222,8 @@ export default function CrawlerAdminPage() {
       <header className="bg-background border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <img src={logo.src} alt="Bidi" className="h-6 w-6 sm:h-8 sm:w-8 text-foreground" />    
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Bidi Crawler Admin</h1>
+            <img src={logo.src} alt="BIDI" className="h-6 w-6 sm:h-8 sm:w-8 text-foreground" />    
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">BIDI Crawler Admin</h1>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <Link href="/admin/analyze-plans">

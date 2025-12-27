@@ -20,10 +20,10 @@ export const homepageMetadata: Metadata = {
     'construction estimating tool',
   ],
   openGraph: {
-    title: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    title: 'BIDI - AI-Powered Construction Estimating & Bid Management',
     description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
     url: baseUrl,
-    siteName: 'Bidi Construction',
+    siteName: 'BIDI Construction',
     locale: 'en_US',
     type: 'website',
   },

@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     const emailPromises = uniqueRecipients.map(async (recipient) => {
       try {
         const { data, error } = await resend.emails.send({
-          from: 'Bidi <noreply@savewithbidi.com>',
+          from: 'BIDI <noreply@savewithbidi.com>',
           reply_to: `bids+${jobRequestId}@savewithbidi.com`,
           to: [recipient.email],
           subject: `New ${tradeCategory} Job Opportunity in ${location}`,
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
                 <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 8px;">
                   <h4 style="color: #f59e0b; margin-top: 0;">Important Notes</h4>
                   <ul style="margin: 0; padding-left: 20px;">
-                    <li>This is an automated message from Bidi</li>
+                    <li>This is an automated message from BIDI</li>
                     <li>Reply directly to this email to submit your bid</li>
                     <li>Include all relevant project details in your response</li>
                     <li>The general contractor will review all bids and contact you directly</li>
@@ -208,7 +208,7 @@ export async function POST(request: NextRequest) {
               
               <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
                 <p style="margin: 0; font-size: 14px;">
-                  © 2024 Bidi. All rights reserved.
+                  © 2024 BIDI. All rights reserved.
                 </p>
                 <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
                   This email was sent to ${recipient.email} because you're registered as a ${tradeCategory} subcontractor in ${location}.

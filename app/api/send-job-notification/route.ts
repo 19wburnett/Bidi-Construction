@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     // Send notification email to admin
     const { data, error } = await resend.emails.send({
-      from: 'Bidi <noreply@savewithbidi.com>',
+      from: 'BIDI <noreply@savewithbidi.com>',
       to: ['savewithbidi@gmail.com'],
       subject: `New Job Posted: ${tradeCategory} in ${location}`,
       html: `
@@ -89,10 +89,10 @@ export async function POST(request: NextRequest) {
           
           <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
             <p style="margin: 0; font-size: 14px;">
-              © 2024 Bidi. All rights reserved.
+              © 2024 BIDI. All rights reserved.
             </p>
             <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">
-              This is an automated notification from the Bidi platform.
+              This is an automated notification from the BIDI platform.
             </p>
           </div>
         </div>

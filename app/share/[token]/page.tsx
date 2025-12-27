@@ -184,7 +184,7 @@ export default function SharedPlanPage() {
                 <FileText className="h-8 w-8" />
               </div>
             </div>
-            <CardTitle className="text-2xl">Welcome to Bidi</CardTitle>
+            <CardTitle className="text-2xl">Welcome to <span className="font-bidi">BIDI</span></CardTitle>
             <CardDescription className="text-base">
               You've been invited to collaborate on construction plans
             </CardDescription>

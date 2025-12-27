@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
             </head>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
               <div style="background-color: #f97316; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
-                <h1 style="margin: 0; font-size: 24px;">Bidi</h1>
+                <h1 style="margin: 0; font-size: 24px;">BIDI</h1>
                 <p style="margin: 5px 0 0 0; opacity: 0.9;">Construction Marketplace</p>
               </div>
               
@@ -223,12 +223,12 @@ export async function POST(request: NextRequest) {
                 
                 <p style="margin-top: 30px;">We appreciate your interest and time spent preparing your bid. We hope to work with you on future projects.</p>
                 
-                <p style="margin-top: 30px;">Best regards,<br>The Bidi Team</p>
+                <p style="margin-top: 30px;">Best regards,<br>The BIDI Team</p>
               </div>
               
               <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center; border-radius: 0 0 8px 8px; margin-top: 20px;">
                 <p style="margin: 0; font-size: 14px;">
-                  © ${new Date().getFullYear()} Bidi. All rights reserved.
+                  © ${new Date().getFullYear()} BIDI. All rights reserved.
                 </p>
               </div>
             </body>

@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: BlogPostPageProps): Promise<M
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'
 
   return {
-    title: `${post.title} | Bidi Blog`,
+    title: `${post.title} | BIDI Blog`,
     description: post.description,
     keywords: post.seoKeywords || [],
     authors: [{ name: post.author }],
@@ -121,7 +121,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           },
           publisher: {
             '@type': 'Organization',
-            name: 'Bidi Construction',
+            name: 'BIDI Construction',
             logo: {
               '@type': 'ImageObject',
               url: `${baseUrl}/brand/Bidi%20Contracting%20Logo.svg`,
@@ -228,7 +228,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           <div className="mt-12 p-8 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-900">
             <h3 className="text-2xl font-bold mb-4">Ready to Transform Your Estimating Process?</h3>
             <p className="text-gray-700 dark:text-gray-300 mb-6">
-              See how <span className="font-bidi">Bidi</span>'s AI-powered platform can automate your construction estimating and bid management.
+              See how <span className="font-bidi">BIDI</span>'s AI-powered platform can automate your construction estimating and bid management.
             </p>
             <Link href="/estimate">
               <Button variant="orange" size="lg">

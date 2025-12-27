@@ -16,8 +16,8 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
           <div>
             <div className="flex items-center space-x-3 mb-4">
-              <img src={logo.src} alt="Bidi" className="h-8 w-8" />
-              <span className="font-bidi text-2xl font-bold">Bidi</span>
+              <img src={logo.src} alt="BIDI" className="h-8 w-8" />
+              <span className="font-bidi text-2xl font-bold">BIDI</span>
             </div>
             <p className="text-gray-400 font-medium mb-4">
               Automated subcontractor search and bid collection for construction professionals.
@@ -83,7 +83,7 @@ export default function Footer() {
         </div>
         <div className="border-t border-gray-800 pt-8 text-center">
           <p className="text-gray-400 font-medium">
-            © 2025 Bidi. All rights reserved.
+            © 2025 BIDI. All rights reserved.
           </p>
         </div>
       </div>

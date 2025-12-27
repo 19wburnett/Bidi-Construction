@@ -109,7 +109,7 @@ export default function SubscriptionPage() {
         <CardHeader className="text-center">
           <div className="flex items-center justify-center space-x-3 mb-4">
             <div className="relative">
-              <img src={logo.src} alt="Bidi" className="h-10 w-10 sm:h-12 sm:w-12 transition-transform duration-300" />
+              <img src={logo.src} alt="BIDI" className="h-10 w-10 sm:h-12 sm:w-12 transition-transform duration-300" />
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight font-bidi">BIDI</h1>
@@ -117,7 +117,7 @@ export default function SubscriptionPage() {
               BETA
             </span>
           </div>
-          <CardTitle className="text-2xl sm:text-3xl dark:text-white">Subscribe to Bidi</CardTitle>
+          <CardTitle className="text-2xl sm:text-3xl dark:text-white">Subscribe to <span className="font-bidi">BIDI</span></CardTitle>
           <CardDescription className="text-base sm:text-lg dark:text-gray-300">
             {subscriptionType === 'sub' 
               ? 'Quote Generation Service for Subcontractors'

@@ -428,7 +428,7 @@ async function getOutreachEmailTemplate(tradeCategory: string, location: string)
         
         <div style="background-color: #1e293b; color: white; padding: 20px; text-align: center;">
           <p style="margin: 0; font-size: 14px;">
-            © 2024 Bidi. All rights reserved.
+            © 2024 BIDI. All rights reserved.
           </p>
         </div>
       </div>
@@ -442,7 +442,7 @@ async function sendOutreachEmail(contractor: any, template: any) {
     const resend = new Resend(process.env.RESEND_API_KEY)
     
     const { data, error } = await resend.emails.send({
-      from: 'Bidi <noreply@savewithbidi.com>',
+      from: 'BIDI <noreply@savewithbidi.com>',
       to: [contractor.email],
       subject: template.subject,
       html: template.html,

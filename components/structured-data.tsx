@@ -12,8 +12,8 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const defaultData = {
     '@context': 'https://schema.org',
     '@type': type,
-    name: 'Bidi Construction',
-    alternateName: 'Bidi',
+    name: 'BIDI Construction',
+    alternateName: 'BIDI',
     url: baseUrl,
     logo: `${baseUrl}/brand/Bidi%20Contracting%20Logo.svg`,
     description: 'AI-powered construction estimating and automated bid management platform for General Contractors.',
@@ -57,7 +57,7 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const softwareAppData = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'Bidi Construction Platform',
+    name: 'BIDI Construction Platform',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web Browser',
     offers: {
@@ -77,7 +77,7 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const websiteData = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'Bidi Construction',
+    name: 'BIDI Construction',
     url: baseUrl,
     potentialAction: {
       '@type': 'SearchAction',

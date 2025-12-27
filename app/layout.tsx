@@ -22,8 +22,8 @@ const barlow = Barlow({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Bidi - AI-Powered Construction Estimating & Bid Management',
-    template: '%s | Bidi',
+    default: 'BIDI - AI-Powered Construction Estimating & Bid Management',
+    template: '%s | BIDI',
   },
   description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
   keywords: [
@@ -47,9 +47,9 @@ export const metadata: Metadata = {
     'GC software',
     'construction bid platform',
   ],
-  authors: [{ name: 'Bidi Contracting' }],
-  creator: 'Bidi Contracting',
-  publisher: 'Bidi Contracting',
+  authors: [{ name: 'BIDI Contracting' }],
+  creator: 'BIDI Contracting',
+  publisher: 'BIDI Contracting',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'),
   alternates: {
     canonical: '/',
@@ -58,21 +58,21 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'en_US',
     url: '/',
-    siteName: 'Bidi',
-    title: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    siteName: 'BIDI',
+    title: 'BIDI - AI-Powered Construction Estimating & Bid Management',
     description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
     images: [
       {
         url: '/brand/Bidi%20Contracting%20Logo.svg',
         width: 1200,
         height: 630,
-        alt: 'Bidi Construction Platform',
+        alt: 'BIDI Construction Platform',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Bidi - AI-Powered Construction Estimating & Bid Management',
+    title: 'BIDI - AI-Powered Construction Estimating & Bid Management',
     description: 'AI-powered construction estimating and automated bid management platform for General Contractors.',
     images: ['/brand/Bidi%20Contracting%20Logo.svg'],
   },

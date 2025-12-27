@@ -73,7 +73,7 @@ export default function EstimatePage() {
       description: 'AI-powered analysis and cost estimates for construction plans',
       provider: {
         '@type': 'Organization',
-        name: 'Bidi Contracting',
+        name: 'BIDI Contracting',
         url: baseUrl,
       },
       areaServed: {

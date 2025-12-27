@@ -322,7 +322,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
             )}>
               <img 
                 src={logo.src} 
-                alt="Bidi" 
+                alt="BIDI" 
                 className="h-9 w-9"
               />
               {!isCollapsed && (

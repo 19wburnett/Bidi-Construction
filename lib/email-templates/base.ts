@@ -249,7 +249,7 @@ export function generateEmailWrapper(content: string, preheader?: string): strin
           <!-- Header -->
           <tr>
             <td class="header" style="${EMAIL_STYLES.header}">
-              <img src="${BIDI_LOGO_BASE64}" alt="Bidi" style="${EMAIL_STYLES.logo}">
+              <img src="${BIDI_LOGO_BASE64}" alt="BIDI" style="${EMAIL_STYLES.logo}">
               <p style="${EMAIL_STYLES.headerTitle}">Construction Bidding</p>
             </td>
           </tr>
@@ -269,7 +269,7 @@ export function generateEmailWrapper(content: string, preheader?: string): strin
                 Simply reply to this email to respond.
               </p>
               <p style="${EMAIL_STYLES.footerText}; margin-top: 16px; font-size: 12px;">
-                © ${new Date().getFullYear()} Bidi. All rights reserved.
+                © ${new Date().getFullYear()} BIDI. All rights reserved.
               </p>
             </td>
           </tr>

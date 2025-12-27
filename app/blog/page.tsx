@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     'construction best practices',
   ],
   openGraph: {
-    title: 'Bidi Blog - Construction Estimating & Bid Management Insights',
+    title: 'BIDI Blog - Construction Estimating & Bid Management Insights',
     description: 'Expert insights on construction estimating, AI technology, and bid management.',
     type: 'website',
   },
@@ -37,7 +37,7 @@ export default function BlogPage() {
         data={{
           '@context': 'https://schema.org',
           '@type': 'Blog',
-          name: 'Bidi Construction Blog',
+          name: 'BIDI Construction Blog',
           description: 'Expert insights on construction estimating, AI technology, and bid management.',
           url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'}/blog`,
         }}
@@ -47,7 +47,7 @@ export default function BlogPage() {
           {/* Header */}
           <div className="text-center mb-12">
             <h1 className="text-4xl sm:text-5xl font-bold text-black dark:text-white mb-4">
-              <span className="font-bidi">Bidi</span> <span className="font-bidi bidi-orange-text">Blog</span>
+              <span className="font-bidi">BIDI</span> <span className="font-bidi bidi-orange-text">Blog</span>
             </h1>
             <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
               Expert insights on construction estimating, AI technology, and bid management
