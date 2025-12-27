@@ -302,6 +302,23 @@ export interface Database {
           trade_category: string
           location: string
           created_at: string
+          phone?: string | null
+          website_url?: string | null
+          google_review_score?: number | null
+          google_reviews_link?: string | null
+          time_in_business?: string | null
+          jobs_completed?: number | null
+          licensed?: boolean | null
+          bonded?: boolean | null
+          notes?: string | null
+          profile_picture_url?: string | null
+          profile_summary?: string | null
+          services?: string[] | null
+          enrichment_status?: string | null
+          enrichment_updated_at?: string | null
+          bio?: string | null
+          service_radius?: number | null
+          year_established?: number | null
         }
         Insert: {
           id?: string
@@ -310,6 +327,23 @@ export interface Database {
           trade_category: string
           location: string
           created_at?: string
+          phone?: string | null
+          website_url?: string | null
+          google_review_score?: number | null
+          google_reviews_link?: string | null
+          time_in_business?: string | null
+          jobs_completed?: number | null
+          licensed?: boolean | null
+          bonded?: boolean | null
+          notes?: string | null
+          profile_picture_url?: string | null
+          profile_summary?: string | null
+          services?: string[] | null
+          enrichment_status?: string | null
+          enrichment_updated_at?: string | null
+          bio?: string | null
+          service_radius?: number | null
+          year_established?: number | null
         }
         Update: {
           id?: string
@@ -318,6 +352,61 @@ export interface Database {
           trade_category?: string
           location?: string
           created_at?: string
+          phone?: string | null
+          website_url?: string | null
+          google_review_score?: number | null
+          google_reviews_link?: string | null
+          time_in_business?: string | null
+          jobs_completed?: number | null
+          licensed?: boolean | null
+          bonded?: boolean | null
+          notes?: string | null
+          profile_picture_url?: string | null
+          profile_summary?: string | null
+          services?: string[] | null
+          enrichment_status?: string | null
+          enrichment_updated_at?: string | null
+          bio?: string | null
+          service_radius?: number | null
+          year_established?: number | null
+        }
+      }
+      subcontractor_portfolio_photos: {
+        Row: {
+          id: string
+          subcontractor_id: string
+          image_url: string
+          storage_path: string
+          caption: string | null
+          display_order: number
+          is_primary: boolean
+          uploaded_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          subcontractor_id: string
+          image_url: string
+          storage_path: string
+          caption?: string | null
+          display_order?: number
+          is_primary?: boolean
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          subcontractor_id?: string
+          image_url?: string
+          storage_path?: string
+          caption?: string | null
+          display_order?: number
+          is_primary?: boolean
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
         }
       }
       bid_notes: {

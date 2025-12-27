@@ -18,7 +18,9 @@ import {
   ArrowUpDown,
   Filter,
   Calendar,
-  Sparkles
+  Sparkles,
+  Eye,
+  Image as ImageIcon
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -32,6 +34,8 @@ import ProfileDropdown from '@/components/profile-dropdown'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import SubcontractorPhotoManager from '@/components/subcontractor-photo-manager'
+import ProfilePictureUpload from '@/components/profile-picture-upload'
 
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
@@ -57,6 +61,7 @@ interface Subcontractor {
   licensed: boolean | null
   bonded: boolean | null
   notes: string | null
+  profile_picture_url: string | null
 }
 
 interface FormState {
@@ -74,6 +79,7 @@ interface FormState {
   licensed: string
   bonded: string
   notes: string
+  profile_picture_url: string
 }
 
 const TRADE_CATEGORIES = [
@@ -162,6 +168,7 @@ export default function AdminSubcontractorCRMPage() {
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')
   const [activeSubcontractorId, setActiveSubcontractorId] = useState<string | null>(null)
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false)
+  const [photoManagerSubcontractorId, setPhotoManagerSubcontractorId] = useState<string | null>(null)
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
@@ -179,7 +186,8 @@ export default function AdminSubcontractorCRMPage() {
     references: '',
     licensed: 'unknown',
     bonded: 'unknown',
-    notes: ''
+    notes: '',
+    profile_picture_url: ''
   })
 
   const inputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null>>({})
@@ -201,7 +209,8 @@ export default function AdminSubcontractorCRMPage() {
     references: '',
     licensed: 'unknown',
     bonded: 'unknown',
-    notes: ''
+    notes: '',
+    profile_picture_url: ''
   }
 
   const knownTradeCategories = useMemo(() => {
@@ -335,7 +344,8 @@ export default function AdminSubcontractorCRMPage() {
           : record.bonded
           ? 'true'
           : 'false',
-      notes: record.notes ?? ''
+      notes: record.notes ?? '',
+      profile_picture_url: record.profile_picture_url ?? ''
     })
     setIsDialogOpen(true)
   }
@@ -348,12 +358,14 @@ export default function AdminSubcontractorCRMPage() {
   }
 
   const handleFormChange = (field: keyof FormState, value: string) => {
+    console.log(`Form field changed: ${field} = ${value}`)
     setFormState((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     resetMessages()
+    console.log('Form submitted, current formState:', formState)
 
     if (!formState.name || !formState.email || !formState.trade_category || !formState.location) {
       setError('Please provide name, email, trade, and location.')
@@ -389,7 +401,7 @@ export default function AdminSubcontractorCRMPage() {
       }
     }
 
-    const payload = {
+    const payload: Record<string, any> = {
       name: formState.name.trim(),
       email: formState.email.trim().toLowerCase(),
       trade_category: formState.trade_category,
@@ -417,8 +429,19 @@ export default function AdminSubcontractorCRMPage() {
           : formState.bonded === 'false'
           ? false
           : null,
-      notes: formState.notes.trim() || null
+      notes: formState.notes.trim() || null,
     }
+    
+    // Only include profile_picture_url if it has a value
+    if (formState.profile_picture_url && formState.profile_picture_url.trim()) {
+      payload.profile_picture_url = formState.profile_picture_url.trim()
+    } else {
+      payload.profile_picture_url = null
+    }
+    
+    console.log('Form submission payload:', payload)
+    console.log('profile_picture_url in payload:', payload.profile_picture_url)
+    console.log('Current formState.profile_picture_url:', formState.profile_picture_url)
 
     try {
       setIsSaving(true)
@@ -438,17 +461,27 @@ export default function AdminSubcontractorCRMPage() {
 
         setSuccess('Subcontractor added successfully.')
       } else if (dialogMode === 'edit' && activeSubcontractorId) {
-        const { error: updateError } = await supabase
-          .from('subcontractors')
-          .update(payload)
-          .eq('id', activeSubcontractorId)
+        console.log('Updating subcontractor ID:', activeSubcontractorId)
+        console.log('Updating subcontractor with payload:', JSON.stringify(payload, null, 2))
+        
+        // Use API route that uses admin client to bypass RLS
+        const response = await fetch(`/api/subcontractors/${activeSubcontractorId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
 
-        if (updateError) {
-          console.error('Failed to update subcontractor:', updateError)
-          setError('Failed to update subcontractor.')
+        if (!response.ok) {
+          const errorData = await response.json()
+          console.error('Failed to update subcontractor:', errorData)
+          setError(`Failed to update subcontractor: ${errorData.error || 'Unknown error'}`)
           return
         }
 
+        const result = await response.json()
+        console.log('Update successful:', result)
         setSuccess('Subcontractor updated successfully.')
       }
 
@@ -2026,6 +2059,24 @@ The Bidi Team`
                               <Button
                                 variant="outline"
                                 size="sm"
+                                asChild
+                              >
+                                <Link href={`/subcontractors/${record.id}`} target="_blank">
+                                  <Eye className="h-4 w-4 mr-1.5" />
+                                  Profile
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setPhotoManagerSubcontractorId(record.id)}
+                              >
+                                <ImageIcon className="h-4 w-4 mr-1.5" />
+                                Photos
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => openEditDialog(record)}
                               >
                                 <Pencil className="h-4 w-4 mr-1.5" />
@@ -2200,6 +2251,24 @@ The Bidi Team`
                   </div>
                 </div>
 
+                <div>
+                  <Label>Profile Picture / Logo</Label>
+                  <ProfilePictureUpload
+                    value={formState.profile_picture_url}
+                    onChange={(url) => {
+                      console.log('Profile picture onChange called with URL:', url)
+                      handleFormChange('profile_picture_url', url)
+                    }}
+                    disabled={isSaving}
+                    subcontractorId={activeSubcontractorId || undefined}
+                  />
+                  {formState.profile_picture_url && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Current URL: {formState.profile_picture_url.substring(0, 50)}...
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="trade">Trade *</Label>
@@ -2371,6 +2440,15 @@ The Bidi Team`
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Photo Manager Modal */}
+      {photoManagerSubcontractorId && (
+        <SubcontractorPhotoManager
+          subcontractorId={photoManagerSubcontractorId}
+          isOpen={!!photoManagerSubcontractorId}
+          onClose={() => setPhotoManagerSubcontractorId(null)}
+        />
+      )}
     </div>
   )
 }

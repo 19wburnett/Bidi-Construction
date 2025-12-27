@@ -137,7 +137,7 @@ export default function HomePage() {
           </div>
         </div>
         
-        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-6 tracking-tight transition-all duration-1000 delay-500 ${
+        <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-bold text-black dark:text-white mb-4 tracking-tight transition-all duration-1000 delay-500 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
         }`}>
           AI-Powered Estimating & Takeoff
@@ -145,6 +145,12 @@ export default function HomePage() {
             Built for Contractors
           </span>
         </h1>
+        
+        <p className={`text-lg sm:text-xl text-gray-500 dark:text-gray-400 mb-6 font-medium transition-all duration-1000 delay-600 ${
+          isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
+        }`}>
+          by <span className="font-semibold text-gray-700 dark:text-gray-300">Bidi Contracting</span>
+        </p>
         
         <p className={`text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-4xl mx-auto font-medium transition-all duration-1000 delay-700 ${
           isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'

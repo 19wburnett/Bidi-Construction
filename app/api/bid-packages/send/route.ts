@@ -486,7 +486,30 @@ function generateCustomTemplateBody(
             </tr>`
           ).join('')}
         </tbody>
-      </table>`
+      </table>
+      <!-- Important Disclaimer -->
+      <div style="background-color: #FFF7ED; border-left: 4px solid #F59E0B; border-radius: 0 8px 8px 0; padding: 20px; margin: 24px 0;">
+        <h3 style="font-size: 15px; font-weight: 600; color: #92400E; margin: 0 0 12px 0;">
+          ⚠️ Important: Verify Measurements & Check for Missing Scope
+        </h3>
+        <p style="font-size: 15px; color: #78350F; margin: 0 0 12px 0; line-height: 1.7;">
+          Please note that the line items provided above are <strong>minimum requirements</strong> based on initial takeoff measurements. We strongly recommend that you:
+        </p>
+        <ul style="margin: 16px 0; padding-left: 20px;">
+          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
+            <strong>Perform your own measurements</strong> to verify quantities and ensure accuracy
+          </li>
+          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
+            <strong>Review the plans thoroughly</strong> to identify any additional scope or items that may be missing from the list above
+          </li>
+          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
+            <strong>Include any additional work</strong> you identify in your bid, as the provided line items may not represent the complete scope
+          </li>
+        </ul>
+        <p style="font-size: 13px; color: #92400E; margin: 0;">
+          Your bid should reflect your own measurements and assessment of the full scope of work required.
+        </p>
+      </div>`
     : '<p style="padding: 12px 16px; text-align: center; color: #777878;">No specific line items required</p>'
   
   htmlBody = htmlBody.replace(/{lineItems}/g, lineItemsHtml)

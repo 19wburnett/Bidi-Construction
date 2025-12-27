@@ -22,8 +22,8 @@ const barlow = Barlow({
 
 export const metadata: Metadata = {
   title: {
-    default: 'BIDI - AI-Powered Construction Estimating & Bid Management',
-    template: '%s | BIDI',
+    default: 'Bidi Contracting - AI-Powered Construction Estimating & Bid Management',
+    template: '%s | Bidi Contracting',
   },
   description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
   keywords: [
@@ -58,8 +58,8 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'en_US',
     url: '/',
-    siteName: 'BIDI',
-    title: 'BIDI - AI-Powered Construction Estimating & Bid Management',
+    siteName: 'Bidi Contracting',
+    title: 'Bidi Contracting - AI-Powered Construction Estimating & Bid Management',
     description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
     images: [
       {

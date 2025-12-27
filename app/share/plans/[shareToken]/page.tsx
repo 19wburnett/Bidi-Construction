@@ -347,20 +347,22 @@ export default function GuestPlanViewer() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-3 md:p-4">
+      <div className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-3 md:p-4 sticky top-0 z-50">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg md:text-xl font-semibold text-gray-900 truncate">{plan.title || plan.file_name}</h1>
-            <p className="text-xs md:text-sm text-gray-600">Shared plan • {guestName}</p>
+            <h1 className="text-lg md:text-xl font-bold text-white truncate tracking-tight drop-shadow-sm">
+              {plan.title || plan.file_name}
+            </h1>
+            <p className="text-xs md:text-sm text-slate-400 font-medium">Shared plan • {guestName}</p>
           </div>
           <div className="flex items-center space-x-2 md:space-x-4">
-            <div className="text-xs md:text-sm text-gray-600">
+            <div className="text-xs md:text-sm text-slate-300">
               {(() => {
                 const Icon = getPermissionIcon(share.permissions)
                 return (
-                  <div className="flex items-center space-x-1 md:space-x-2">
-                    <Icon className="h-3 w-3 md:h-4 md:w-4" />
-                    <span className="hidden sm:inline">
+                  <div className="flex items-center space-x-1 md:space-x-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+                    <Icon className="h-3.5 w-3.5 text-orange-400" />
+                    <span className="hidden sm:inline font-medium">
                       {share.permissions === 'view_only' && 'View Only'}
                       {share.permissions === 'markup' && 'Markup Access'}
                       {share.permissions === 'comment' && 'Comment Access'}

@@ -164,6 +164,12 @@ export default function DashboardSidebar({ className }: SidebarProps) {
       href: '/dashboard/contacts',
       icon: Users
     },
+    // Add Browse Subcontractors for GCs only
+    ...(userRole === 'GC' ? [{
+      label: 'Browse Subcontractors',
+      href: '/dashboard/subcontractors/browse',
+      icon: Building2
+    }] : []),
     // Add Quotes menu item for subcontractors
     ...(userRole === 'sub' ? [{
       label: 'Quotes',

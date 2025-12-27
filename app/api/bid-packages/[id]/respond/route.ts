@@ -162,65 +162,106 @@ export async function POST(
       formattedEmailBody = `${formattedEmailBody}<br><br>${planLinksHtml}`
     }
 
-    // Find the original email in the thread (the one with parent_email_id = null)
-    // This is the first email sent, which we need to thread the follow-up to
+    // Find the most recent email in the thread to reply to
+    // This ensures we continue the same thread instead of creating a new one
     let threadId = recipient.thread_id || `thread-${bidPackageId}-${recipient.subcontractor_email}`
-    let originalEmail: any = null
+    let mostRecentEmail: any = null
     let parentId: string | null = null
-    
-    // Find the original email in this thread (the root email)
-    const { data: originalEmails } = await supabase
-      .from('bid_package_recipients')
-      .select('id, resend_email_id, thread_id')
-      .eq('thread_id', threadId)
-      .is('parent_email_id', null)
-      .order('created_at', { ascending: true })
-      .limit(1)
-    
-    if (originalEmails && originalEmails.length > 0) {
-      originalEmail = originalEmails[0]
-      parentId = originalEmail.id
-      threadId = originalEmail.thread_id || threadId
-    } else {
-      // Fallback: use the recipient passed in as parent if no original found
-      parentId = recipient.id
-    }
-    
-    // Fetch the original email's Message-ID from Resend for proper threading headers
     let inReplyTo: string | undefined = undefined
     let references: string | undefined = undefined
     
-    if (originalEmail?.resend_email_id) {
-      try {
-        const emailResponse = await fetch(`https://api.resend.com/emails/${originalEmail.resend_email_id}`, {
-          headers: {
-            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (emailResponse.ok) {
-          const emailData = await emailResponse.json()
-          // Resend may return message_id in the response, or we construct it
-          // Standard format: <message-id@domain>
-          // Try to get it from the response, or construct from resend_email_id
-          const messageId = emailData.message_id || 
-                           emailData.headers?.['message-id'] || 
-                           `<${originalEmail.resend_email_id}@resend.dev>`
-          inReplyTo = messageId
-          references = messageId
-          console.log('📧 [respond] Setting threading headers:', { inReplyTo, references, originalEmailId: originalEmail.resend_email_id })
-        } else {
-          console.log('📧 [respond] Could not fetch original email from Resend, constructing Message-ID')
-          // Construct Message-ID from resend_email_id as fallback
-          const messageId = `<${originalEmail.resend_email_id}@resend.dev>`
-          inReplyTo = messageId
-          references = messageId
+    // Get all emails in this thread, ordered by most recent first
+    const { data: threadEmails } = await supabase
+      .from('bid_package_recipients')
+      .select('id, resend_email_id, thread_id, created_at')
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: false })
+    
+    if (threadEmails && threadEmails.length > 0) {
+      // Use the most recent email in the thread as the parent
+      mostRecentEmail = threadEmails[0]
+      parentId = mostRecentEmail.id
+      threadId = mostRecentEmail.thread_id || threadId
+      
+      // Fetch Message-IDs for proper threading headers
+      // We need to reply to the most recent email, but include all previous Message-IDs in References
+      const messageIds: string[] = []
+      
+      // Helper function to get Message-ID for an email
+      const getMessageId = async (email: any): Promise<string> => {
+        if (!email.resend_email_id) {
+          return ''
         }
-      } catch (error) {
-        console.error('📧 [respond] Error fetching original email from Resend:', error)
-        // Construct Message-ID from resend_email_id as fallback
-        const messageId = `<${originalEmail.resend_email_id}@resend.dev>`
+        
+        try {
+          // Try to fetch from Resend API (for sent emails) or Receiving API (for received emails)
+          let emailResponse = await fetch(`https://api.resend.com/emails/${email.resend_email_id}`, {
+            headers: {
+              'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          })
+          
+          // If that fails, try the Receiving API (for inbound emails)
+          if (!emailResponse.ok) {
+            emailResponse = await fetch(`https://api.resend.com/emails/receiving/${email.resend_email_id}`, {
+              headers: {
+                'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+              }
+            })
+          }
+          
+          if (emailResponse.ok) {
+            const emailData = await emailResponse.json()
+            // Try to get Message-ID from headers or construct it
+            return emailData.message_id || 
+                   emailData.headers?.['message-id'] || 
+                   emailData.headers?.['Message-ID'] ||
+                   `<${email.resend_email_id}@resend.dev>`
+          } else {
+            // Construct Message-ID from resend_email_id as fallback
+            return `<${email.resend_email_id}@resend.dev>`
+          }
+        } catch (error) {
+          // Construct Message-ID from resend_email_id as fallback
+          return `<${email.resend_email_id}@resend.dev>`
+        }
+      }
+      
+      // Build References header with all Message-IDs in the thread (for proper threading)
+      // Include all emails in the thread chain (oldest to newest)
+      // Note: threadEmails is ordered newest first, so we'll reverse it to get chronological order
+      const emailsInOrder = [...threadEmails].reverse() // Oldest to newest
+      
+      // Fetch Message-IDs for all emails in the thread
+      for (const email of emailsInOrder) {
+        const messageId = await getMessageId(email)
+        if (messageId) {
+          messageIds.push(messageId)
+        }
+      }
+      
+      // Set In-Reply-To to the most recent email's Message-ID
+      if (messageIds.length > 0) {
+        inReplyTo = messageIds[messageIds.length - 1] // Most recent (last in chronological order)
+      }
+      
+      // References header should include all Message-IDs in chronological order (oldest to newest)
+      // This includes the most recent one (which is also in In-Reply-To)
+      references = messageIds.join(' ')
+      
+      console.log('📧 [respond] Setting threading headers:', { 
+        inReplyTo, 
+        references, 
+        mostRecentEmailId: mostRecentEmail.resend_email_id,
+        threadLength: threadEmails.length
+      })
+    } else {
+      // Fallback: use the recipient passed in as parent if no thread found
+      parentId = recipient.id
+      if (recipient.resend_email_id) {
+        const messageId = `<${recipient.resend_email_id}@resend.dev>`
         inReplyTo = messageId
         references = messageId
       }

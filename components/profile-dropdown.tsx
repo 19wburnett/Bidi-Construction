@@ -120,7 +120,7 @@ export default function ProfileDropdown() {
             id,
             name
           ),
-          bid_package_recipients:recipient_id (
+          bid_package_recipients!recipient_id (
             id,
             subcontractor_name,
             subcontractor_email

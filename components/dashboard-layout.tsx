@@ -55,13 +55,13 @@ export default function DashboardLayout({ children, className }: DashboardLayout
         </aside>
 
         {/* Sidebar - Mobile */}
-        <aside
-          className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:hidden w-64 bg-white dark:bg-black border-r border-gray-200 dark:border-gray-800 ${
-            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
-        >
-          <DashboardSidebar />
-        </aside>
+        {sidebarOpen && (
+          <aside
+            className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:hidden w-64 bg-white dark:bg-black border-r border-gray-200 dark:border-gray-800 translate-x-0`}
+          >
+            <DashboardSidebar />
+          </aside>
+        )}
 
         {/* Main Content */}
         <main className="flex-1 overflow-hidden flex flex-col relative">

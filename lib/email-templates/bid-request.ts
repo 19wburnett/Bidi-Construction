@@ -141,6 +141,30 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
         </h3>
         ${lineItemsTable}
       </div>
+      
+      <!-- Important Disclaimer -->
+      <div style="${EMAIL_STYLES.infoBox}; background-color: #FFF7ED; border-left: 4px solid #F59E0B; border-radius: 0 8px 8px 0; margin-top: 24px;">
+        <h3 style="font-size: 15px; font-weight: 600; color: #92400E; margin: 0 0 12px 0;">
+          ⚠️ Important: Verify Measurements & Check for Missing Scope
+        </h3>
+        <p style="${EMAIL_STYLES.paragraph}; margin-bottom: 12px; color: #78350F;">
+          Please note that the line items provided above are <strong>minimum requirements</strong> based on initial takeoff measurements. We strongly recommend that you:
+        </p>
+        <ul style="${EMAIL_STYLES.list}">
+          <li style="${EMAIL_STYLES.listItem}; color: #78350F;">
+            <strong>Perform your own measurements</strong> to verify quantities and ensure accuracy
+          </li>
+          <li style="${EMAIL_STYLES.listItem}; color: #78350F;">
+            <strong>Review the plans thoroughly</strong> to identify any additional scope or items that may be missing from the list above
+          </li>
+          <li style="${EMAIL_STYLES.listItem}; color: #78350F;">
+            <strong>Include any additional work</strong> you identify in your bid, as the provided line items may not represent the complete scope
+          </li>
+        </ul>
+        <p style="${EMAIL_STYLES.paragraph}; font-size: 13px; color: #92400E; margin: 0;">
+          Your bid should reflect your own measurements and assessment of the full scope of work required.
+        </p>
+      </div>
     ` : ''}
 
     <div style="${EMAIL_STYLES.divider}"></div>

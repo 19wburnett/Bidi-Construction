@@ -16,6 +16,7 @@ import { getJobForUser } from '@/lib/job-access'
 import { useAuth } from '@/app/providers'
 import EmailTemplateSelector from '@/components/email-template-selector'
 import EmailPreviewModal from '@/components/email-preview-modal'
+import SubcontractorProfileModal from '@/components/subcontractor-profile-modal'
 import { 
   Package,
   Users,
@@ -188,6 +189,8 @@ export default function BidPackageModal({
   const [expandedTradeSummaries, setExpandedTradeSummaries] = useState<Record<string, boolean>>({})
   const [subcontractorSearch, setSubcontractorSearch] = useState('')
   const [loadingPhase, setLoadingPhase] = useState<'creating' | 'sending' | 'loading-recipients'>('creating')
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [selectedProfileSubcontractorId, setSelectedProfileSubcontractorId] = useState<string | null>(null)
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -2224,6 +2227,23 @@ export default function BidPackageModal({
                                         <Badge variant="outline" className="text-xs whitespace-nowrap">
                                           {sub.trade_category}
                                         </Badge>
+                                        {sub.source === 'bidi' && (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 gap-1 text-xs"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              // Extract actual ID (remove 'bidi:' prefix)
+                                              const actualId = sub.id.startsWith('bidi:') ? sub.id.split(':')[1] : sub.id
+                                              setSelectedProfileSubcontractorId(actualId)
+                                              setProfileModalOpen(true)
+                                            }}
+                                          >
+                                            <Eye className="h-3 w-3" />
+                                            Profile
+                                          </Button>
+                                        )}
                                         {sub.website_url && (
                                           <Button asChild variant="outline" size="sm" className="h-7 gap-1 text-xs">
                                             <a href={sub.website_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center">
@@ -2278,6 +2298,16 @@ export default function BidPackageModal({
                           selectedTemplateId={selectedTemplateId}
                           canCreatePackage={canCreatePackage}
                           loading={loading}
+                        />
+                      )}
+                      {selectedProfileSubcontractorId && (
+                        <SubcontractorProfileModal
+                          subcontractorId={selectedProfileSubcontractorId}
+                          isOpen={profileModalOpen}
+                          onClose={() => {
+                            setProfileModalOpen(false)
+                            setSelectedProfileSubcontractorId(null)
+                          }}
                         />
                       )}
                     </motion.div>
