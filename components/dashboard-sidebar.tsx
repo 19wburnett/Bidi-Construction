@@ -326,7 +326,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
                 className="h-9 w-9"
               />
               {!isCollapsed && (
-                <span className="text-xl font-bold tracking-tight dark:text-white">BIDI</span>
+                <span className="text-xl font-bold tracking-tight dark:text-white font-bidi">BIDI</span>
               )}
             </Link>
           </div>

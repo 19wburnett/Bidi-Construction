@@ -520,7 +520,7 @@ export default function HomePage() {
                             {/* Pulse effect */}
                             <div className="absolute inset-0 bg-orange rounded-lg sm:rounded-xl animate-ping opacity-20"></div>
                           </div>
-                          <span className="text-[10px] sm:text-xs font-semibold text-gray-700 text-center">Bidi</span>
+                          <span className="text-[10px] sm:text-xs font-semibold text-gray-700 text-center font-bidi">Bidi</span>
           </div>
 
                         {/* Animated Connection Line */}
@@ -991,7 +991,11 @@ function FAQSection() {
     },
     {
       question: "Does this work with my existing subcontractors?",
-      answer: "Absolutely. You can upload your own subcontractor directory to BIDI. When you start a project, you can choose to invite your own subs, our network of vetted subcontractors, or a mix of both. We handle the outreach and follow-ups for everyone."
+      answer: (
+        <>
+          Absolutely. You can upload your own subcontractor directory to <span className="font-bidi">BIDI</span>. When you start a project, you can choose to invite your own subs, our network of vetted subcontractors, or a mix of both. We handle the outreach and follow-ups for everyone.
+        </>
+      )
     },
     {
       question: "How does the bid leveling work?",
@@ -1003,7 +1007,7 @@ function FAQSection() {
     <div className="max-w-3xl mx-auto">
       <div className="text-center mb-10">
         <h2 className="text-3xl font-bold text-black dark:text-white mb-4">Frequently Asked Questions</h2>
-        <p className="text-gray-600 dark:text-gray-300">Everything you need to know about BIDI</p>
+        <p className="text-gray-600 dark:text-gray-300">Everything you need to know about <span className="font-bidi">BIDI</span></p>
       </div>
       
       <Accordion type="single" collapsible className="w-full">

@@ -529,7 +529,7 @@ export default function SubcontractorsPage() {
                   </div>
                 </div>
                 <CardTitle className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-3">
-                  Bidi Quote Service
+                  <span className="font-bidi">Bidi</span> Quote Service
                 </CardTitle>
                 <CardDescription className="text-lg text-gray-600 dark:text-gray-300">
                   Professional quote generation for subcontractors
@@ -906,7 +906,7 @@ export default function SubcontractorsPage() {
                 <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
                   <CheckCircle className="h-10 w-10 text-green-600" />
                 </div>
-                <h3 className="text-3xl font-bold text-black dark:text-white mb-4">Welcome to Bidi!</h3>
+                <h3 className="text-3xl font-bold text-black dark:text-white mb-4">Welcome to <span className="font-bidi">Bidi</span>!</h3>
                 <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 font-medium max-w-xl mx-auto">
                   Thank you for joining our free network! You've been successfully added to our database 
                   and will start receiving email notifications for jobs matching your trade ({formData.trade}) 

@@ -228,7 +228,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           <div className="mt-12 p-8 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-900">
             <h3 className="text-2xl font-bold mb-4">Ready to Transform Your Estimating Process?</h3>
             <p className="text-gray-700 dark:text-gray-300 mb-6">
-              See how Bidi's AI-powered platform can automate your construction estimating and bid management.
+              See how <span className="font-bidi">Bidi</span>'s AI-powered platform can automate your construction estimating and bid management.
             </p>
             <Link href="/estimate">
               <Button variant="orange" size="lg">
