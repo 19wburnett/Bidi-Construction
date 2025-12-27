@@ -39,12 +39,14 @@ export async function recordChatTurn(
   jobId: string | null,
   userMessage: string,
   assistantMessage: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  chatId?: string | null
 ): Promise<void> {
   const { error } = await supabase.from('plan_chat_history').insert({
     plan_id: planId,
     user_id: userId,
     job_id: jobId,
+    chat_id: chatId || null,
     user_message: userMessage,
     assistant_message: assistantMessage,
     metadata: metadata || {},
@@ -118,15 +120,26 @@ export async function getRecentConversationContext(
   supabase: GenericSupabase,
   planId: string,
   userId: string,
-  limit = 8
+  limit = 8,
+  chatId?: string | null
 ): Promise<ConversationContext> {
   // Fetch recent turns (raw messages)
   const recentLimit = Math.min(limit, 4) // Last 4 turns are raw
-  const { data: recentTurns, error } = await supabase
+  let query = supabase
     .from('plan_chat_history')
     .select('id, user_message, assistant_message, summary, created_at, metadata')
     .eq('plan_id', planId)
     .eq('user_id', userId)
+  
+  // Filter by chat_id if provided
+  if (chatId) {
+    query = query.eq('chat_id', chatId)
+  } else {
+    // If no chat_id, only get messages without chat_id (legacy) or use most recent chat
+    query = query.is('chat_id', null)
+  }
+  
+  const { data: recentTurns, error } = await query
     .order('created_at', { ascending: false })
     .limit(limit)
 

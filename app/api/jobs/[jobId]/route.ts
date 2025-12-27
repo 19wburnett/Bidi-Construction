@@ -42,14 +42,14 @@ export async function PATCH(
     // Check if user is the original creator
     const isCreator = job.user_id === user.id
 
-    // Check if user has membership and is owner
+    // Check if user has membership (owner or collaborator)
     const membership = await getJobForUser(supabase, jobId, user.id, 'id')
-    const isOwner = membership?.role === 'owner'
+    const hasAccess = membership !== null
 
-    // Only allow update if user is creator or owner
-    if (!isCreator && !isOwner) {
+    // Allow update if user is creator or has membership (owner or collaborator)
+    if (!isCreator && !hasAccess) {
       return NextResponse.json(
-        { error: 'Only job owners can update jobs' },
+        { error: 'You do not have permission to update this job' },
         { status: 403 }
       )
     }

@@ -4,6 +4,7 @@ import Script from 'next/script'
 import './globals.css'
 import { Providers } from './providers'
 import AuthErrorBoundary from '@/components/auth-error-boundary'
+import { StructuredData } from '@/components/structured-data'
 
 const sairaStencilOne = Saira_Stencil_One({ 
   weight: '400',
@@ -25,7 +26,27 @@ export const metadata: Metadata = {
     template: '%s | Bidi',
   },
   description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
-  keywords: ['construction estimating', 'bid management', 'construction software', 'general contractors', 'subcontractors', 'AI estimating', 'construction takeoff', 'automated bidding'],
+  keywords: [
+    'construction estimating',
+    'bid management',
+    'construction software',
+    'general contractors',
+    'subcontractors',
+    'AI estimating',
+    'construction takeoff',
+    'automated bidding',
+    'construction bid software',
+    'construction estimating software',
+    'takeoff software',
+    'construction management',
+    'bid collection',
+    'construction technology',
+    'construction AI',
+    'construction software USA',
+    'construction estimating tool',
+    'GC software',
+    'construction bid platform',
+  ],
   authors: [{ name: 'Bidi Contracting' }],
   creator: 'Bidi Contracting',
   publisher: 'Bidi Contracting',
@@ -84,8 +105,18 @@ export default function RootLayout({
     <html lang="en" className={`${barlow.variable} ${sairaStencilOne.variable}`} suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="geo.region" content="US" />
+        <meta name="geo.placename" content="United States" />
+        <meta name="language" content="English" />
+        <meta name="distribution" content="global" />
+        <meta name="rating" content="general" />
+        <meta name="revisit-after" content="7 days" />
+        <link rel="canonical" href={process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'} />
       </head>
       <body className={barlow.className} suppressHydrationWarning>
+        <StructuredData type="Organization" />
+        <StructuredData type="SoftwareApplication" />
+        <StructuredData type="WebSite" />
         <Script
           src="https://www.googletagmanager.com/gtag/js?id=G-SX6C5ZZ8EN"
           strategy="afterInteractive"

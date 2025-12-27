@@ -39,7 +39,8 @@ export default async function proxy(request: NextRequest) {
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
                          request.nextUrl.pathname.startsWith('/auth') || 
-                         request.nextUrl.pathname.startsWith('/share')
+                         request.nextUrl.pathname.startsWith('/share') ||
+                         request.nextUrl.pathname.startsWith('/blog')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
     // For API routes, only refresh cookies/session and pass through without redirects
@@ -73,7 +74,8 @@ export default async function proxy(request: NextRequest) {
     const publicPaths = ['/', '/pricing', '/subcontractors', '/demo', '/card', '/estimate']
     const isPublicPath = publicPaths.includes(request.nextUrl.pathname) || 
                          request.nextUrl.pathname.startsWith('/auth') || 
-                         request.nextUrl.pathname.startsWith('/share')
+                         request.nextUrl.pathname.startsWith('/share') ||
+                         request.nextUrl.pathname.startsWith('/blog')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
     if (!isApiRoute && !isPublicPath) {

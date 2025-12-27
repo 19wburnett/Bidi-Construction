@@ -93,11 +93,14 @@ function buildAnswerUserContent(result: PlanChatDeterministicResult): string {
  */
 export async function generatePlanChatAnswer(
   result: PlanChatDeterministicResult,
-  recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>
+  recentMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  model?: string
 ): Promise<string> {
   if (!hasAIGatewayKey) {
     throw new Error('AI Gateway API key is not configured. Please add AI_GATEWAY_API_KEY to your environment variables.')
   }
+
+  const selectedModel = model || OPENAI_MODEL
 
   const isTakeoffQuestion =
     result.classification.question_type === 'TAKEOFF_QUANTITY' ||
@@ -125,7 +128,7 @@ export async function generatePlanChatAnswer(
 
   try {
     const response = await aiGateway.generate({
-      model: OPENAI_MODEL,
+      model: selectedModel,
       messages: messages as any,
       maxTokens: 600,
     })
@@ -192,13 +195,28 @@ export async function generatePlanChatAnswer(
           }. ${result.scope_description}`
         }
       } else {
-        answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
+        // Check if we have any data at all
+        const hasAnyData = result.related_items.length > 0 || 
+                          (result.blueprint_snippets && result.blueprint_snippets.length > 0)
+        
+        if (!hasAnyData) {
+          answer = "I couldn't find any relevant information for this plan. The plan may need to be processed to extract text and create embeddings. Try asking about specific takeoff items or pages, or trigger text extraction from the plan settings."
+        } else {
+          answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
+        }
       }
     }
 
     // Ensure answer is always a string
     if (!answer || answer.length < 10) {
-      answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
+      const hasAnyData = result.related_items.length > 0 || 
+                        (result.blueprint_snippets && result.blueprint_snippets.length > 0)
+      
+      if (!hasAnyData) {
+        answer = "I couldn't find any relevant information for this plan. The plan may need to be processed to extract text and create embeddings."
+      } else {
+        answer = "I couldn't find relevant information to answer that question. Try rephrasing or asking about specific items or pages."
+      }
     }
 
     return answer

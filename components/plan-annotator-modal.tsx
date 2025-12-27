@@ -395,7 +395,7 @@ export default function PlanAnnotatorModal({
     }
 
     const newNote: BidNote = {
-      id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       note_type: customNoteForm.note_type,
       category: customNoteForm.category || null,
       location: customNoteForm.location || null,

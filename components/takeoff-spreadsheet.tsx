@@ -307,7 +307,7 @@ export default function TakeoffSpreadsheet({
 
       // Ensure item has required fields and normalize structure
       return {
-        id: item.id || `item-${Math.random().toString(36).substr(2, 9)}`,
+        id: item.id || `item-${Math.random().toString(36).slice(2, 11)}`,
         name,
         description,
         quantity,

@@ -6,8 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import Navbar from '@/components/navbar'
-import Footer from '@/components/footer'
+import PublicLayout from '@/components/public-layout'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { BackgroundPattern } from '@/components/ui/background-pattern'
@@ -489,10 +488,9 @@ export default function SubcontractorsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300 overflow-hidden">
-      <BackgroundPattern />
-
-      <Navbar />
+    <PublicLayout>
+      <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300 overflow-hidden">
+        <BackgroundPattern />
 
       {/* Quote Service Hero Section */}
       <section className="bg-gradient-to-br from-orange-50 to-white dark:from-orange-950/30 dark:to-black py-16 sm:py-24 transition-colors duration-300 relative overflow-hidden">
@@ -948,8 +946,7 @@ export default function SubcontractorsPage() {
           )}
         </div>
       </section>
-
-      <Footer />
-    </div>
+      </div>
+    </PublicLayout>
   )
 }

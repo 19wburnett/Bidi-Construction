@@ -3,12 +3,13 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import Navbar from '@/components/navbar'
-import Footer from '@/components/footer'
+import PublicLayout from '@/components/public-layout'
 import Link from 'next/link'
-import { Users, Mail, FileText, Star, CheckCircle, ArrowRight, Zap, Clock, DollarSign, Phone, MapPin, Play, Search, Brain, AlertCircle, ChevronDown } from 'lucide-react'
+import { Users, Mail, FileText, Star, CheckCircle, ArrowRight, Zap, Clock, DollarSign, Phone, MapPin, Play, Search, Brain, AlertCircle, ChevronDown, Calendar } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { StructuredData } from '@/components/structured-data'
+import { getBlogPosts } from '@/lib/blog/posts'
 
 export default function HomePage() {
   const [isVisible, setIsVisible] = useState(false)
@@ -46,45 +47,74 @@ export default function HomePage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black relative overflow-hidden transition-colors duration-300">
-      {/* Professional Construction Background Pattern */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        {/* Base gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-50 via-white to-orange-50/60 dark:from-black dark:via-black dark:to-orange-950/40"></div>
-        
-        {/* Top accent line */}
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange via-orange to-transparent"></div>
-        
-        {/* Tire track patterns - visible but subtle */}
-        <div className="absolute top-32 left-10 w-80 h-80 opacity-[0.12] rotate-12 text-gray-500">
-          <TireTrackPattern />
-        </div>
-        <div className="absolute top-[500px] right-20 w-64 h-64 opacity-[0.12] -rotate-45 text-gray-500">
-          <TireTrackPattern />
-        </div>
-        <div className="absolute bottom-96 left-1/4 w-72 h-72 opacity-[0.10] rotate-[30deg] text-orange">
-          <TireTrackPattern />
-        </div>
-        <div className="absolute bottom-40 right-1/3 w-56 h-56 opacity-[0.12] -rotate-12 text-gray-500">
-          <TireTrackPattern />
-        </div>
-        
-        {/* Gradient orbs for depth */}
-        <div className="absolute top-1/4 -left-32 w-[500px] h-[500px] bg-gradient-radial from-orange/12 to-transparent blur-3xl"></div>
-        <div className="absolute bottom-1/4 -right-32 w-[500px] h-[500px] bg-gradient-radial from-gray-500/12 to-transparent blur-3xl"></div>
-        <div className="absolute top-2/3 left-1/3 w-80 h-80 bg-gradient-radial from-orange/10 to-transparent blur-2xl"></div>
-        
-        {/* Additional diagonal accent lines */}
-        <div className="absolute top-1/3 left-0 w-full h-px bg-gradient-to-r from-transparent via-orange/15 to-transparent"></div>
-        <div className="absolute bottom-1/3 left-0 w-full h-px bg-gradient-to-r from-transparent via-gray-500/15 to-transparent"></div>
-        
-        {/* Dot pattern for texture */}
-        <div className="absolute inset-0" style={{
-          backgroundImage: 'radial-gradient(circle, rgba(235, 80, 35, 0.04) 1px, transparent 1px)',
-          backgroundSize: '50px 50px'
-        }}></div>
-      </div>
-      <Navbar />
+    <>
+      {/* SEO Structured Data for Homepage */}
+      <StructuredData
+        type="LocalBusiness"
+        data={{
+          '@context': 'https://schema.org',
+          '@type': 'LocalBusiness',
+          name: 'Bidi Construction',
+          description: 'AI-powered construction estimating and automated bid management platform serving General Contractors across the United States.',
+          url: process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com',
+          areaServed: {
+            '@type': 'Country',
+            name: 'United States',
+          },
+          serviceType: [
+            'Construction Estimating Software',
+            'Bid Management Platform',
+            'AI-Powered Takeoff',
+            'Construction Bid Collection',
+          ],
+          knowsAbout: [
+            'Construction Estimating',
+            'Bid Management',
+            'Construction Takeoff',
+            'General Contracting',
+            'Subcontractor Management',
+          ],
+        }}
+      />
+      <PublicLayout>
+        <div className="min-h-screen bg-white dark:bg-black relative overflow-hidden transition-colors duration-300">
+          {/* Professional Construction Background Pattern */}
+          <div className="pointer-events-none absolute inset-0 -z-10">
+            {/* Base gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-gray-50 via-white to-orange-50/60 dark:from-black dark:via-black dark:to-orange-950/40"></div>
+            
+            {/* Top accent line */}
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange via-orange to-transparent"></div>
+            
+            {/* Tire track patterns - visible but subtle */}
+            <div className="absolute top-32 left-10 w-80 h-80 opacity-[0.12] rotate-12 text-gray-500">
+              <TireTrackPattern />
+            </div>
+            <div className="absolute top-[500px] right-20 w-64 h-64 opacity-[0.12] -rotate-45 text-gray-500">
+              <TireTrackPattern />
+            </div>
+            <div className="absolute bottom-96 left-1/4 w-72 h-72 opacity-[0.10] rotate-[30deg] text-orange">
+              <TireTrackPattern />
+            </div>
+            <div className="absolute bottom-40 right-1/3 w-56 h-56 opacity-[0.12] -rotate-12 text-gray-500">
+              <TireTrackPattern />
+            </div>
+            
+            {/* Gradient orbs for depth */}
+            <div className="absolute top-1/4 -left-32 w-[500px] h-[500px] bg-gradient-radial from-orange/12 to-transparent blur-3xl"></div>
+            <div className="absolute bottom-1/4 -right-32 w-[500px] h-[500px] bg-gradient-radial from-gray-500/12 to-transparent blur-3xl"></div>
+            <div className="absolute top-2/3 left-1/3 w-80 h-80 bg-gradient-radial from-orange/10 to-transparent blur-2xl"></div>
+            
+            {/* Additional diagonal accent lines */}
+            <div className="absolute top-1/3 left-0 w-full h-px bg-gradient-to-r from-transparent via-orange/15 to-transparent"></div>
+            <div className="absolute bottom-1/3 left-0 w-full h-px bg-gradient-to-r from-transparent via-gray-500/15 to-transparent"></div>
+            
+            {/* Dot pattern for texture */}
+            <div className="absolute inset-0" style={{
+              backgroundImage: 'radial-gradient(circle, rgba(235, 80, 35, 0.04) 1px, transparent 1px)',
+              backgroundSize: '50px 50px'
+            }}></div>
+          </div>
 
       {/* Hero Section */}
       <section className="container mx-auto px-4 py-8 sm:py-16 text-center relative z-10">
@@ -592,6 +622,21 @@ export default function HomePage() {
         <DemoSection />
       </section>
 
+      {/* Blog Section */}
+      <section className="bg-gray-50 dark:bg-black py-16 relative z-10">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl sm:text-4xl font-bold text-black dark:text-white mb-4">
+              Latest <span className="font-bidi bidi-orange-text">Insights</span>
+            </h2>
+            <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+              Stay updated with the latest trends and tips in construction estimating and bid management
+            </p>
+          </div>
+          <BlogSection />
+        </div>
+      </section>
+
       {/* FAQ Section */}
       <section className="container mx-auto px-4 py-16 relative z-10">
         <FAQSection />
@@ -631,9 +676,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-
-      <Footer />
-    </div>
+        </div>
+      </PublicLayout>
+    </>
   )
 }
 
@@ -1485,6 +1530,66 @@ function DemoSection() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Blog Section Component
+function BlogSection() {
+  const featuredPosts = getBlogPosts({ featured: true, limit: 3 })
+
+  if (featuredPosts.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+      {featuredPosts.map(post => (
+        <Link key={post.slug} href={`/blog/${post.slug}`}>
+          <Card className="h-full hover:shadow-lg transition-all duration-300 cursor-pointer group border-2 hover:border-orange">
+            <CardHeader>
+              <Badge className="mb-2 w-fit bidi-orange-bg-light bidi-orange-text">
+                Featured
+              </Badge>
+              <CardTitle className="group-hover:text-orange transition-colors line-clamp-2">
+                {post.title}
+              </CardTitle>
+              <CardDescription className="line-clamp-3">
+                {post.description}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
+                <div className="flex items-center">
+                  <Calendar className="h-4 w-4 mr-1" />
+                  {new Date(post.publishedAt).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </div>
+                {post.readingTime && (
+                  <div className="flex items-center">
+                    <Clock className="h-4 w-4 mr-1" />
+                    {post.readingTime} min
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center text-orange group-hover:underline font-semibold">
+                Read article
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      ))}
+      <div className="md:col-span-3 text-center mt-8">
+        <Link href="/blog">
+          <Button variant="construction" size="lg">
+            View All Articles
+            <ArrowRight className="ml-2 h-5 w-5" />
+          </Button>
+        </Link>
+      </div>
     </div>
   )
 }

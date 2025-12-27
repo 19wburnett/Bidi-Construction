@@ -8,10 +8,18 @@ import {
   MessageCircleQuestion,
   Send,
   TriangleAlert,
-  User as UserIcon
+  User as UserIcon,
+  Sparkles,
+  Plus,
+  MessageSquare,
+  Trash2,
+  ChevronDown
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { AVAILABLE_CHAT_MODELS, DEFAULT_CHAT_MODEL, type ChatModel } from '@/lib/plan-chat-models'
 
 type PlanChatRole = 'user' | 'assistant'
 
@@ -32,6 +40,15 @@ interface ChatStatusResponse {
   itemCount?: number
   summaryCategories?: Array<{ category: string; totalQuantity: number; unit?: string }>
   chatHistory?: Array<{ id: string; role: 'user' | 'assistant'; content: string; created_at: string }>
+}
+
+interface ChatSession {
+  id: string
+  title: string | null
+  description: string | null
+  created_at: string
+  updated_at: string
+  last_message_at: string | null
 }
 
 interface ChatErrorState {
@@ -69,6 +86,8 @@ function TypingIndicator() {
   )
 }
 
+const MODEL_STORAGE_KEY = 'plan-chat-selected-model'
+
 export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [messages, setMessages] = useState<PlanChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -77,6 +96,15 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [status, setStatus] = useState<ChatStatusResponse | null>(null)
   const [error, setError] = useState<ChatErrorState | null>(null)
   const [missingTakeoff, setMissingTakeoff] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_CHAT_MODEL
+    }
+    return DEFAULT_CHAT_MODEL
+  })
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
+  const [isLoadingChats, setIsLoadingChats] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const hasHydratedMessagesRef = useRef(false)
 
@@ -94,11 +122,27 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     setStatus(null)
     setError(null)
     setMissingTakeoff(false)
+    setSelectedChatId(null)
 
     hasHydratedMessagesRef.current = true
+    loadChatSessions()
     fetchStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, planId])
+
+  useEffect(() => {
+    if (selectedChatId) {
+      fetchStatus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChatId])
+
+  useEffect(() => {
+    // Save model preference to localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel)
+    }
+  }, [selectedModel])
 
 
   const summaryPreview = useMemo(() => {
@@ -106,14 +150,87 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     return status.summaryCategories.slice(0, 3)
   }, [status])
 
+  async function loadChatSessions() {
+    if (!jobId || !planId) return
+
+    setIsLoadingChats(true)
+    try {
+      const response = await fetch(
+        `/api/plan-chat/sessions?jobId=${encodeURIComponent(jobId)}&planId=${encodeURIComponent(planId)}`
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        setChatSessions(data.sessions || [])
+        
+        // Auto-select most recent chat if available
+        if (data.sessions && data.sessions.length > 0 && !selectedChatId) {
+          setSelectedChatId(data.sessions[0].id)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load chat sessions:', err)
+    } finally {
+      setIsLoadingChats(false)
+    }
+  }
+
+  async function createNewChat() {
+    if (!jobId || !planId) return
+
+    try {
+      const response = await fetch('/api/plan-chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, planId }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setSelectedChatId(data.session.id)
+        setMessages([])
+        await loadChatSessions()
+      }
+    } catch (err) {
+      console.error('Failed to create new chat:', err)
+    }
+  }
+
+  async function deleteChat(chatIdToDelete: string) {
+    if (!confirm('Are you sure you want to delete this chat? This cannot be undone.')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/plan-chat/sessions?chatId=${encodeURIComponent(chatIdToDelete)}`, {
+        method: 'DELETE',
+      })
+
+      if (response.ok) {
+        await loadChatSessions()
+        if (selectedChatId === chatIdToDelete) {
+          // Switch to most recent chat or create new one
+          const remainingChats = chatSessions.filter(c => c.id !== chatIdToDelete)
+          if (remainingChats.length > 0) {
+            setSelectedChatId(remainingChats[0].id)
+          } else {
+            setSelectedChatId(null)
+            setMessages([])
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete chat:', err)
+    }
+  }
+
   async function fetchStatus() {
     if (!jobId || !planId) return
 
     setIsLoading(true)
     try {
-      const response = await fetch(
-        `/api/plan-chat?jobId=${encodeURIComponent(jobId)}&planId=${encodeURIComponent(planId)}`
-      )
+      const url = `/api/plan-chat?jobId=${encodeURIComponent(jobId)}&planId=${encodeURIComponent(planId)}${selectedChatId ? `&chatId=${encodeURIComponent(selectedChatId)}` : ''}`
+      const response = await fetch(url)
 
       if (response.status === 401) {
         setError({
@@ -186,6 +303,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
             role,
             content,
           })),
+          model: selectedModel,
+          chatId: selectedChatId,
         }),
       })
 
@@ -210,13 +329,26 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
         throw new Error(payload.error || 'Failed to get a response from Plan Chat')
       }
 
-      const payload: { reply: string } = await response.json()
+      const payload: { reply: string; chatId?: string } = await response.json()
+      
+      // Update selected chat ID if a new one was created
+      if (payload.chatId && payload.chatId !== selectedChatId) {
+        setSelectedChatId(payload.chatId)
+        await loadChatSessions()
+      }
+      
       const assistantMessage: PlanChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: payload.reply.trim(),
       }
       setMessages((prev) => [...prev, assistantMessage])
+      
+      // Refresh chat sessions after a short delay to pick up AI-generated title
+      // Title generation happens async, so wait a bit before refreshing
+      setTimeout(() => {
+        loadChatSessions()
+      }, 2000)
     } catch (err) {
       console.error('Plan Chat request failed', err)
       setError({
@@ -235,184 +367,312 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
               <Bot className="h-4 w-4 text-orange-500" />
               <h4 className="text-sm font-semibold text-gray-900">Plan Chat</h4>
+            </div>
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 text-xs">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    {selectedChatId 
+                      ? chatSessions.find(c => c.id === selectedChatId)?.title || 'Chat'
+                      : 'New Chat'}
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-64 p-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={createNewChat}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Chat
+                  </Button>
+                  <div className="border-t my-2" />
+                  <div className="max-h-64 overflow-y-auto space-y-1">
+                    {chatSessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className="flex items-center justify-between group hover:bg-gray-50 rounded px-2 py-1.5"
+                      >
+                        <button
+                          className="flex-1 text-left"
+                          onClick={() => {
+                            setSelectedChatId(session.id)
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4 text-gray-400" />
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">
+                                {session.title || 'Untitled Chat'}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                {new Date(session.updated_at).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteChat(session.id)
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3 text-red-500" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
             <p className="mt-1 text-xs text-gray-500">
               Ask questions about this plan. Answers combine the latest takeoff data with text snippets
               extracted from the blueprint.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchStatus}
-            disabled={isLoading || isSending}
-          >
-            {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchStatus}
+              disabled={isLoading || isSending}
+            >
+              {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
+            </Button>
+          </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-            {isLoading ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500">
-                <Loader2 className="h-6 w-6 animate-spin" />
-                <span className="text-sm font-medium">Preparing Plan Chat…</span>
-              </div>
-            ) : !canChat ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-gray-600">
-                <TriangleAlert className="h-8 w-8 text-amber-500" />
-                <p className="max-w-xs text-sm font-medium">
-                  {error?.message || 'Plan Chat is temporarily unavailable. Try again in a moment.'}
-                </p>
-                {error?.details && (
-                  <p className="max-w-sm text-xs text-gray-400">{error.details}</p>
-                )}
-              </div>
-            ) : hasActiveConversation ? (
-              <>
-                {missingTakeoff && (
-                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
-                    Takeoff results for this plan are still processing. I&rsquo;ll answer using the
-                    blueprint text snippets that have been ingested so far.
-                  </div>
-                )}
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
+        <div className="flex min-h-0 flex-1 flex-col bg-white">
+          <div className="flex-1 overflow-y-auto">
+            <div className="space-y-0">
+              {isLoading ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span className="text-sm font-medium">Preparing Plan Chat…</span>
+                </div>
+              ) : !canChat ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-gray-600 py-12 px-4">
+                  <TriangleAlert className="h-8 w-8 text-amber-500" />
+                  <p className="max-w-xs text-sm font-medium">
+                    {error?.message || 'Plan Chat is temporarily unavailable. Try again in a moment.'}
+                  </p>
+                  {error?.details && (
+                    <p className="max-w-sm text-xs text-gray-400">{error.details}</p>
+                  )}
+                </div>
+              ) : hasActiveConversation ? (
+                <>
+                  {missingTakeoff && (
+                    <div className="px-4 py-3 bg-amber-50 border-b border-amber-200">
+                      <div className="mx-auto max-w-3xl">
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
+                          Takeoff results for this plan are still processing. I&rsquo;ll answer using the
+                          blueprint text snippets that have been ingested so far.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {messages.map((message) => (
                     <div
-                      className={`max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-sm ${
-                        message.role === 'user'
-                          ? 'bg-orange-600 text-white'
-                          : 'bg-gray-100 text-gray-900'
+                      key={message.id}
+                      className={`group py-6 px-4 hover:bg-gray-50/50 transition-colors ${
+                        message.role === 'user' ? 'bg-gray-50' : 'bg-white'
                       }`}
                     >
-                      <div className="mb-1 flex items-center gap-1 text-xs opacity-75">
-                        {message.role === 'user' ? (
-                          <UserIcon className="h-3.5 w-3.5" />
-                        ) : (
-                          <Bot className="h-3.5 w-3.5 text-orange-500" />
+                      <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
+                        {message.role === 'assistant' && (
+                          <div className="flex-shrink-0">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
+                              <Bot className="h-5 w-5 text-white" />
+                            </div>
+                          </div>
                         )}
-                        <span>{message.role === 'user' ? 'You' : 'AI Estimator'}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-gray-500">
+                              {message.role === 'user' ? 'You' : 'AI Estimator'}
+                            </span>
+                          </div>
+                          <div className="prose prose-sm max-w-none">
+                            <p className="text-gray-900 whitespace-pre-wrap leading-relaxed">
+                              {message.content}
+                            </p>
+                          </div>
+                        </div>
+                        {message.role === 'user' && (
+                          <div className="flex-shrink-0">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gray-400 to-gray-600 shadow-sm">
+                              <UserIcon className="h-5 w-5 text-white" />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    </div>
+                  ))}
+                  <AnimatePresence>
+                    {isSending && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        className="py-6 px-4 bg-white"
+                      >
+                        <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
+                          <div className="flex-shrink-0">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
+                              <Bot className="h-5 w-5 text-white" />
+                            </div>
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1">
+                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              ) : (
+                <div className="px-4 py-8">
+                  <div className="mx-auto max-w-2xl space-y-4">
+                    {missingTakeoff && (
+                      <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
+                        Takeoff results aren&rsquo;t ready yet, but you can still ask about sheet notes,
+                        legends, and other text pulled from the blueprint. I&rsquo;ll let you know when I
+                        need more data.
+                      </div>
+                    )}
+                    <div className="text-center mb-8">
+                      <Bot className="mx-auto h-12 w-12 text-gray-300 mb-4" />
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                        How can I help you today?
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        Ask about quantities, categories, or anything captured in the takeoff. When takeoff
+                        data is missing, I&rsquo;ll rely on the blueprint text that has been processed and
+                        tell you if something isn&rsquo;t available yet.
+                      </p>
+                    </div>
+                    {summaryPreview && summaryPreview.length > 0 && (
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                          Category Highlights
+                        </p>
+                        <ul className="space-y-2 text-sm text-gray-700">
+                          {summaryPreview.map((category) => (
+                            <li key={category.category} className="flex items-center justify-between">
+                              <span>{category.category}</span>
+                              <span className="text-gray-500 font-medium">
+                                {category.totalQuantity.toLocaleString()}
+                                {category.unit ? ` ${category.unit}` : ''}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="space-y-3">
+                      <p className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                        <MessageCircleQuestion className="h-4 w-4" />
+                        Try asking
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {examplePrompts.map((prompt) => (
+                          <button
+                            key={prompt}
+                            onClick={() => setInput(prompt)}
+                            className="px-4 py-3 text-sm text-left rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors text-gray-700"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                ))}
-                <AnimatePresence>
-                  {isSending && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 4 }}
-                      className="flex justify-start"
-                    >
-                      <TypingIndicator />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </>
-            ) : (
-              <div className="space-y-4">
-                {missingTakeoff && (
-                  <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
-                    Takeoff results aren&rsquo;t ready yet, but you can still ask about sheet notes,
-                    legends, and other text pulled from the blueprint. I&rsquo;ll let you know when I
-                    need more data.
-                  </div>
-                )}
-                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
-                  <p className="mb-2 font-medium text-gray-700">
-                    Ready to help with takeoff insights and blueprint details for this plan.
-                  </p>
-                  <p>
-                    Ask about quantities, categories, or anything captured in the takeoff. When takeoff
-                    data is missing, I&rsquo;ll rely on the blueprint text that has been processed and
-                    tell you if something isn&rsquo;t available yet.
-                  </p>
                 </div>
-                {summaryPreview && summaryPreview.length > 0 && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Category Highlights
-                    </p>
-                    <ul className="mt-2 space-y-1 text-sm text-gray-700">
-                      {summaryPreview.map((category) => (
-                        <li key={category.category} className="flex items-center justify-between">
-                          <span>{category.category}</span>
-                          <span className="text-gray-500">
-                            {category.totalQuantity.toLocaleString()}
-                            {category.unit ? ` ${category.unit}` : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-gray-500">
-                    <MessageCircleQuestion className="h-3.5 w-3.5" />
-                    Try asking
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {examplePrompts.map((prompt) => (
-                      <Button
-                        key={prompt}
-                        variant="outline"
-                        size="sm"
-                        className="justify-start text-left text-xs"
-                        onClick={() => setInput(prompt)}
-                      >
-                        {prompt}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
+              )}
+              <div ref={chatEndRef} />
+            </div>
           </div>
 
-          <div className="border-t border-gray-200 bg-white px-4 py-3">
-            <Textarea
-              placeholder={
-                canChat
-                ? 'Ask a question about this plan…'
-                : 'Plan Chat is currently unavailable.'
-              }
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault()
-                  handleSendMessage()
-                }
-              }}
-              disabled={!canChat || isSending}
-              rows={3}
-              className="resize-none"
-            />
-            <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
-              <p>Press Enter to send · Shift+Enter for a new line</p>
-              <Button
-                onClick={handleSendMessage}
-                disabled={!canChat || !input.trim() || isSending}
-                className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400"
-              >
-                {isSending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <Send className="mr-2 h-4 w-4" />
-                    Send
-                  </>
-                )}
-              </Button>
+          <div className="border-t border-gray-200 bg-white">
+            <div className="px-4 py-3">
+              <div className="relative flex items-end gap-3 rounded-2xl border border-gray-300 bg-white shadow-sm hover:border-gray-400 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 transition-all">
+                <Textarea
+                  placeholder={
+                    canChat
+                    ? 'Ask a question about this plan…'
+                    : 'Plan Chat is currently unavailable.'
+                  }
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      handleSendMessage()
+                    }
+                  }}
+                  disabled={!canChat || isSending}
+                  rows={1}
+                  className="min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent px-4 py-2.5 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                  style={{ height: 'auto' }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement
+                    target.style.height = 'auto'
+                    target.style.height = `${Math.min(target.scrollHeight, 200)}px`
+                  }}
+                />
+                <div className="flex-shrink-0 pb-1.5 pr-2">
+                  <Button
+                    onClick={handleSendMessage}
+                    disabled={!canChat || !input.trim() || isSending}
+                    className="h-8 w-8 rounded-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
+                    size="icon"
+                  >
+                    {isSending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5 text-white" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <Select value={selectedModel} onValueChange={setSelectedModel} disabled={isSending}>
+                  <SelectTrigger className="h-6 w-auto border-0 bg-transparent text-xs text-gray-500 hover:text-gray-700 px-0">
+                    <Sparkles className="mr-1.5 h-3 w-3" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AVAILABLE_CHAT_MODELS.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{model.name}</span>
+                          <span className="text-xs text-gray-500">{model.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-400">
+                  AI can make mistakes. Check important info.
+                </p>
+              </div>
             </div>
           </div>
         </div>

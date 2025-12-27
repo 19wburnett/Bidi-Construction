@@ -649,82 +649,105 @@ export default function TakeoffSidebar({
           </div>
         ) : (
           // Chat Tab
-          <div className="h-full flex flex-col">
+          <div className="h-full flex flex-col bg-white">
             {/* Chat Messages */}
-            <div className="flex-1 overflow-auto p-4 space-y-4">
-              {isLoadingChat ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
-                </div>
-              ) : chatMessages.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p className="mb-4">Ask AI about your takeoff</p>
-                  <div className="space-y-2 text-left max-w-sm mx-auto text-sm">
-                    <p className="text-xs text-gray-400">Example questions:</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start text-left"
-                      onClick={() => setChatInput("How many square feet of drywall are in this takeoff?")}
-                    >
-                      "How many square feet of drywall?"
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start text-left"
-                      onClick={() => setChatInput("What's the total cost for electrical work?")}
-                    >
-                      "Total cost for electrical work?"
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full justify-start text-left"
-                      onClick={() => setChatInput("Am I missing any common materials?")}
-                    >
-                      "Am I missing any materials?"
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                chatMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-lg p-3 ${
-                        message.role === 'user'
-                          ? 'bg-orange-600 text-white'
-                          : 'bg-gray-100 text-gray-900'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2 mb-1">
-                        {message.role === 'user' ? (
-                          <UserIcon className="h-4 w-4" />
-                        ) : (
-                          <Bot className="h-4 w-4" />
-                        )}
-                        <span className="text-xs opacity-75">
-                          {message.role === 'user' ? 'You' : 'AI Assistant'}
-                        </span>
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      <p className="text-xs opacity-50 mt-1">
-                        {new Date(message.created_at).toLocaleTimeString()}
-                      </p>
+            <div className="flex-1 overflow-auto">
+              <div className="space-y-0">
+                {isLoadingChat ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600 mx-auto"></div>
+                      <p className="mt-4 text-sm text-gray-500">Loading chat...</p>
                     </div>
                   </div>
-                ))
-              )}
-              <div ref={chatEndRef} />
+                ) : chatMessages.length === 0 ? (
+                  <div className="text-center py-12 px-4">
+                    <Bot className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">How can I help you today?</h3>
+                    <p className="text-sm text-gray-500 mb-6">Ask AI about your takeoff</p>
+                    <div className="space-y-2 text-left max-w-sm mx-auto">
+                      {[
+                        "How many square feet of drywall are in this takeoff?",
+                        "What's the total cost for electrical work?",
+                        "Am I missing any common materials?"
+                      ].map((prompt) => (
+                        <button
+                          key={prompt}
+                          onClick={() => setChatInput(prompt)}
+                          className="w-full px-4 py-3 text-sm text-left rounded-lg border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors text-gray-700"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`group py-4 px-4 hover:bg-gray-50/50 transition-colors ${
+                        message.role === 'user' ? 'bg-gray-50' : 'bg-white'
+                      }`}
+                    >
+                      <div className="flex gap-3">
+                        {message.role === 'assistant' && (
+                          <div className="flex-shrink-0">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
+                              <Bot className="h-4 w-4 text-white" />
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-gray-500">
+                              {message.role === 'user' ? 'You' : 'AI Assistant'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">
+                            {message.content}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {new Date(message.created_at).toLocaleTimeString()}
+                          </p>
+                        </div>
+                        {message.role === 'user' && (
+                          <div className="flex-shrink-0">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-gray-400 to-gray-600 shadow-sm">
+                              <UserIcon className="h-4 w-4 text-white" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {isSending && (
+                  <div className="py-4 px-4 bg-white">
+                    <div className="flex gap-3">
+                      <div className="flex-shrink-0">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
+                          <Bot className="h-4 w-4 text-white" />
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
             </div>
 
             {/* Chat Input */}
-            <div className="p-4 border-t">
-              <div className="flex space-x-2">
+            <div className="border-t border-gray-200 bg-white p-3">
+              <div className="relative flex items-end gap-2 rounded-2xl border border-gray-300 bg-white shadow-sm hover:border-gray-400 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 transition-all">
                 <Textarea
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
@@ -735,24 +758,33 @@ export default function TakeoffSidebar({
                     }
                   }}
                   placeholder="Ask about quantities, costs, or materials..."
-                  rows={2}
+                  rows={1}
                   disabled={isSending}
-                  className="flex-1"
+                  className="min-h-[40px] max-h-[120px] resize-none border-0 bg-transparent px-3 py-2 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                  style={{ height: 'auto' }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement
+                    target.style.height = 'auto'
+                    target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+                  }}
                 />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!chatInput.trim() || isSending}
-                  className="self-end"
-                >
-                  {isSending ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
+                <div className="flex-shrink-0 pb-1 pr-2">
+                  <Button
+                    onClick={handleSendMessage}
+                    disabled={!chatInput.trim() || isSending}
+                    className="h-7 w-7 rounded-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm p-0"
+                    size="icon"
+                  >
+                    {isSending ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                    ) : (
+                      <Send className="h-3 w-3 text-white" />
+                    )}
+                  </Button>
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Press Enter to send, Shift+Enter for new line
+              <p className="text-xs text-center text-gray-400 mt-1.5">
+                AI can make mistakes. Check important info.
               </p>
             </div>
           </div>

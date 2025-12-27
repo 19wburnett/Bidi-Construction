@@ -639,6 +639,19 @@ export async function POST(request: NextRequest) {
             has_takeoff_analysis: true
           })
           .eq('id', planId)
+        
+        // Vectorize takeoff items for semantic search (async, don't wait)
+        if (takeoffAnalysis && planId) {
+          const currentPlanId = planId // Capture for type narrowing
+          import('@/lib/takeoff-item-embeddings').then(({ ingestTakeoffItemEmbeddings }) => {
+            import('@/lib/plan-chat-v3/retrieval-engine').then(({ normalizeTakeoffItems }) => {
+              const normalizedItems = normalizeTakeoffItems(mergedItems)
+              ingestTakeoffItemEmbeddings(supabase, currentPlanId, normalizedItems).catch((error) => {
+                console.error('[TakeoffVectorize] Failed to auto-vectorize takeoff items:', error)
+              })
+            })
+          })
+        }
       }
     }
 

@@ -3,8 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import Navbar from '@/components/navbar'
-import Footer from '@/components/footer'
+import PublicLayout from '@/components/public-layout'
 import Link from 'next/link'
 import { BackgroundPattern } from '@/components/ui/background-pattern'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -108,7 +107,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-white dark:bg-black relative transition-colors duration-300 overflow-hidden">
       <BackgroundPattern />
 
-      <Navbar />
+      <PublicLayout>
 
       {/* Hero Section */}
       <section className="container mx-auto px-4 py-16 sm:py-24 text-center relative z-10">
@@ -323,7 +322,7 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <Footer />
+      </PublicLayout>
     </div>
   )
 }

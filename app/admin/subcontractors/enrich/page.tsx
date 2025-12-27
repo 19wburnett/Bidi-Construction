@@ -722,9 +722,73 @@ export default function SubcontractorEnrichmentPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            const sub = subcontractors.find((s) => s.id === result.id)
-                            if (sub) fetchEnrichmentDetails(sub)
+                          onClick={async () => {
+                            let sub = subcontractors.find((s) => s.id === result.id)
+                            // If not found in current list, fetch it or create minimal object
+                            if (!sub) {
+                              try {
+                                const { data } = await supabase
+                                  .from('subcontractors')
+                                  .select('*')
+                                  .eq('id', result.id)
+                                  .single()
+                                if (data) {
+                                  sub = data as Subcontractor
+                                } else {
+                                  // Create minimal object from result data
+                                  sub = {
+                                    id: result.id,
+                                    name: result.name,
+                                    email: '',
+                                    trade_category: '',
+                                    location: '',
+                                    created_at: '',
+                                    phone: null,
+                                    website_url: null,
+                                    google_review_score: null,
+                                    google_reviews_link: null,
+                                    time_in_business: null,
+                                    jobs_completed: null,
+                                    licensed: null,
+                                    bonded: null,
+                                    notes: null,
+                                    profile_picture_url: null,
+                                    profile_summary: null,
+                                    services: null,
+                                    enrichment_status: null,
+                                    enrichment_updated_at: null,
+                                  }
+                                }
+                              } catch (err) {
+                                console.error('Error fetching subcontractor:', err)
+                                // Create minimal object as fallback
+                                sub = {
+                                  id: result.id,
+                                  name: result.name,
+                                  email: '',
+                                  trade_category: '',
+                                  location: '',
+                                  created_at: '',
+                                  phone: null,
+                                  website_url: null,
+                                  google_review_score: null,
+                                  google_reviews_link: null,
+                                  time_in_business: null,
+                                  jobs_completed: null,
+                                  licensed: null,
+                                  bonded: null,
+                                  notes: null,
+                                  profile_picture_url: null,
+                                  profile_summary: null,
+                                  services: null,
+                                  enrichment_status: null,
+                                  enrichment_updated_at: null,
+                                }
+                              }
+                            }
+                            if (sub) {
+                              fetchEnrichmentDetails(sub)
+                            }
                           }}
                         >
                           <Eye className="h-4 w-4 mr-1" />

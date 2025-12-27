@@ -504,6 +504,20 @@ export async function POST(request: NextRequest) {
 
       if (takeoffError) {
         console.error('Error saving batch takeoff analysis:', takeoffError)
+      } else {
+        // Vectorize takeoff items for semantic search (async, don't wait)
+        if (takeoffAnalysis && planId && mergedResult.items && mergedResult.items.length > 0) {
+          const currentPlanId = planId // Capture for type narrowing
+          Promise.all([
+            import('@/lib/takeoff-item-embeddings'),
+            import('@/lib/plan-chat-v3/retrieval-engine')
+          ]).then(([{ ingestTakeoffItemEmbeddings }, { normalizeTakeoffItems }]) => {
+            const normalizedItems = normalizeTakeoffItems(mergedResult.items)
+            ingestTakeoffItemEmbeddings(supabase, currentPlanId, normalizedItems).catch((error) => {
+              console.error('[TakeoffVectorize] Failed to auto-vectorize takeoff items:', error)
+            })
+          })
+        }
       }
 
       // Update plan status

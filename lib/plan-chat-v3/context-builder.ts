@@ -48,7 +48,9 @@ export interface PlanContext {
       category: string
       quantity?: number | null
       unit?: string | null
+      unit_cost?: number | null
       cost_total?: number | null
+      cost_type?: 'labor' | 'materials' | 'allowance' | 'other' | null
       location?: string | null
       page_number?: number | null
     }>
@@ -87,10 +89,11 @@ export async function buildPlanContext(
   userId: string,
   jobId: string | null,
   classification: PlanChatQuestionClassification,
-  userQuestion: string
+  userQuestion: string,
+  chatId?: string | null
 ): Promise<PlanContext> {
   // 1. Get recent conversation memory
-  const conversationContext = await getRecentConversationContext(supabase, planId, userId, 8)
+  const conversationContext = await getRecentConversationContext(supabase, planId, userId, 8, chatId)
 
   // 2. Perform multi-layer retrieval
   const retrievalResult = await retrieveContext(
@@ -118,7 +121,16 @@ export async function buildPlanContext(
   }
 
   // 4. Build takeoff context
-  const takeoffItems = retrievalResult.takeoff_items.slice(0, 50) // Limit to top 50
+  // For general analysis questions (no targets), include up to 300 items
+  // For targeted queries, limit to top matches to keep context manageable
+  const isGeneralAnalysis = !classification.targets || classification.targets.length === 0 ||
+    classification.question_type === 'TAKEOFF_ANALYZE' ||
+    /(how.*looking|review|analyze|overall|complete|missing|breakdown|estimate.*looking)/i.test(userQuestion)
+  
+  const takeoffItems = isGeneralAnalysis 
+    ? retrievalResult.takeoff_items.slice(0, 300) // Up to 300 items for general analysis
+    : retrievalResult.takeoff_items.slice(0, 50) // Top 50 for targeted queries
+  
   const totalQuantity = takeoffItems.reduce((sum, item) => sum + (item.quantity || 0), 0)
   const totalCost = takeoffItems.reduce((sum, item) => sum + (item.total_cost || 0), 0)
 
@@ -129,12 +141,14 @@ export async function buildPlanContext(
       category: item.category || 'Uncategorized',
       quantity: item.quantity || null,
       unit: item.unit || null,
+      unit_cost: item.unit_cost || null,
       cost_total: item.total_cost || null,
+      cost_type: item.cost_type || null, // 'labor' | 'materials' | 'allowance' | 'other'
       location: item.location || null,
       page_number: item.page_number || null,
     })),
     summary: {
-      total_items: takeoffItems.length,
+      total_items: retrievalResult.takeoff_items.length, // Always show actual total count, not filtered
       total_quantity: totalQuantity > 0 ? totalQuantity : undefined,
       total_cost: totalCost > 0 ? totalCost : undefined,
     },

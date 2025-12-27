@@ -327,7 +327,19 @@ export default function EnhancedPlanViewer() {
           setDrawings(prev => {
             // Merge with existing non-item drawings
             const nonItemDrawings = prev.filter(d => d.type !== 'item')
-            return [...nonItemDrawings, ...items]
+            if (items.length === 0) {
+              return nonItemDrawings
+            }
+            // Deduplicate by ID to prevent duplicates
+            const seenIds = new Set<string>()
+            const uniqueItems = items.filter(item => {
+              if (seenIds.has(item.id)) {
+                return false
+              }
+              seenIds.add(item.id)
+              return true
+            })
+            return [...nonItemDrawings, ...uniqueItems]
           })
         } catch (error) {
           console.error('Error loading items:', error)
@@ -1014,28 +1026,48 @@ export default function EnhancedPlanViewer() {
 
       // Optimistically update UI immediately for better UX
       const tempId = newDrawing.id
+      
+      // Update state and capture the new state for syncing
+      let updatedDrawings: Drawing[]
       if (editingItem) {
         // Update existing item - show immediately
-        setDrawings(prev => prev.map(d => d.id === editingItem.id ? newDrawing : d))
+        updatedDrawings = drawings.map(d => d.id === editingItem.id ? newDrawing : d)
+        setDrawings(updatedDrawings)
       } else {
         // Create new item - show immediately
-        setDrawings(prev => [...prev, newDrawing])
+        updatedDrawings = [...drawings, newDrawing]
+        setDrawings(updatedDrawings)
       }
 
       // Save using item persistence (async, but UI already updated)
       if (itemPersistenceRef.current) {
+        // Use the updated drawings state (not the closure value)
+        const currentItems = updatedDrawings.filter(d => d.type === 'item')
+        
         if (editingItem) {
-          // Update existing item
-          const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItem.id)
-          updatedItems.push(newDrawing)
+          // Update existing item - filter out the old one and add the new one
+          const itemsToSync = currentItems.filter(d => d.id !== editingItem.id)
+          itemsToSync.push(newDrawing)
+          
           // Don't await - let it save in background
-          itemPersistenceRef.current.syncItems(updatedItems).then(savedItems => {
+          itemPersistenceRef.current.syncItems(itemsToSync).then(savedItems => {
             // Update the item with the real database ID if it changed
             const savedItem = savedItems.find(i => i.id === tempId || (editingItem && i.id === editingItem.id))
             if (savedItem && savedItem.id !== tempId) {
-              setDrawings(prev => prev.map(d => 
-                d.id === tempId ? { ...d, id: savedItem.id } : d
-              ))
+              setDrawings(prev => {
+                // Deduplicate by ID to prevent duplicates
+                const seenIds = new Set<string>()
+                return prev.map(d => {
+                  if (d.id === tempId && savedItem.id !== tempId) {
+                    if (seenIds.has(savedItem.id)) return null // Skip if already exists
+                    seenIds.add(savedItem.id)
+                    return { ...d, id: savedItem.id }
+                  }
+                  if (seenIds.has(d.id)) return null // Skip duplicates
+                  seenIds.add(d.id)
+                  return d
+                }).filter((d): d is Drawing => d !== null)
+              })
             }
           }).catch(err => {
             console.error('Error saving item to database:', err)
@@ -1043,10 +1075,11 @@ export default function EnhancedPlanViewer() {
             // For now, we'll keep it visible and let the user retry
           })
         } else {
-          // Create new item
-          const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
+          // Create new item - use current items (which includes the optimistically added one)
+          const itemsToSync = [...currentItems]
+          
           // Don't await - let it save in background
-          itemPersistenceRef.current.syncItems(updatedItems).then(savedItems => {
+          itemPersistenceRef.current.syncItems(itemsToSync).then(savedItems => {
             // Update the item with the real database ID if it changed
             const savedItem = savedItems.find(i => 
               (i.geometry?.x === newDrawing.geometry.x && 
@@ -1055,9 +1088,20 @@ export default function EnhancedPlanViewer() {
               i.id === tempId
             )
             if (savedItem && savedItem.id !== tempId) {
-              setDrawings(prev => prev.map(d => 
-                d.id === tempId ? { ...d, id: savedItem.id } : d
-              ))
+              setDrawings(prev => {
+                // Deduplicate by ID to prevent duplicates
+                const seenIds = new Set<string>()
+                return prev.map(d => {
+                  if (d.id === tempId && savedItem.id !== tempId) {
+                    if (seenIds.has(savedItem.id)) return null // Skip if already exists
+                    seenIds.add(savedItem.id)
+                    return { ...d, id: savedItem.id }
+                  }
+                  if (seenIds.has(d.id)) return null // Skip duplicates
+                  seenIds.add(d.id)
+                  return d
+                }).filter((d): d is Drawing => d !== null)
+              })
             }
           }).catch(err => {
             console.error('Error saving item to database:', err)
@@ -1068,9 +1112,9 @@ export default function EnhancedPlanViewer() {
       } else {
         // Fallback to old method
         if (editingItem) {
-          handleDrawingsChange(drawings.map(d => d.id === editingItem.id ? newDrawing : d))
+          handleDrawingsChange(updatedDrawings)
         } else {
-          handleDrawingsChange([...drawings, newDrawing])
+          handleDrawingsChange(updatedDrawings)
         }
       }
       
@@ -1135,30 +1179,84 @@ export default function EnhancedPlanViewer() {
       }
 
       // Optimistically update UI immediately for better UX
+      const tempId = newDrawing.id
+      
+      // Update state and capture the new state for syncing
+      let updatedDrawings: Drawing[]
       if (editingItemId) {
         // Update existing item - show immediately
-        setDrawings(prev => prev.map(d => d.id === editingItemId ? newDrawing : d))
+        updatedDrawings = drawings.map(d => d.id === editingItemId ? newDrawing : d)
+        setDrawings(updatedDrawings)
       } else {
         // Create new item - show immediately
-        setDrawings(prev => [...prev, newDrawing])
+        updatedDrawings = [...drawings, newDrawing]
+        setDrawings(updatedDrawings)
       }
       
       // Save using item persistence (async, but UI already updated)
       if (itemPersistenceRef.current) {
+        // Use the updated drawings state (not the closure value)
+        const currentItems = updatedDrawings.filter(d => d.type === 'item')
+        
         if (editingItemId) {
-          // Update existing item
-          const updatedItems = drawings.filter(d => d.type === 'item' && d.id !== editingItemId)
-          updatedItems.push(newDrawing)
+          // Update existing item - filter out the old one and add the new one
+          const itemsToSync = currentItems.filter(d => d.id !== editingItemId)
+          itemsToSync.push(newDrawing)
+          
           // Don't await - let it save in background
-          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+          itemPersistenceRef.current.syncItems(itemsToSync).then(savedItems => {
+            // Update the item with the real database ID if it changed
+            const savedItem = savedItems.find(i => i.id === tempId || i.id === editingItemId)
+            if (savedItem && savedItem.id !== tempId) {
+              setDrawings(prev => {
+                // Deduplicate by ID to prevent duplicates
+                const seenIds = new Set<string>()
+                return prev.map(d => {
+                  if (d.id === tempId && savedItem.id !== tempId) {
+                    if (seenIds.has(savedItem.id)) return null // Skip if already exists
+                    seenIds.add(savedItem.id)
+                    return { ...d, id: savedItem.id }
+                  }
+                  if (seenIds.has(d.id)) return null // Skip duplicates
+                  seenIds.add(d.id)
+                  return d
+                }).filter((d): d is Drawing => d !== null)
+              })
+            }
+          }).catch(err => {
             console.error('Error saving item to database:', err)
             // Optionally revert the optimistic update on error
           })
         } else {
-          // Create new item
-          const updatedItems = [...drawings.filter(d => d.type === 'item'), newDrawing]
+          // Create new item - use current items (which includes the optimistically added one)
+          const itemsToSync = [...currentItems]
+          
           // Don't await - let it save in background
-          itemPersistenceRef.current.syncItems(updatedItems).catch(err => {
+          itemPersistenceRef.current.syncItems(itemsToSync).then(savedItems => {
+            // Update the item with the real database ID if it changed
+            const savedItem = savedItems.find(i => 
+              (i.geometry?.x === newDrawing.geometry.x && 
+               i.geometry?.y === newDrawing.geometry.y &&
+               i.pageNumber === newDrawing.pageNumber) ||
+              i.id === tempId
+            )
+            if (savedItem && savedItem.id !== tempId) {
+              setDrawings(prev => {
+                // Deduplicate by ID to prevent duplicates
+                const seenIds = new Set<string>()
+                return prev.map(d => {
+                  if (d.id === tempId && savedItem.id !== tempId) {
+                    if (seenIds.has(savedItem.id)) return null // Skip if already exists
+                    seenIds.add(savedItem.id)
+                    return { ...d, id: savedItem.id }
+                  }
+                  if (seenIds.has(d.id)) return null // Skip duplicates
+                  seenIds.add(d.id)
+                  return d
+                }).filter((d): d is Drawing => d !== null)
+              })
+            }
+          }).catch(err => {
             console.error('Error saving item to database:', err)
             // Optionally revert the optimistic update on error
           })
@@ -1166,9 +1264,9 @@ export default function EnhancedPlanViewer() {
       } else {
         // Fallback to old method
         if (editingItemId) {
-          handleDrawingsChange(drawings.map(d => d.id === editingItemId ? newDrawing : d))
+          handleDrawingsChange(updatedDrawings)
         } else {
-          handleDrawingsChange([...drawings, newDrawing])
+          handleDrawingsChange(updatedDrawings)
         }
       }
       

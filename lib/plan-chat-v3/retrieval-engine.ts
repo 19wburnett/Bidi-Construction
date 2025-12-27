@@ -28,6 +28,7 @@ export interface NormalizedTakeoffItem {
   unit?: string | null
   unit_cost?: number | null
   total_cost?: number | null
+  cost_type?: 'labor' | 'materials' | 'allowance' | 'other' | null
   location?: string | null
   page_number?: number | null
   page_reference?: string | null
@@ -69,7 +70,7 @@ export interface RetrievalResult {
 /**
  * Normalizes takeoff items from various formats
  */
-function normalizeTakeoffItems(raw: any): NormalizedTakeoffItem[] {
+export function normalizeTakeoffItems(raw: any): NormalizedTakeoffItem[] {
   if (!raw) return []
 
   let sourceItems: any[] = []
@@ -185,6 +186,12 @@ function normalizeTakeoffItems(raw: any): NormalizedTakeoffItem[] {
     const unit = coalesceString(item.unit, item.units, item.measure_unit) || null
     const unitCost = parseCurrency(item.unit_cost ?? item.unitCost ?? item.unit_price)
     const totalCost = parseCurrency(item.total_cost ?? item.totalCost ?? item.extended_price)
+    
+    // Extract cost_type if available
+    const costTypeRaw = item.cost_type ?? item.costType ?? item.type
+    const costType = costTypeRaw && ['labor', 'materials', 'allowance', 'other'].includes(costTypeRaw.toLowerCase())
+      ? costTypeRaw.toLowerCase() as 'labor' | 'materials' | 'allowance' | 'other'
+      : null
 
     const notes = coalesceString(item.notes, item.assumptions, item.comments)
 
@@ -198,6 +205,7 @@ function normalizeTakeoffItems(raw: any): NormalizedTakeoffItem[] {
       unit,
       unit_cost: unitCost,
       total_cost: totalCost,
+      cost_type: costType,
       location,
       page_number: pageNumber,
       page_reference: pageReference,
@@ -217,7 +225,34 @@ async function retrieveSemanticChunks(
   limit = 12
 ): Promise<PlanTextChunkRecord[]> {
   try {
-    return await retrievePlanTextChunks(supabase, planId, query, limit)
+    const chunks = await retrievePlanTextChunks(supabase, planId, query, limit)
+    
+    if (chunks.length === 0) {
+      // Check if plan has any chunks at all for better diagnostics
+      const { count } = await supabase
+        .from('plan_text_chunks')
+        .select('id', { count: 'exact', head: true })
+        .eq('plan_id', planId)
+      
+      if (count === 0) {
+        console.warn(`[RetrievalEngine] Plan ${planId} has no text chunks. Ingestion may be needed.`)
+      } else {
+        // Check if chunks exist but don't have embeddings
+        const { count: withEmbeddings } = await supabase
+          .from('plan_text_chunks')
+          .select('id', { count: 'exact', head: true })
+          .eq('plan_id', planId)
+          .not('embedding', 'is', null)
+        
+        if (withEmbeddings === 0) {
+          console.error(`[RetrievalEngine] Plan ${planId} has ${count} chunks but none have embeddings. Re-run ingestion.`)
+        } else {
+          console.warn(`[RetrievalEngine] Plan ${planId} has ${withEmbeddings} chunks with embeddings, but semantic search returned no results for query: "${query.substring(0, 50)}..."`)
+        }
+      }
+    }
+    
+    return chunks
   } catch (error) {
     console.error('[RetrievalEngine] Semantic RAG failed:', error)
     return []
@@ -226,6 +261,7 @@ async function retrieveSemanticChunks(
 
 /**
  * B. Target-Based Retrieval - Find takeoff items matching user targets
+ * HYBRID APPROACH: Uses vector search for semantic queries, keyword matching for exact matches
  */
 export async function findTakeoffItemsByTarget(
   supabase: GenericSupabase,
@@ -250,8 +286,54 @@ export async function findTakeoffItemsByTarget(
 
   const allItems = normalizeTakeoffItems(takeoffRow.items)
 
-  // Fuzzy match against targets
-  const matchedItems = allItems
+  // If no targets specified, return up to 300 items (for general queries like "labor/materials breakdown", "how is it looking", etc.)
+  // These queries need comprehensive takeoff data, but we cap at 300 to avoid overwhelming the context
+  if (!targets || targets.length === 0) {
+    return allItems.slice(0, 300) // Return up to 300 items for general analysis
+  }
+
+  // HYBRID APPROACH: Try vector search first, then keyword matching
+  const queryText = targets.join(' ')
+  
+  // Determine if this is a semantic query (benefits from vector search) vs exact match query
+  // Semantic queries: multi-word, descriptive terms (e.g., "electrical rough-in", "concrete footings")
+  // Exact queries: single category names, specific item names (e.g., "doors", "windows")
+  const isSemanticQuery = queryText.split(/\s+/).length > 1 || 
+                          queryText.length > 15 ||
+                          /(rough|installation|footing|framing|finish)/i.test(queryText)
+  
+  let vectorMatchedIds = new Set<string>()
+  let vectorResults: NormalizedTakeoffItem[] = []
+
+  // Step 1: Try vector search if embeddings exist AND this looks like a semantic query
+  // For exact matches (single word categories), keyword matching is faster and more precise
+  if (isSemanticQuery) {
+    try {
+      const { hasTakeoffItemEmbeddings, retrieveTakeoffItemsByVector } = await import('@/lib/takeoff-item-embeddings')
+      const hasEmbeddings = await hasTakeoffItemEmbeddings(supabase, planId)
+      
+      if (hasEmbeddings) {
+        const vectorMatches = await retrieveTakeoffItemsByVector(supabase, planId, queryText, 30, 0.7)
+        
+        if (vectorMatches.length > 0) {
+          // Map vector results back to actual items
+          const itemMap = new Map(allItems.map(item => [item.id || '', item]))
+          vectorResults = vectorMatches
+            .map(match => itemMap.get(match.takeoff_item_id))
+            .filter((item): item is NormalizedTakeoffItem => item !== undefined)
+          
+          vectorMatchedIds = new Set(vectorResults.map(item => item.id || ''))
+          
+          console.log(`[RetrievalEngine] Vector search found ${vectorResults.length} items for semantic query: "${queryText}"`)
+        }
+      }
+    } catch (vectorError) {
+      console.warn('[RetrievalEngine] Vector search failed, falling back to keyword matching:', vectorError)
+    }
+  }
+
+  // Step 2: Keyword matching (always run as fallback/complement)
+  const keywordMatchedItems = allItems
     .map((item) => {
       const searchText = [
         item.category,
@@ -268,10 +350,40 @@ export async function findTakeoffItemsByTarget(
     })
     .filter(({ score }) => score > 0.4)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 50) // Limit to top 50 matches
     .map(({ item }) => item)
 
-  return matchedItems
+  // Step 3: Combine results intelligently
+  // - If vector search found good results (>= 5 items), prioritize those
+  // - Otherwise, use keyword matches
+  // - Merge both sets, deduplicating by item ID
+  const combinedResults = new Map<string, NormalizedTakeoffItem>()
+  
+  // Add vector results first (higher priority for semantic matches)
+  vectorResults.forEach(item => {
+    if (item.id) {
+      combinedResults.set(item.id, item)
+    }
+  })
+  
+  // Add keyword matches (may include items not found by vector search)
+  keywordMatchedItems.forEach(item => {
+    if (item.id && !combinedResults.has(item.id)) {
+      combinedResults.set(item.id, item)
+    }
+  })
+
+  const finalResults = Array.from(combinedResults.values()).slice(0, 50)
+  
+  // Log which method was used
+  if (vectorResults.length > 0 && keywordMatchedItems.length > 0) {
+    console.log(`[RetrievalEngine] Hybrid search: ${vectorResults.length} vector + ${keywordMatchedItems.length} keyword = ${finalResults.length} unique items`)
+  } else if (vectorResults.length > 0) {
+    console.log(`[RetrievalEngine] Used vector search: ${vectorResults.length} items`)
+  } else {
+    console.log(`[RetrievalEngine] Used keyword matching: ${keywordMatchedItems.length} items`)
+  }
+
+  return finalResults
 }
 
 /**

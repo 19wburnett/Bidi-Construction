@@ -272,6 +272,7 @@ export default function JobDetailPage() {
   const loadJobData = useCallback(async () => {
     try {
       if (!user) {
+        setLoading(false)
         return
       }
 
@@ -281,6 +282,7 @@ export default function JobDetailPage() {
       if (!membership?.job) {
         setJob(null)
         setJobRole(null)
+        setLoading(false)
         return
       }
 
@@ -375,6 +377,13 @@ export default function JobDetailPage() {
       setLoading(false)
     }
   }, [user, jobId, supabase, loadBudgetScenarios, loadAggregatedTakeoffItems])
+
+  // Load job data on mount and when dependencies change
+  useEffect(() => {
+    if (user && jobId) {
+      loadJobData()
+    }
+  }, [user, jobId, loadJobData])
 
   const loadAcceptedBidsWithLineItems = useCallback(async (allBids: any[]) => {
     const acceptedBids = allBids.filter(bid => bid.status === 'accepted')
@@ -687,8 +696,11 @@ export default function JobDetailPage() {
       .slice(0, 5)
   }
 
+  // Check if user can edit this job (any user with access - owner, collaborator, or original creator)
+  const canEditJob = Boolean(jobRole !== null || (job && job.user_id === user?.id))
+
   const openEditDialog = () => {
-    if (!job || (jobRole !== 'owner' && job.user_id !== user?.id)) return
+    if (!job || !canEditJob) return
 
     setEditForm({
       name: job.name || '',
@@ -1217,8 +1229,8 @@ export default function JobDetailPage() {
                 Back to Dashboard
               </Button>
             </Link>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0 flex-1">
                 {/* Job Cover Image Thumbnail */}
                 <div className="flex-shrink-0">
                   {job.cover_image_path ? (
@@ -1237,75 +1249,75 @@ export default function JobDetailPage() {
                     </div>
                   )}
                 </div>
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-900 mb-2">{job.name}</h1>
-                  <div className="flex items-center space-x-4 text-sm text-gray-600">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-3xl font-bold text-gray-900 mb-2 truncate">{job.name}</h1>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600">
                     <div className="flex items-center">
-                      <MapPin className="h-4 w-4 mr-1" />
-                      {job.location}
+                      <MapPin className="h-4 w-4 mr-1 flex-shrink-0" />
+                      <span className="truncate">{job.location}</span>
                     </div>
                     {job.budget_range && (
                       <div className="flex items-center">
-                        <DollarSign className="h-4 w-4 mr-1" />
-                        {job.budget_range}
+                        <DollarSign className="h-4 w-4 mr-1 flex-shrink-0" />
+                        <span className="truncate">{job.budget_range}</span>
                       </div>
                     )}
                     <div className="flex items-center">
-                      <Calendar className="h-4 w-4 mr-1" />
+                      <Calendar className="h-4 w-4 mr-1 flex-shrink-0" />
                       {new Date(job.created_at).toLocaleDateString()}
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="flex items-center space-x-2">
-                {(jobRole === 'owner' || (job.user_id === user?.id)) ? (
-                  <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors hover:opacity-80 ${getStatusColor(job.status)} ${updatingStatus ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                        disabled={updatingStatus}
-                      >
-                        {formatStatus(job.status)}
-                        <ChevronDown className="h-3 w-3" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-56 p-2" align="end">
-                      <div className="space-y-1">
-                        <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">
-                          Change Status
+              <div className="flex items-center space-x-2 flex-shrink-0">
+                {canEditJob ? (
+                  <>
+                    <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium transition-colors hover:opacity-80 ${getStatusColor(job.status)} ${updatingStatus ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                          disabled={updatingStatus}
+                        >
+                          {formatStatus(job.status)}
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-2" align="end">
+                        <div className="space-y-1">
+                          <div className="px-2 py-1.5 text-xs font-semibold text-gray-500 uppercase">
+                            Change Status
+                          </div>
+                          {JOB_STATUSES.map((statusOption) => (
+                            <button
+                              key={statusOption}
+                              onClick={() => handleQuickStatusUpdate(statusOption)}
+                              disabled={updatingStatus || statusOption === job.status}
+                              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                                statusOption === job.status
+                                  ? 'bg-orange-50 text-orange-700 font-medium cursor-default'
+                                  : 'hover:bg-gray-100 text-gray-700 cursor-pointer'
+                              } ${updatingStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span>{formatStatus(statusOption)}</span>
+                                {statusOption === job.status && (
+                                  <Check className="h-4 w-4 text-orange-600" />
+                                )}
+                              </div>
+                            </button>
+                          ))}
                         </div>
-                        {JOB_STATUSES.map((statusOption) => (
-                          <button
-                            key={statusOption}
-                            onClick={() => handleQuickStatusUpdate(statusOption)}
-                            disabled={updatingStatus || statusOption === job.status}
-                            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                              statusOption === job.status
-                                ? 'bg-orange-50 text-orange-700 font-medium cursor-default'
-                                : 'hover:bg-gray-100 text-gray-700 cursor-pointer'
-                            } ${updatingStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span>{formatStatus(statusOption)}</span>
-                              {statusOption === job.status && (
-                                <Check className="h-4 w-4 text-orange-600" />
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                      </PopoverContent>
+                    </Popover>
+                    <Button variant="outline" size="sm" onClick={openEditDialog}>
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit
+                    </Button>
+                  </>
                 ) : (
                   <Badge className={getStatusColor(job.status)}>
                     {formatStatus(job.status)}
                   </Badge>
-                )}
-                {(jobRole === 'owner' || (job.user_id === user?.id)) && (
-                  <Button variant="outline" size="sm" onClick={openEditDialog}>
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit
-                  </Button>
                 )}
               </div>
             </div>
@@ -1439,7 +1451,7 @@ export default function JobDetailPage() {
                 <motion.div variants={staggerItem} className="w-full">
                   <JobTimeline 
                     jobId={jobId} 
-                    canEdit={jobRole === 'owner'}
+                    canEdit={canEditJob}
                     onUpdate={() => {
                       // Refresh any relevant data if needed
                     }}
@@ -1824,7 +1836,7 @@ export default function JobDetailPage() {
                     <div className="h-full overflow-auto">
                       <TakeoffSpreadsheet
                         items={aggregatedTakeoffItems}
-                        editable={jobRole === 'owner' || job.user_id === user?.id}
+                        editable={canEditJob}
                         onItemsChange={handleTakeoffItemsChange}
                         onItemHighlight={(bbox) => {
                           // Find the plan that contains this page

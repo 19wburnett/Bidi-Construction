@@ -324,6 +324,19 @@ async function saveAndReturnResults(
         has_takeoff_analysis: true
       })
       .eq('id', planId)
+    
+    // Vectorize takeoff items for semantic search (async, don't wait)
+    if (takeoffAnalysis && planId && itemsWithIds.length > 0) {
+      Promise.all([
+        import('@/lib/takeoff-item-embeddings'),
+        import('@/lib/plan-chat-v3/retrieval-engine')
+      ]).then(([{ ingestTakeoffItemEmbeddings }, { normalizeTakeoffItems }]) => {
+        const normalizedItems = normalizeTakeoffItems(itemsWithIds)
+        ingestTakeoffItemEmbeddings(supabase, planId, normalizedItems).catch((error) => {
+          console.error('[TakeoffVectorize] Failed to auto-vectorize takeoff items:', error)
+        })
+      })
+    }
   }
   
   // Return response

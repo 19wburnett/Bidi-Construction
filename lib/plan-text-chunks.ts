@@ -186,6 +186,31 @@ export async function ingestPlanTextChunks(
     }
   }
 
+  // Validate that embeddings were created successfully
+  const { data: insertedChunks, error: verifyError } = await supabase
+    .from('plan_text_chunks')
+    .select('id, embedding')
+    .eq('plan_id', planId)
+
+  if (verifyError) {
+    console.warn('[Ingestion] Failed to verify inserted chunks:', verifyError)
+    warnings.push('Could not verify embeddings after insertion')
+  } else if (insertedChunks) {
+    const chunksWithoutEmbeddings = insertedChunks.filter(chunk => !chunk.embedding)
+    if (chunksWithoutEmbeddings.length > 0) {
+      const errorMsg = `${chunksWithoutEmbeddings.length} chunks were inserted without embeddings - they won't be searchable`
+      console.error(`[Ingestion] WARNING: ${errorMsg}`)
+      warnings.push(errorMsg)
+    }
+    
+    const chunksWithEmbeddings = insertedChunks.filter(chunk => chunk.embedding)
+    if (chunksWithEmbeddings.length === 0) {
+      throw new Error('No chunks were created with embeddings. Check AI_GATEWAY_API_KEY and embedding model configuration.')
+    }
+    
+    console.log(`[Ingestion] Successfully created ${chunksWithEmbeddings.length} chunks with embeddings for plan ${planId}`)
+  }
+
   return {
     planId,
     chunkCount: recordsToInsert.length,
@@ -212,6 +237,33 @@ export async function retrievePlanTextChunks(
     return []
   }
 
+  // First, check if plan has any chunks with embeddings
+  const { count, error: countError } = await supabase
+    .from('plan_text_chunks')
+    .select('id', { count: 'exact', head: true })
+    .eq('plan_id', planId)
+    .not('embedding', 'is', null)
+
+  if (countError) {
+    console.error('[Retrieval] Error checking chunks:', countError)
+  }
+
+  if (count === 0 || count === null) {
+    console.warn(`[Retrieval] Plan ${planId} has no chunks with embeddings. Run ingestion first.`)
+    
+    // Check if plan has chunks at all (without embeddings)
+    const { count: totalCount } = await supabase
+      .from('plan_text_chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('plan_id', planId)
+    
+    if (totalCount && totalCount > 0) {
+      console.error(`[Retrieval] Plan ${planId} has ${totalCount} chunks but none have embeddings. Re-run ingestion.`)
+    }
+    
+    return []
+  }
+
   const queryEmbedding = await embedChunks([sanitizedQuery])
   const embeddingVector = queryEmbedding[0]
 
@@ -222,6 +274,7 @@ export async function retrievePlanTextChunks(
   })
 
   if (error) {
+    console.error('[Retrieval] Vector search error:', error)
     throw new Error(error.message || 'Failed to retrieve plan text chunks')
   }
 

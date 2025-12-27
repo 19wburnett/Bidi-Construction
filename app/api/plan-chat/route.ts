@@ -5,6 +5,7 @@ import { buildDeterministicResult } from '@/lib/planChat/deterministicEngine'
 import { generatePlanChatAnswer } from '@/lib/planChat/answerModel'
 import type { PlanTextChunkRecord } from '@/lib/plan-text-chunks'
 import { generateAnswer } from '@/lib/plan-chat-v3'
+import { updateChatTitleIfNeeded } from '@/lib/plan-chat-v3/chat-title-generator'
 
 type ChatHistoryMessage = {
   role: 'user' | 'assistant'
@@ -284,27 +285,58 @@ const normalizeTakeoffItems = (raw: any): NormalizedTakeoffItem[] => {
 }
 
 function summarizeCategories(items: NormalizedTakeoffItem[]): TakeoffSummaryCategory[] {
-  const totals = new Map<string, { total: number; unit?: string }>()
+  // Group by category AND unit to avoid mixing incompatible units (e.g., SF + LF)
+  const totals = new Map<string, { total: number; unit: string; itemCount: number }>()
 
   for (const item of items) {
     const category = item.category || 'Uncategorized'
     const quantityValue = item.quantity ?? null
+    const unit = (item.unit || '').trim().toLowerCase()
 
-    if (quantityValue !== null && Number.isFinite(quantityValue)) {
-      const current = totals.get(category) || { total: 0, unit: item.unit || undefined }
-      totals.set(category, {
+    // Only process items with valid quantities
+    if (quantityValue !== null && Number.isFinite(quantityValue) && quantityValue > 0) {
+      // Normalize unit: treat empty/null as 'units', normalize common variations
+      const normalizedUnit = unit || 'units'
+      
+      // Use composite key: "category|unit" to separate different units within same category
+      const key = `${category}|${normalizedUnit}`
+      const current = totals.get(key) || { total: 0, unit: normalizedUnit, itemCount: 0 }
+      
+      totals.set(key, {
         total: current.total + quantityValue,
-        unit: current.unit || (item.unit ?? undefined),
+        unit: current.unit,
+        itemCount: current.itemCount + 1,
       })
     }
   }
 
-  return Array.from(totals.entries())
+  // For each category, show the unit type with the most items (most representative)
+  // If tied, prefer the one with the largest total
+  const categoryGroups = new Map<string, { totalQuantity: number; unit: string; itemCount: number }>()
+  
+  for (const [key, value] of totals.entries()) {
+    const [category] = key.split('|')
+    const existing = categoryGroups.get(category)
+    
+    // Prefer the entry with more items, or if equal, the larger total
+    if (!existing || 
+        value.itemCount > existing.itemCount ||
+        (value.itemCount === existing.itemCount && value.total > existing.totalQuantity)) {
+      categoryGroups.set(category, {
+        totalQuantity: value.total,
+        unit: value.unit,
+        itemCount: value.itemCount,
+      })
+    }
+  }
+
+  return Array.from(categoryGroups.entries())
     .map(([category, value]) => ({
       category,
-      totalQuantity: Number.isFinite(value.total) ? value.total : 0,
-      unit: value.unit ?? null,
+      totalQuantity: Number.isFinite(value.totalQuantity) ? value.totalQuantity : 0,
+      unit: value.unit !== 'units' ? value.unit : null,
     }))
+    .filter(item => item.totalQuantity > 0) // Only show categories with valid totals
     .sort((a, b) => b.totalQuantity - a.totalQuantity)
 }
 
@@ -1072,12 +1104,24 @@ export async function GET(request: NextRequest) {
 
   const categories = summarizeCategories(context.takeoff.items).slice(0, 5)
 
+  // Get chatId from query params if provided
+  const chatId = request.nextUrl.searchParams.get('chatId')
+
   // Load chat history from database
-  const { data: chatMessages, error: chatError } = await supabase
+  let query = supabase
     .from('plan_chat_messages')
     .select('id, role, content, created_at')
     .eq('plan_id', planId)
     .eq('user_id', user.id)
+  
+  if (chatId) {
+    query = query.eq('chat_id', chatId)
+  } else {
+    // If no chatId, get messages without chat_id (legacy) or most recent chat
+    query = query.is('chat_id', null)
+  }
+  
+  const { data: chatMessages, error: chatError } = await query
     .order('created_at', { ascending: true })
 
   if (chatError) {
@@ -1095,7 +1139,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  let payload: { jobId?: string; planId?: string; messages?: ChatHistoryMessage[] } = {}
+  let payload: { jobId?: string; planId?: string; messages?: ChatHistoryMessage[]; model?: string; chatId?: string } = {}
 
   try {
     payload = await request.json()
@@ -1103,7 +1147,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 })
   }
 
-  const { jobId, planId, messages } = payload
+  const { jobId, planId, messages, model, chatId } = payload
 
   if (!jobId || !planId || !Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json(
@@ -1156,6 +1200,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No user message found' }, { status: 400 })
   }
 
+  // Get or create chat session
+  let activeChatId = chatId || null
+  if (!activeChatId) {
+    // Create a new chat session if none provided
+    const { data: newSession, error: sessionError } = await supabase
+      .from('plan_chat_sessions')
+      .insert({
+        job_id: jobId,
+        plan_id: planId,
+        user_id: user.id,
+        title: latestUserMessage.content.substring(0, 50) || `Chat ${new Date().toLocaleDateString()}`,
+      })
+      .select()
+      .single()
+
+    if (!sessionError && newSession) {
+      activeChatId = newSession.id
+    }
+  }
+
   try {
     // Use V3 system (can be toggled with environment variable)
     const useV3 = process.env.PLAN_CHAT_V3_ENABLED !== 'false' // Default to true
@@ -1167,7 +1231,9 @@ export async function POST(request: NextRequest) {
         planId,
         user.id,
         jobId,
-        latestUserMessage.content
+        latestUserMessage.content,
+        model,
+        activeChatId
       )
 
       // Also save to legacy plan_chat_messages table for backward compatibility
@@ -1176,6 +1242,7 @@ export async function POST(request: NextRequest) {
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
+          chat_id: activeChatId,
           role: 'user',
           content: latestUserMessage.content,
         })
@@ -1184,6 +1251,7 @@ export async function POST(request: NextRequest) {
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
+          chat_id: activeChatId,
           role: 'assistant',
           content: result.answer,
         })
@@ -1192,10 +1260,18 @@ export async function POST(request: NextRequest) {
         // Don't fail the request if DB save fails
       }
 
+      // Generate/update chat title if needed (async, don't wait)
+      if (activeChatId) {
+        updateChatTitleIfNeeded(supabase, activeChatId, user.id).catch((error) => {
+          console.error('[PlanChatV3] Failed to update chat title:', error)
+        })
+      }
+
       return NextResponse.json({
         reply: result.answer,
         mode: result.mode,
         metadata: result.metadata,
+        chatId: activeChatId,
       })
     } else {
       // V2: Legacy system (kept for backward compatibility)
@@ -1215,7 +1291,7 @@ export async function POST(request: NextRequest) {
       // Stage 3: Generate answer
       // Get last 3 messages for context
       const recentMessages = sanitizedHistory.slice(-3)
-      const answer = await generatePlanChatAnswer(deterministicResult, recentMessages)
+      const answer = await generatePlanChatAnswer(deterministicResult, recentMessages, model)
 
       // Save messages to database
       try {
@@ -1224,6 +1300,7 @@ export async function POST(request: NextRequest) {
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
+          chat_id: activeChatId,
           role: 'user',
           content: latestUserMessage.content,
         })
@@ -1233,6 +1310,7 @@ export async function POST(request: NextRequest) {
           plan_id: planId,
           user_id: user.id,
           job_id: jobId,
+          chat_id: activeChatId,
           role: 'assistant',
           content: answer,
         })
@@ -1241,7 +1319,14 @@ export async function POST(request: NextRequest) {
         // Don't fail the request if DB save fails
       }
 
-      return NextResponse.json({ reply: answer })
+      // Generate/update chat title if needed (async, don't wait)
+      if (activeChatId) {
+        updateChatTitleIfNeeded(supabase, activeChatId, user.id).catch((error) => {
+          console.error('[PlanChat] Failed to update chat title:', error)
+        })
+      }
+
+      return NextResponse.json({ reply: answer, chatId: activeChatId })
     }
   } catch (error) {
     console.error('[PlanChat] Plan Chat completion failed:', error)
