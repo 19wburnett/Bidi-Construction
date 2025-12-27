@@ -66,7 +66,7 @@ export const metadata: Metadata = {
         url: '/brand/Bidi%20Contracting%20Logo.svg',
         width: 1200,
         height: 630,
-        alt: 'BIDI Construction Platform',
+        alt: 'Bidi Contracting Platform',
       },
     ],
   },

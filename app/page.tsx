@@ -54,7 +54,7 @@ export default function HomePage() {
         data={{
           '@context': 'https://schema.org',
           '@type': 'LocalBusiness',
-          name: 'BIDI Construction',
+          name: 'Bidi Contracting',
           description: 'AI-powered construction estimating and automated bid management platform serving General Contractors across the United States.',
           url: process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com',
           areaServed: {

@@ -12,7 +12,7 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const defaultData = {
     '@context': 'https://schema.org',
     '@type': type,
-    name: 'BIDI Construction',
+    name: 'Bidi Contracting',
     alternateName: 'BIDI',
     url: baseUrl,
     logo: `${baseUrl}/brand/Bidi%20Contracting%20Logo.svg`,
@@ -57,7 +57,7 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const softwareAppData = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'BIDI Construction Platform',
+    name: 'Bidi Contracting Platform',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web Browser',
     offers: {
@@ -77,7 +77,7 @@ export function StructuredData({ type = 'Organization', data }: StructuredDataPr
   const websiteData = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: 'BIDI Construction',
+    name: 'Bidi Contracting',
     url: baseUrl,
     potentialAction: {
       '@type': 'SearchAction',

@@ -23,7 +23,7 @@ export const homepageMetadata: Metadata = {
     title: 'BIDI - AI-Powered Construction Estimating & Bid Management',
     description: 'AI-powered construction estimating and automated bid management platform. From automated plan analysis to final bid delivery - we handle everything for General Contractors.',
     url: baseUrl,
-    siteName: 'BIDI Construction',
+    siteName: 'Bidi Contracting',
     locale: 'en_US',
     type: 'website',
   },
