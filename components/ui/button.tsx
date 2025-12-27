@@ -24,10 +24,10 @@ const buttonVariants = cva(
         construction: "bg-white border-2 border-gray-300 text-gray-900 hover:border-gray-400 font-medium",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
+        default: "h-10 sm:h-10 px-4 py-2 min-h-[44px] sm:min-h-[40px]",
+        sm: "h-9 sm:h-9 rounded-md px-3 min-h-[44px] sm:min-h-[36px]",
+        lg: "h-11 sm:h-11 rounded-md px-6 sm:px-8 py-3 sm:py-2 min-h-[44px] sm:min-h-[44px]",
+        icon: "h-10 w-10 sm:h-10 sm:w-10 min-h-[44px] min-w-[44px] sm:min-h-[40px] sm:min-w-[40px]",
       },
     },
     defaultVariants: {

@@ -6,10 +6,10 @@ import { MapPin, Loader2 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 // Dynamically import Leaflet components to avoid SSR issues
-const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
-const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
-const Rectangle = dynamic(() => import('react-leaflet').then(mod => mod.Rectangle), { ssr: false })
-const Circle = dynamic(() => import('react-leaflet').then(mod => mod.Circle), { ssr: false })
+const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false }) as any
+const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false }) as any
+const Rectangle = dynamic(() => import('react-leaflet').then(mod => mod.Rectangle), { ssr: false }) as any
+const Circle = dynamic(() => import('react-leaflet').then(mod => mod.Circle), { ssr: false }) as any
 
 // Import Leaflet CSS
 import 'leaflet/dist/leaflet.css'

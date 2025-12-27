@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import { useAuth } from '@/app/providers'
+import { createClient } from '@/lib/supabase'
 
 interface PortfolioPhoto {
   id: string
@@ -47,11 +48,13 @@ export default function SubcontractorProfilePage() {
   const params = useParams()
   const { user } = useAuth()
   const subcontractorId = params.id as string
+  const supabase = createClient()
 
   const [subcontractor, setSubcontractor] = useState<Subcontractor | null>(null)
   const [photos, setPhotos] = useState<PortfolioPhoto[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
     if (!subcontractorId) return
@@ -101,7 +104,34 @@ export default function SubcontractorProfilePage() {
   }
 
   // Check if user is admin (for upload permissions)
-  const isAdmin = user?.is_admin || false
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user) {
+        setIsAdmin(false)
+        return
+      }
+
+      try {
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+
+        if (error) {
+          console.error('Error checking admin status:', error)
+          setIsAdmin(false)
+        } else {
+          setIsAdmin(userData?.is_admin || false)
+        }
+      } catch (err) {
+        console.error('Error checking admin status:', err)
+        setIsAdmin(false)
+      }
+    }
+
+    checkAdminStatus()
+  }, [user, supabase])
 
   if (loading) {
     return (

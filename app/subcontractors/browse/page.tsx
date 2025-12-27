@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import PublicLayout from '@/components/public-layout'
@@ -27,7 +27,7 @@ interface Subcontractor {
   profile_picture_url?: string | null
 }
 
-export default function BrowseSubcontractorsPage() {
+function BrowseSubcontractorsPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   
@@ -345,3 +345,16 @@ export default function BrowseSubcontractorsPage() {
   )
 }
 
+export default function BrowseSubcontractorsPage() {
+  return (
+    <Suspense fallback={
+      <PublicLayout>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <FallingBlocksLoader text="Loading..." size="md" />
+        </div>
+      </PublicLayout>
+    }>
+      <BrowseSubcontractorsPageContent />
+    </Suspense>
+  )
+}

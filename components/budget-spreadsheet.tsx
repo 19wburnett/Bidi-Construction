@@ -982,8 +982,8 @@ export default function BudgetSpreadsheet({
 
       {/* Table */}
       <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
+        <div className="overflow-x-auto overscroll-x-contain -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full border-collapse min-w-[800px] sm:min-w-0">
             <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-20">
               <tr>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>

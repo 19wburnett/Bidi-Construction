@@ -30,7 +30,7 @@ const Dialog = ({ open, onOpenChange, children }: DialogProps) => {
         onClick={() => onOpenChange(false)}
         style={{ pointerEvents: 'auto' }}
       />
-      <div className="relative z-[100000] w-full flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="relative z-[100000] w-full flex items-center justify-center p-2 sm:p-4" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -45,7 +45,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
     return (
       <div
         ref={ref}
-        className={`bg-white shadow-2xl rounded-lg ${className}`}
+        className={`bg-white dark:bg-gray-900 shadow-2xl rounded-lg w-full max-w-full sm:max-w-lg md:max-w-2xl lg:max-w-4xl max-h-[90vh] sm:max-h-[85vh] overflow-y-auto mx-4 sm:mx-0 ${className}`}
         {...props}
       >
         {children}
@@ -88,10 +88,10 @@ const DialogClose = React.forwardRef<
 >(({ className = "", ...props }, ref) => (
   <button
     ref={ref}
-    className={`absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:pointer-events-none ${className}`}
+    className={`absolute right-2 sm:right-4 top-2 sm:top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:pointer-events-none touch-target p-2 ${className}`}
     {...props}
   >
-    <X className="h-4 w-4" />
+    <X className="h-5 w-5 sm:h-4 sm:w-4" />
     <span className="sr-only">Close</span>
   </button>
 ))

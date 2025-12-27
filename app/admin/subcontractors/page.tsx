@@ -806,7 +806,8 @@ The Bidi Team`
     references: null,
     licensed: null,
     bonded: null,
-    notes: ''
+    notes: '',
+    profile_picture_url: null
   })
 
   const validateEmail = (value: string) => {

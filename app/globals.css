@@ -378,3 +378,61 @@
   }
 }
 
+/* Mobile and Tablet Responsive Utilities */
+@layer utilities {
+  /* Touch-friendly minimum sizes */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Mobile-safe text sizes */
+  .text-mobile-safe {
+    font-size: clamp(0.875rem, 2.5vw, 1rem);
+  }
+
+  /* Responsive container padding */
+  .container-mobile {
+    @apply px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Mobile table wrapper */
+  .table-mobile-wrapper {
+    @apply -mx-4 sm:mx-0;
+    @apply overflow-x-auto;
+    @apply overscroll-x-contain;
+  }
+
+  /* Mobile-friendly modal */
+  .modal-mobile {
+    @apply w-full max-w-full sm:max-w-lg md:max-w-2xl;
+    @apply mx-0 sm:mx-4;
+    @apply max-h-[90vh] sm:max-h-[85vh];
+  }
+
+  /* Responsive grid that stacks on mobile */
+  .grid-responsive {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4;
+  }
+
+  /* Hide on mobile, show on tablet+ */
+  .hide-mobile {
+    @apply hidden sm:block;
+  }
+
+  /* Show only on mobile */
+  .show-mobile {
+    @apply block sm:hidden;
+  }
+
+  /* Responsive spacing */
+  .space-responsive {
+    @apply space-y-4 sm:space-y-6 lg:space-y-8;
+  }
+
+  /* Mobile-friendly button groups */
+  .button-group-mobile {
+    @apply flex flex-col sm:flex-row gap-2 sm:gap-3;
+  }
+}
+

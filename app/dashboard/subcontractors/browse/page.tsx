@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import DashboardNavbar from '@/components/dashboard-navbar'
 import { Card, CardContent } from '@/components/ui/card'
@@ -29,7 +29,7 @@ interface Subcontractor {
   profile_picture_url?: string | null
 }
 
-export default function DashboardBrowseSubcontractorsPage() {
+function DashboardBrowseSubcontractorsPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user } = useAuth()
@@ -537,6 +537,7 @@ export default function DashboardBrowseSubcontractorsPage() {
         {selectedSubcontractorId && (
           <SubcontractorProfileModal
             subcontractorId={selectedSubcontractorId}
+            isOpen={!!selectedSubcontractorId}
             onClose={() => setSelectedSubcontractorId(null)}
           />
         )}
@@ -545,3 +546,17 @@ export default function DashboardBrowseSubcontractorsPage() {
   )
 }
 
+export default function DashboardBrowseSubcontractorsPage() {
+  return (
+    <Suspense fallback={
+      <>
+        <DashboardNavbar title="Browse Subcontractors" />
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <FallingBlocksLoader text="Loading..." size="md" />
+        </div>
+      </>
+    }>
+      <DashboardBrowseSubcontractorsPageContent />
+    </Suspense>
+  )
+}
