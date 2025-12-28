@@ -125,3 +125,4 @@ CREATE TRIGGER update_takeoff_embedding_timestamp
   EXECUTE FUNCTION update_takeoff_embedding_timestamp();
 
 
+

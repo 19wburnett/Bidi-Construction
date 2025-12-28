@@ -286,12 +286,15 @@ export async function POST(request: NextRequest) {
           reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
         }
 
-        const { data: resendData, error: resendError } = await resend.emails.send(emailData)
+        const { data, error: resendError } = await resend.emails.send(emailData)
 
         if (resendError) {
           errors.push({ subcontractor: sub.email, error: resendError.message })
           continue
         }
+
+        // Type as any to access message_id which may exist at runtime but not in types
+        const resendData: any = data
 
         // Create recipient record
         const [source, id] = subId.includes(':') ? subId.split(':') : ['gc', subId]
@@ -325,6 +328,9 @@ export async function POST(request: NextRequest) {
         })
         
         console.log(`📧 [send] Creating recipient record for ${sub.email} in package ${bidPackageId}`)
+        // Get Message-ID from Resend response for threading
+        const messageId = resendData?.message_id || (resendData?.id ? `<${resendData.id}@resend.dev>` : null)
+        
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
           .insert({
@@ -333,6 +339,7 @@ export async function POST(request: NextRequest) {
             subcontractor_email: sub.email,
             subcontractor_name: sub.name,
             resend_email_id: resendData?.id,
+            message_id: messageId || null, // Store Message-ID for threading
             status: 'sent',
             sent_at: new Date().toISOString(),
             thread_id: threadId,

@@ -45,3 +45,4 @@ CREATE INDEX IF NOT EXISTS plan_text_chunks_embedding_null_idx
 COMMENT ON INDEX plan_text_chunks_embedding_null_idx IS 'Helps quickly identify plans with chunks missing embeddings';
 
 
+

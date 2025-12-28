@@ -1276,7 +1276,8 @@ async function handleInboundEmail(body: any) {
             bid_id: null,
             thread_id: originalRecipient.thread_id || finalThreadId,
             parent_email_id: originalRecipient.id,
-            resend_email_id: emailId || null // Store email_id for later content fetching
+            resend_email_id: emailId || null, // Store email_id for later content fetching
+            message_id: replyInfo.messageId || null // Store actual Message-ID for threading
           })
           .select()
           .single()
@@ -1346,6 +1347,7 @@ async function handleInboundEmail(body: any) {
             thread_id: finalThreadId,
             parent_email_id: finalParentId,
             resend_email_id: emailId || null, // Store email_id for later content fetching
+            message_id: replyInfo.messageId || null, // Store actual Message-ID for threading
             is_from_gc: false // Explicitly mark as subcontractor-sent email
           })
         .select()

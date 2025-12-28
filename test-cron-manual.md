@@ -127,3 +127,4 @@ Note: This won't work in production due to CRON_SECRET requirement.
 To test specific categories, you can temporarily modify the `selectTradeCategoriesForDay` function in the route file, or modify the rotation logic to always return specific categories for testing.
 
 
+
