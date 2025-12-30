@@ -126,3 +126,5 @@ CREATE TRIGGER update_takeoff_embedding_timestamp
 
 
 
+
+

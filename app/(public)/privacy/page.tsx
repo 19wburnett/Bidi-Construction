@@ -43,6 +43,18 @@ export default function PrivacyPolicyPage() {
               <li><strong>Log Data:</strong> Access times, error logs, and system performance data</li>
               <li><strong>Cookies and Tracking:</strong> We use cookies and similar technologies to enhance your experience</li>
             </ul>
+
+            <h3 className="text-xl font-semibold text-black dark:text-white mt-6 mb-3">2.3 Google User Data</h3>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              If you choose to sign in using Google OAuth, we access the following information from your Google account:
+            </p>
+            <ul className="list-disc pl-6 text-gray-700 dark:text-gray-300 mb-4 space-y-2">
+              <li><strong>Basic Profile Information:</strong> Your name and email address</li>
+              <li><strong>Profile Picture:</strong> Your Google profile picture (if available)</li>
+            </ul>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              <strong>Important:</strong> We do not access, read, or store any data from your Gmail account. All email functionality in our application is handled through Resend, a third-party email service provider. We do not use the Gmail API or access any Gmail messages, attachments, or other Gmail data.
+            </p>
           </section>
 
           <section className="mb-8">
@@ -59,6 +71,25 @@ export default function PrivacyPolicyPage() {
               <li>Send marketing communications (with your consent)</li>
               <li>Comply with legal obligations and enforce our terms</li>
             </ul>
+
+            <h3 className="text-xl font-semibold text-black dark:text-white mt-6 mb-3">3.1 How We Use Google User Data</h3>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              Google user data accessed through OAuth authentication is used solely for the following purposes:
+            </p>
+            <ul className="list-disc pl-6 text-gray-700 dark:text-gray-300 mb-4 space-y-2">
+              <li><strong>Account Creation and Authentication:</strong> To create and authenticate your user account on our platform</li>
+              <li><strong>Profile Setup:</strong> To pre-populate your profile with your name and email address from your Google account</li>
+              <li><strong>Account Management:</strong> To identify you when you sign in and maintain your account information</li>
+            </ul>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              <strong>Data Storage:</strong> The Google user data we access (name, email, profile picture) is stored securely in our database and is subject to the same security measures and retention policies as other user data described in this Privacy Policy.
+            </p>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              <strong>Data Sharing:</strong> We do not share Google user data with third parties except as described in Section 4 (How We Share Your Information). We do not use Google user data for advertising purposes or transfer it to third parties for their use.
+            </p>
+            <p className="text-gray-700 dark:text-gray-300 mb-4">
+              <strong>Data Access Limitations:</strong> We only access the minimum Google user data necessary to provide authentication services. We do not request or access any additional Google user data beyond basic profile information (name, email, profile picture).
+            </p>
           </section>
 
           <section className="mb-8">

@@ -12,3 +12,5 @@ WHERE message_id IS NOT NULL;
 -- Add a comment explaining the column
 COMMENT ON COLUMN bid_package_recipients.message_id IS 'The actual Message-ID header from the email (e.g., <uuid@resend.dev> or Gmail Message-ID). Used for proper email threading via In-Reply-To and References headers.';
 
+
+
