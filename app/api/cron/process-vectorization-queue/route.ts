@@ -58,9 +58,23 @@ export async function GET(request: NextRequest) {
 
     console.log(`📋 Found ${pendingJobs.length} pending job(s)`)
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:3000'
+    // Determine the base URL for internal API calls
+    // In Vercel, we can use the request URL or environment variables
+    const vercelUrl = process.env.VERCEL_URL
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL
+    
+    let baseUrl: string
+    if (appUrl) {
+      baseUrl = appUrl
+    } else if (vercelUrl) {
+      baseUrl = `https://${vercelUrl}`
+    } else {
+      // Fallback: try to construct from request
+      const url = new URL(request.url)
+      baseUrl = `${url.protocol}//${url.host}`
+    }
+    
+    console.log(`🌐 Using base URL: ${baseUrl}`)
 
     // Process each job
     const results = await Promise.allSettled(
@@ -68,34 +82,81 @@ export async function GET(request: NextRequest) {
         try {
           console.log(`🚀 Processing vectorization job ${job.id} for plan ${job.plan_id}`)
           
-          // Call the process endpoint
-          const response = await fetch(`${baseUrl}/api/plan-vectorization/process`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queueJobId: job.id }),
-          })
+          const processUrl = `${baseUrl}/api/plan-vectorization/process`
+          console.log(`📡 Calling process endpoint: ${processUrl}`)
+          
+          // Call the process endpoint with timeout
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10 minute timeout
+          
+          try {
+            const response = await fetch(processUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ queueJobId: job.id }),
+              signal: controller.signal,
+            })
+            
+            clearTimeout(timeoutId)
 
-          if (!response.ok) {
-            const error = await response.json().catch(() => ({ error: 'Unknown error' }))
-            throw new Error(error.error || `HTTP ${response.status}`)
+            if (!response.ok) {
+              let errorDetails: any = { error: `HTTP ${response.status}` }
+              try {
+                const errorBody = await response.json()
+                errorDetails = errorBody
+              } catch (e) {
+                const text = await response.text().catch(() => '')
+                errorDetails = { error: `HTTP ${response.status}`, details: text || 'No error body' }
+              }
+              
+              console.error(`❌ Job ${job.id} HTTP error:`, errorDetails)
+              throw new Error(errorDetails.error || errorDetails.details || `HTTP ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log(`✅ Job ${job.id} completed: ${result.chunkCount || 0} chunks created`)
+            
+            return {
+              jobId: job.id,
+              planId: job.plan_id,
+              success: true,
+              chunkCount: result.chunkCount,
+            }
+          } catch (fetchError) {
+            clearTimeout(timeoutId)
+            
+            if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+              throw new Error('Request timeout after 10 minutes')
+            }
+            throw fetchError
           }
-
-          const result = await response.json()
-          console.log(`✅ Job ${job.id} completed: ${result.chunkCount || 0} chunks created`)
+        } catch (error) {
+          const errorMessage = error instanceof Error 
+            ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ''}`
+            : String(error)
+          
+          console.error(`❌ Job ${job.id} failed:`, errorMessage)
+          
+          // Try to update the job status in the database
+          try {
+            await supabase
+              .from('plan_vectorization_queue')
+              .update({
+                status: 'failed',
+                error_message: error instanceof Error ? error.message : String(error),
+                completed_at: new Date().toISOString(),
+              })
+              .eq('id', job.id)
+          } catch (updateError) {
+            console.error(`❌ Failed to update job ${job.id} status:`, updateError)
+          }
           
           return {
             jobId: job.id,
             planId: job.plan_id,
-            success: true,
-            chunkCount: result.chunkCount,
-          }
-        } catch (error) {
-          console.error(`❌ Job ${job.id} failed:`, error)
-          return {
-            jobId: job.id,
-            planId: job.plan_id,
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error instanceof Error ? error.message : String(error),
+            errorDetails: error instanceof Error ? error.stack : undefined,
           }
         }
       })

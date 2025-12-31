@@ -81,7 +81,15 @@ export async function POST(request: NextRequest) {
       warnings: result.warnings,
     })
   } catch (error) {
-    console.error('[VectorizationProcess] Processing failed:', error)
+    const errorMessage = error instanceof Error 
+      ? `${error.name}: ${error.message}`
+      : String(error)
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    console.error('[VectorizationProcess] Processing failed:', errorMessage)
+    if (errorStack) {
+      console.error('[VectorizationProcess] Error stack:', errorStack)
+    }
     
     // Update job status to failed
     try {
@@ -89,7 +97,7 @@ export async function POST(request: NextRequest) {
         .from('plan_vectorization_queue')
         .update({
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Unknown error',
+          error_message: error instanceof Error ? error.message : String(error),
           completed_at: new Date().toISOString(),
         })
         .eq('id', queueJobId)
@@ -100,7 +108,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'Vectorization processing failed',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.name : typeof error,
       },
       { status: 500 }
     )
@@ -151,9 +160,18 @@ async function ingestPlanTextChunksWithProgress(
       warnings: result.warnings,
     }
   } catch (error) {
+    const errorMessage = error instanceof Error 
+      ? `${error.name}: ${error.message}`
+      : String(error)
+    
+    console.error('[VectorizationProcess] ingestPlanTextChunksWithProgress error:', errorMessage)
+    if (error instanceof Error && error.stack) {
+      console.error('[VectorizationProcess] Error stack:', error.stack)
+    }
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error instanceof Error ? error.message : String(error),
     }
   }
 }

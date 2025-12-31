@@ -389,6 +389,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
       const payload: { reply: string; chatId?: string; metadata?: { wasVectorizing?: boolean } } = await response.json()
       
+      // Validate that reply exists
+      if (!payload.reply || typeof payload.reply !== 'string') {
+        throw new Error('Invalid response: missing or invalid reply')
+      }
+      
       // Remove vectorization message and add the actual response
       setMessages((prev) => {
         const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
@@ -499,6 +504,12 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
                 if (retryResponse.ok) {
                   const retryPayload = await retryResponse.json()
+                  
+                  // Validate that reply exists
+                  if (!retryPayload.reply || typeof retryPayload.reply !== 'string') {
+                    throw new Error('Invalid response: missing or invalid reply')
+                  }
+                  
                   const assistantMessage: PlanChatMessage = {
                     id: `assistant-${Date.now()}`,
                     role: 'assistant',

@@ -278,6 +278,11 @@ export default function ChatPage() {
 
       const payload: { reply: string; chatId?: string } = await response.json()
       
+      // Validate that reply exists
+      if (!payload.reply || typeof payload.reply !== 'string') {
+        throw new Error('Invalid response: missing or invalid reply')
+      }
+      
       // Update selected chat ID if a new one was created
       if (payload.chatId && payload.chatId !== selectedChatId) {
         setSelectedChatId(payload.chatId)

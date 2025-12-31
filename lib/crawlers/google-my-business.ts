@@ -1,6 +1,3 @@
-import puppeteer from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
-
 export async function crawlGoogleMyBusiness(
   tradeCategory: string, 
   location: string, 
@@ -12,8 +9,25 @@ export async function crawlGoogleMyBusiness(
   let browser
   
   try {
-    // Use serverless-compatible Chromium in production, regular Puppeteer in development
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1'
+    // Determine environment
+    const isVercel = process.env.VERCEL === '1'
+    const isAwsLambda = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT)
+    
+    // Dynamically import puppeteer based on environment
+    let puppeteer: any
+    let chromium: any
+    
+    if (isAwsLambda && !isVercel) {
+      // AWS Lambda: use puppeteer-core with @sparticuz/chromium
+      const puppeteerCoreModule = await import('puppeteer-core')
+      puppeteer = puppeteerCoreModule.default || puppeteerCoreModule
+      const chromiumModule = await import('@sparticuz/chromium')
+      chromium = chromiumModule.default || chromiumModule
+    } else {
+      // Vercel or development: use regular puppeteer (bundles Chromium)
+      const puppeteerModule = await import('puppeteer')
+      puppeteer = puppeteerModule.default || puppeteerModule
+    }
     
     const launchOptions: any = {
       headless: true,
@@ -31,10 +45,11 @@ export async function crawlGoogleMyBusiness(
       ]
     }
     
-    // Use Chromium binary for serverless environments
-    if (isProduction) {
+    // Only use @sparticuz/chromium on AWS Lambda (not Vercel)
+    if (isAwsLambda && !isVercel && chromium) {
       launchOptions.executablePath = await chromium.executablePath()
     }
+    // On Vercel, puppeteer will use its bundled Chromium
     
     browser = await puppeteer.launch(launchOptions)
     
@@ -196,11 +211,24 @@ export async function crawlGoogleMyBusiness(
       }
     }
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Google Maps crawler error:', error)
+    
+    // Provide helpful error message for common issues
+    if (error?.message?.includes('libnss3.so') || error?.message?.includes('shared libraries')) {
+      console.error('⚠️ Chromium system library error. This usually means @sparticuz/chromium is being used on an incompatible platform (like Vercel).')
+      console.error('💡 Solution: The code should automatically use regular puppeteer on Vercel. If this error persists, consider using a headless browser service API.')
+    } else if (error?.message?.includes('Failed to launch')) {
+      console.error('⚠️ Browser launch failed. This might be due to missing dependencies or function size limits on Vercel.')
+      console.error('💡 Consider using a headless browser service API for production.')
+    }
   } finally {
     if (browser) {
-      await browser.close()
+      try {
+        await browser.close()
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError)
+      }
     }
   }
   
