@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { Resend } from 'resend'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
+import { getResendClient } from '@/lib/resend-client'
 
 export async function POST(request: NextRequest) {
   try {
@@ -76,6 +74,7 @@ export async function POST(request: NextRequest) {
 
     // Send email notification
     try {
+      const resend = getResendClient()
       const { data, error } = await resend.emails.send({
         from: 'BIDI <noreply@savewithbidi.com>',
         to: userEmail,

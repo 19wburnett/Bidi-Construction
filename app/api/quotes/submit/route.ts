@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { Resend } from 'resend'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
+import { getResendClient } from '@/lib/resend-client'
 
 /**
  * Send email notification to admin users about a new quote request
@@ -18,6 +16,8 @@ async function sendAdminQuoteNotification(
   workDescription: string,
   knownPricing: any
 ) {
+  const resend = getResendClient()
+
   // Get all admin email addresses - check both role = 'admin' OR is_admin = true
   const { data: admins, error: adminError } = await supabase
     .from('users')

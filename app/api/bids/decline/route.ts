@@ -1,8 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
+import { getResendClient } from '@/lib/resend-client'
 
 export async function POST(request: NextRequest) {
   try {
@@ -151,9 +149,10 @@ export async function POST(request: NextRequest) {
     let emailError = null
     if (sendEmail) {
       try {
+        const resend = getResendClient()
         // Handle subcontractors - can be object or array depending on query
-        const subcontractor = Array.isArray(bid.subcontractors) 
-          ? bid.subcontractors[0] 
+        const subcontractor = Array.isArray(bid.subcontractors)
+          ? bid.subcontractors[0]
           : bid.subcontractors
         const gcContact = Array.isArray(bid.gc_contacts) 
           ? bid.gc_contacts[0] 

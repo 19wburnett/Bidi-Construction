@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { generateReminderEmail, generateReminderSubject } from '@/lib/email-templates/reminder'
+import { getResendClient } from '@/lib/resend-client'
 
 export const runtime = 'nodejs'
 // Allow up to 5 minutes for the cron job to complete
 export const maxDuration = 300
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 // Default reminder schedule: 3 days, then 7 days
 const DEFAULT_REMINDER_DAYS = [3, 7]
@@ -39,6 +37,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('🔔 Starting reminder cron job...')
+    const resend = getResendClient()
     const supabase = await createServerSupabaseClient()
     const now = new Date()
     

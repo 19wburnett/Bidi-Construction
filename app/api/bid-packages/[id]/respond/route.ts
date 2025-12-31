@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { getResendClient } from '@/lib/resend-client'
 
 export const runtime = 'nodejs'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 if (!process.env.RESEND_API_KEY) {
   console.error('RESEND_API_KEY is not set in environment variables')
@@ -43,6 +41,7 @@ export async function POST(
     }
 
     const supabase = await createServerSupabaseClient()
+    const resend = getResendClient()
 
     // Verify user owns this bid package
     const { data: bidPackage, error: packageError } = await supabase

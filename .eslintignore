@@ -1,0 +1,10 @@
+node_modules/
+.next/
+public/
+supabase/
+types/supabase.ts
+md/
+prompts/
+scripts/
+tests/
+**/*.min.js
