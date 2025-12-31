@@ -12,46 +12,117 @@ export async function crawlGoogleMyBusiness(
     // Determine environment
     const isVercel = process.env.VERCEL === '1'
     const isAwsLambda = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT)
+    const browserlessApiKey = process.env.BROWSERLESS_API_KEY
+    const browserlessUrl = process.env.BROWSERLESS_URL || process.env.BROWSERLESS_WS_ENDPOINT
     
     // Dynamically import puppeteer based on environment
     let puppeteer: any
     let chromium: any
     
-    if (isAwsLambda && !isVercel) {
+    // Check if we should use a headless browser service (recommended for Vercel)
+    if ((browserlessApiKey || browserlessUrl) && isVercel) {
+      // Use headless browser service on Vercel
+      const puppeteerCoreModule = await import('puppeteer-core')
+      puppeteer = puppeteerCoreModule.default || puppeteerCoreModule
+      
+      // Construct WebSocket endpoint from API key or use provided URL
+      let wsEndpoint: string
+      if (browserlessApiKey) {
+        // Use API key to construct the WebSocket URL (simpler approach)
+        // Default to production-sfo endpoint, but allow override via BROWSERLESS_ENDPOINT
+        const endpoint = process.env.BROWSERLESS_ENDPOINT || 'production-sfo.browserless.io'
+        wsEndpoint = `wss://${endpoint}?token=${browserlessApiKey}`
+        console.log(`🔗 Connecting to Browserless.io using API key (endpoint: ${endpoint})`)
+      } else if (browserlessUrl) {
+        // Use provided WebSocket URL (for custom setups)
+        wsEndpoint = browserlessUrl.startsWith('ws://') || browserlessUrl.startsWith('wss://') 
+          ? browserlessUrl 
+          : `wss://${browserlessUrl.replace(/^https?:\/\//, '')}`
+        console.log(`🔗 Connecting to Browserless.io using custom URL`)
+      } else {
+        throw new Error('BROWSERLESS_API_KEY or BROWSERLESS_URL must be set')
+      }
+      
+      try {
+        browser = await puppeteer.connect({
+          browserWSEndpoint: wsEndpoint,
+          defaultViewport: { width: 1920, height: 1080 }
+        })
+        console.log('✅ Connected to headless browser service')
+      } catch (connectError: any) {
+        throw new Error(
+          `Failed to connect to browser service at ${wsEndpoint.replace(/\?token=[^&]+/, '?token=***')}. ` +
+          `Error: ${connectError.message}. ` +
+          `Please verify your BROWSERLESS_API_KEY or BROWSERLESS_URL is correct and the service is accessible.`
+        )
+      }
+    } else if (isAwsLambda && !isVercel) {
       // AWS Lambda: use puppeteer-core with @sparticuz/chromium
       const puppeteerCoreModule = await import('puppeteer-core')
       puppeteer = puppeteerCoreModule.default || puppeteerCoreModule
       const chromiumModule = await import('@sparticuz/chromium')
       chromium = chromiumModule.default || chromiumModule
+      
+      const launchOptions: any = {
+        headless: true,
+        args: [
+          '--no-sandbox', 
+          '--disable-setuid-sandbox',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=VizDisplayCompositor',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ]
+      }
+      
+      if (chromium) {
+        launchOptions.executablePath = await chromium.executablePath()
+      }
+      
+      browser = await puppeteer.launch(launchOptions)
     } else {
-      // Vercel or development: use regular puppeteer (bundles Chromium)
-      const puppeteerModule = await import('puppeteer')
-      puppeteer = puppeteerModule.default || puppeteerModule
+      // Development or Vercel without browser service: try regular puppeteer
+      // Note: This may not work on Vercel due to Chrome not being available
+      try {
+        const puppeteerModule = await import('puppeteer')
+        puppeteer = puppeteerModule.default || puppeteerModule
+        
+        const launchOptions: any = {
+          headless: true,
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+          ]
+        }
+        
+        browser = await puppeteer.launch(launchOptions)
+      } catch (puppeteerError: any) {
+        // If puppeteer fails (e.g., Chrome not found on Vercel), provide helpful error
+        if (isVercel) {
+        throw new Error(
+          'Puppeteer cannot find Chrome on Vercel. Please set up a headless browser service:\n' +
+          '1. Sign up for Browserless.io at https://www.browserless.io/\n' +
+          '2. Get your API key from the dashboard\n' +
+          '3. Set BROWSERLESS_API_KEY environment variable in Vercel\n' +
+          '   (or use BROWSERLESS_URL with full WebSocket URL)\n' +
+          '4. Alternatively, move the crawler to AWS Lambda or a dedicated server'
+        )
+        }
+        throw puppeteerError
+      }
     }
-    
-    const launchOptions: any = {
-      headless: true,
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu'
-      ]
-    }
-    
-    // Only use @sparticuz/chromium on AWS Lambda (not Vercel)
-    if (isAwsLambda && !isVercel && chromium) {
-      launchOptions.executablePath = await chromium.executablePath()
-    }
-    // On Vercel, puppeteer will use its bundled Chromium
-    
-    browser = await puppeteer.launch(launchOptions)
     
     const page = await browser.newPage()
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
@@ -217,15 +288,27 @@ export async function crawlGoogleMyBusiness(
     // Provide helpful error message for common issues
     if (error?.message?.includes('libnss3.so') || error?.message?.includes('shared libraries')) {
       console.error('⚠️ Chromium system library error. This usually means @sparticuz/chromium is being used on an incompatible platform (like Vercel).')
-      console.error('💡 Solution: The code should automatically use regular puppeteer on Vercel. If this error persists, consider using a headless browser service API.')
-    } else if (error?.message?.includes('Failed to launch')) {
-      console.error('⚠️ Browser launch failed. This might be due to missing dependencies or function size limits on Vercel.')
-      console.error('💡 Consider using a headless browser service API for production.')
+      console.error('💡 Solution: Set BROWSERLESS_URL environment variable to use a headless browser service.')
+    } else if (error?.message?.includes('Failed to launch') || error?.message?.includes('Could not find Chrome')) {
+      console.error('⚠️ Browser launch failed. Chrome is not available on Vercel serverless functions.')
+      console.error('💡 Solution: Set BROWSERLESS_API_KEY environment variable in Vercel:')
+      console.error('   - Sign up at https://www.browserless.io/')
+      console.error('   - Get your API key from the dashboard')
+      console.error('   - Add BROWSERLESS_API_KEY to your Vercel environment variables')
+      console.error('   - Alternatively, set BROWSERLESS_URL with full WebSocket URL')
+    } else if (error?.message?.includes('headless browser service')) {
+      // Error message already contains instructions
+      console.error(error.message)
     }
   } finally {
     if (browser) {
       try {
-        await browser.close()
+        // Check if browser is connected (from browser service) or launched (local)
+        if ('disconnect' in browser && typeof browser.disconnect === 'function') {
+          await browser.disconnect()
+        } else {
+          await browser.close()
+        }
       } catch (closeError) {
         console.error('Error closing browser:', closeError)
       }

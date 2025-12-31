@@ -149,7 +149,18 @@ async function ingestPlanTextChunksWithProgress(
 
     // Run vectorization (this will handle the actual work)
     // For large PDFs, this may take several minutes
+    console.log(`[VectorizationProcess] Starting vectorization for plan ${planId}`)
     const result = await ingestPlanTextChunks(supabase, planId)
+    
+    console.log(`[VectorizationProcess] Vectorization complete: ${result.chunkCount} chunks, ${result.pageCount} pages`)
+    
+    if (result.chunkCount === 0) {
+      console.warn(`[VectorizationProcess] WARNING: No chunks created for plan ${planId}. This may indicate an issue with the PDF or text extraction.`)
+    }
+    
+    if (result.warnings && result.warnings.length > 0) {
+      console.warn(`[VectorizationProcess] Warnings:`, result.warnings)
+    }
 
     await updateProgress(supabase, queueJobId, 90, 'Finalizing vectorization...')
 

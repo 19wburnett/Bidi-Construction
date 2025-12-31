@@ -65,7 +65,8 @@ export async function GET(request: NextRequest) {
     
     let baseUrl: string
     if (appUrl) {
-      baseUrl = appUrl
+      // Remove trailing slash if present
+      baseUrl = appUrl.replace(/\/$/, '')
     } else if (vercelUrl) {
       baseUrl = `https://${vercelUrl}`
     } else {

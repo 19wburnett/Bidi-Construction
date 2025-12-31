@@ -170,6 +170,20 @@ export async function ingestPlanTextChunks(
   console.log(`[Vectorization] Created ${chunkCandidates.length} text chunks from ${pageTexts.length} pages`)
 
   if (chunkCandidates.length === 0) {
+    console.warn(`[Vectorization] WARNING: No chunks created for plan ${planId}. This may indicate:`)
+    console.warn(`  - No text was extracted from the PDF (${pageCount} pages processed)`)
+    console.warn(`  - Text extraction failed or PDF is image-only`)
+    console.warn(`  - Chunking function returned empty results`)
+    
+    if (pageCount === 0) {
+      warnings.push('No pages found in PDF file')
+    } else if (pageTexts.length === 0) {
+      warnings.push(`PDF has ${pageCount} pages but no text was extracted`)
+    } else {
+      const totalTextLength = pageTexts.reduce((sum, page) => sum + (page.text?.length || 0), 0)
+      warnings.push(`PDF has ${pageTexts.length} pages with text, but chunking produced no chunks (total text length: ${totalTextLength} chars)`)
+    }
+    
     await supabase.from('plan_text_chunks').delete().eq('plan_id', planId)
     return {
       planId,
