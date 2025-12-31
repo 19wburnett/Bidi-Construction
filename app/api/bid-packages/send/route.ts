@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
 import { generateBidRequestEmail, generateBidRequestSubject } from '@/lib/email-templates/bid-request'
+import { getResendClient } from '@/lib/resend-client'
 
 export const runtime = 'nodejs'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 interface SendRequest {
   bidPackageId: string
@@ -37,6 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createServerSupabaseClient()
+    const resend = getResendClient()
 
     // Get bid package details (including deadline field)
     const { data: bidPackage, error: packageError } = await supabase

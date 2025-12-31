@@ -1,24 +1,9 @@
 import type { Metadata } from 'next'
-import { Saira_Stencil_One, Barlow } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
 import { Providers } from './providers'
 import AuthErrorBoundary from '@/components/auth-error-boundary'
 import { StructuredData } from '@/components/structured-data'
-
-const sairaStencilOne = Saira_Stencil_One({ 
-  weight: '400',
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-saira-stencil',
-})
-
-const barlow = Barlow({ 
-  weight: ['400', '500', '600', '700'],
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-barlow',
-})
 
 export const metadata: Metadata = {
   title: {
@@ -102,7 +87,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={`${barlow.variable} ${sairaStencilOne.variable}`} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="geo.region" content="US" />
@@ -113,7 +98,7 @@ export default function RootLayout({
         <meta name="revisit-after" content="7 days" />
         <link rel="canonical" href={process.env.NEXT_PUBLIC_APP_URL || 'https://bidicontracting.com'} />
       </head>
-      <body className={barlow.className} suppressHydrationWarning>
+      <body className="font-barlow" suppressHydrationWarning>
         <StructuredData type="Organization" />
         <StructuredData type="SoftwareApplication" />
         <StructuredData type="WebSite" />

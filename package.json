@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint --ext .js,.ts,.tsx ./app ./components ./lib ./types ./index.ts ./proxy.ts ./instrumentation-client.ts",
     "postinstall": "node update-pdf-worker.js"
   },
   "dependencies": {

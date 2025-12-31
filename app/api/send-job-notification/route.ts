@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { getResendClient } from '@/lib/resend-client'
 
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,6 +43,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Send notification email to admin
+    const resend = getResendClient()
     const { data, error } = await resend.emails.send({
       from: 'BIDI <noreply@savewithbidi.com>',
       to: ['savewithbidi@gmail.com'],

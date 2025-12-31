@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { createClient } from '@supabase/supabase-js'
-import { Resend } from 'resend'
 import OpenAI from 'openai'
 import { cleanEmailContent } from '@/lib/email-content-cleaner'
 // @ts-ignore - pdf2json doesn't have TypeScript types
@@ -13,11 +12,15 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const fetchCache = 'force-no-store'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+
+  return new OpenAI({ apiKey })
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +34,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('📧 Resend webhook payload:', JSON.stringify(body, null, 2))
     console.log('Event type:', body.type)
+
+    const resendApiKey = process.env.RESEND_API_KEY
+    if (!resendApiKey) {
+      console.error('RESEND_API_KEY is not set in environment variables')
+      return NextResponse.json(
+        { error: 'RESEND_API_KEY is not configured' },
+        { status: 500 }
+      )
+    }
 
     const eventType = body.type
 
@@ -77,10 +89,16 @@ export async function POST(request: NextRequest) {
 async function handleOutboundEvent(body: any) {
   // Use service role to bypass RLS for webhook operations
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!serviceRoleKey) {
-    console.error('❌ SUPABASE_SERVICE_ROLE_KEY not configured')
-    return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
-  }
+    if (!serviceRoleKey) {
+      console.error('❌ SUPABASE_SERVICE_ROLE_KEY not configured')
+      return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
+    }
+
+    const resendApiKey = process.env.RESEND_API_KEY
+    if (!resendApiKey) {
+      console.error('RESEND_API_KEY is not set in environment variables')
+      return NextResponse.json({ error: 'RESEND_API_KEY is not configured' }, { status: 500 })
+    }
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -362,6 +380,12 @@ async function handleInboundEmail(body: any) {
     return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
   }
 
+    const resendApiKey = process.env.RESEND_API_KEY
+    if (!resendApiKey) {
+      console.error('RESEND_API_KEY is not set in environment variables')
+      return NextResponse.json({ error: 'RESEND_API_KEY is not configured' }, { status: 500 })
+    }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     serviceRoleKey,
@@ -419,7 +443,7 @@ async function handleInboundEmail(body: any) {
       // Use direct API call to Receiving API endpoint
       const response = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
         headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Authorization': `Bearer ${resendApiKey}`,
           'Content-Type': 'application/json'
         }
       })
@@ -660,7 +684,7 @@ async function handleInboundEmail(body: any) {
       // For receiving emails, use /emails/receiving/{emailId}/attachments endpoint
       const listResponse = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
         headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Authorization': `Bearer ${resendApiKey}`,
           'Content-Type': 'application/json'
         }
       })
@@ -1386,11 +1410,12 @@ async function handleInboundEmail(body: any) {
   })
 }
 
-async function detectClarifyingQuestions(emailContent: string): Promise<{ hasQuestions: boolean; questions: string[] }> {
-  try {
-    const prompt = `
-    Analyze this email from a subcontractor and detect if they are asking clarifying questions.
-    Return ONLY a JSON object with this structure:
+  async function detectClarifyingQuestions(emailContent: string): Promise<{ hasQuestions: boolean; questions: string[] }> {
+    try {
+      const openai = getOpenAIClient()
+      const prompt = `
+      Analyze this email from a subcontractor and detect if they are asking clarifying questions.
+      Return ONLY a JSON object with this structure:
     {
       "hasQuestions": true or false,
       "questions": ["question 1", "question 2", ...] or []
@@ -1526,11 +1551,12 @@ async function createNotification(
   }
 }
 
-async function parseBidWithAI(emailContent: string, senderEmail: string, tradeCategory: string): Promise<string> {
-  try {
-    const prompt = `
-    Analyze this email from a subcontractor responding to a ${tradeCategory} job opportunity.
-    Provide a concise summary of their bid response.
+  async function parseBidWithAI(emailContent: string, senderEmail: string, tradeCategory: string): Promise<string> {
+    try {
+      const openai = getOpenAIClient()
+      const prompt = `
+      Analyze this email from a subcontractor responding to a ${tradeCategory} job opportunity.
+      Provide a concise summary of their bid response.
 
     Email content:
     ${emailContent}
@@ -1555,11 +1581,12 @@ async function parseBidWithAI(emailContent: string, senderEmail: string, tradeCa
   }
 }
 
-async function extractBidData(emailContent: string, senderEmail: string) {
-  try {
-    const prompt = `
-    Extract structured bid information from this subcontractor email response.
-    Return ONLY a JSON object with these fields (use null if not found):
+  async function extractBidData(emailContent: string, senderEmail: string) {
+    try {
+      const openai = getOpenAIClient()
+      const prompt = `
+      Extract structured bid information from this subcontractor email response.
+      Return ONLY a JSON object with these fields (use null if not found):
     {
       "companyName": "string or null",
       "phone": "string or null", 
@@ -1698,13 +1725,14 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   })
 }
 
-/**
- * Parse bid PDF with AI to extract line items and bid data
- */
-async function parseBidPDFWithAI(extractedText: string, fileName: string, tradeCategory: string): Promise<any> {
-  const systemPrompt = `You are an expert at parsing construction bids and quotes from subcontractors.
+  /**
+   * Parse bid PDF with AI to extract line items and bid data
+   */
+  async function parseBidPDFWithAI(extractedText: string, fileName: string, tradeCategory: string): Promise<any> {
+    const openai = getOpenAIClient()
+    const systemPrompt = `You are an expert at parsing construction bids and quotes from subcontractors.
 
-Your task is to extract structured data from the bid document text provided.
+  Your task is to extract structured data from the bid document text provided.
 
 EXTRACTION RULES:
 1. LINE ITEMS: Parse each line item carefully:
@@ -1799,11 +1827,12 @@ ${extractedText}`
   }
 }
 
-async function extractCategorizedNotes(emailContent: string, tradeCategory: string) {
-  try {
-    const prompt = `
-    Analyze this subcontractor email and extract any specific notes, requirements, concerns, or suggestions mentioned.
-    Focus on construction-related details that would be useful for project planning.
+  async function extractCategorizedNotes(emailContent: string, tradeCategory: string) {
+    try {
+      const openai = getOpenAIClient()
+      const prompt = `
+      Analyze this subcontractor email and extract any specific notes, requirements, concerns, or suggestions mentioned.
+      Focus on construction-related details that would be useful for project planning.
     
     Return ONLY a JSON array of note objects. Each note should have:
     {

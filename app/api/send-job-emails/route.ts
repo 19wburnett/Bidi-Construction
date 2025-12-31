@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { getResendClient } from '@/lib/resend-client'
 
 // Use Node.js runtime for Supabase compatibility
 export const runtime = 'nodejs'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +27,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createServerSupabaseClient()
+    const resend = getResendClient()
 
     // Get job request details
     const { data: jobRequest, error: jobError } = await supabase

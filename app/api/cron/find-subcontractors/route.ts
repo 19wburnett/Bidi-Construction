@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { TRADE_CATEGORIES } from '@/lib/trade-types'
 import { crawlGoogleMyBusiness } from '@/lib/crawlers/google-my-business'
+import { getResendClient } from '@/lib/resend-client'
 
 export const runtime = 'nodejs'
 // Allow up to 5 minutes for the cron job to complete
 export const maxDuration = 300
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 /**
  * Cron endpoint for automatically finding new subcontractors
@@ -37,6 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('🔍 Starting subcontractor discovery cron job...')
+    const resend = getResendClient()
     const supabase = await createServerSupabaseClient()
     
     // Get trade categories to search today using day of year rotation
@@ -329,6 +328,8 @@ async function sendAdminNotification(
   skippedCount: number,
   errorCount: number
 ): Promise<void> {
+  const resend = getResendClient()
+
   // Get all admin email addresses - check both role = 'admin' OR is_admin = true
   const { data: admins, error: adminError } = await supabase
     .from('users')
