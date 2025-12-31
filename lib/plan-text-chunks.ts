@@ -78,8 +78,11 @@ export async function ingestPlanTextChunks(
   const pdfBuffer = await downloadPlanPdf(supabase, plan.file_path)
 
   // Step 1: Try regular text extraction first (for native PDFs)
+  // For large PDFs, this is done page by page to avoid memory issues
   let pageTexts = await extractTextPerPage(pdfBuffer)
   const pageCount = pageTexts.length
+  
+  console.log(`[Vectorization] Extracted text from ${pageCount} pages`)
 
   const warnings: string[] = []
 
@@ -138,18 +141,33 @@ export async function ingestPlanTextChunks(
 
   const sheetIndexByPage = await loadSheetMetadataByPage(supabase, planId)
 
+  // Step 3: Chunk the text (for large PDFs, this is done in batches)
   const chunkCandidates: RawChunkCandidate[] = []
-  pageTexts.forEach((page, pageIndex) => {
-    const sheetMeta = sheetIndexByPage.get(page.pageNumber)
-    const pageChunks = chunkPageText(page.text, {
-      planId,
-      pageNumber: page.pageNumber,
-      pageIndex,
-      sheetMeta,
-      totalPages: pageTexts.length,
+  const chunkBatchSize = 50 // Process 50 pages at a time for very large PDFs
+  
+  for (let i = 0; i < pageTexts.length; i += chunkBatchSize) {
+    const batch = pageTexts.slice(i, i + chunkBatchSize)
+    batch.forEach((page, batchIndex) => {
+      const pageIndex = i + batchIndex
+      const sheetMeta = sheetIndexByPage.get(page.pageNumber)
+      const pageChunks = chunkPageText(page.text, {
+        planId,
+        pageNumber: page.pageNumber,
+        pageIndex,
+        sheetMeta,
+        totalPages: pageTexts.length,
+      })
+      chunkCandidates.push(...pageChunks)
     })
-    chunkCandidates.push(...pageChunks)
-  })
+    
+    // Log progress for large PDFs
+    if (pageTexts.length > 100) {
+      const progress = Math.round(((i + batch.length) / pageTexts.length) * 100)
+      console.log(`[Vectorization] Chunking progress: ${progress}% (${i + batch.length}/${pageTexts.length} pages)`)
+    }
+  }
+  
+  console.log(`[Vectorization] Created ${chunkCandidates.length} text chunks from ${pageTexts.length} pages`)
 
   if (chunkCandidates.length === 0) {
     await supabase.from('plan_text_chunks').delete().eq('plan_id', planId)
@@ -161,7 +179,21 @@ export async function ingestPlanTextChunks(
     }
   }
 
-  const embeddings = await embedChunks(chunkCandidates.map((chunk) => chunk.snippet_text))
+  // For large PDFs, process embeddings in batches to avoid memory issues
+  const batchSize = 50 // Process 50 chunks at a time
+  const embeddings: number[][] = []
+  
+  for (let i = 0; i < chunkCandidates.length; i += batchSize) {
+    const batch = chunkCandidates.slice(i, i + batchSize)
+    const batchEmbeddings = await embedChunks(batch.map((chunk) => chunk.snippet_text))
+    embeddings.push(...batchEmbeddings)
+    
+    // Log progress for large PDFs
+    if (chunkCandidates.length > 100) {
+      const progress = Math.round(((i + batch.length) / chunkCandidates.length) * 100)
+      console.log(`[Vectorization] Embedding progress: ${progress}% (${i + batch.length}/${chunkCandidates.length} chunks)`)
+    }
+  }
 
   // Delete existing chunks first to keep ingestion idempotent
   const { error: deleteError } = await supabase.from('plan_text_chunks').delete().eq('plan_id', planId)

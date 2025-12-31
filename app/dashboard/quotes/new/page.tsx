@@ -141,6 +141,16 @@ export default function NewQuoteRequestPage() {
         throw new Error('Failed to create plan record')
       }
 
+      // Queue plan text chunk vectorization for RAG context (background job)
+      // This runs automatically when plans are uploaded, so they're ready for chat
+      if (plan.id) {
+        import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
+          queuePlanVectorization(plan.id, systemJobId, 5).catch((err) => {
+            console.error('Background vectorization queue trigger failed:', err)
+          })
+        })
+      }
+
       // Parse known pricing (try to parse as JSON, otherwise store as text)
       let knownPricingJson: any = null
       if (formData.knownPricing.trim()) {

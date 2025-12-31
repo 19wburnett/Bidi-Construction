@@ -52,7 +52,7 @@ interface ChatSession {
 }
 
 interface ChatErrorState {
-  type: 'missing-takeoff' | 'request-failed' | 'unauthorized' | 'unknown'
+  type: 'missing-takeoff' | 'request-failed' | 'unauthorized' | 'unknown' | 'vectorization-failed'
   message: string
   details?: string
 }
@@ -93,6 +93,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isVectorizing, setIsVectorizing] = useState(false)
+  const [vectorizationProgress, setVectorizationProgress] = useState<number | null>(null)
   const [status, setStatus] = useState<ChatStatusResponse | null>(null)
   const [error, setError] = useState<ChatErrorState | null>(null)
   const [missingTakeoff, setMissingTakeoff] = useState(false)
@@ -276,10 +278,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
   async function handleSendMessage() {
     const trimmed = input.trim()
-    if (!trimmed || isSending || !canChat) return
+    if (!trimmed || isSending || !canChat || isVectorizing) return
 
     setError(null)
     setIsSending(true)
+    setIsVectorizing(true) // Start vectorization loading state
     setInput('')
 
     const newMessage: PlanChatMessage = {
@@ -289,6 +292,14 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     }
 
     setMessages((prev) => [...prev, newMessage])
+
+    // Add vectorization message
+    const vectorizationMessage: PlanChatMessage = {
+      id: `vectorizing-${Date.now()}`,
+      role: 'assistant',
+      content: 'Processing plans for AI... This may take a moment.',
+    }
+    setMessages((prev) => [...prev, vectorizationMessage])
 
     try {
       const response = await fetch('/api/plan-chat', {
@@ -326,10 +337,63 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
+        
+        // Handle vectorization queued/in progress (202 Accepted)
+        if (response.status === 202 && (payload?.error === 'VECTORIZATION_QUEUED' || payload?.error === 'VECTORIZATION_IN_PROGRESS')) {
+          const queueJobId = payload.queueJobId
+          const progress = payload.progress || 0
+          
+          // Update vectorization message with progress
+          setMessages((prev) => {
+            const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+            const progressMessage: PlanChatMessage = {
+              id: `vectorizing-${Date.now()}`,
+              role: 'assistant',
+              content: progress > 0 
+                ? `Processing plans for AI... ${progress}% complete. This may take a few minutes for large plans.`
+                : 'Processing plans for AI... This may take a few minutes for large plans. You can close this page and come back later.',
+            }
+            return [...filtered, progressMessage]
+          })
+          
+          // Poll for completion
+          pollVectorizationStatus(planId, queueJobId, trimmed)
+          return
+        }
+        
+        // Handle vectorization failure
+        if (response.status === 500 && payload?.error === 'VECTORIZATION_FAILED') {
+          // Remove vectorization message
+          setMessages((prev) => prev.filter((msg) => !msg.id.startsWith('vectorizing-')))
+          
+          const errorMessage = payload.message || 'Failed to prepare the plan for chat. Please try again in a moment.'
+          
+          const assistantMessage: PlanChatMessage = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: errorMessage,
+          }
+          setMessages((prev) => [...prev, assistantMessage])
+          setError({
+            type: 'vectorization-failed',
+            message: errorMessage,
+            details: payload.vectorizationStatus 
+              ? `Chunks: ${payload.vectorizationStatus.chunkCount || 0}, Embeddings: ${payload.vectorizationStatus.embeddingCount || 0}`
+              : 'Unknown error',
+          })
+          return
+        }
+        
         throw new Error(payload.error || 'Failed to get a response from Plan Chat')
       }
 
-      const payload: { reply: string; chatId?: string } = await response.json()
+      const payload: { reply: string; chatId?: string; metadata?: { wasVectorizing?: boolean } } = await response.json()
+      
+      // Remove vectorization message and add the actual response
+      setMessages((prev) => {
+        const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+        return filtered
+      })
       
       // Update selected chat ID if a new one was created
       if (payload.chatId && payload.chatId !== selectedChatId) {
@@ -351,16 +415,144 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
       }, 2000)
     } catch (err) {
       console.error('Plan Chat request failed', err)
+      // Remove vectorization message on error
+      setMessages((prev) => {
+        const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+        return filtered.filter((message) => message.id !== newMessage.id)
+      })
+      setInput(trimmed)
       setError({
         type: 'request-failed',
         message: 'Plan Chat ran into an issue. Try again in a moment.',
         details: err instanceof Error ? err.message : String(err),
       })
-      setMessages((prev) => prev.filter((message) => message.id !== newMessage.id))
-      setInput(trimmed)
     } finally {
       setIsSending(false)
+      setIsVectorizing(false)
     }
+  }
+
+  // Poll for vectorization status
+  async function pollVectorizationStatus(planId: string, queueJobId: string, originalMessage: string, maxAttempts = 60) {
+    let attempts = 0
+    const pollInterval = 3000 // Poll every 3 seconds
+
+    const poll = async () => {
+      if (attempts >= maxAttempts) {
+        // Timeout after 3 minutes
+        setMessages((prev) => {
+          const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+          const timeoutMessage: PlanChatMessage = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: 'Vectorization is taking longer than expected. Please try again in a few minutes.',
+          }
+          return [...filtered, timeoutMessage]
+        })
+        setIsVectorizing(false)
+        setVectorizationProgress(null)
+        return
+      }
+
+      attempts++
+
+      try {
+        const response = await fetch(`/api/plan-vectorization/queue?planId=${planId}&jobId=${jobId}`)
+        if (response.ok) {
+          const job = await response.json()
+          
+          setVectorizationProgress(job.progress || 0)
+          
+          // Update progress message
+          setMessages((prev) => {
+            const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+            const progressMessage: PlanChatMessage = {
+              id: `vectorizing-${Date.now()}`,
+              role: 'assistant',
+              content: job.status === 'completed'
+                ? 'Vectorization complete! Processing your question...'
+                : `Processing plans for AI... ${job.progress || 0}% complete${job.current_step ? ` (${job.current_step})` : ''}. This may take a few minutes for large plans.`,
+            }
+            return [...filtered, progressMessage]
+          })
+
+          if (job.status === 'completed') {
+            setIsVectorizing(false)
+            setVectorizationProgress(null)
+            // Remove vectorization message and retry the original request
+            setMessages((prev) => prev.filter((msg) => !msg.id.startsWith('vectorizing-')))
+            
+            // Retry the chat request with the original message
+            setTimeout(async () => {
+              try {
+                const retryResponse = await fetch('/api/plan-chat', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jobId,
+                    planId,
+                    messages: [{ role: 'user', content: originalMessage }],
+                    model: selectedModel,
+                    chatId: selectedChatId,
+                  }),
+                })
+
+                if (retryResponse.ok) {
+                  const retryPayload = await retryResponse.json()
+                  const assistantMessage: PlanChatMessage = {
+                    id: `assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: retryPayload.reply.trim(),
+                  }
+                  setMessages((prev) => [...prev, assistantMessage])
+                } else {
+                  throw new Error('Failed to get response after vectorization')
+                }
+              } catch (retryError) {
+                console.error('Error retrying after vectorization:', retryError)
+                const errorMessage: PlanChatMessage = {
+                  id: `assistant-${Date.now()}`,
+                  role: 'assistant',
+                  content: 'Vectorization completed, but there was an error processing your question. Please try again.',
+                }
+                setMessages((prev) => [...prev, errorMessage])
+              } finally {
+                setIsSending(false)
+              }
+            }, 1000)
+            return
+          }
+
+          if (job.status === 'failed') {
+            setMessages((prev) => {
+              const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
+              const errorMessage: PlanChatMessage = {
+                id: `assistant-${Date.now()}`,
+                role: 'assistant',
+                content: job.error_message || 'Vectorization failed. Please try again.',
+              }
+              return [...filtered, errorMessage]
+            })
+            setIsVectorizing(false)
+            setVectorizationProgress(null)
+            return
+          }
+
+          // Continue polling
+          setTimeout(poll, pollInterval)
+        } else {
+          // Error polling, continue anyway
+          setTimeout(poll, pollInterval)
+        }
+      } catch (error) {
+        console.error('Error polling vectorization status:', error)
+        // Continue polling on error
+        setTimeout(poll, pollInterval)
+      }
+    }
+
+    // Start polling
+    setTimeout(poll, pollInterval)
   }
 
   return (
@@ -459,6 +651,14 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 py-12">
                   <Loader2 className="h-6 w-6 animate-spin" />
                   <span className="text-sm font-medium">Preparing Plan Chat…</span>
+                </div>
+              ) : isVectorizing ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-600 py-12 px-4">
+                  <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-gray-700">Processing plans for AI...</p>
+                    <p className="mt-1 text-xs text-gray-500">Extracting and vectorizing blueprint text. This may take a moment.</p>
+                  </div>
                 </div>
               ) : !canChat ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-gray-600 py-12 px-4">
@@ -640,11 +840,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                 <div className="flex-shrink-0 pb-1.5 pr-2">
                   <Button
                     onClick={handleSendMessage}
-                    disabled={!canChat || !input.trim() || isSending}
+                    disabled={!canChat || !input.trim() || isSending || isVectorizing}
                     className="h-8 w-8 rounded-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
                     size="icon"
                   >
-                    {isSending ? (
+                    {isSending || isVectorizing ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
                     ) : (
                       <Send className="h-3.5 w-3.5 text-white" />

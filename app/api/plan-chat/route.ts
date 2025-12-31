@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { getJobForUser } from '@/lib/job-access'
 import { classifyPlanChatQuestion } from '@/lib/planChat/classifier'
 import { buildDeterministicResult } from '@/lib/planChat/deterministicEngine'
 import { generatePlanChatAnswer } from '@/lib/planChat/answerModel'
@@ -448,16 +449,14 @@ async function loadPlanContext(
   jobId: string,
   planId: string
 ) {
-  const { data: job, error: jobError } = await supabase
-    .from('jobs')
-    .select('id, name')
-    .eq('id', jobId)
-    .eq('user_id', userId)
-    .single()
+  // Check job access through job_members table (supports owners and collaborators)
+  const membership = await getJobForUser(supabase, jobId, userId, 'id, name')
 
-  if (jobError || !job) {
+  if (!membership || !membership.job) {
     return { error: 'JOB_NOT_FOUND' as const }
   }
+
+  const job = membership.job
 
   const { data: plan, error: planError } = await supabase
     .from('plans')
@@ -1176,6 +1175,104 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
+  // Check if plan is vectorized (required for chat to work)
+  // If not, queue it for background vectorization
+  const { checkPlanVectorizationStatus } = await import('@/lib/plan-vectorization-status')
+  
+  let vectorizationStatus = await checkPlanVectorizationStatus(supabase, planId)
+  let wasVectorizing = false
+  
+  if (!vectorizationStatus.isVectorized) {
+    // Check if there's already a job in the queue
+    const { data: existingJob } = await supabase
+      .from('plan_vectorization_queue')
+      .select('id, status, progress')
+      .eq('plan_id', planId)
+      .in('status', ['pending', 'processing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (existingJob) {
+      // Job already queued or processing
+      return NextResponse.json(
+        {
+          error: 'VECTORIZATION_IN_PROGRESS',
+          message: 'This plan is being vectorized in the background. Please wait a moment and try again.',
+          queueJobId: existingJob.id,
+          status: existingJob.status,
+          progress: existingJob.progress,
+        },
+        { status: 202 } // 202 Accepted - processing in background
+      )
+    }
+
+    // Queue vectorization job
+    console.log(`[PlanChat] Plan ${planId} is not vectorized. Queueing vectorization...`)
+    wasVectorizing = true
+    
+    try {
+      // Create queue job
+      const { data: queueJob, error: queueError } = await supabase
+        .from('plan_vectorization_queue')
+        .insert({
+          plan_id: planId,
+          user_id: user.id,
+          job_id: jobId,
+          status: 'pending',
+          priority: 10, // Higher priority for user-initiated requests
+          progress: 0,
+          current_step: 'Queued for processing',
+        })
+        .select('id')
+        .single()
+
+      if (queueError || !queueJob) {
+        throw new Error('Failed to queue vectorization job')
+      }
+
+      // Trigger background processing (don't wait)
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'http://localhost:3000'
+      
+      fetch(`${baseUrl}/api/plan-vectorization/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueJobId: queueJob.id }),
+      }).catch((error) => {
+        console.error('[PlanChat] Failed to trigger vectorization processing:', error)
+      })
+
+      return NextResponse.json(
+        {
+          error: 'VECTORIZATION_QUEUED',
+          message: 'This plan is being vectorized in the background. This may take a few minutes for large plans. Please try again in a moment.',
+          queueJobId: queueJob.id,
+          status: 'pending',
+        },
+        { status: 202 } // 202 Accepted - processing in background
+      )
+    } catch (vectorizationError) {
+      console.error('[PlanChat] Failed to queue vectorization:', vectorizationError)
+      return NextResponse.json(
+        {
+          error: 'VECTORIZATION_FAILED',
+          message: vectorizationError instanceof Error 
+            ? `Failed to queue vectorization: ${vectorizationError.message}` 
+            : 'Failed to queue vectorization. Please try again in a moment.',
+          vectorizationStatus: {
+            hasChunks: vectorizationStatus.hasChunks,
+            hasEmbeddings: vectorizationStatus.hasEmbeddings,
+            chunkCount: vectorizationStatus.chunkCount,
+            embeddingCount: vectorizationStatus.embeddingCount,
+          },
+        },
+        { status: 500 }
+      )
+    }
+  }
+
   // Sanitize messages
   const sanitizedHistory = messages
     .filter((message): message is ChatHistoryMessage => {
@@ -1270,7 +1367,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         reply: result.answer,
         mode: result.mode,
-        metadata: result.metadata,
+        metadata: {
+          ...result.metadata,
+          wasVectorizing,
+        },
         chatId: activeChatId,
       })
     } else {

@@ -124,15 +124,12 @@ export default function UploadPlanPage() {
           console.error('Background ingestion trigger failed:', err)
         })
 
-        // Trigger plan text chunk ingestion for RAG context
-        fetch('/api/plan-text-chunks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            planId: plan.id,
-          }),
-        }).catch((err) => {
-          console.error('Background plan text ingestion trigger failed:', err)
+        // Queue plan text chunk vectorization for RAG context (background job)
+        // This runs automatically when plans are uploaded, so they're ready for chat
+        import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
+          queuePlanVectorization(plan.id, null, 5).catch((err) => {
+            console.error('Background vectorization queue trigger failed:', err)
+          })
         })
       }
 

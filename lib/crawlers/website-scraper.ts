@@ -1,4 +1,5 @@
-import puppeteer from 'puppeteer'
+import puppeteer from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
 export interface ContactInfo {
   email?: string
@@ -18,7 +19,10 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
 
   let browser
   try {
-    browser = await puppeteer.launch({
+    // Use serverless-compatible Chromium in production, regular Puppeteer in development
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1'
+    
+    const launchOptions: any = {
       headless: true,
       args: [
         '--no-sandbox', 
@@ -27,9 +31,22 @@ export async function scrapeWebsiteForContactInfo(website: string): Promise<Cont
         '--ignore-ssl-errors',
         '--ignore-certificate-errors-spki-list',
         '--disable-web-security',
-        '--allow-running-insecure-content'
+        '--allow-running-insecure-content',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
       ]
-    })
+    }
+    
+    // Use Chromium binary for serverless environments
+    if (isProduction) {
+      launchOptions.executablePath = await chromium.executablePath()
+    }
+    
+    browser = await puppeteer.launch(launchOptions)
     
     const page = await browser.newPage()
     

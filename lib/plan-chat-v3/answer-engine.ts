@@ -80,6 +80,47 @@ export async function generateAnswer(
     chatId
   )
 
+  // Check if plan is vectorized (has chunks with embeddings)
+  // This is a fallback check - the route should catch this first
+  // If we get here with no chunks, try to vectorize automatically
+  if (context.blueprint_context.chunks.length === 0) {
+    const { checkPlanVectorizationStatus } = await import('@/lib/plan-vectorization-status')
+    const { ingestPlanTextChunks } = await import('@/lib/plan-text-chunks')
+    
+    const vectorizationStatus = await checkPlanVectorizationStatus(supabase, planId)
+    
+    if (!vectorizationStatus.isVectorized) {
+      // Try to vectorize automatically
+      console.log(`[AnswerEngine] Plan ${planId} not vectorized, attempting auto-vectorization...`)
+      try {
+        await ingestPlanTextChunks(supabase, planId)
+        // Re-check after vectorization
+        const newStatus = await checkPlanVectorizationStatus(supabase, planId)
+        if (!newStatus.isVectorized) {
+          throw new Error('Vectorization completed but plan is still not ready. Please try again.')
+        }
+        // Rebuild context after vectorization
+        const newContext = await buildPlanContext(
+          supabase,
+          planId,
+          userId,
+          jobId,
+          classification,
+          userQuestion,
+          chatId
+        )
+        // Use the new context
+        Object.assign(context, newContext)
+      } catch (vectorizationError) {
+        throw new Error(
+          vectorizationError instanceof Error 
+            ? `Failed to vectorize plan: ${vectorizationError.message}`
+            : 'Failed to prepare the plan for chat. Please try again in a moment.'
+        )
+      }
+    }
+  }
+
   logRetrievalStats({
     semantic_chunks: context.blueprint_context.chunks.length,
     takeoff_items: context.takeoff_context.items.length,

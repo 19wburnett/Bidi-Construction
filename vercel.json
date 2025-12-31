@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/find-subcontractors",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/process-vectorization-queue",
+      "schedule": "*/5 * * * *"
     }
   ],
   "rewrites": [

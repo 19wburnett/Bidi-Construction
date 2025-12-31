@@ -56,7 +56,7 @@ import BidPackageViewModal from '@/components/bid-package-view-modal'
 import AddBidModal from '@/components/add-bid-modal'
 import BulkPdfUploadModal from '@/components/bulk-pdf-upload-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
-import BudgetSpreadsheet from '@/components/budget-spreadsheet'
+import BudgetCardGrid from '@/components/budget-card-grid'
 import ReportViewerModal from '@/components/report-viewer-modal'
 import JobTimeline from '@/components/job-timeline'
 import ScenarioComparisonModal from '@/components/scenario-comparison-modal'
@@ -976,15 +976,12 @@ export default function JobDetailPage() {
             console.error('Background ingestion trigger failed:', err)
           })
 
-          fetch('/api/plan-text-chunks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              planId: newPlan.id,
-              jobId,
-            }),
-          }).catch((err) => {
-            console.error('Background plan text ingestion trigger failed:', err)
+          // Queue plan text chunk vectorization for RAG context (background job)
+          // This runs automatically when plans are uploaded, so they're ready for chat
+          import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
+            queuePlanVectorization(newPlan.id, jobId, 5).catch((err) => {
+              console.error('Background vectorization queue trigger failed:', err)
+            })
           })
         }
       }
@@ -2043,28 +2040,13 @@ export default function JobDetailPage() {
                         View accepted bids organized by trade category and see what still needs bids
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="p-0">
-                      <BudgetSpreadsheet
+                    <CardContent className="p-6">
+                      <BudgetCardGrid
                         acceptedBids={acceptedBidsWithLineItems}
                         takeoffItems={aggregatedTakeoffItems}
-                        jobId={jobId}
-                        scenarios={scenarios}
                         allBids={bids}
-                        activeScenarioId={activeScenarioId}
-                        onScenarioChange={setActiveScenarioId}
-                        onCreateScenario={handleCreateScenario}
-                        onApplyScenario={handleApplyScenario}
-                        onCompareScenarios={() => setShowScenarioComparisonModal(true)}
-                        onEditScenario={handleEditScenario}
-                        onDeleteScenario={handleDeleteScenario}
-                        onAddBidToScenario={handleAddBidToScenario}
-                        onRemoveBidFromScenario={handleRemoveBidFromScenario}
+                        jobId={jobId}
                         bidPackages={bidPackages.map(pkg => ({ trade_category: pkg.trade_category }))}
-                        onCreateBidPackage={(tradeCategory) => {
-                          // Open bid package modal for this trade
-                          setShowPackageModal(true)
-                          // You might want to pre-fill the trade category in the modal
-                        }}
                         onBidClick={(bidId) => {
                           setSelectedBidIdForModal(bidId)
                           setShowBidComparisonModal(true)
@@ -2074,6 +2056,15 @@ export default function JobDetailPage() {
                           // The user can filter by trade category in the modal
                           setSelectedBidIdForModal(null)
                           setShowBidComparisonModal(true)
+                        }}
+                        onCreateBidPackage={(tradeCategory) => {
+                          // Open bid package modal for this trade
+                          setShowPackageModal(true)
+                          // You might want to pre-fill the trade category in the modal
+                        }}
+                        onBidAccepted={() => {
+                          // Refresh job data after bid acceptance
+                          loadJobData()
                         }}
                       />
                     </CardContent>

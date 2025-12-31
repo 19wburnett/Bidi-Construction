@@ -55,6 +55,8 @@
     "posthog-js": "^1.268.6",
     "posthog-node": "^5.9.1",
     "puppeteer": "^24.19.0",
+    "puppeteer-core": "^24.19.0",
+    "@sparticuz/chromium": "^131.0.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-konva": "^18.2.14",
