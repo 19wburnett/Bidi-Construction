@@ -416,6 +416,7 @@ export interface Database {
           bio?: string | null
           service_radius?: number | null
           year_established?: number | null
+          portfolio_links?: string[] | null
         }
         Insert: {
           id?: string
@@ -441,6 +442,7 @@ export interface Database {
           bio?: string | null
           service_radius?: number | null
           year_established?: number | null
+          portfolio_links?: string[] | null
         }
         Update: {
           id?: string
@@ -466,6 +468,7 @@ export interface Database {
           bio?: string | null
           service_radius?: number | null
           year_established?: number | null
+          portfolio_links?: string[] | null
         }
       }
       subcontractor_portfolio_photos: {

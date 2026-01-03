@@ -13,9 +13,10 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 /**
  * Cron endpoint for automatically finding new subcontractors
  * 
- * This endpoint is designed to run daily via Vercel Cron.
- * It searches Google Maps for subcontractors in Utah across different trade categories,
- * checks for duplicates, adds new ones to the database, and notifies admin users.
+ * This endpoint is designed to run every 2 hours via Vercel Cron.
+ * It randomly selects one trade category and searches Google Maps for subcontractors 
+ * in Utah within that category, checks for duplicates, adds new ones to the database, 
+ * and notifies admin users.
  * 
  * Security: Validates CRON_SECRET header to prevent unauthorized access
  */
@@ -39,15 +40,13 @@ export async function GET(request: NextRequest) {
     console.log('🔍 Starting subcontractor discovery cron job...')
     const supabase = await createServerSupabaseClient()
     
-    // Get trade categories to search today using day of year rotation
-    const today = new Date()
-    const dayOfYear = Math.floor((today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24))
-    const categoriesToSearch = selectTradeCategoriesForDay(dayOfYear)
+    // Randomly select one trade category to search
+    const categoriesToSearch = selectRandomTradeCategory()
     
-    console.log(`📋 Searching ${categoriesToSearch.length} trade categories today: ${categoriesToSearch.join(', ')}`)
+    console.log(`📋 Randomly selected trade category: ${categoriesToSearch[0]}`)
     
     const location = 'Utah'
-    const maxResultsPerCategory = 7 // Target 10-20 total per day with 2-3 categories
+    const maxResultsPerCategory = 10 // Search up to 10 results per category per run
     const newSubcontractors: Array<{
       name: string
       email: string
@@ -188,26 +187,13 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Select 2-3 trade categories to search based on day of year
- * This ensures variety and spreads the load across all categories over time
+ * Randomly select one trade category to search
+ * This ensures variety across runs and prevents bias toward certain categories
  */
-function selectTradeCategoriesForDay(dayOfYear: number): string[] {
+function selectRandomTradeCategory(): string[] {
   const categories = [...TRADE_CATEGORIES]
-  const numCategories = categories.length
-  
-  // Select 2-3 categories per day (alternate between 2 and 3)
-  const numToSelect = dayOfYear % 2 === 0 ? 2 : 3
-  
-  // Use day of year to determine starting index
-  const startIndex = dayOfYear % numCategories
-  
-  const selected: string[] = []
-  for (let i = 0; i < numToSelect; i++) {
-    const index = (startIndex + i) % numCategories
-    selected.push(categories[index])
-  }
-  
-  return selected
+  const randomIndex = Math.floor(Math.random() * categories.length)
+  return [categories[randomIndex]]
 }
 
 /**
@@ -393,7 +379,7 @@ async function sendAdminNotification(
         </div>
         
         <p style="font-size: 14px; color: #64748b; margin-top: 20px;">
-          This is an automated report from the daily subcontractor discovery cron job.
+          This is an automated report from the subcontractor discovery cron job.
         </p>
       </div>
       

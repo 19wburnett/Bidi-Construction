@@ -125,6 +125,7 @@ export async function PATCH(
       'bio',
       'service_radius',
       'year_established',
+      'portfolio_links',
     ]
 
     const updates: Record<string, any> = {}

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import DashboardNavbar from '@/components/dashboard-navbar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,6 +10,17 @@ import { Badge } from '@/components/ui/badge'
 import { Search, MapPin, Star, Grid3x3, List, ChevronLeft, ChevronRight, UserPlus, Check, Loader2 } from 'lucide-react'
 import Image from 'next/image'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
+
+// Helper to check if URL is from Supabase (safe for Next.js Image)
+function isSupabaseUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.includes('supabase.co') || urlObj.hostname.includes('supabase.in')
+  } catch {
+    return false
+  }
+}
 import { TRADE_CATEGORIES } from '@/lib/trade-types'
 import { useAuth } from '@/app/providers'
 import { createClient } from '@/lib/supabase'
@@ -188,19 +198,14 @@ function DashboardBrowseSubcontractorsPageContent() {
 
   if (loading && subcontractors.length === 0) {
     return (
-      <>
-        <DashboardNavbar title="Browse Subcontractors" />
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <FallingBlocksLoader text="Loading subcontractors..." size="md" />
-        </div>
-      </>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <FallingBlocksLoader text="Loading subcontractors..." size="md" />
+      </div>
     )
   }
 
   return (
-    <>
-      <DashboardNavbar title="Browse Subcontractors" />
-      <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
         {/* Header */}
         <div className="bg-white border-b">
           <div className="max-w-7xl mx-auto px-4 py-8">
@@ -315,14 +320,32 @@ function DashboardBrowseSubcontractorsPageContent() {
                           className="aspect-video relative bg-gray-100 rounded-t-lg overflow-hidden cursor-pointer"
                           onClick={() => setSelectedSubcontractorId(sub.id)}
                         >
-                          {sub.primary_photo_url || sub.profile_picture_url ? (
-                            <Image
-                              src={sub.primary_photo_url || sub.profile_picture_url || ''}
-                              alt={sub.name}
-                              fill
-                              className="object-cover"
-                            />
-                          ) : (
+                          {sub.primary_photo_url || sub.profile_picture_url ? (() => {
+                            const imageUrl = sub.primary_photo_url || sub.profile_picture_url || ''
+                            const isSupabase = isSupabaseUrl(imageUrl)
+                            return isSupabase ? (
+                              <Image
+                                src={imageUrl}
+                                alt={sub.name}
+                                fill
+                                className="object-cover"
+                              />
+                            ) : (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={imageUrl}
+                                alt={sub.name}
+                                className="object-cover w-full h-full"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.style.display = 'none'
+                                  const fallback = target.nextElementSibling as HTMLElement
+                                  if (fallback) fallback.style.display = 'flex'
+                                }}
+                              />
+                            )
+                          })() : null}
+                          {!(sub.primary_photo_url || sub.profile_picture_url) && (
                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-500 to-orange-600 text-white text-2xl font-bold">
                               {sub.name.charAt(0).toUpperCase()}
                             </div>
@@ -417,14 +440,32 @@ function DashboardBrowseSubcontractorsPageContent() {
                               className="w-24 h-24 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
                               onClick={() => setSelectedSubcontractorId(sub.id)}
                             >
-                              {sub.primary_photo_url || sub.profile_picture_url ? (
-                                <Image
-                                  src={sub.primary_photo_url || sub.profile_picture_url || ''}
-                                  alt={sub.name}
-                                  fill
-                                  className="object-cover"
-                                />
-                              ) : (
+                              {sub.primary_photo_url || sub.profile_picture_url ? (() => {
+                                const imageUrl = sub.primary_photo_url || sub.profile_picture_url || ''
+                                const isSupabase = isSupabaseUrl(imageUrl)
+                                return isSupabase ? (
+                                  <Image
+                                    src={imageUrl}
+                                    alt={sub.name}
+                                    fill
+                                    className="object-cover"
+                                  />
+                                ) : (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={imageUrl}
+                                    alt={sub.name}
+                                    className="object-cover w-full h-full"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement
+                                      target.style.display = 'none'
+                                      const fallback = target.nextElementSibling as HTMLElement
+                                      if (fallback) fallback.style.display = 'flex'
+                                    }}
+                                  />
+                                )
+                              })() : null}
+                              {!(sub.primary_photo_url || sub.profile_picture_url) && (
                                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-500 to-orange-600 text-white text-xl font-bold">
                                   {sub.name.charAt(0).toUpperCase()}
                                 </div>
@@ -542,19 +583,15 @@ function DashboardBrowseSubcontractorsPageContent() {
           />
         )}
       </div>
-    </>
   )
 }
 
 export default function DashboardBrowseSubcontractorsPage() {
   return (
     <Suspense fallback={
-      <>
-        <DashboardNavbar title="Browse Subcontractors" />
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <FallingBlocksLoader text="Loading..." size="md" />
-        </div>
-      </>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <FallingBlocksLoader text="Loading..." size="md" />
+      </div>
     }>
       <DashboardBrowseSubcontractorsPageContent />
     </Suspense>

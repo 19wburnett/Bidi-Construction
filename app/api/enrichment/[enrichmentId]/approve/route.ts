@@ -92,6 +92,9 @@ export async function POST(
     if (results.bonded_claimed !== null && results.bonded_claimed !== undefined) {
       updatePayload.bonded = results.bonded_claimed
     }
+    if (results.portfolio_links && Array.isArray(results.portfolio_links) && results.portfolio_links.length > 0) {
+      updatePayload.portfolio_links = results.portfolio_links
+    }
 
     // Build notes from enrichment sources
     const existingNotes = await supabaseAdmin
@@ -100,16 +103,32 @@ export async function POST(
       .eq('id', enrichment.subcontractor_id)
       .single()
 
-    if (results.yelp_link || results.bbb_link) {
-      let notesAddition = '\n\n--- Enrichment Links ---\n'
-      if (results.yelp_link) {
-        notesAddition += `Yelp: ${results.yelp_link}\n`
+    // Collect all additional info that doesn't have dedicated fields
+    const hasAdditionalInfo = 
+      results.yelp_link || 
+      results.bbb_link || 
+      results.service_area ||
+      results.insured_claimed
+
+    if (hasAdditionalInfo) {
+      let notesAddition = '\n\n--- Enrichment Additional Info ---\n'
+      
+      if (results.service_area) {
+        notesAddition += `Service Area: ${results.service_area}\n`
       }
-      if (results.bbb_link) {
-        notesAddition += `BBB: ${results.bbb_link}\n`
+      
+      if (results.insured_claimed !== null && results.insured_claimed !== undefined) {
+        notesAddition += `Claims to be insured: ${results.insured_claimed ? 'Yes' : 'No'}\n`
       }
-      if (results.insured_claimed) {
-        notesAddition += `Claims to be insured (from website)\n`
+      
+      if (results.yelp_link || results.bbb_link) {
+        notesAddition += `\n--- Enrichment Links ---\n`
+        if (results.yelp_link) {
+          notesAddition += `Yelp: ${results.yelp_link}\n`
+        }
+        if (results.bbb_link) {
+          notesAddition += `BBB: ${results.bbb_link}\n`
+        }
       }
       
       updatePayload.notes = (existingNotes?.data?.notes || '') + notesAddition

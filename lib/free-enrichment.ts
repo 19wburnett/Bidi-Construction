@@ -38,6 +38,7 @@ export interface EnrichmentResults {
   google_reviews_link: string | null
   yelp_link: string | null
   bbb_link: string | null
+  portfolio_links: string[] | null
 }
 
 /**
@@ -263,6 +264,13 @@ export async function crawlWebsite(baseUrl: string): Promise<CrawledPage[]> {
     `${normalizedBase}/our-services`,
     `${normalizedBase}/contact`,
     `${normalizedBase}/contact-us`,
+    `${normalizedBase}/portfolio`,
+    `${normalizedBase}/gallery`,
+    `${normalizedBase}/projects`,
+    `${normalizedBase}/our-work`,
+    `${normalizedBase}/work`,
+    `${normalizedBase}/case-studies`,
+    `${normalizedBase}/examples`,
   ]
   
   for (const pageUrl of pagesToCrawl) {
@@ -303,6 +311,7 @@ export function extractProfileData(
     google_reviews_link: null,
     yelp_link: null,
     bbb_link: null,
+    portfolio_links: null,
   }
   
   const sources: EnrichmentSources = {}
@@ -494,6 +503,53 @@ export function extractProfileData(
     }
   }
   
+  // Collect all portfolio links found across pages
+  const allPortfolioLinks = new Set<string>()
+  for (const page of pages) {
+    const $ = cheerio.load(page.html)
+    const portfolioKeywords = ['portfolio', 'gallery', 'projects', 'our-work', 'work', 'case-studies', 'examples', 'showcase', 'completed-projects', 'project-gallery']
+    
+    $('a').each((_, el) => {
+      const href = $(el).attr('href') || ''
+      const hrefLower = href.toLowerCase()
+      const linkText = $(el).text().toLowerCase().trim()
+      
+      const isPortfolioLink = portfolioKeywords.some(keyword => 
+        hrefLower.includes(keyword) || linkText.includes(keyword)
+      )
+      
+      if (isPortfolioLink && href && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('tel:')) {
+        try {
+          const absoluteUrl = makeAbsoluteUrl(href, page.url)
+          const linkUrl = new URL(absoluteUrl)
+          const pageUrl = new URL(page.url)
+          if (linkUrl.origin === pageUrl.origin) {
+            allPortfolioLinks.add(absoluteUrl)
+          }
+        } catch {
+          // Skip invalid URLs
+        }
+      }
+    })
+    
+    // Check if current page is a portfolio page
+    const currentUrlLower = page.url.toLowerCase()
+    const isPortfolioPage = portfolioKeywords.some(keyword => currentUrlLower.includes(keyword))
+    if (isPortfolioPage) {
+      allPortfolioLinks.add(page.url)
+    }
+  }
+  
+  // Set portfolio links if any found
+  if (allPortfolioLinks.size > 0) {
+    results.portfolio_links = Array.from(allPortfolioLinks).slice(0, 10) // Limit to 10 links
+    sources.portfolio_links = {
+      source_url: pages[0].url,
+      confidence: 0.8,
+      extracted_text: `Found ${allPortfolioLinks.size} portfolio/work page(s)`,
+    }
+  }
+  
   // Try to extract summary from first paragraph if not found
   if (!results.profile_summary && pages[0]) {
     const $ = cheerio.load(pages[0].html)
@@ -674,6 +730,7 @@ export async function enrichSubcontractorFree(
     google_reviews_link: null,
     yelp_link: null,
     bbb_link: null,
+    portfolio_links: null,
   }
   
   let sources: EnrichmentSources = {}

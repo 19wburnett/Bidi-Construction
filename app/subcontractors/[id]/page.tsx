@@ -6,9 +6,9 @@ import PublicLayout from '@/components/public-layout'
 import SubcontractorProfileHeader from '@/components/subcontractor-profile-header'
 import SubcontractorPhotoGallery from '@/components/subcontractor-photo-gallery'
 import SubcontractorProfileInfoCard from '@/components/subcontractor-profile-info-card'
-import SubcontractorLocationMap from '@/components/subcontractor-location-map'
-import { Card, CardContent } from '@/components/ui/card'
-import { Loader2 } from 'lucide-react'
+// import SubcontractorLocationMap from '@/components/subcontractor-location-map'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Loader2, ExternalLink } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import { useAuth } from '@/app/providers'
 import { createClient } from '@/lib/supabase'
@@ -42,6 +42,7 @@ interface Subcontractor {
   bio?: string | null
   service_radius?: number | null
   year_established?: number | null
+  portfolio_links?: string[] | null
 }
 
 export default function SubcontractorProfilePage() {
@@ -234,10 +235,10 @@ export default function SubcontractorProfilePage() {
               />
 
               {/* Location Map */}
-              <SubcontractorLocationMap
+              {/* <SubcontractorLocationMap
                 location={subcontractor.location}
                 serviceRadius={subcontractor.service_radius}
-              />
+              /> */}
 
               {/* Google Reviews Link */}
               {subcontractor.google_reviews_link && (
@@ -251,6 +252,47 @@ export default function SubcontractorProfilePage() {
                     >
                       View Google Reviews →
                     </a>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Portfolio/Work Links */}
+              {subcontractor.portfolio_links && subcontractor.portfolio_links.length > 0 && (
+                <Card>
+                  <CardHeader className="bg-gray-50/50 border-b border-gray-100 py-4">
+                    <CardTitle className="text-lg font-bold">Portfolio & Work</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="space-y-2">
+                      {subcontractor.portfolio_links.map((link, index) => {
+                        // Extract a readable label from the URL
+                        const urlObj = new URL(link)
+                        const pathParts = urlObj.pathname.split('/').filter(Boolean)
+                        const label = pathParts[pathParts.length - 1] 
+                          ? pathParts[pathParts.length - 1].replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                          : 'Portfolio'
+                        
+                        return (
+                          <a
+                            key={index}
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-gray-50 transition-all group border border-transparent hover:border-gray-100"
+                          >
+                            <div className="h-8 w-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600 group-hover:bg-purple-100 transition-colors">
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-sm text-gray-700 group-hover:text-purple-600 font-medium truncate">
+                                {label}
+                              </span>
+                              <span className="text-xs text-gray-500 truncate">{urlObj.hostname}</span>
+                            </div>
+                          </a>
+                        )
+                      })}
+                    </div>
                   </CardContent>
                 </Card>
               )}

@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/cron/find-subcontractors",
-      "schedule": "0 6 * * *"
+      "schedule": "0 */2 * * *"
     },
     {
       "path": "/api/cron/process-vectorization-queue",

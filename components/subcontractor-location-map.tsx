@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { MapPin, Loader2 } from 'lucide-react'
 import dynamic from 'next/dynamic'
@@ -127,13 +127,182 @@ function isStateLocation(location: string): { isState: boolean; stateAbbr: strin
   return { isState: false, stateAbbr: null }
 }
 
+// Internal map component that handles a single map instance
+function MapInstance({ 
+  mapKey, 
+  center, 
+  bounds, 
+  zoom, 
+  isState, 
+  stateAbbr, 
+  serviceRadius 
+}: {
+  mapKey: string
+  center: [number, number]
+  bounds: [[number, number], [number, number]]
+  zoom: number
+  isState: boolean
+  stateAbbr: string | null
+  serviceRadius?: number | null
+}) {
+  const mapRef = useRef<any>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isInitializedRef = useRef(false)
+  const [isReady, setIsReady] = useState(false)
+  // Generate a truly unique container ID using a combination of key and random string
+  const [containerId] = useState(() => 
+    `map-container-${mapKey.replace(/[^a-zA-Z0-9]/g, '-')}-${Math.random().toString(36).substr(2, 9)}`
+  )
+
+  // Clean up any existing map before rendering
+  useEffect(() => {
+    const cleanup = async () => {
+      if (containerRef.current) {
+        const container = containerRef.current
+        // Check if container already has a Leaflet map
+        if ((container as any)._leaflet_id) {
+          try {
+            // Import Leaflet to access map instances
+            const L = await import('leaflet')
+            const leafletId = (container as any)._leaflet_id
+            // Try to get and remove existing map
+            const existingMap = (L.default as any).Map?.get?.(container) || 
+                              (L.default as any).map?._instances?.[leafletId]
+            if (existingMap && typeof existingMap.remove === 'function') {
+              existingMap.remove()
+            }
+          } catch (e) {
+            // If that fails, just clear the container
+            console.warn('Error cleaning up existing map:', e)
+          }
+          // Clear the leaflet ID
+          delete (container as any)._leaflet_id
+          // Clear inner HTML
+          container.innerHTML = ''
+        }
+      }
+      // Small delay to ensure cleanup is complete before rendering
+      await new Promise(resolve => setTimeout(resolve, 0))
+      // Mark as ready after cleanup
+      setIsReady(true)
+    }
+    
+    setIsReady(false)
+    cleanup()
+    
+    // Cleanup function: properly destroy the map when component unmounts or key changes
+    return () => {
+      if (mapRef.current) {
+        try {
+          // Properly remove the Leaflet map instance
+          const map = mapRef.current
+          if (map && typeof map.remove === 'function') {
+            map.remove()
+          }
+        } catch (e) {
+          // Ignore errors during cleanup
+          console.warn('Error removing map:', e)
+        }
+        mapRef.current = null
+      }
+      // Clear the container's leaflet ID and clean up the DOM
+      if (containerRef.current) {
+        const container = containerRef.current
+        // Remove Leaflet ID
+        if ((container as any)._leaflet_id) {
+          delete (container as any)._leaflet_id
+        }
+        // Clear inner HTML to remove any Leaflet-generated elements
+        container.innerHTML = ''
+      }
+      isInitializedRef.current = false
+      setIsReady(false)
+    }
+  }, [mapKey])
+
+  if (!isReady) {
+    return (
+      <div ref={containerRef} id={containerId} key={containerId} className="w-full h-full flex items-center justify-center bg-gray-100">
+        <Loader2 className="h-6 w-6 animate-spin text-orange-600" />
+      </div>
+    )
+  }
+
+  return (
+    <div ref={containerRef} id={containerId} key={containerId} className="w-full h-full">
+      <MapContainer
+        key={`${mapKey}-${containerId}`}
+        center={center}
+        bounds={bounds}
+        zoom={zoom}
+        style={{ height: '100%', width: '100%', zIndex: 0 }}
+        scrollWheelZoom={false}
+        whenCreated={(map: any) => {
+          // Prevent double initialization
+          if (isInitializedRef.current && mapRef.current && mapRef.current !== map) {
+            // If we already have a map, remove the new one
+            try {
+              if (map && typeof map.remove === 'function') {
+                map.remove()
+              }
+            } catch (e) {
+              // Ignore errors
+            }
+            return
+          }
+          // Store map instance for cleanup
+          mapRef.current = map
+          isInitializedRef.current = true
+        }}
+      >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      
+      {/* Draw state boundary */}
+      {isState && stateAbbr && STATE_BOUNDS[stateAbbr] && (
+        <Rectangle
+          bounds={STATE_BOUNDS[stateAbbr]}
+          pathOptions={{
+            color: '#ff6b35',
+            fillColor: '#ff6b35',
+            fillOpacity: 0.1,
+            weight: 3,
+          }}
+        />
+      )}
+
+      {/* Draw service radius circle */}
+      {serviceRadius && (
+        <Circle
+          center={center}
+          radius={serviceRadius * 1609.34} // Convert miles to meters
+          pathOptions={{
+            color: '#ff6b35',
+            fillColor: '#ff6b35',
+            fillOpacity: 0.15,
+            weight: 2,
+          }}
+        />
+      )}
+    </MapContainer>
+    </div>
+  )
+}
+
 export default function SubcontractorLocationMap({
   location,
   serviceRadius,
 }: SubcontractorLocationMapProps) {
   const [mounted, setMounted] = useState(false)
+  const prevLocationRef = useRef<string>(location)
+  const prevServiceRadiusRef = useRef<number | null | undefined>(serviceRadius)
+  // Use a stable key that only changes when location or serviceRadius actually changes
+  const mapInstanceKey = `map-${location}-${serviceRadius || 'none'}`
   const { isState, stateAbbr } = isStateLocation(location)
-
+  
+  // Track mounted state and fix Leaflet icons
   useEffect(() => {
     setMounted(true)
     
@@ -149,6 +318,12 @@ export default function SubcontractorLocationMap({
       })
     }
   }, [])
+  
+  // Update refs when props change (for tracking changes)
+  useEffect(() => {
+    prevLocationRef.current = location
+    prevServiceRadiusRef.current = serviceRadius
+  }, [location, serviceRadius])
 
   // Calculate center and bounds for the map
   const getMapBounds = () => {
@@ -209,47 +384,29 @@ export default function SubcontractorLocationMap({
           )}
         </div>
 
-        <div className="w-full h-64 rounded-lg overflow-hidden border relative">
-          <MapContainer
-            center={center}
-            bounds={bounds}
-            zoom={isState ? 7 : 10}
-            style={{ height: '100%', width: '100%', zIndex: 0 }}
-            scrollWheelZoom={false}
+        {/* Render map with unique key to force complete remount when location/radius changes */}
+        {mounted ? (
+          <div 
+            key={`map-wrapper-${mapInstanceKey}`}
+            className="w-full h-64 rounded-lg overflow-hidden border relative"
+            style={{ minHeight: '256px' }}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            <MapInstance
+              key={mapInstanceKey}
+              mapKey={mapInstanceKey}
+              center={center}
+              bounds={bounds}
+              zoom={isState ? 7 : 10}
+              isState={isState}
+              stateAbbr={stateAbbr}
+              serviceRadius={serviceRadius}
             />
-            
-            {/* Draw state boundary */}
-            {isState && stateAbbr && STATE_BOUNDS[stateAbbr] && (
-              <Rectangle
-                bounds={STATE_BOUNDS[stateAbbr]}
-                pathOptions={{
-                  color: '#ff6b35',
-                  fillColor: '#ff6b35',
-                  fillOpacity: 0.1,
-                  weight: 3,
-                }}
-              />
-            )}
-
-            {/* Draw service radius circle */}
-            {serviceRadius && (
-              <Circle
-                center={center}
-                radius={serviceRadius * 1609.34} // Convert miles to meters
-                pathOptions={{
-                  color: '#ff6b35',
-                  fillColor: '#ff6b35',
-                  fillOpacity: 0.15,
-                  weight: 2,
-                }}
-              />
-            )}
-          </MapContainer>
-        </div>
+          </div>
+        ) : (
+          <div className="w-full h-64 rounded-lg overflow-hidden border bg-gray-100 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-orange-600" />
+          </div>
+        )}
       </CardContent>
     </Card>
   )

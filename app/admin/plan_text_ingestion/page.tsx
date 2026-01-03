@@ -15,7 +15,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AlertCircle, CheckCircle2, Loader2, RefreshCcw, Sparkles } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { AlertCircle, CheckCircle2, Loader2, RefreshCcw, Sparkles, Clock, Play, List, XCircle } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 
 interface IngestionResponse {
   planId: string
@@ -51,6 +53,46 @@ interface BackfillResponse {
   hasMore: boolean
 }
 
+interface QueueJob {
+  id: string
+  plan_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled'
+  priority: number
+  progress: number
+  current_step: string | null
+  error_message: string | null
+  chunks_created: number | null
+  pages_processed: number | null
+  total_pages: number | null
+  queued_at: string
+  started_at: string | null
+  completed_at: string | null
+  plan?: {
+    id: string
+    title: string | null
+    file_name: string
+  }
+}
+
+interface QueueStatus {
+  jobId?: string
+  status?: string
+  progress?: number
+  currentStep?: string
+  error?: string
+}
+
+interface PlanWithJob {
+  id: string
+  title: string | null
+  file_name: string
+  job_id: string
+  job?: {
+    id: string
+    name: string | null
+  }
+}
+
 export default function PlanTextIngestionAdminPage() {
   const [planId, setPlanId] = useState('')
   const [jobId, setJobId] = useState('')
@@ -64,6 +106,20 @@ export default function PlanTextIngestionAdminPage() {
   const { user, loading: authLoading } = useAuth()
   const supabase = createClient()
   const router = useRouter()
+
+  // Vectorization queue state
+  const [queuePlanId, setQueuePlanId] = useState('')
+  const [queueJobId, setQueueJobId] = useState('')
+  const [queuePriority, setQueuePriority] = useState('5')
+  const [queueLoading, setQueueLoading] = useState(false)
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
+  const [queueJobs, setQueueJobs] = useState<QueueJob[]>([])
+  const [loadingQueue, setLoadingQueue] = useState(false)
+  const [queueStatusPlanId, setQueueStatusPlanId] = useState('')
+  
+  // Plans list for selection
+  const [plans, setPlans] = useState<PlanWithJob[]>([])
+  const [loadingPlans, setLoadingPlans] = useState(false)
 
   useEffect(() => {
     if (authLoading) return
@@ -271,6 +327,172 @@ export default function PlanTextIngestionAdminPage() {
     setJobId('')
   }
 
+  // Vectorization queue functions
+  const handleQueuePlan = async () => {
+    if (!queuePlanId.trim()) return
+
+    setQueueLoading(true)
+    setQueueStatus(null)
+
+    try {
+      const response = await fetch('/api/plan-vectorization/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId: queuePlanId.trim(),
+          jobId: queueJobId.trim() || null,
+          priority: parseInt(queuePriority) || 5,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setQueueStatus({
+          error: data.error || 'Failed to queue vectorization',
+        })
+        return
+      }
+
+      setQueueStatus({
+        jobId: data.jobId,
+        status: 'pending',
+        progress: 0,
+      })
+
+      // Refresh queue list
+      loadQueueJobs()
+    } catch (error) {
+      setQueueStatus({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
+    } finally {
+      setQueueLoading(false)
+    }
+  }
+
+  const checkQueueStatus = async () => {
+    if (!queueStatusPlanId.trim()) return
+
+    setLoadingQueue(true)
+    setQueueStatus(null)
+
+    try {
+      const response = await fetch(
+        `/api/plan-vectorization/queue?planId=${queueStatusPlanId.trim()}`
+      )
+
+      if (!response.ok) {
+        const data = await response.json()
+        setQueueStatus({
+          error: data.error || 'Failed to check queue status',
+        })
+        return
+      }
+
+      const data = await response.json()
+      setQueueStatus({
+        jobId: data.id,
+        status: data.status,
+        progress: data.progress,
+        currentStep: data.current_step,
+        error: data.error_message,
+      })
+    } catch (error) {
+      setQueueStatus({
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
+    } finally {
+      setLoadingQueue(false)
+    }
+  }
+
+  const loadQueueJobs = async () => {
+    setLoadingQueue(true)
+    try {
+      const { data, error } = await supabase
+        .from('plan_vectorization_queue')
+        .select(`
+          *,
+          plans!inner(id, title, file_name)
+        `)
+        .order('queued_at', { ascending: false })
+        .limit(20)
+
+      if (error) throw error
+
+      // Transform the data
+      const transformed = (data || []).map((job: any) => ({
+        ...job,
+        plan: Array.isArray(job.plans) ? job.plans[0] : job.plans,
+      }))
+
+      setQueueJobs(transformed)
+    } catch (error) {
+      console.error('Failed to load queue jobs:', error)
+    } finally {
+      setLoadingQueue(false)
+    }
+  }
+
+  const loadPlans = async () => {
+    setLoadingPlans(true)
+    try {
+      const { data, error } = await supabase
+        .from('plans')
+        .select(`
+          id,
+          title,
+          file_name,
+          job_id,
+          jobs!inner(id, name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(1000) // Limit to most recent 1000 plans
+
+      if (error) throw error
+
+      // Transform the data
+      const transformed = (data || []).map((plan: any) => ({
+        ...plan,
+        job: Array.isArray(plan.jobs) ? plan.jobs[0] : plan.jobs,
+      }))
+
+      setPlans(transformed)
+    } catch (error) {
+      console.error('Failed to load plans:', error)
+    } finally {
+      setLoadingPlans(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadQueueJobs()
+      loadPlans()
+    }
+  }, [isAdmin])
+
+  // Update jobId when plan is selected (for queue)
+  useEffect(() => {
+    if (queuePlanId) {
+      const selectedPlan = plans.find(p => p.id === queuePlanId)
+      if (selectedPlan?.job_id) {
+        setQueueJobId(selectedPlan.job_id)
+      }
+    }
+  }, [queuePlanId, plans])
+
+  // Update jobId when plan is selected (for ingestion)
+  useEffect(() => {
+    if (planId) {
+      const selectedPlan = plans.find(p => p.id === planId)
+      if (selectedPlan?.job_id) {
+        setJobId(selectedPlan.job_id)
+      }
+    }
+  }, [planId, plans])
+
   if (authLoading || !authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -286,10 +508,10 @@ export default function PlanTextIngestionAdminPage() {
   return (
     <div className="container mx-auto max-w-4xl px-4 py-10 space-y-8">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Plan Text Ingestion</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Plan Text Ingestion & Vectorization</h1>
         <p className="text-muted-foreground">
-          Trigger the PDF text extraction and embedding pipeline for a specific plan. Use this after
-          running a migration or uploading new plan files to ensure Plan Chat has blueprint context.
+          Manage plan text extraction, embedding, and vectorization. Queue plans for background processing
+          or trigger immediate ingestion. Use this after running migrations or uploading new plan files.
         </p>
       </div>
 
@@ -338,29 +560,50 @@ export default function PlanTextIngestionAdminPage() {
           </div>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="plan-id">Plan ID</Label>
-              <Input
-                id="plan-id"
-                placeholder="d783f3f6-474e-48e7-92de-697309012ded"
+              <Label htmlFor="plan-id">Select Plan</Label>
+              <Select
                 value={planId}
-                onChange={(event) => setPlanId(event.target.value)}
+                onValueChange={setPlanId}
+                disabled={loading || loadingPlans}
                 required
-                disabled={loading}
-              />
+              >
+                <SelectTrigger id="plan-id">
+                  <SelectValue placeholder={loadingPlans ? "Loading plans..." : "Select a plan..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {loadingPlans ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading plans...</div>
+                  ) : plans.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">No plans available</div>
+                  ) : (
+                    plans.map((plan) => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        {plan.title || plan.file_name} • {plan.job?.name || 'Unknown Job'}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {planId && (
+                <p className="text-xs text-muted-foreground">
+                  Plan ID: <span className="font-mono">{planId}</span>
+                </p>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="job-id">
-                Job ID <span className="text-muted-foreground">(optional)</span>
-              </Label>
-              <Input
-                id="job-id"
-                placeholder="00d3c9de-b9ad-45ad-820f-ddd73a63cefb"
-                value={jobId}
-                onChange={(event) => setJobId(event.target.value)}
-                disabled={loading}
-              />
-            </div>
+            {jobId && (
+              <div className="space-y-2">
+                <Label htmlFor="job-id">
+                  Job ID <span className="text-muted-foreground">(auto-filled)</span>
+                </Label>
+                <Input
+                  id="job-id"
+                  value={jobId}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <Button type="submit" disabled={loading || !planId.trim()} className="gap-2">
@@ -467,6 +710,324 @@ export default function PlanTextIngestionAdminPage() {
             ID in Supabase to verify the stored snippets and embeddings.
           </p>
         </CardFooter>
+      </Card>
+
+      {/* Vectorization Queue Management */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Vectorization Queue</CardTitle>
+          <CardDescription>
+            Queue plans for background vectorization. This is the recommended method for
+            processing multiple plans as it runs in the background without blocking.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Queue a plan */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="queue-plan-id">Select Plan</Label>
+              <Select
+                value={queuePlanId}
+                onValueChange={setQueuePlanId}
+                disabled={queueLoading || loadingPlans}
+              >
+                <SelectTrigger id="queue-plan-id">
+                  <SelectValue placeholder={loadingPlans ? "Loading plans..." : "Select a plan..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {loadingPlans ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading plans...</div>
+                  ) : plans.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">No plans available</div>
+                  ) : (
+                    plans.map((plan) => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        {plan.title || plan.file_name} • {plan.job?.name || 'Unknown Job'}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {queuePlanId && (
+                <p className="text-xs text-muted-foreground">
+                  Plan ID: <span className="font-mono">{queuePlanId}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="queue-priority">Priority (higher = more priority)</Label>
+              <Input
+                id="queue-priority"
+                type="number"
+                min="0"
+                max="10"
+                value={queuePriority}
+                onChange={(e) => setQueuePriority(e.target.value)}
+                disabled={queueLoading}
+              />
+            </div>
+            {queueJobId && (
+              <p className="text-xs text-muted-foreground">
+                Job ID: <span className="font-mono">{queueJobId}</span> (auto-filled from selected plan)
+              </p>
+            )}
+
+            <Button
+              onClick={handleQueuePlan}
+              disabled={queueLoading || !queuePlanId.trim()}
+              className="gap-2"
+            >
+              {queueLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              {queueLoading ? 'Queueing...' : 'Queue for Vectorization'}
+            </Button>
+
+            {queueStatus && (
+              <div
+                className={`rounded-lg border p-4 ${
+                  queueStatus.error
+                    ? 'border-destructive/40 bg-destructive/10'
+                    : 'border-emerald-200 bg-emerald-50/10'
+                }`}
+              >
+                {queueStatus.error ? (
+                  <div className="flex items-center gap-2 text-destructive">
+                    <XCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">{queueStatus.error}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <p className="flex items-center gap-2 text-emerald-600">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Plan queued successfully!
+                    </p>
+                    <p>
+                      <span className="font-medium">Queue Job ID:</span>{' '}
+                      <span className="font-mono text-xs">{queueStatus.jobId}</span>
+                    </p>
+                    <p>
+                      <span className="font-medium">Status:</span> {queueStatus.status}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Check queue status */}
+          <div className="border-t pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="check-queue-plan-id">Check Queue Status for Plan</Label>
+              <div className="flex gap-2">
+                <Select
+                  value={queueStatusPlanId}
+                  onValueChange={setQueueStatusPlanId}
+                  disabled={loadingQueue || loadingPlans}
+                >
+                  <SelectTrigger id="check-queue-plan-id" className="flex-1">
+                    <SelectValue placeholder={loadingPlans ? "Loading plans..." : "Select a plan to check status..."} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {loadingPlans ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading plans...</div>
+                    ) : plans.length === 0 ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No plans available</div>
+                    ) : (
+                      plans.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.title || plan.file_name} • {plan.job?.name || 'Unknown Job'}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={checkQueueStatus}
+                  disabled={loadingQueue || !queueStatusPlanId.trim()}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  {loadingQueue ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <List className="h-4 w-4" />
+                  )}
+                  Check
+                </Button>
+              </div>
+            </div>
+
+            {queueStatus && queueStatusPlanId && (
+              <div className="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
+                {queueStatus.error ? (
+                  <div className="flex items-center gap-2 text-destructive">
+                    <XCircle className="h-4 w-4" />
+                    <span className="text-sm">{queueStatus.error}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Status:</span>
+                      <Badge
+                        variant={
+                          queueStatus.status === 'completed'
+                            ? 'default'
+                            : queueStatus.status === 'failed'
+                            ? 'destructive'
+                            : queueStatus.status === 'processing'
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                      >
+                        {queueStatus.status}
+                      </Badge>
+                    </div>
+                    {queueStatus.progress !== undefined && (
+                      <div>
+                        <span className="font-medium">Progress:</span> {queueStatus.progress}%
+                        <div className="mt-1 h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 transition-all"
+                            style={{ width: `${queueStatus.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {queueStatus.currentStep && (
+                      <p>
+                        <span className="font-medium">Current Step:</span> {queueStatus.currentStep}
+                      </p>
+                    )}
+                    {queueStatus.jobId && (
+                      <p>
+                        <span className="font-medium">Job ID:</span>{' '}
+                        <span className="font-mono text-xs">{queueStatus.jobId}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Queue Jobs List */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Recent Queue Jobs</CardTitle>
+              <CardDescription>
+                View recent vectorization queue jobs and their status
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadQueueJobs}
+              disabled={loadingQueue}
+              className="gap-2"
+            >
+              <RefreshCcw className={`h-4 w-4 ${loadingQueue ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loadingQueue ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : queueJobs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
+              <List className="h-6 w-6" />
+              <p className="text-sm">No queue jobs found.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {queueJobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">
+                          {job.plan?.title || job.plan?.file_name || 'Unknown Plan'}
+                        </span>
+                        <Badge
+                          variant={
+                            job.status === 'completed'
+                              ? 'default'
+                              : job.status === 'failed'
+                              ? 'destructive'
+                              : job.status === 'processing'
+                              ? 'secondary'
+                              : 'outline'
+                          }
+                        >
+                          {job.status}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        Plan: {job.plan_id} • Job: {job.id}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      {new Date(job.queued_at).toLocaleString()}
+                    </div>
+                  </div>
+
+                  {job.status === 'processing' && job.progress !== undefined && (
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span>Progress: {job.progress}%</span>
+                        {job.current_step && <span>{job.current_step}</span>}
+                      </div>
+                      <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 transition-all"
+                          style={{ width: `${job.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {job.status === 'completed' && (
+                    <div className="text-xs space-y-1">
+                      <p>
+                        <span className="font-medium">Chunks created:</span>{' '}
+                        {job.chunks_created?.toLocaleString() || 0}
+                      </p>
+                      <p>
+                        <span className="font-medium">Pages processed:</span>{' '}
+                        {job.pages_processed || 0} / {job.total_pages || 0}
+                      </p>
+                      {job.completed_at && (
+                        <p className="text-muted-foreground">
+                          Completed: {new Date(job.completed_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {job.status === 'failed' && job.error_message && (
+                    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-xs">
+                      <p className="font-medium">Error:</p>
+                      <p className="mt-1">{job.error_message}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   )

@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import {
   Building2,
   ArrowLeft,
@@ -107,6 +106,7 @@ interface EnrichmentRecord {
     google_reviews_link?: string | null
     yelp_link?: string | null
     bbb_link?: string | null
+    portfolio_links?: string[] | null
   } | null
   sources_json: Record<string, {
     source_url: string
@@ -1014,14 +1014,22 @@ export default function SubcontractorEnrichmentPage() {
                               {/* Logo/Avatar */}
                               <div className="flex-shrink-0">
                                 {sub.profile_picture_url ? (
-                                  <Image
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
                                     src={sub.profile_picture_url}
                                     alt={sub.name}
                                     width={48}
                                     height={48}
-                                    className="rounded-lg object-cover"
+                                    className="rounded-lg object-cover w-12 h-12"
+                                    onError={(e) => {
+                                      const target = e.target as HTMLImageElement
+                                      target.style.display = 'none'
+                                      const fallback = target.nextElementSibling as HTMLElement
+                                      if (fallback) fallback.style.display = 'flex'
+                                    }}
                                   />
-                                ) : (
+                                ) : null}
+                                {!sub.profile_picture_url && (
                                   <div className="w-12 h-12 rounded-lg bg-gray-200 flex items-center justify-center">
                                     <Building2 className="h-6 w-6 text-gray-400" />
                                   </div>
@@ -1253,14 +1261,22 @@ export default function SubcontractorEnrichmentPage() {
               {selectedSubcontractor && (
                 <div className="flex items-center space-x-4 p-4 bg-muted/50 rounded-lg">
                   {selectedSubcontractor.profile_picture_url ? (
-                    <Image
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
                       src={selectedSubcontractor.profile_picture_url}
                       alt={selectedSubcontractor.name}
                       width={64}
                       height={64}
-                      className="rounded-lg object-cover"
+                      className="rounded-lg object-cover w-16 h-16"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement
+                        target.style.display = 'none'
+                        const fallback = target.nextElementSibling as HTMLElement
+                        if (fallback) fallback.style.display = 'flex'
+                      }}
                     />
-                  ) : (
+                  ) : null}
+                  {!selectedSubcontractor.profile_picture_url && (
                     <div className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center">
                       <Building2 className="h-8 w-8 text-gray-400" />
                     </div>
@@ -1347,12 +1363,30 @@ export default function SubcontractorEnrichmentPage() {
                                       {value ? 'Yes' : 'No'}
                                     </Badge>
                                   ) : Array.isArray(value) ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {value.map((item, i) => (
-                                        <Badge key={i} variant="outline" className="text-xs">
-                                          {item}
-                                        </Badge>
-                                      ))}
+                                    <div className="space-y-1">
+                                      {value.map((item, i) => {
+                                        // If it's an array of URLs (like portfolio_links), show as links
+                                        if (typeof item === 'string' && item.startsWith('http')) {
+                                          return (
+                                            <a
+                                              key={i}
+                                              href={item}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-blue-600 hover:underline flex items-center text-sm block"
+                                            >
+                                              <ExternalLink className="h-3 w-3 mr-1" />
+                                              {item.length > 60 ? item.substring(0, 60) + '...' : item}
+                                            </a>
+                                          )
+                                        }
+                                        // Otherwise show as badge
+                                        return (
+                                          <Badge key={i} variant="outline" className="text-xs">
+                                            {item}
+                                          </Badge>
+                                        )
+                                      })}
                                     </div>
                                   ) : typeof value === 'string' && value.startsWith('http') ? (
                                     <a

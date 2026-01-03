@@ -44,6 +44,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Job already completed' }, { status: 200 })
     }
 
+    // Verify plan exists before starting processing
+    const { data: planExists, error: planCheckError } = await supabase
+      .from('plans')
+      .select('id')
+      .eq('id', job.plan_id)
+      .maybeSingle()
+
+    if (planCheckError) {
+      console.error('[VectorizationProcess] Error checking plan existence:', planCheckError)
+      // Continue anyway - might be a transient error
+    }
+
+    if (!planExists) {
+      console.warn(`[VectorizationProcess] Plan ${job.plan_id} not found, marking job as failed`)
+      await supabase
+        .from('plan_vectorization_queue')
+        .update({
+          status: 'failed',
+          error_message: `Plan ${job.plan_id} not found. The plan may have been deleted.`,
+          completed_at: new Date().toISOString(),
+          current_step: 'Plan not found',
+        })
+        .eq('id', queueJobId)
+      
+      return NextResponse.json({
+        success: false,
+        error: 'Plan not found',
+        message: `The plan associated with this vectorization job no longer exists. The plan may have been deleted.`,
+      }, { status: 404 })
+    }
+
     // Update status to processing
     await supabase
       .from('plan_vectorization_queue')

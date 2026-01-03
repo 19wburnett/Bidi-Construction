@@ -17,6 +17,17 @@ interface SubcontractorProfileHeaderProps {
   profilePictureUrl?: string | null
 }
 
+// Helper to check if URL is from Supabase (safe for Next.js Image)
+function isSupabaseUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.includes('supabase.co') || urlObj.hostname.includes('supabase.in')
+  } catch {
+    return false
+  }
+}
+
 export default function SubcontractorProfileHeader({
   name,
   tradeCategory,
@@ -30,6 +41,7 @@ export default function SubcontractorProfileHeader({
   const backgroundImage = primaryPhotoUrl
   const avatarImage = profilePictureUrl
   const isBackgroundDark = useImageBrightness(backgroundImage)
+  const isAvatarSupabase = isSupabaseUrl(avatarImage)
 
   return (
     <div className="relative w-full bg-white">
@@ -58,13 +70,29 @@ export default function SubcontractorProfileHeader({
           <div className="flex flex-col md:flex-row items-start md:items-end gap-4 md:gap-6 flex-1 min-w-0">
             <div className="relative h-32 w-32 md:h-48 md:w-48 rounded-3xl overflow-hidden border-4 border-white bg-white shadow-2xl flex-shrink-0">
               {avatarImage ? (
-                <Image
-                  src={avatarImage}
-                  alt={name}
-                  fill
-                  className="object-cover"
-                />
-              ) : (
+                isAvatarSupabase ? (
+                  <Image
+                    src={avatarImage}
+                    alt={name}
+                    fill
+                    className="object-cover"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={avatarImage}
+                    alt={name}
+                    className="object-cover w-full h-full"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement
+                      target.style.display = 'none'
+                      const fallback = target.nextElementSibling as HTMLElement
+                      if (fallback) fallback.style.display = 'flex'
+                    }}
+                  />
+                )
+              ) : null}
+              {!avatarImage && (
                 <div className="h-full w-full flex items-center justify-center bg-gray-100 text-orange-500 text-5xl font-bold">
                   {name.charAt(0)}
                 </div>
