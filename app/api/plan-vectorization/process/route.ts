@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 import { ingestPlanTextChunks } from '@/lib/plan-text-chunks'
 
 /**
  * POST /api/plan-vectorization/process
  * Process a vectorization job from the queue
  * This endpoint is called by the queue system or can be triggered manually
+ * Uses admin client to bypass RLS for background processing
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createServerSupabaseClient()
+  // Use admin client to bypass RLS - this is a background job that needs to access any plan
+  const supabase = createAdminSupabaseClient()
   
   let payload: { queueJobId?: string } = {}
   try {
@@ -45,19 +47,44 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify plan exists before starting processing
+    // Use admin client to bypass RLS - this is a background job
+    console.log(`[VectorizationProcess] Checking if plan ${job.plan_id} exists...`)
     const { data: planExists, error: planCheckError } = await supabase
       .from('plans')
-      .select('id')
+      .select('id, title, file_name, file_path, job_id')
       .eq('id', job.plan_id)
       .maybeSingle()
 
     if (planCheckError) {
       console.error('[VectorizationProcess] Error checking plan existence:', planCheckError)
-      // Continue anyway - might be a transient error
+      console.error('[VectorizationProcess] Error details:', JSON.stringify(planCheckError, null, 2))
+      // Mark as failed with the error details
+      await supabase
+        .from('plan_vectorization_queue')
+        .update({
+          status: 'failed',
+          error_message: `Error checking plan existence: ${planCheckError.message}`,
+          completed_at: new Date().toISOString(),
+          current_step: 'Plan check error',
+        })
+        .eq('id', queueJobId)
+      
+      return NextResponse.json({
+        success: false,
+        error: 'Plan check failed',
+        message: `Failed to verify plan existence: ${planCheckError.message}`,
+      }, { status: 500 })
     }
 
     if (!planExists) {
-      console.warn(`[VectorizationProcess] Plan ${job.plan_id} not found, marking job as failed`)
+      console.warn(`[VectorizationProcess] Plan ${job.plan_id} not found in database`)
+      // Try to get more info about why it might not be found
+      const { count: totalPlans } = await supabase
+        .from('plans')
+        .select('id', { count: 'exact', head: true })
+      
+      console.warn(`[VectorizationProcess] Total plans in database: ${totalPlans}`)
+      
       await supabase
         .from('plan_vectorization_queue')
         .update({
@@ -74,6 +101,8 @@ export async function POST(request: NextRequest) {
         message: `The plan associated with this vectorization job no longer exists. The plan may have been deleted.`,
       }, { status: 404 })
     }
+
+    console.log(`[VectorizationProcess] Plan found: ${planExists.title || planExists.file_name} (ID: ${planExists.id})`)
 
     // Update status to processing
     await supabase
