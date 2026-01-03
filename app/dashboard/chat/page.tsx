@@ -276,10 +276,10 @@ export default function ChatPage() {
         throw new Error(payload.error || 'Failed to get a response')
       }
 
-      const payload: { reply: string; chatId?: string } = await response.json()
+      const payload: { reply?: string; chatId?: string } = await response.json()
       
-      // Validate that reply exists
-      if (!payload.reply || typeof payload.reply !== 'string') {
+      // Validate that reply exists and is a non-empty string
+      if (!payload || !payload.reply || typeof payload.reply !== 'string' || payload.reply.trim().length === 0) {
         throw new Error('Invalid response: missing or invalid reply')
       }
       
@@ -292,7 +292,7 @@ export default function ChatPage() {
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: payload.reply.trim(),
+        content: (payload.reply || '').trim(),
       }
 
       setMessages((prev) => [...prev, assistantMessage])

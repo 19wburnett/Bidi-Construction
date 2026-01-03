@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { formatPhoneNumber, isValidPhoneNumber } from '@/lib/sms-helper'
 
 export const runtime = 'nodejs'
 
@@ -14,6 +15,92 @@ interface RespondRequest {
   recipientId: string
   responseText: string
   quickReplyId?: string
+  deliveryChannel?: 'email' | 'sms' | 'both' // New: delivery channel preference
+}
+
+/**
+ * Send SMS via Telnyx API
+ */
+async function sendTelnyxSMS(to: string, message: string): Promise<{ id: string; error?: any }> {
+  const telnyxApiKey = process.env.TELNYX_API_KEY
+  if (!telnyxApiKey) {
+    throw new Error('TELNYX_API_KEY is not configured')
+  }
+
+  const telnyxPhoneNumber = process.env.TELNYX_PHONE_NUMBER
+  if (!telnyxPhoneNumber) {
+    throw new Error('TELNYX_PHONE_NUMBER is not configured. Please set it in your .env file.')
+  }
+
+  // Normalize both phone numbers (must be in E.164 format)
+  console.log('📱 [respond] Raw phone number from env:', telnyxPhoneNumber)
+  const normalizedFrom = formatPhoneNumber(telnyxPhoneNumber)
+  const normalizedTo = formatPhoneNumber(to)
+
+  console.log('📱 [respond] Sending SMS:', {
+    originalFrom: telnyxPhoneNumber,
+    normalizedFrom: normalizedFrom,
+    originalTo: to,
+    normalizedTo: normalizedTo,
+    messageLength: message.length
+  })
+
+  const response = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${telnyxApiKey}`
+    },
+    body: JSON.stringify({
+      from: normalizedFrom,
+      to: normalizedTo,
+      text: message
+    })
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    console.error('❌ Telnyx API error:', JSON.stringify(data, null, 2))
+    
+    // Provide more helpful error messages
+    const errorCode = data.errors?.[0]?.code
+    const errorDetail = data.errors?.[0]?.detail || data.message || 'Failed to send SMS'
+    
+    if (errorCode === '40013') {
+      throw new Error(
+        `Invalid source phone number: ${normalizedFrom}. ` +
+        `Please verify: 1) The number is in E.164 format (e.g., +1234567890), ` +
+        `2) The number is enabled for messaging in your Telnyx dashboard, ` +
+        `3) The number is verified and active. ` +
+        `Check your TELNYX_PHONE_NUMBER environment variable.`
+      )
+    }
+    
+    if (errorCode === '10039') {
+      throw new Error(
+        `Telnyx account restriction: Only pre-verified destination numbers are allowed at your account level. ` +
+        `The destination number ${normalizedTo} needs to be verified before sending. ` +
+        `Options: ` +
+        `1) Verify the destination number in Telnyx Dashboard → Numbers → Verify Numbers, OR ` +
+        `2) Upgrade your Telnyx account to allow sending to unverified numbers. ` +
+        `See: https://telnyx.com/upgrade or https://developers.telnyx.com/docs/overview/errors/10039`
+      )
+    }
+    
+    if (errorCode === '40010') {
+      throw new Error(
+        `10DLC Registration Required: Your phone number ${normalizedFrom} is not registered for 10DLC (10-Digit Long Code) messaging, ` +
+        `which is required by the carrier for A2P messaging. ` +
+        `To fix: Go to Telnyx Dashboard → Messaging → 10DLC → Register your brand and campaign. ` +
+        `See: https://developers.telnyx.com/docs/overview/errors/40010`
+      )
+    }
+    
+    throw new Error(errorDetail)
+  }
+
+  return { id: data.data.id }
 }
 
 export async function POST(
@@ -33,7 +120,7 @@ export async function POST(
 
 
     const body: RespondRequest = await request.json()
-    const { recipientId, responseText, quickReplyId } = body
+    const { recipientId, responseText, quickReplyId, deliveryChannel = 'email' } = body
 
     if (!bidPackageId || !recipientId || !responseText) {
       return NextResponse.json(
@@ -82,12 +169,28 @@ export async function POST(
       )
     }
 
-    // Validate recipient has required fields
-    if (!recipient.subcontractor_email) {
-      return NextResponse.json(
-        { error: 'Recipient email is missing' },
-        { status: 400 }
-      )
+    // Validate recipient has required fields based on delivery channel
+    if (deliveryChannel === 'email' || deliveryChannel === 'both') {
+      if (!recipient.subcontractor_email) {
+        return NextResponse.json(
+          { error: 'Recipient email is missing' },
+          { status: 400 }
+        )
+      }
+    }
+    if (deliveryChannel === 'sms' || deliveryChannel === 'both') {
+      if (!recipient.subcontractor_phone) {
+        return NextResponse.json(
+          { error: 'Recipient phone number is missing' },
+          { status: 400 }
+        )
+      }
+      if (!isValidPhoneNumber(recipient.subcontractor_phone)) {
+        return NextResponse.json(
+          { error: 'Recipient phone number is invalid' },
+          { status: 400 }
+        )
+      }
     }
 
     // Get plans for this job to include plan links
@@ -387,62 +490,122 @@ export async function POST(
       )
     }
 
-    // Send response email with threading headers
-    const emailData: any = {
-      from: 'Bidi <noreply@bidicontracting.com>',
-      to: [recipient.subcontractor_email],
-      subject: emailSubject,
-      html: formattedEmailBody,
-      reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`,
-      ...(Object.keys(emailHeaders).length > 0 && { headers: emailHeaders })
-    }
-    
-    console.log('📧 [respond] Sending email via Resend:', {
-      to: recipient.subcontractor_email,
-      subject: emailSubject,
-      hasHeaders: Object.keys(emailHeaders).length > 0,
-      headers: emailHeaders
-    })
-    
-    // Add retry logic with exponential backoff for rate limit errors
+    // Send email if requested
     let resendData: any = null
     let resendError: any = null
-    const maxRetries = 3
-    const baseDelay = 600 // Start with 600ms delay
-    
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const { data, error } = await resend.emails.send(emailData)
+    let actualMessageId: string | null = null
+    let emailTextContent = ''
+
+    if (deliveryChannel === 'email' || deliveryChannel === 'both') {
+      // Send response email with threading headers
+      const emailData: any = {
+        from: 'Bidi <noreply@bidicontracting.com>',
+        to: [recipient.subcontractor_email],
+        subject: emailSubject,
+        html: formattedEmailBody,
+        reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`,
+        ...(Object.keys(emailHeaders).length > 0 && { headers: emailHeaders })
+      }
       
-      if (!error) {
-        resendData = data
-        resendError = null
+      console.log('📧 [respond] Sending email via Resend:', {
+        to: recipient.subcontractor_email,
+        subject: emailSubject,
+        hasHeaders: Object.keys(emailHeaders).length > 0,
+        headers: emailHeaders
+      })
+      
+      // Add retry logic with exponential backoff for rate limit errors
+      const maxRetries = 3
+      const baseDelay = 600 // Start with 600ms delay
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const { data, error } = await resend.emails.send(emailData)
+        
+        if (!error) {
+          resendData = data
+          resendError = null
+          break
+        }
+        
+        // If it's a rate limit error and we have retries left, wait and retry
+        if (error.name === 'rate_limit_exceeded' || (error as any).statusCode === 429) {
+          if (attempt < maxRetries - 1) {
+            const delay = baseDelay * Math.pow(2, attempt) // Exponential backoff: 600ms, 1200ms, 2400ms
+            console.log(`⏳ [respond] Rate limited, waiting ${delay}ms before retry (attempt ${attempt + 1}/${maxRetries})`)
+            await new Promise(resolve => setTimeout(resolve, delay))
+            continue
+          }
+        }
+        
+        // For other errors or if we've exhausted retries, fail
+        resendError = error
         break
       }
-      
-      // If it's a rate limit error and we have retries left, wait and retry
-      if (error.name === 'rate_limit_exceeded' || (error as any).statusCode === 429) {
-        if (attempt < maxRetries - 1) {
-          const delay = baseDelay * Math.pow(2, attempt) // Exponential backoff: 600ms, 1200ms, 2400ms
-          console.log(`⏳ [respond] Rate limited, waiting ${delay}ms before retry (attempt ${attempt + 1}/${maxRetries})`)
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
+
+      if (resendData?.id) {
+        // Try to fetch the actual Message-ID from Resend after sending
+        if (resendData.message_id) {
+          actualMessageId = resendData.message_id.startsWith('<') 
+            ? resendData.message_id 
+            : `<${resendData.message_id}>`
+          console.log('📧 [respond] Got Message-ID from response:', actualMessageId)
+        } else {
+          // Construct fallback Message-ID
+          actualMessageId = resendData.id ? `<${resendData.id}@resend.dev>` : null
+          console.log('📧 [respond] Using constructed Message-ID:', actualMessageId)
+          
+          // Try to fetch from Resend API after a short delay
+          try {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            const emailResponse = await fetch(`https://api.resend.com/emails/${resendData.id}`, {
+              headers: {
+                'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+              }
+            })
+            
+            if (emailResponse.ok) {
+              const emailDetails = await emailResponse.json()
+              if (emailDetails.message_id || emailDetails.headers?.['message-id']) {
+                const fetchedId = emailDetails.message_id || emailDetails.headers?.['message-id']
+                actualMessageId = fetchedId.startsWith('<') ? fetchedId : `<${fetchedId}>`
+                console.log('📧 [respond] Fetched Message-ID from API:', actualMessageId)
+              }
+            }
+          } catch (error) {
+            console.log('📧 [respond] Could not fetch Message-ID from API (using constructed):', error instanceof Error ? error.message : String(error))
+          }
         }
+
+        // Extract text content from formatted email body for storage
+        emailTextContent = formattedEmailBody
+          .replace(/<style[^>]*>.*?<\/style>/gi, '')
+          .replace(/<script[^>]*>.*?<\/script>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 5000)
       }
-      
-      // For other errors or if we've exhausted retries, fail
-      resendError = error
-      break
     }
 
+    // Handle email sending errors (only fail if email is required)
     if (resendError) {
       console.error('❌ [respond] Resend error:', resendError)
-      return NextResponse.json(
-        { error: 'Failed to send email', details: resendError.message },
-        { status: 500 }
-      )
+      if (deliveryChannel === 'email') {
+        return NextResponse.json(
+          { error: 'Failed to send email', details: resendError.message },
+          { status: 500 }
+        )
+      }
+      // If both channels, continue with SMS
     }
     
-    if (!resendData?.id) {
+    if (deliveryChannel === 'email' && !resendData?.id) {
       console.error('❌ [respond] No email ID returned from Resend:', resendData)
       return NextResponse.json(
         { error: 'Failed to send email - no email ID returned' },
@@ -450,60 +613,28 @@ export async function POST(
       )
     }
     
-    console.log('✅ [respond] Email sent successfully:', resendData.id)
-    console.log('📧 [respond] Resend response:', JSON.stringify(resendData, null, 2))
-    
-    // Try to fetch the actual Message-ID from Resend after sending
-    // Sometimes Resend doesn't include it in the immediate response
-    let actualMessageId: string | null = null
-    
-    // First try the response
-    if (resendData.message_id) {
-      actualMessageId = resendData.message_id.startsWith('<') 
-        ? resendData.message_id 
-        : `<${resendData.message_id}>`
-      console.log('📧 [respond] Got Message-ID from response:', actualMessageId)
-    } else {
-      // Construct fallback Message-ID
-      actualMessageId = resendData.id ? `<${resendData.id}@resend.dev>` : null
-      console.log('📧 [respond] Using constructed Message-ID:', actualMessageId)
-      
-      // Try to fetch from Resend API after a short delay (in case it's not immediately available)
+    if (resendData?.id) {
+      console.log('✅ [respond] Email sent successfully:', resendData.id)
+    }
+
+    // Send SMS if requested
+    let telnyxMessageId: string | null = null
+    if (deliveryChannel === 'sms' || deliveryChannel === 'both') {
       try {
-        await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second
-        const emailResponse = await fetch(`https://api.resend.com/emails/${resendData.id}`, {
-          headers: {
-            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (emailResponse.ok) {
-          const emailDetails = await emailResponse.json()
-          if (emailDetails.message_id || emailDetails.headers?.['message-id']) {
-            const fetchedId = emailDetails.message_id || emailDetails.headers?.['message-id']
-            actualMessageId = fetchedId.startsWith('<') ? fetchedId : `<${fetchedId}>`
-            console.log('📧 [respond] Fetched Message-ID from API:', actualMessageId)
-          }
+        const smsResult = await sendTelnyxSMS(recipient.subcontractor_phone, responseText.trim())
+        telnyxMessageId = smsResult.id
+        console.log('✅ [respond] SMS sent successfully:', telnyxMessageId)
+      } catch (smsError: any) {
+        console.error('❌ [respond] SMS error:', smsError)
+        if (deliveryChannel === 'sms') {
+          return NextResponse.json(
+            { error: 'Failed to send SMS', details: smsError.message },
+            { status: 500 }
+          )
         }
-      } catch (error) {
-        console.log('📧 [respond] Could not fetch Message-ID from API (using constructed):', error instanceof Error ? error.message : String(error))
+        // If both channels, continue with email result
       }
     }
-    
-    // Extract text content from formatted email body for storage
-    const emailTextContent = formattedEmailBody
-      .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
-      .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
-      .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
-      .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-      .replace(/&amp;/g, '&') // Replace &amp; with &
-      .replace(/&lt;/g, '<') // Replace &lt; with <
-      .replace(/&gt;/g, '>') // Replace &gt; with >
-      .replace(/&quot;/g, '"') // Replace &quot; with "
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-      .trim()
-      .substring(0, 5000) // Limit to 5000 chars
     
     console.log('📧 [respond] Inserting recipient record:', {
       bidPackageId,
@@ -514,22 +645,49 @@ export async function POST(
       messageId: actualMessageId
     })
     
+    // Determine thread ID based on delivery channel
+    const smsThreadId = recipient.subcontractor_phone 
+      ? `sms-thread-${bidPackageId}-${recipient.subcontractor_phone.replace(/[^\d]/g, '')}`
+      : null
+    
+    const finalThreadId = deliveryChannel === 'sms' && smsThreadId 
+      ? smsThreadId 
+      : threadId
+
+    const recipientData: any = {
+      bid_package_id: bidPackageId,
+      subcontractor_id: recipient.subcontractor_id,
+      subcontractor_email: recipient.subcontractor_email || null,
+      subcontractor_name: recipient.subcontractor_name,
+      subcontractor_phone: recipient.subcontractor_phone || null,
+      delivery_channel: deliveryChannel,
+      thread_id: finalThreadId,
+      parent_email_id: parentId,
+      response_text: deliveryChannel === 'sms' ? responseText.trim() : emailTextContent,
+      is_from_gc: true,
+      sent_at: new Date().toISOString()
+    }
+
+    // Add email fields if email was sent
+    if (resendData?.id) {
+      recipientData.resend_email_id = resendData.id
+      recipientData.message_id = actualMessageId || null
+      recipientData.status = 'sent'
+    }
+
+    // Add SMS fields if SMS was sent
+    if (telnyxMessageId) {
+      recipientData.telnyx_message_id = telnyxMessageId
+      recipientData.sms_status = 'sent'
+      recipientData.sms_sent_at = new Date().toISOString()
+      if (!recipientData.status) {
+        recipientData.status = 'sent'
+      }
+    }
+
     const { data: newRecipient, error: insertError } = await supabase
       .from('bid_package_recipients')
-      .insert({
-        bid_package_id: bidPackageId,
-        subcontractor_id: recipient.subcontractor_id,
-        subcontractor_email: recipient.subcontractor_email,
-        subcontractor_name: recipient.subcontractor_name,
-        resend_email_id: resendData?.id,
-        message_id: actualMessageId || null, // Store Message-ID for threading
-        status: 'sent',
-        sent_at: new Date().toISOString(),
-        thread_id: threadId,
-        parent_email_id: parentId,
-        response_text: emailTextContent, // Store the full email content (includes plan links if any)
-        is_from_gc: true // Explicitly mark as GC-sent email
-      })
+      .insert(recipientData)
       .select()
       .single()
     
@@ -572,7 +730,9 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      emailId: resendData?.id
+      emailId: resendData?.id,
+      smsMessageId: telnyxMessageId,
+      deliveryChannel
     })
 
   } catch (error: any) {

@@ -6,7 +6,7 @@ import Link from 'next/link'
 import ProfileDropdown from '@/components/profile-dropdown'
 import CreditsDisplay from '@/components/credits-display'
 import NotificationBell from '@/components/notification-bell'
-import logo from '../public/brand/Bidi Contracting Logo.svg'    
+const logoPath = '/brand/Bidi Contracting Logo.svg'    
 
 interface DashboardNavbarProps {
   title?: string
@@ -45,7 +45,7 @@ export default function DashboardNavbar({
     <header className="bg-white border-b-2 border-gray-200 shadow-sm">
       <div className="container mx-auto px-4 py-4 flex justify-between items-center">
         <div className="flex items-center space-x-3">
-          <img src={logo.src} alt="BIDI" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
+          <img src={logoPath} alt="BIDI" className="h-6 w-6 sm:h-8 sm:w-8 text-black" />    
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{renderTitle()}</h1>
         </div>
         <div className="flex items-center space-x-2 sm:space-x-4">

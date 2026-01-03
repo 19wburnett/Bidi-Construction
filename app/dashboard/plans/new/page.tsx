@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
+import { listJobsForUser } from '@/lib/job-access'
 import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
@@ -81,11 +82,23 @@ export default function UploadPlanPage() {
         numPages = 1
       }
 
+      // Get user's jobs to find a job_id for the plan
+      const memberships = await listJobsForUser(supabase, user.id, 'id')
+      const jobIds = memberships.map(({ job }) => job.id).filter(Boolean) as string[]
+      
+      if (jobIds.length === 0) {
+        throw new Error('Please create a job first before uploading plans. Plans must be associated with a job.')
+      }
+
+      // Use the first job (user can reassign later if needed)
+      const jobId = jobIds[0]
+
       // Create plan record in database
       const { data: plan, error: dbError } = await supabase
         .from('plans')
         .insert({
-          user_id: user.id,
+          job_id: jobId,
+          created_by: user.id,
           file_name: selectedFile.name,
           file_path: filePath,
           file_size: selectedFile.size,
@@ -126,9 +139,18 @@ export default function UploadPlanPage() {
 
         // Queue plan text chunk vectorization for RAG context (background job)
         // This runs automatically when plans are uploaded, so they're ready for chat
+        // Note: Database trigger also queues this automatically, but this ensures it happens
         import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
-          queuePlanVectorization(plan.id, null, 5).catch((err) => {
+          queuePlanVectorization(plan.id, null, 5).then((result) => {
+            if (result.success) {
+              console.log(`✅ Vectorization queued for plan ${plan.id}: job ${result.jobId}`)
+            } else {
+              console.warn(`⚠️ Vectorization queue failed for plan ${plan.id}: ${result.error}`)
+              // Don't throw - database trigger will handle it if this fails
+            }
+          }).catch((err) => {
             console.error('Background vectorization queue trigger failed:', err)
+            // Don't throw - database trigger will handle it if this fails
           })
         })
       }

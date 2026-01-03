@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Receipt, Package, Hammer, FileText, DollarSign, Wrench } from 'lucide-react'
 
 interface BidLineItem {
@@ -14,6 +16,8 @@ interface BidLineItem {
   unit_price: number | null
   amount: number
   notes: string | null
+  is_optional?: boolean | null
+  option_group?: string | null
 }
 
 interface BidLineItemsDisplayProps {
@@ -50,6 +54,9 @@ const CATEGORY_CONFIG = {
 }
 
 export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineItemsDisplayProps) {
+  // Track which optional items are selected
+  const [selectedOptionalItems, setSelectedOptionalItems] = useState<Set<string>>(new Set())
+
   if (!lineItems || lineItems.length === 0) {
     return null
   }
@@ -70,11 +77,47 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
     }).format(num)
   }
 
-  // Calculate total from line items
-  const calculatedTotal = lineItems.reduce((sum, item) => sum + (item.amount || 0), 0)
+  // Toggle optional item selection
+  const toggleOptionalItem = (itemId: string) => {
+    setSelectedOptionalItems(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+  }
 
-  // Group items by category
-  const itemsByCategory = lineItems.reduce((acc, item) => {
+  // Calculate total from line items (standard items + selected optional items)
+  const standardItems = lineItems.filter(item => !item.is_optional)
+  const selectedOptionalItemsList = lineItems.filter(
+    item => item.is_optional && selectedOptionalItems.has(item.id)
+  )
+  const calculatedTotal = [
+    ...standardItems,
+    ...selectedOptionalItemsList
+  ].reduce((sum, item) => sum + (item.amount || 0), 0)
+  const optionalTotal = lineItems.filter(item => item.is_optional).reduce((sum, item) => sum + (item.amount || 0), 0)
+  const selectedOptionalTotal = selectedOptionalItemsList.reduce((sum, item) => sum + (item.amount || 0), 0)
+
+  // Separate standard and optional items
+  const standardLineItems = lineItems.filter(item => !item.is_optional)
+  const optionalLineItems = lineItems.filter(item => item.is_optional)
+
+  // Group optional items by option_group
+  const optionalByGroup = optionalLineItems.reduce((acc, item) => {
+    const group = item.option_group || 'Other Options'
+    if (!acc[group]) {
+      acc[group] = []
+    }
+    acc[group].push(item)
+    return acc
+  }, {} as Record<string, BidLineItem[]>)
+
+  // Group standard items by category
+  const itemsByCategory = standardLineItems.reduce((acc, item) => {
     const category = item.category || 'other'
     if (!acc[category]) {
       acc[category] = []
@@ -132,6 +175,11 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
                             <p className="text-sm text-gray-900 dark:text-white font-medium">
                               {item.description}
                             </p>
+                            {item.is_optional && (
+                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
+                                Optional
+                              </Badge>
+                            )}
                           </div>
                           
                           {/* Quantity and Unit Info */}
@@ -172,10 +220,104 @@ export default function BidLineItemsDisplay({ lineItems, totalAmount }: BidLineI
             )
           })}
 
+          {/* Optional Items Section */}
+          {optionalLineItems.length > 0 && (
+            <div className="border-t-2 border-orange-300 dark:border-orange-700 pt-4 space-y-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400">Optional Items</h3>
+              </div>
+              {Object.entries(optionalByGroup).map(([groupName, groupItems]) => {
+                const groupTotal = groupItems.reduce((sum, item) => sum + (item.amount || 0), 0)
+                return (
+                  <div key={groupName} className="space-y-2 border-l-4 border-l-orange-400 pl-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300">
+                        {groupName}
+                      </Badge>
+                      <span className="text-sm font-semibold text-orange-700 dark:text-orange-400">
+                        {formatCurrency(groupTotal)}
+                      </span>
+                    </div>
+                    {groupItems.map((item) => {
+                      const itemCategory = item.category || 'other'
+                      const config = CATEGORY_CONFIG[itemCategory as keyof typeof CATEGORY_CONFIG] || CATEGORY_CONFIG.other
+                      const isSelected = selectedOptionalItems.has(item.id)
+                      return (
+                        <div 
+                          key={item.id} 
+                          className={`rounded-lg p-3 border transition-colors ${
+                            isSelected 
+                              ? 'bg-orange-100 dark:bg-orange-900/50 border-orange-400 dark:border-orange-600' 
+                              : 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1">
+                              <div className="flex items-start space-x-2">
+                                <Checkbox
+                                  id={`optional-${item.id}`}
+                                  checked={isSelected}
+                                  onCheckedChange={() => toggleOptionalItem(item.id)}
+                                  className="mt-0.5"
+                                />
+                                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+                                  #{item.item_number}
+                                </span>
+                                <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                  {item.description}
+                                </p>
+                              </div>
+                              {(item.quantity || item.unit || item.unit_price) && (
+                                <div className="mt-1 flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
+                                  {item.quantity && item.unit && (
+                                    <span>
+                                      {formatNumber(item.quantity)} {item.unit}
+                                    </span>
+                                  )}
+                                  {item.unit_price && (
+                                    <span>
+                                      @ {formatCurrency(item.unit_price)}/{item.unit || 'unit'}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {item.notes && (
+                                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 italic">
+                                  {item.notes}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right ml-4">
+                              <p className="text-sm font-bold text-orange-700 dark:text-orange-400">
+                                {formatCurrency(item.amount)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              <div className="text-xs text-gray-500 dark:text-gray-400 italic pt-2 border-t border-orange-200 dark:border-orange-800">
+                <div className="flex justify-between items-center mb-1">
+                  <span>All optional items total: {formatCurrency(optionalTotal)}</span>
+                </div>
+                {selectedOptionalTotal > 0 && (
+                  <div className="flex justify-between items-center font-semibold text-orange-700 dark:text-orange-400">
+                    <span>Selected optional items: {formatCurrency(selectedOptionalTotal)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Total */}
           <div className="border-t-2 border-gray-300 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center">
-              <span className="text-lg font-bold text-gray-900 dark:text-white">Total</span>
+              <span className="text-lg font-bold text-gray-900 dark:text-white">
+                Total {selectedOptionalTotal > 0 ? '(Standard + Selected Options)' : '(Standard Items)'}
+              </span>
               <span className="text-2xl font-bold text-green-600 dark:text-green-400">
                 {formatCurrency(calculatedTotal)}
               </span>

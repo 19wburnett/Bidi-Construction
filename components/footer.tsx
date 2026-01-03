@@ -1,4 +1,4 @@
-import logo from '../public/brand/Bidi Contracting Logo.svg'
+const logoPath = '/brand/Bidi Contracting Logo.svg'
 import { Facebook, Linkedin, Instagram, Youtube } from 'lucide-react'
 
 export default function Footer() {
@@ -16,7 +16,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
           <div>
             <div className="flex items-center space-x-3 mb-4">
-              <img src={logo.src} alt="Bidi Contracting" className="h-8 w-8" />
+              <img src={logoPath} alt="Bidi Contracting" className="h-8 w-8" />
               <div className="flex flex-col">
                 <span className="font-bidi text-2xl font-bold">BIDI</span>
                 <span className="text-sm text-gray-400 font-medium">Bidi Contracting</span>

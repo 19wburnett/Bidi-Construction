@@ -254,6 +254,9 @@ export interface Database {
           bid_package_id: string | null
           seen: boolean | null
           updated_at: string
+          is_manually_edited: boolean | null
+          edited_by: string | null
+          edited_at: string | null
         }
         Insert: {
           id?: string
@@ -273,6 +276,9 @@ export interface Database {
           bid_package_id?: string | null
           seen?: boolean | null
           updated_at?: string
+          is_manually_edited?: boolean | null
+          edited_by?: string | null
+          edited_at?: string | null
         }
         Update: {
           id?: string
@@ -292,6 +298,97 @@ export interface Database {
           bid_package_id?: string | null
           seen?: boolean | null
           updated_at?: string
+          is_manually_edited?: boolean | null
+          edited_by?: string | null
+          edited_at?: string | null
+        }
+      }
+      bid_line_items: {
+        Row: {
+          id: string
+          bid_id: string
+          item_number: number
+          description: string
+          category: string | null
+          quantity: number | null
+          unit: string | null
+          unit_price: number | null
+          amount: number
+          notes: string | null
+          created_at: string
+          updated_at: string
+          is_optional: boolean | null
+          option_group: string | null
+        }
+        Insert: {
+          id?: string
+          bid_id: string
+          item_number: number
+          description: string
+          category?: string | null
+          quantity?: number | null
+          unit?: string | null
+          unit_price?: number | null
+          amount: number
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+          is_optional?: boolean | null
+          option_group?: string | null
+        }
+        Update: {
+          id?: string
+          bid_id?: string
+          item_number?: number
+          description?: string
+          category?: string | null
+          quantity?: number | null
+          unit?: string | null
+          unit_price?: number | null
+          amount?: number
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+          is_optional?: boolean | null
+          option_group?: string | null
+        }
+      }
+      bid_edit_history: {
+        Row: {
+          id: string
+          bid_id: string
+          edited_by: string
+          edited_at: string
+          field_name: string
+          old_value: any | null
+          new_value: any | null
+          change_type: 'field_update' | 'line_item_add' | 'line_item_update' | 'line_item_delete'
+          notes: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          bid_id: string
+          edited_by: string
+          edited_at?: string
+          field_name: string
+          old_value?: any | null
+          new_value?: any | null
+          change_type: 'field_update' | 'line_item_add' | 'line_item_update' | 'line_item_delete'
+          notes?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          bid_id?: string
+          edited_by?: string
+          edited_at?: string
+          field_name?: string
+          old_value?: any | null
+          new_value?: any | null
+          change_type?: 'field_update' | 'line_item_add' | 'line_item_update' | 'line_item_delete'
+          notes?: string | null
+          created_at?: string
         }
       }
       subcontractors: {

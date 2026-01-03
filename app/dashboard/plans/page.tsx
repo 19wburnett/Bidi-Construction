@@ -119,18 +119,56 @@ export default function PlansPage() {
     if (!confirm('Are you sure you want to delete this plan?')) return
 
     try {
-      const { error } = await supabase
+      // Get plan info first to get file_path
+      const plan = plans.find(p => p.id === planId)
+      if (!plan) {
+        alert('Plan not found')
+        return
+      }
+
+      // Get full plan data including file_path
+      const { data: planData, error: fetchError } = await supabase
+        .from('plans')
+        .select('file_path')
+        .eq('id', planId)
+        .single()
+
+      if (fetchError) {
+        console.error('Error fetching plan:', fetchError)
+        throw fetchError
+      }
+
+      // Delete from storage if file_path exists
+      if (planData?.file_path) {
+        // Determine storage bucket - could be 'plans' or 'job-plans'
+        const storageBucket = planData.file_path.startsWith('job-plans/') ? 'job-plans' : 'plans'
+        const { error: storageError } = await supabase.storage
+          .from(storageBucket)
+          .remove([planData.file_path])
+
+        if (storageError) {
+          console.error('Error deleting file from storage:', storageError)
+          // Continue with database delete even if storage delete fails
+        }
+      }
+
+      // Delete from database
+      const { error: dbError } = await supabase
         .from('plans')
         .delete()
         .eq('id', planId)
 
-      if (error) throw error
+      if (dbError) {
+        console.error('Delete error:', dbError)
+        throw dbError
+      }
 
       // Refresh plans
       setPlans(prev => prev.filter(p => p.id !== planId))
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting plan:', error)
-      alert('Failed to delete plan')
+      const errorMessage = error?.message || 'Failed to delete plan'
+      alert(`Failed to delete plan: ${errorMessage}`)
     }
   }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
 import { generateBidRequestEmail, generateBidRequestSubject } from '@/lib/email-templates/bid-request'
+import { generateBidPackageSMS, formatPhoneNumber, isValidPhoneNumber } from '@/lib/sms-helper'
 
 export const runtime = 'nodejs'
 
@@ -13,6 +14,153 @@ interface SendRequest {
   planId: string
   reportIds?: string[]
   templateId?: string
+  deliveryChannel?: 'email' | 'sms' | 'both' // New: delivery channel preference
+}
+
+/**
+ * Send SMS via Telnyx API
+ */
+async function sendTelnyxSMS(to: string, message: string): Promise<{ id: string; error?: any }> {
+  const telnyxApiKey = process.env.TELNYX_API_KEY
+  if (!telnyxApiKey) {
+    throw new Error('TELNYX_API_KEY is not configured')
+  }
+
+  const telnyxPhoneNumber = process.env.TELNYX_PHONE_NUMBER
+  if (!telnyxPhoneNumber) {
+    throw new Error('TELNYX_PHONE_NUMBER is not configured. Please set it in your .env file.')
+  }
+
+  // Normalize the "from" phone number (must be in E.164 format)
+  console.log('📱 [sendTelnyxSMS] Raw phone number from env:', telnyxPhoneNumber)
+  const normalizedFrom = formatPhoneNumber(telnyxPhoneNumber)
+  const normalizedTo = formatPhoneNumber(to)
+
+  console.log('📱 [sendTelnyxSMS] Sending SMS:', {
+    originalFrom: telnyxPhoneNumber,
+    normalizedFrom: normalizedFrom,
+    originalTo: to,
+    normalizedTo: normalizedTo,
+    messageLength: message.length
+  })
+
+  // Verify the phone number is configured for messaging and get messaging profile ID
+  let messagingProfileId: string | undefined
+  try {
+    const verifyResponse = await fetch(`https://api.telnyx.com/v2/phone_numbers/${encodeURIComponent(normalizedFrom)}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${telnyxApiKey}`
+      }
+    })
+    
+    if (verifyResponse.ok) {
+      const numberData = await verifyResponse.json()
+      messagingProfileId = numberData.data?.messaging_profile_id
+      console.log('📱 [sendTelnyxSMS] Phone number details:', {
+        number: normalizedFrom,
+        status: numberData.data?.status,
+        features: numberData.data?.features,
+        messagingProfileId: messagingProfileId
+      })
+      
+      // Check if messaging is enabled
+      if (!messagingProfileId && !numberData.data?.features?.sms) {
+        console.error('❌ [sendTelnyxSMS] Phone number is NOT assigned to a messaging profile!')
+        console.error('❌ [sendTelnyxSMS] Go to Telnyx Dashboard → Numbers → My Numbers → Find your number → Assign Messaging Profile')
+        throw new Error(
+          `Phone number ${normalizedFrom} is not assigned to a messaging profile. ` +
+          `Please go to Telnyx Dashboard → Numbers → My Numbers → Find ${normalizedFrom} → Assign Messaging Profile. ` +
+          `The messaging profile you just viewed needs to be assigned to this phone number.`
+        )
+      } else if (!messagingProfileId) {
+        console.warn('⚠️ [sendTelnyxSMS] Phone number has SMS features but no messaging profile assigned')
+      } else {
+        console.log('✅ [sendTelnyxSMS] Phone number is properly configured:', {
+          messagingProfileId: messagingProfileId,
+          status: numberData.data.status
+        })
+      }
+    } else {
+      console.warn('⚠️ [sendTelnyxSMS] Could not verify phone number status:', verifyResponse.status)
+    }
+  } catch (verifyError) {
+    // Non-critical - continue with sending
+    console.warn('⚠️ [sendTelnyxSMS] Could not verify phone number:', verifyError)
+  }
+
+  // Build request body according to Telnyx API spec
+  // According to API docs: 'from' is required when sending with a phone number
+  // 'messaging_profile_id' can be included but 'from' is still required for phone numbers
+  const requestBody: any = {
+    from: normalizedFrom,
+    to: normalizedTo,
+    text: message
+  }
+  
+  // Include messaging_profile_id if available (may help with some account restrictions)
+  if (messagingProfileId) {
+    requestBody.messaging_profile_id = messagingProfileId
+    console.log('📱 [sendTelnyxSMS] Including messaging_profile_id in request:', messagingProfileId)
+  }
+
+  const response = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${telnyxApiKey}`
+    },
+    body: JSON.stringify(requestBody)
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    console.error('❌ Telnyx API error:', JSON.stringify(data, null, 2))
+    
+    // Provide more helpful error messages
+    const errorCode = data.errors?.[0]?.code
+    const errorDetail = data.errors?.[0]?.detail || data.message || 'Failed to send SMS'
+    
+    if (errorCode === '40013') {
+      throw new Error(
+        `Invalid source phone number: ${normalizedFrom} (normalized from: ${telnyxPhoneNumber}). ` +
+        `This error means Telnyx cannot use this number for messaging. ` +
+        `Please check in Telnyx dashboard: ` +
+        `1) Go to Numbers → My Numbers → Find ${normalizedFrom} ` +
+        `2) Ensure "Messaging" is enabled for this number ` +
+        `3) Verify the number status is "Active" ` +
+        `4) Check that a Messaging Profile is assigned to the number ` +
+        `If messaging is not enabled, click "Enable Messaging" in the number settings.`
+      )
+    }
+    
+    if (errorCode === '10039') {
+      throw new Error(
+        `Telnyx account restriction: Only pre-verified destination numbers are allowed at your account level. ` +
+        `The destination number ${normalizedTo} needs to be verified before sending. ` +
+        `Options: ` +
+        `1) Verify the destination number in Telnyx Dashboard → Numbers → Verify Numbers, OR ` +
+        `2) Upgrade your Telnyx account to allow sending to unverified numbers. ` +
+        `See: https://telnyx.com/upgrade or https://developers.telnyx.com/docs/overview/errors/10039`
+      )
+    }
+    
+    if (errorCode === '40010') {
+      throw new Error(
+        `10DLC Registration Required: Your phone number ${normalizedFrom} is not registered for 10DLC (10-Digit Long Code) messaging, ` +
+        `which is required by the carrier for A2P (Application-to-Person) messaging. ` +
+        `To fix this: ` +
+        `1) Go to Telnyx Dashboard → Messaging → 10DLC → Register your brand and campaign, OR ` +
+        `2) Use a toll-free number or short code that doesn't require 10DLC registration. ` +
+        `See: https://developers.telnyx.com/docs/overview/errors/40010 or https://developers.telnyx.com/docs/messaging/10dlc/overview`
+      )
+    }
+    
+    throw new Error(errorDetail)
+  }
+
+  return { id: data.data.id }
 }
 
 export async function POST(request: NextRequest) {
@@ -27,7 +175,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SendRequest = await request.json()
-    const { bidPackageId, subcontractorIds, planId, reportIds, templateId } = body
+    const { bidPackageId, subcontractorIds, planId, reportIds, templateId, deliveryChannel = 'email' } = body
 
     if (!bidPackageId || !subcontractorIds || subcontractorIds.length === 0 || !planId) {
       return NextResponse.json(
@@ -83,8 +231,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get subcontractors
-    const subcontractorIdMap = new Map<string, { id: string; email: string; name: string; trade_category: string }>()
+    // Get subcontractors (with phone numbers for SMS)
+    const subcontractorIdMap = new Map<string, { id: string; email: string; name: string; trade_category: string; phone?: string }>()
     
     for (const subId of subcontractorIds) {
       const [source, id] = subId.includes(':') ? subId.split(':') : ['gc', subId]
@@ -92,7 +240,7 @@ export async function POST(request: NextRequest) {
       if (source === 'gc') {
         const { data: gcContact } = await supabase
           .from('gc_contacts')
-          .select('id, name, email, trade_category')
+          .select('id, name, email, trade_category, phone')
           .eq('id', id)
           .single()
         
@@ -101,13 +249,14 @@ export async function POST(request: NextRequest) {
             id: subId,
             email: gcContact.email,
             name: gcContact.name,
-            trade_category: gcContact.trade_category
+            trade_category: gcContact.trade_category,
+            phone: gcContact.phone || undefined
           })
         }
       } else if (source === 'bidi') {
         const { data: bidiSub } = await supabase
           .from('subcontractors')
-          .select('id, name, email, trade_category')
+          .select('id, name, email, trade_category, phone')
           .eq('id', id)
           .single()
         
@@ -116,7 +265,8 @@ export async function POST(request: NextRequest) {
             id: subId,
             email: bidiSub.email,
             name: bidiSub.name,
-            trade_category: bidiSub.trade_category
+            trade_category: bidiSub.trade_category,
+            phone: bidiSub.phone || undefined
           })
         }
       }
@@ -272,137 +422,196 @@ export async function POST(request: NextRequest) {
           reportLinks,
         })
 
-    // Send emails and create recipient records
+    // Generate SMS message if needed
+    const smsMessage = (deliveryChannel === 'sms' || deliveryChannel === 'both')
+      ? generateBidPackageSMS({
+          jobName: bidPackage.jobs.name,
+          jobLocation: bidPackage.jobs.location,
+          tradeCategory: bidPackage.trade_category,
+          deadline: deadlineValue,
+          description: bidPackage.description,
+          planLink
+        })
+      : null
+
+    // Send emails/SMS and create recipient records
     const results = []
     const errors = []
 
     for (const [subId, sub] of Array.from(subcontractorIdMap.entries())) {
       try {
-        const emailData: any = {
-          from: 'Bidi <noreply@bidicontracting.com>',
-          to: [sub.email],
-          subject: emailSubject,
-          html: emailBody,
-          reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
-        }
-
-        const { data, error: resendError } = await resend.emails.send(emailData)
-
-        if (resendError) {
-          errors.push({ subcontractor: sub.email, error: resendError.message })
-          continue
-        }
-
-        // Type as any to access message_id which may exist at runtime but not in types
-        const resendData: any = data
-
         // Create recipient record
         const [source, id] = subId.includes(':') ? subId.split(':') : ['gc', subId]
         const subcontractorDbId = source === 'gc' ? null : id
 
         // Create thread_id for this recipient
-        const threadId = `thread-${bidPackageId}-${sub.email}`
-        
-        // Extract text content from HTML email body for storage
+        const threadId = `thread-${bidPackageId}-${sub.email || sub.phone || subId}`
+
+        let resendData: any = null
+        let telnyxMessageId: string | null = null
         let emailTextContent = ''
-        if (emailBody) {
-          emailTextContent = emailBody
-            .replace(/<style[^>]*>.*?<\/style>/gi, '') // Remove style tags
-            .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
-            .replace(/<[^>]+>/g, ' ') // Remove all HTML tags
-            .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-            .replace(/&amp;/g, '&') // Replace &amp; with &
-            .replace(/&lt;/g, '<') // Replace &lt; with <
-            .replace(/&gt;/g, '>') // Replace &gt; with >
-            .replace(/&quot;/g, '"') // Replace &quot; with "
-            .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-            .trim()
-            .substring(0, 5000) // Limit to 5000 chars
+        let messageId: string | null = null
+
+        // Send email if requested
+        if (deliveryChannel === 'email' || deliveryChannel === 'both') {
+          if (!sub.email) {
+            errors.push({ subcontractor: sub.name || subId, error: 'No email address available' })
+            continue
+          }
+
+          const emailData: any = {
+            from: 'Bidi <noreply@bidicontracting.com>',
+            to: [sub.email],
+            subject: emailSubject,
+            html: emailBody,
+            reply_to: `bids+${bidPackageId}@bids.bidicontracting.com`
+          }
+
+          const { data, error: resendError } = await resend.emails.send(emailData)
+
+          if (resendError) {
+            errors.push({ subcontractor: sub.email, error: resendError.message })
+            // Continue to try SMS if both channels requested
+            if (deliveryChannel === 'both' && sub.phone) {
+              // Will try SMS below
+            } else {
+              continue
+            }
+          } else {
+            resendData = data
+            messageId = resendData?.message_id || (resendData?.id ? `<${resendData.id}@resend.dev>` : null)
+            
+            // Extract text content from HTML email body for storage
+            if (emailBody) {
+              emailTextContent = emailBody
+                .replace(/<style[^>]*>.*?<\/style>/gi, '')
+                .replace(/<script[^>]*>.*?<\/script>/gi, '')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .substring(0, 5000)
+            }
+          }
         }
-        
-        console.log('📧 [send] Storing email content:', {
-          emailBodyLength: emailBody?.length || 0,
-          emailTextContentLength: emailTextContent.length,
-          emailTextContentPreview: emailTextContent.substring(0, 200),
-          subcontractorEmail: sub.email
-        })
-        
-        console.log(`📧 [send] Creating recipient record for ${sub.email} in package ${bidPackageId}`)
-        // Get Message-ID from Resend response for threading
-        const messageId = resendData?.message_id || (resendData?.id ? `<${resendData.id}@resend.dev>` : null)
+
+        // Send SMS if requested
+        if (deliveryChannel === 'sms' || deliveryChannel === 'both') {
+          if (!sub.phone) {
+            if (deliveryChannel === 'sms') {
+              errors.push({ subcontractor: sub.name || subId, error: 'No phone number available' })
+              continue
+            }
+            // If both channels and email failed, skip
+            if (deliveryChannel === 'both' && !resendData) {
+              continue
+            }
+          } else if (isValidPhoneNumber(sub.phone)) {
+            try {
+              const smsResult = await sendTelnyxSMS(sub.phone, smsMessage || emailTextContent || 'New bid opportunity')
+              telnyxMessageId = smsResult.id
+              console.log('📱 [send] SMS sent successfully:', { phone: sub.phone, messageId: telnyxMessageId })
+            } catch (smsError: any) {
+              console.error('❌ Error sending SMS:', smsError)
+              if (deliveryChannel === 'sms') {
+                errors.push({ subcontractor: sub.phone, error: `SMS failed: ${smsError.message}` })
+                continue
+              }
+              // If both channels, continue with email only
+            }
+          } else {
+            console.warn(`⚠️ Invalid phone number for ${sub.name || subId}: ${sub.phone}`)
+            if (deliveryChannel === 'sms') {
+              errors.push({ subcontractor: sub.phone, error: 'Invalid phone number format' })
+              continue
+            }
+          }
+        }
+
+        // Create recipient record
+        const recipientData: any = {
+          bid_package_id: bidPackageId,
+          subcontractor_id: subcontractorDbId,
+          subcontractor_email: sub.email || null,
+          subcontractor_name: sub.name,
+          subcontractor_phone: sub.phone || null,
+          delivery_channel: deliveryChannel,
+          thread_id: threadId,
+          parent_email_id: null,
+          is_from_gc: true
+        }
+
+        // Add email fields if email was sent
+        if (resendData) {
+          recipientData.resend_email_id = resendData.id
+          recipientData.message_id = messageId
+          recipientData.status = 'sent'
+          recipientData.sent_at = new Date().toISOString()
+          recipientData.response_text = emailTextContent || null
+        }
+
+        // Add SMS fields if SMS was sent
+        if (telnyxMessageId) {
+          recipientData.telnyx_message_id = telnyxMessageId
+          recipientData.sms_status = 'sent'
+          recipientData.sms_sent_at = new Date().toISOString()
+          if (!recipientData.response_text && smsMessage) {
+            recipientData.response_text = smsMessage
+          }
+        }
+
+        // If neither email nor SMS was sent successfully, skip creating recipient
+        if (!resendData && !telnyxMessageId) {
+          continue
+        }
+
+        console.log(`📧 [send] Creating recipient record for ${sub.email || sub.phone} in package ${bidPackageId}`)
         
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
-          .insert({
-            bid_package_id: bidPackageId,
-            subcontractor_id: subcontractorDbId,
-            subcontractor_email: sub.email,
-            subcontractor_name: sub.name,
-            resend_email_id: resendData?.id,
-            message_id: messageId || null, // Store Message-ID for threading
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-            thread_id: threadId,
-            parent_email_id: null,
-            response_text: emailTextContent || null, // Store email content so it can be displayed in thread (null if empty)
-            is_from_gc: true // Explicitly mark as GC-sent email
-          })
+          .insert(recipientData)
           .select()
           .single()
         
-        // Verify the content was saved
         if (recipientError) {
-          console.error(`📧 [send] Error creating recipient record for ${sub.email}:`, recipientError)
-          console.error(`📧 [send] Error details:`, {
-            code: recipientError.code,
-            message: recipientError.message,
-            details: recipientError.details,
-            hint: recipientError.hint
+          console.error(`📧 [send] Error creating recipient record:`, recipientError)
+          errors.push({ 
+            subcontractor: sub.email || sub.phone || subId, 
+            error: `Failed to create recipient record: ${recipientError.message}` 
           })
-          errors.push({ subcontractor: sub.email, error: `Failed to create recipient record: ${recipientError.message}` })
-          // Don't continue - throw error so frontend knows recipient wasn't created
-          throw new Error(`Failed to create recipient record for ${sub.email}: ${recipientError.message}`)
+          throw new Error(`Failed to create recipient record: ${recipientError.message}`)
         }
 
         if (!recipient) {
-          console.error(`📧 [send] Recipient insert returned no data for ${sub.email} - this should not happen`)
-          errors.push({ subcontractor: sub.email, error: 'Recipient insert returned no data' })
-          throw new Error(`Recipient insert returned no data for ${sub.email}`)
+          console.error(`📧 [send] Recipient insert returned no data`)
+          errors.push({ subcontractor: sub.email || sub.phone || subId, error: 'Recipient insert returned no data' })
+          throw new Error('Recipient insert returned no data')
         }
 
         console.log('📧 [send] Recipient created successfully:', {
           id: recipient.id,
-          bid_package_id: recipient.bid_package_id,
-          subcontractor_email: recipient.subcontractor_email,
-          hasResponseText: !!recipient.response_text,
-          responseTextLength: recipient.response_text?.length || 0
+          email: recipient.subcontractor_email,
+          phone: recipient.subcontractor_phone,
+          deliveryChannel: recipient.delivery_channel
         })
-
-        // Verify the recipient was actually saved by querying it back
-        const { data: verifyRecipient, error: verifyError } = await supabase
-          .from('bid_package_recipients')
-          .select('id, bid_package_id, subcontractor_email')
-          .eq('id', recipient.id)
-          .single()
-
-        if (verifyError || !verifyRecipient) {
-          console.error(`📧 [send] WARNING: Could not verify recipient was saved:`, verifyError)
-          console.error(`📧 [send] Original recipient data:`, recipient)
-        } else {
-          console.log(`📧 [send] Verified recipient exists in database:`, verifyRecipient.id)
-        }
 
         results.push({
           recipientId: recipient.id,
           email: sub.email,
-          resendEmailId: resendData?.id
+          phone: sub.phone,
+          resendEmailId: resendData?.id,
+          telnyxMessageId
         })
 
         // Small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 500))
 
       } catch (error: any) {
-        errors.push({ subcontractor: sub.email, error: error.message })
+        errors.push({ subcontractor: sub.email || sub.phone || subId, error: error.message })
       }
     }
 

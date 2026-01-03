@@ -1333,6 +1333,17 @@ export async function POST(request: NextRequest) {
         activeChatId
       )
 
+      // Validate that we have a valid answer
+      if (!result || !result.answer || typeof result.answer !== 'string' || result.answer.trim().length === 0) {
+        console.error('[PlanChatV3] Invalid answer from generateAnswer:', {
+          hasResult: !!result,
+          answerType: result?.answer ? typeof result.answer : 'undefined',
+          answerLength: result?.answer?.length || 0,
+          answerPreview: result?.answer?.substring(0, 100) || 'N/A',
+        })
+        throw new Error('Failed to generate a valid response. The AI returned an empty or invalid answer.')
+      }
+
       // Also save to legacy plan_chat_messages table for backward compatibility
       try {
         await supabase.from('plan_chat_messages').insert({
@@ -1365,7 +1376,7 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({
-        reply: result.answer,
+        reply: result.answer.trim(),
         mode: result.mode,
         metadata: {
           ...result.metadata,

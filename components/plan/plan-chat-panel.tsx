@@ -387,11 +387,19 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
         throw new Error(payload.error || 'Failed to get a response from Plan Chat')
       }
 
-      const payload: { reply: string; chatId?: string; metadata?: { wasVectorizing?: boolean } } = await response.json()
+      const payload: { reply?: string; chatId?: string; metadata?: { wasVectorizing?: boolean }; error?: string } = await response.json()
       
-      // Validate that reply exists
-      if (!payload.reply || typeof payload.reply !== 'string') {
-        throw new Error('Invalid response: missing or invalid reply')
+      // Validate that reply exists and is a non-empty string
+      if (!payload || !payload.reply || typeof payload.reply !== 'string' || payload.reply.trim().length === 0) {
+        const errorMessage = payload?.error || 'The AI returned an empty or invalid response. Please try again.'
+        console.error('[PlanChat] Invalid response payload:', {
+          hasPayload: !!payload,
+          hasReply: !!payload?.reply,
+          replyType: payload?.reply ? typeof payload.reply : 'undefined',
+          replyLength: payload?.reply?.length || 0,
+          error: payload?.error,
+        })
+        throw new Error(errorMessage)
       }
       
       // Remove vectorization message and add the actual response
@@ -409,7 +417,7 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
       const assistantMessage: PlanChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: payload.reply.trim(),
+        content: (payload.reply || '').trim(),
       }
       setMessages((prev) => [...prev, assistantMessage])
       
@@ -503,17 +511,17 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                 })
 
                 if (retryResponse.ok) {
-                  const retryPayload = await retryResponse.json()
+                  const retryPayload: { reply?: string; chatId?: string } = await retryResponse.json()
                   
-                  // Validate that reply exists
-                  if (!retryPayload.reply || typeof retryPayload.reply !== 'string') {
+                  // Validate that reply exists and is a non-empty string
+                  if (!retryPayload || !retryPayload.reply || typeof retryPayload.reply !== 'string' || retryPayload.reply.trim().length === 0) {
                     throw new Error('Invalid response: missing or invalid reply')
                   }
                   
                   const assistantMessage: PlanChatMessage = {
                     id: `assistant-${Date.now()}`,
                     role: 'assistant',
-                    content: retryPayload.reply.trim(),
+                    content: (retryPayload.reply || '').trim(),
                   }
                   setMessages((prev) => [...prev, assistantMessage])
                 } else {

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase'
 import { Building2, ArrowLeft } from 'lucide-react'
-import logo from '../../../public/brand/Bidi Contracting Logo.svg'
+const logoPath = '/brand/Bidi Contracting Logo.svg'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 function LoginPageContent() {
@@ -133,7 +133,7 @@ function LoginPageContent() {
         <Card className="w-full max-w-md border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950">
           <CardHeader className="text-center">
             <div className="flex items-center justify-center space-x-2 mb-4">
-              <img src={logo.src} alt="BIDI" className="h-6 w-6 sm:h-8 sm:w-8" />
+              <img src={logoPath} alt="BIDI" className="h-6 w-6 sm:h-8 sm:w-8" />
               <h1 className="text-xl sm:text-2xl font-bold text-black dark:text-white font-bidi">BIDI</h1>
             </div>
             <CardTitle className="text-lg sm:text-xl">Welcome Back</CardTitle>

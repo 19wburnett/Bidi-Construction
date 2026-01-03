@@ -230,6 +230,11 @@ TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
 - Cross-reference dimensions to ensure accuracy
 - Assign appropriate ${standardName} cost codes to each item
 - Provide realistic unit_cost pricing for each item
+- Extract material specifications when visible (grade, type, size, manufacturer)
+- Identify labor requirements and trade assignments
+- Consider waste factors based on material type
+- Identify equipment needs for installation
+- Check construction code compliance requirements
 
 3-LEVEL CATEGORIZATION:
 LEVEL 1: CATEGORY - MUST be one of: structural, exterior, interior, mep, finishes, or other
@@ -292,7 +297,55 @@ You MUST also provide a complete quality_analysis object with:
    - coverage_percentage: What % of the plan set you believe you've covered
    - assumptions_made: List every assumption you made, with reason
 
-CRITICAL: Even if the plan is unclear or incomplete, you MUST still populate all quality_analysis fields. Use them to document what's missing or unclear.`
+CRITICAL: Even if the plan is unclear or incomplete, you MUST still populate all quality_analysis fields. Use them to document what's missing or unclear.
+
+MISSING INFORMATION IDENTIFICATION (CRITICAL):
+For each item you extract, you MUST explicitly identify what information CANNOT be determined from the plans:
+1. **Missing Measurements**: If dimensions, lengths, widths, heights are not visible or unclear
+   - State what measurement is missing (e.g., "Window width not visible", "Wall height unclear")
+   - Explain why it's needed (e.g., "Cannot calculate window quantity without width")
+   - Specify where to find it (e.g., "Check Window Schedule on Sheet A-3")
+   - Assign impact level: "critical" (blocks quantity calculation), "high" (significantly affects estimate), "medium" (affects accuracy), "low" (minor impact)
+
+2. **Missing Quantities**: If item counts are not specified
+   - State what count is missing (e.g., "Number of outlets not specified", "Door count unclear")
+   - Explain why needed (e.g., "Cannot estimate electrical work without outlet count")
+   - Specify where to find it (e.g., "Check Electrical Schedule on Sheet E-1")
+   - Assign impact level
+
+3. **Missing Specifications**: If material grades, types, sizes, or manufacturers are not shown
+   - State what spec is missing (e.g., "Concrete strength not specified", "Lumber grade unclear")
+   - Explain why needed (e.g., "Cannot price concrete without strength specification")
+   - Specify where to find it (e.g., "Check Specifications Section or Detail 3/S-1")
+   - Assign impact level
+
+4. **Missing Details**: If installation methods, finishes, or accessories are not specified
+   - State what detail is missing (e.g., "Roofing installation method not shown", "Paint finish type unclear")
+   - Explain why needed (e.g., "Affects labor hours and material costs")
+   - Specify where to find it (e.g., "Check Details Section or Specifications")
+   - Assign impact level
+
+For each missing information item, add to the item's "notes" field in this format:
+"⚠️ MISSING: [what's missing]. WHY NEEDED: [why it's needed]. WHERE TO FIND: [where to find it]. IMPACT: [critical/high/medium/low]"
+
+Also add missing information to quality_analysis.completeness.missing_dimensions or appropriate field.
+
+ESTIMATE INFORMATION EXTRACTION:
+When visible in plans, extract the following for each item:
+- **Material Specifications**: Grade, type, size, manufacturer, model number
+- **Labor Requirements**: Trade type, estimated hours (if calculable from plan complexity)
+- **Waste Factors**: Standard waste factors based on material type (e.g., lumber 5-10%, drywall 10-15%, concrete 5%)
+- **Equipment Needs**: Special equipment required (e.g., "Crane required", "Scaffolding needed")
+- **Site Conditions**: Any site-specific requirements visible in plans
+
+Include this information in the item's "notes" field or as additional fields if the response format supports it.
+
+CONSTRUCTION CODE COMPLIANCE:
+- Check for building code compliance issues (egress, accessibility, structural requirements)
+- Verify code-compliant dimensions (stair risers, guardrail heights, door widths)
+- Identify potential code violations
+- Note any code-related requirements that affect quantities or costs
+- Include code compliance notes in quality_analysis.risk_flags`
 
     case 'quality':
       return basePrompt + jobTypePrompt + `
@@ -461,6 +514,11 @@ IMPORTANT:
 - INCLUDE LOCATIONS: Specify where each item is located
 - PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
 - If dimensions are unclear or not visible, state "dimension not visible" in notes AND add to quality_analysis.completeness.missing_dimensions
+- **CRITICAL**: For each item where you cannot determine a complete quantity or estimate, explicitly state:
+  - What information is missing (measurements, quantities, specifications)
+  - Why it's needed for the estimate
+  - Where to find it (sheet numbers, schedules, details)
+  - Impact level (critical/high/medium/low)
 
 QUALITY ANALYSIS REQUIREMENTS - POPULATE ALL FIELDS:
 - completeness: Assess what's missing (sheets, dimensions, details, sections)

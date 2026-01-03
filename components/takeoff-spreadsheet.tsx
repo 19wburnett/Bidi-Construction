@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2, FolderInput } from 'lucide-react'
+import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2, FolderInput, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,15 @@ interface TakeoffSpreadsheetProps {
   onPageNavigate?: (page: number) => void
   editable?: boolean
   onItemsChange?: (items: TakeoffItem[]) => void
+  missingInformation?: Array<{
+    item_id?: string
+    item_name: string
+    category: string
+    missing_data: string
+    why_needed: string
+    where_to_find: string
+    impact: 'critical' | 'high' | 'medium' | 'low'
+  }>
 }
 
 interface GroupedRow {
@@ -57,7 +66,8 @@ export default function TakeoffSpreadsheet({
   onItemHighlight,
   onPageNavigate,
   editable = false,
-  onItemsChange
+  onItemsChange,
+  missingInformation = []
 }: TakeoffSpreadsheetProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
@@ -878,6 +888,19 @@ export default function TakeoffSpreadsheet({
     const item = row.data!
     const isEditing = editingCell?.rowId === row.id
     const itemCost = calculateItemCost(item)
+    
+    // Find missing information for this item
+    const itemMissingInfo = missingInformation.filter(mi => 
+      mi.item_id === item.id || mi.item_name === item.name || mi.item_name === item.description
+    )
+    const hasMissingInfo = itemMissingInfo.length > 0
+    const criticalMissing = itemMissingInfo.some(mi => mi.impact === 'critical')
+    const highMissing = itemMissingInfo.some(mi => mi.impact === 'high')
+    
+    // Get missing info tooltip text
+    const missingInfoTooltip = itemMissingInfo.length > 0
+      ? itemMissingInfo.map(mi => `${mi.missing_data} (${mi.impact} impact)`).join(', ')
+      : ''
 
     return (
       <tr
@@ -894,8 +917,46 @@ export default function TakeoffSpreadsheet({
             {item.bounding_box && (
               <div className="absolute inset-y-0 left-0 w-1 bg-orange-200 opacity-0 group-hover:opacity-100 transition-opacity" />
             )}
+            {hasMissingInfo && (
+              <div 
+                className="absolute top-2 left-2"
+                title={missingInfoTooltip}
+              >
+                <AlertTriangle 
+                  className={`h-4 w-4 ${
+                    criticalMissing 
+                      ? 'text-red-600' 
+                      : highMissing 
+                      ? 'text-orange-600' 
+                      : 'text-yellow-600'
+                  }`} 
+                />
+              </div>
+            )}
         </td>
         <td className="py-2 px-4 text-sm">
+          {hasMissingInfo && (
+            <div className="flex items-center gap-1 mb-1">
+              <AlertTriangle 
+                className={`h-3 w-3 ${
+                  criticalMissing 
+                    ? 'text-red-600' 
+                    : highMissing 
+                    ? 'text-orange-600' 
+                    : 'text-yellow-600'
+                }`} 
+              />
+              <span className={`text-xs ${
+                criticalMissing 
+                  ? 'text-red-600' 
+                  : highMissing 
+                  ? 'text-orange-600' 
+                  : 'text-yellow-600'
+              }`}>
+                Missing: {itemMissingInfo.length} item{itemMissingInfo.length > 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
           {isEditing && editingCell?.field === 'name' ? (
             <Input
               value={editValue}
@@ -1448,7 +1509,7 @@ export default function TakeoffSpreadsheet({
           <table className="w-full border-collapse min-w-[1000px] sm:min-w-0">
             <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-20">
               <tr>
-                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>
+                <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-8" title="Missing information indicator"></th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Item Name</th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-32">Cost Code</th>
                 <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">Description</th>

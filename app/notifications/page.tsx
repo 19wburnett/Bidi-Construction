@@ -102,7 +102,7 @@ export default function NotificationsPage() {
             id,
             name
           ),
-          bid_package_recipients!recipient_id (
+          bid_package_recipients (
             id,
             subcontractor_name,
             subcontractor_email

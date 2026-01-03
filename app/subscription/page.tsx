@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { Check, CreditCard } from 'lucide-react'
-import logo from '../../public/brand/Bidi Contracting Logo.svg'
+const logoPath = '/brand/Bidi Contracting Logo.svg'
 
 export default function SubscriptionPage() {
   const [loading, setLoading] = useState(false)
@@ -109,7 +109,7 @@ export default function SubscriptionPage() {
         <CardHeader className="text-center">
           <div className="flex items-center justify-center space-x-3 mb-4">
             <div className="relative">
-              <img src={logo.src} alt="BIDI" className="h-10 w-10 sm:h-12 sm:w-12 transition-transform duration-300" />
+              <img src={logoPath} alt="BIDI" className="h-10 w-10 sm:h-12 sm:w-12 transition-transform duration-300" />
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight font-bidi">BIDI</h1>

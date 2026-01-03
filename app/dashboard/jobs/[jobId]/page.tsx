@@ -60,6 +60,8 @@ import BudgetCardGrid from '@/components/budget-card-grid'
 import ReportViewerModal from '@/components/report-viewer-modal'
 import JobTimeline from '@/components/job-timeline'
 import ScenarioComparisonModal from '@/components/scenario-comparison-modal'
+import TradeOrganizedPlansView from '@/components/trade-organized-plans-view'
+import TradeDocumentsPanel from '@/components/trade-documents-panel'
 
 const PROJECT_TYPES = [
   'Residential',
@@ -978,9 +980,18 @@ export default function JobDetailPage() {
 
           // Queue plan text chunk vectorization for RAG context (background job)
           // This runs automatically when plans are uploaded, so they're ready for chat
+          // Note: Database trigger also queues this automatically, but this ensures it happens
           import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
-            queuePlanVectorization(newPlan.id, jobId, 5).catch((err) => {
+            queuePlanVectorization(newPlan.id, jobId, 5).then((result) => {
+              if (result.success) {
+                console.log(`✅ Vectorization queued for plan ${newPlan.id}: job ${result.jobId}`)
+              } else {
+                console.warn(`⚠️ Vectorization queue failed for plan ${newPlan.id}: ${result.error}`)
+                // Don't throw - database trigger will handle it if this fails
+              }
+            }).catch((err) => {
               console.error('Background vectorization queue trigger failed:', err)
+              // Don't throw - database trigger will handle it if this fails
             })
           })
         }
@@ -1083,16 +1094,20 @@ export default function JobDetailPage() {
         .delete()
         .eq('id', plan.id)
 
-      if (dbError) throw dbError
+      if (dbError) {
+        console.error('Delete error:', dbError)
+        throw dbError
+      }
 
       // Update local state
       setPlans(prev => prev.filter(p => p.id !== plan.id))
       
       // Reload job data to update takeoff summaries etc
       loadJobData()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting plan:', error)
-      alert('Failed to delete plan.')
+      const errorMessage = error?.message || 'Failed to delete plan'
+      alert(`Failed to delete plan: ${errorMessage}`)
     }
   }
 
@@ -1173,7 +1188,7 @@ export default function JobDetailPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-8 max-w-7xl">
+        <div className="container mx-auto px-6 py-8 max-w-screen-2xl">
           <motion.div
             variants={skeletonPulse}
             animate="animate"
@@ -1213,7 +1228,7 @@ export default function JobDetailPage() {
   return (
     <>
       <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-8 max-w-7xl">
+        <div className="container mx-auto px-6 py-8 max-w-screen-2xl">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -1513,157 +1528,40 @@ export default function JobDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <AnimatePresence>
-                    {plans.length === 0 ? (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="text-center py-12"
-                      >
-                        <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No plans uploaded yet</h3>
-                        <p className="text-gray-600 mb-4">Upload your first plan to get started with analysis and bidding</p>
-                        <label htmlFor="plan-upload">
-                          <Button asChild>
-                            <span>
-                              <Plus className="h-4 w-4 mr-2" />
-                              Upload Your First Plan
-                            </span>
-                          </Button>
-                        </label>
-                      </motion.div>
-                    ) : filteredPlans.length === 0 ? (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="text-center py-12"
-                      >
-                        <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">No plans found</h3>
-                        <p className="text-gray-600">Try adjusting your search query</p>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        variants={staggerContainer}
-                        initial="initial"
-                        animate="animate"
-                        className="flex flex-col space-y-3"
-                      >
-                        {filteredPlans.map((plan) => (
-                          <motion.div
-                            key={plan.id}
-                            variants={staggerItem}
-                            className="flex items-stretch gap-3 group"
-                          >
-                            {editingPlanId === plan.id ? (
-                              <div className="flex-1 flex items-center p-4 bg-white border rounded-lg shadow-sm ring-2 ring-orange-500 border-transparent transition-all">
-                                <FileText className="h-8 w-8 text-orange-600 mr-4 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <div className="flex items-center gap-1 flex-1 min-w-0">
-                                      <Input
-                                        value={editingTitle}
-                                        onChange={(e) => setEditingTitle(e.target.value)}
-                                        className="h-7 text-sm px-2 max-w-[300px]"
-                                        autoFocus
-                                        onKeyDown={(e) => {
-                                          e.stopPropagation()
-                                          if (e.key === 'Enter') savePlanTitle()
-                                          if (e.key === 'Escape') cancelEditingPlan()
-                                        }}
-                                      />
-                                      <Button 
-                                        size="sm" 
-                                        variant="ghost" 
-                                        className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 flex-shrink-0"
-                                        onClick={savePlanTitle}
-                                      >
-                                        <Check className="h-3 w-3" />
-                                      </Button>
-                                      <Button 
-                                        size="sm" 
-                                        variant="ghost" 
-                                        className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 flex-shrink-0"
-                                        onClick={cancelEditingPlan}
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                    <Badge variant="secondary" className="text-xs ml-2">{plan.status}</Badge>
-                                  </div>
-                                  <div className="text-sm text-gray-500 flex items-center gap-3">
-                                    <span>{plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}</span>
-                                    <span>•</span>
-                                    <span>Uploaded {new Date(plan.created_at || new Date()).toLocaleDateString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <Link 
-                                href={`/dashboard/jobs/${jobId}/plans/${plan.id}`}
-                                className="flex-1 flex"
-                              >
-                                <div className="flex-1 flex items-center p-4 bg-white border rounded-lg hover:border-orange-500 hover:shadow-md transition-all cursor-pointer group-hover:border-orange-500">
-                                  <FileText className="h-8 w-8 text-orange-600 mr-4 flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="font-semibold text-gray-900 truncate text-lg">
-                                          {plan.title || plan.file_name}
-                                      </span>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
-                                        onClick={(e) => {
-                                          e.preventDefault()
-                                          e.stopPropagation()
-                                          startEditingPlan(plan)
-                                        }}
-                                      >
-                                        <Pencil className="h-3 w-3" />
-                                      </Button>
-                                      <Badge variant="secondary" className="text-xs ml-2">{plan.status}</Badge>
-                                    </div>
-                                    <div className="text-sm text-gray-500 flex items-center gap-3">
-                                      <span>{plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}</span>
-                                      <span>•</span>
-                                      <span>Uploaded {new Date(plan.created_at || new Date()).toLocaleDateString()}</span>
-                                    </div>
-                                  </div>
-                                  <div className="text-sm font-medium text-orange-600 flex items-center opacity-0 group-hover:opacity-100 transition-opacity px-4">
-                                    View Plan <ArrowRight className="ml-1 h-4 w-4" />
-                                  </div>
-                                </div>
-                              </Link>
-                            )}
-                            
-                            <div className="flex flex-col gap-2">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-full flex-1 bg-white hover:bg-gray-50 hover:text-blue-600 border-gray-200 w-12"
-                                title="Download"
-                                onClick={() => handleDownloadPlan(plan)}
-                              >
-                                <Download className="h-5 w-5" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-full flex-1 bg-white hover:bg-red-50 hover:text-red-600 border-gray-200 w-12"
-                                title="Delete"
-                                onClick={() => handleDeletePlan(plan)}
-                              >
-                                <Trash2 className="h-5 w-5" />
-                              </Button>
-                            </div>
-                          </motion.div>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  <TradeOrganizedPlansView
+                    plans={plans}
+                    jobId={jobId}
+                    onPlanDelete={(planId: string) => {
+                      const plan = plans.find(p => p.id === planId)
+                      if (plan) {
+                        handleDeletePlan(plan)
+                      }
+                    }}
+                    onPlanDownload={handleDownloadPlan}
+                    onPlanEdit={startEditingPlan}
+                    editingPlanId={editingPlanId}
+                    editingTitle={editingTitle}
+                    onEditingTitleChange={setEditingTitle}
+                    onSaveTitle={savePlanTitle}
+                    onCancelEditing={cancelEditingPlan}
+                    searchQuery={searchQuery}
+                  />
+                </CardContent>
+              </Card>
+
+              {/* Trade Documents Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <FileText className="h-5 w-5 mr-2 text-blue-600" />
+                    Trade Documents
+                  </CardTitle>
+                  <CardDescription>
+                    Upload trade-specific SOW and supporting documents
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <TradeDocumentsPanel jobId={jobId} />
                 </CardContent>
               </Card>
 

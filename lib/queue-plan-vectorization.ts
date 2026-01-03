@@ -16,6 +16,8 @@ export async function queuePlanVectorization(
   priority: number = 5
 ): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
+    console.log(`[QueueVectorization] Queuing vectorization for plan ${planId}, job ${jobId}, priority ${priority}`)
+    
     const response = await fetch('/api/plan-vectorization/queue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -28,19 +30,22 @@ export async function queuePlanVectorization(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+      console.error(`[QueueVectorization] API error (${response.status}):`, error)
       return {
         success: false,
-        error: error.error || 'Failed to queue vectorization',
+        error: error.error || `Failed to queue vectorization (HTTP ${response.status})`,
       }
     }
 
     const data = await response.json()
+    console.log(`[QueueVectorization] Successfully queued: job ${data.jobId}`)
     return {
       success: true,
       jobId: data.jobId,
     }
   } catch (error) {
     console.error('[QueueVectorization] Failed to queue:', error)
+    // Don't throw - return error so caller can handle it
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

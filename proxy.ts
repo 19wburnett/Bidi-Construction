@@ -43,7 +43,12 @@ export default async function proxy(request: NextRequest) {
                          request.nextUrl.pathname.startsWith('/blog')
     const isApiRoute = request.nextUrl.pathname.startsWith('/api')
     
-    // For API routes, only refresh cookies/session and pass through without redirects
+    // For API routes, skip all redirects and pass through immediately
+    if (isApiRoute) {
+      return response
+    }
+    
+    // For non-API routes, handle redirects
     if (!isApiRoute) {
       // If user is signed in and hits the home page, send them to dashboard
       if (user && request.nextUrl.pathname === '/') {

@@ -14,6 +14,7 @@ import {
   Clock,
   GitCompare,
   Mail,
+  MessageSquare,
   Check,
   X,
   ChevronRight,
@@ -26,7 +27,9 @@ import {
   Eye,
   CheckCircle2,
   XCircle,
-  RefreshCw
+  RefreshCw,
+  Edit2,
+  History
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -37,6 +40,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { modalBackdrop, modalContent } from '@/lib/animations'
 import { BidComparisonAISidebar } from '@/components/bid-comparison-ai-sidebar'
+import BidEditForm from '@/components/bid-edit-form'
+import BidLineItemsEditor from '@/components/bid-line-items-editor'
+import BidEditHistory from '@/components/bid-edit-history'
+import BidOptionsIndicator from '@/components/bid-options-indicator'
 
 interface BidComparisonModalProps {
   jobId: string
@@ -105,6 +112,8 @@ interface BidLineItem {
   amount: number
   notes: string | null
   cost_code?: string | null
+  is_optional?: boolean | null
+  option_group?: string | null
 }
 
 interface TakeoffItem {
@@ -136,11 +145,16 @@ export default function BidComparisonModal({
   const [emailStatuses, setEmailStatuses] = useState<Record<string, any>>({})
   const [allRecipients, setAllRecipients] = useState<any[]>([])
   const [emailThreads, setEmailThreads] = useState<Record<string, any>>({})
-  const [activeTab, setActiveTab] = useState<'details' | 'comparison' | 'conversation'>('details')
+  const [activeTab, setActiveTab] = useState<'details' | 'comparison' | 'conversation' | 'history'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
+  const [messageType, setMessageType] = useState<'email' | 'sms'>('email') // Tab within emails section
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
+  const [selectedSMSRecipient, setSelectedSMSRecipient] = useState<any | null>(null)
+  const [smsRecipients, setSmsRecipients] = useState<any[]>([])
+  const [smsThreads, setSmsThreads] = useState<Record<string, any>>({})
   const [responseText, setResponseText] = useState('')
   const [sendingResponse, setSendingResponse] = useState(false)
+  const [deliveryChannel, setDeliveryChannel] = useState<'email' | 'sms' | 'both'>('email')
   const [takeoffSearchTerm, setTakeoffSearchTerm] = useState('')
   const [bidsSearchTerm, setBidsSearchTerm] = useState('')
   const [emailsSearchTerm, setEmailsSearchTerm] = useState('')
@@ -167,9 +181,50 @@ export default function BidComparisonModal({
   const [processingBidAction, setProcessingBidAction] = useState(false)
   const [fetchedEmailContent, setFetchedEmailContent] = useState<Record<string, string>>({})
   const [fetchingEmailContent, setFetchingEmailContent] = useState<Set<string>>(new Set())
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [refreshingBid, setRefreshingBid] = useState(false)
+  // Track which optional items are selected in view mode
+  const [selectedOptionalItems, setSelectedOptionalItems] = useState<Set<string>>(new Set())
   
   const { user } = useAuth()
   const supabase = createClient()
+
+  // Handler for saving bid edits
+  const handleSaveBidEdit = async (data: { bid_amount: number | null; timeline: string | null; notes: string | null; edit_notes?: string }) => {
+    if (!selectedBidId) return
+
+    setRefreshingBid(true)
+    try {
+      const response = await fetch(`/api/bids/${selectedBidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to save changes')
+      }
+
+      // Refresh bid data
+      await loadBidLineItems(selectedBidId)
+      await loadData()
+      setIsEditMode(false)
+    } catch (err: any) {
+      setError(err.message || 'Failed to save changes')
+      throw err
+    } finally {
+      setRefreshingBid(false)
+    }
+  }
+
+  // Handler for refreshing line items after edit
+  const handleLineItemsRefresh = async () => {
+    if (selectedBidId) {
+      await loadBidLineItems(selectedBidId)
+      await loadData()
+    }
+  }
 
   // Helper to validate if an ID is a valid UUID (recipient ID format)
   const isValidRecipientId = useCallback((id: any): boolean => {
@@ -507,34 +562,68 @@ export default function BidComparisonModal({
               setAllRecipients(threadRecipients)
               console.log('📧 loadData: Updated allRecipients with', threadRecipients.length, 'recipients')
               
-              // Store full thread data for display
+              // Store full thread data for display (both email and SMS threads)
               const threadsMap: Record<string, any> = {}
+              const smsThreadsMap: Record<string, any> = {}
               statusData.threads.forEach((thread: any) => {
-                threadsMap[thread.thread_id] = thread
+                // Check if this is an SMS thread
+                if (thread.thread_id?.startsWith('sms-thread-') || thread.latest_message?.subcontractor_phone) {
+                  smsThreadsMap[thread.thread_id] = thread
+                } else {
+                  threadsMap[thread.thread_id] = thread
+                }
               })
               setEmailThreads(threadsMap)
+              setSmsThreads(smsThreadsMap)
               console.log('📧 loadData: Updated emailThreads with', Object.keys(threadsMap).length, 'threads')
+              console.log('📱 loadData: Updated smsThreads with', Object.keys(smsThreadsMap).length, 'threads')
             } else {
             setAllRecipients(statusData.recipients)
               // Build threads from recipients if threads not provided
               const threadsMap: Record<string, any> = {}
+              const smsThreadsMap: Record<string, any> = {}
               statusData.recipients.forEach((recipient: any) => {
-                const threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
-                if (!threadsMap[threadId]) {
-                  threadsMap[threadId] = {
-                    thread_id: threadId,
-                    original_email: recipient,
-                    messages: [recipient],
-                    latest_message: recipient,
-                    message_count: 1
+                // Determine thread ID based on delivery channel
+                let threadId: string
+                if (recipient.subcontractor_phone && (recipient.delivery_channel === 'sms' || recipient.delivery_channel === 'both' || recipient.telnyx_message_id)) {
+                  threadId = recipient.thread_id || 
+                    (recipient.subcontractor_phone 
+                      ? `sms-thread-${recipient.bid_package_id}-${recipient.subcontractor_phone.replace(/[^\d]/g, '')}`
+                      : `sms-thread-${recipient.bid_package_id}-${recipient.id}`)
+                  const targetMap = smsThreadsMap
+                  if (!targetMap[threadId]) {
+                    targetMap[threadId] = {
+                      thread_id: threadId,
+                      original_message: recipient,
+                      messages: [recipient],
+                      latest_message: recipient,
+                      message_count: 1
+                    }
+                  } else {
+                    targetMap[threadId].messages.push(recipient)
+                    targetMap[threadId].latest_message = recipient
+                    targetMap[threadId].message_count = targetMap[threadId].messages.length
                   }
                 } else {
-                  threadsMap[threadId].messages.push(recipient)
-                  threadsMap[threadId].latest_message = recipient
-                  threadsMap[threadId].message_count = threadsMap[threadId].messages.length
+                  threadId = recipient.thread_id || `thread-${recipient.bid_package_id}-${recipient.subcontractor_email}`
+                  const targetMap = threadsMap
+                  if (!targetMap[threadId]) {
+                    targetMap[threadId] = {
+                      thread_id: threadId,
+                      original_email: recipient,
+                      messages: [recipient],
+                      latest_message: recipient,
+                      message_count: 1
+                    }
+                  } else {
+                    targetMap[threadId].messages.push(recipient)
+                    targetMap[threadId].latest_message = recipient
+                    targetMap[threadId].message_count = targetMap[threadId].messages.length
+                  }
                 }
               })
               setEmailThreads(threadsMap)
+              setSmsThreads(smsThreadsMap)
             }
             
             const statusMap: Record<string, any> = {}
@@ -950,8 +1039,9 @@ export default function BidComparisonModal({
   const discrepancies = calculateDiscrepancies()
 
   const handleSendMessage = async () => {
-    if (!responseText.trim() || !selectedEmailRecipient?.id || sendingResponse) return
-    const bidPackageId = selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id
+    const recipient = messageType === 'email' ? selectedEmailRecipient : selectedSMSRecipient
+    if (!responseText.trim() || !recipient?.id || sendingResponse) return
+    const bidPackageId = recipient.bid_package_id || recipient.bid_packages?.id
     if (!bidPackageId) return
 
     setSendingResponse(true)
@@ -961,8 +1051,9 @@ export default function BidComparisonModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipientId: selectedEmailRecipient.id,
-          responseText: responseText.trim()
+          recipientId: recipient.id,
+          responseText: responseText.trim(),
+          deliveryChannel: messageType === 'email' ? 'email' : 'sms'
         })
       })
       if (res.ok) {
@@ -984,11 +1075,21 @@ export default function BidComparisonModal({
                 setEmailThreads(threadsMap)
                 
                 // Update selected recipient to show latest thread
-                const threadId = selectedEmailRecipient.thread_id || 
-                  `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
-                const updatedThread = threadsMap[threadId]
-                if (updatedThread && updatedThread.latest_message) {
-                  setSelectedEmailRecipient(updatedThread.latest_message)
+                if (messageType === 'email' && selectedEmailRecipient) {
+                  const threadId = selectedEmailRecipient.thread_id || 
+                    `thread-${selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id}-${selectedEmailRecipient.subcontractor_email}`
+                  const updatedThread = threadsMap[threadId]
+                  if (updatedThread && updatedThread.latest_message) {
+                    setSelectedEmailRecipient(updatedThread.latest_message)
+                  }
+                } else if (messageType === 'sms' && selectedSMSRecipient) {
+                  const smsThreadId = selectedSMSRecipient.subcontractor_phone 
+                    ? `sms-thread-${selectedSMSRecipient.bid_package_id || selectedSMSRecipient.bid_packages?.id}-${selectedSMSRecipient.subcontractor_phone.replace(/[^\d]/g, '')}`
+                    : `sms-thread-${selectedSMSRecipient.bid_package_id || selectedSMSRecipient.bid_packages?.id}-${selectedSMSRecipient.id}`
+                  const updatedThread = threadsMap[smsThreadId]
+                  if (updatedThread && updatedThread.latest_message) {
+                    setSelectedSMSRecipient(updatedThread.latest_message)
+                  }
                 }
               } else {
                 setAllRecipients(statusData.recipients)
@@ -1012,12 +1113,20 @@ export default function BidComparisonModal({
                 setEmailThreads(threadsMap)
                 
                 // Update selected recipient
-                const updated = statusData.recipients.find((r: any) => 
-                  r.thread_id === selectedEmailRecipient.thread_id ||
-                  (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
-                   r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
-                )
-                if (updated) setSelectedEmailRecipient(updated)
+                if (messageType === 'email' && selectedEmailRecipient) {
+                  const updated = statusData.recipients.find((r: any) => 
+                    r.thread_id === selectedEmailRecipient.thread_id ||
+                    (r.subcontractor_email === selectedEmailRecipient.subcontractor_email && 
+                     r.bid_package_id === (selectedEmailRecipient.bid_package_id || selectedEmailRecipient.bid_packages?.id))
+                  )
+                  if (updated) setSelectedEmailRecipient(updated)
+                } else if (messageType === 'sms' && selectedSMSRecipient) {
+                  const updated = statusData.recipients.find((r: any) => 
+                    r.subcontractor_phone === selectedSMSRecipient.subcontractor_phone && 
+                    r.bid_package_id === (selectedSMSRecipient.bid_package_id || selectedSMSRecipient.bid_packages?.id)
+                  )
+                  if (updated) setSelectedSMSRecipient(updated)
+                }
               }
             }
           }
@@ -2103,6 +2212,22 @@ export default function BidComparisonModal({
                         <div className="flex items-start gap-6">
                             {/* Action Buttons */}
                           <div className="flex gap-2 flex-wrap">
+                              {/* Edit Button */}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={processingBidAction}
+                                onClick={() => setIsEditMode(!isEditMode)}
+                                className={isEditMode ? 'bg-orange-50 border-orange-300 text-orange-700' : ''}
+                              >
+                                <Edit2 className="h-4 w-4 mr-2" />
+                                {isEditMode ? 'Cancel Edit' : 'Edit Bid'}
+                              </Button>
+                              {(selectedBid as any).is_manually_edited && (
+                                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300">
+                                  Manually Edited
+                                </Badge>
+                              )}
                               {/* Always show Decline button if not already declined */}
                               {selectedBid.status !== 'declined' && (
                                 <>
@@ -2230,7 +2355,7 @@ export default function BidComparisonModal({
                         </div>
                       </div>
 
-                      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'details' | 'comparison')} className="w-full">
+                      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'details' | 'comparison' | 'history')} className="w-full">
                         <TabsList className="bg-transparent border-b rounded-none p-0 h-auto w-full justify-start gap-6">
                           <TabsTrigger 
                             value="details"
@@ -2244,6 +2369,13 @@ export default function BidComparisonModal({
                           >
                             Comparison Analysis
                           </TabsTrigger>
+                          <TabsTrigger 
+                            value="history"
+                            className="rounded-none border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-600 px-4 py-3"
+                          >
+                            <History className="h-4 w-4 mr-2" />
+                            Edit History
+                          </TabsTrigger>
                         </TabsList>
                       </Tabs>
                     </div>
@@ -2252,8 +2384,53 @@ export default function BidComparisonModal({
                     <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6">
                       <Tabs value={activeTab} className="space-y-6">
                         <TabsContent value="details" className="mt-0 space-y-6">
-                          {/* Stats Cards */}
-                          <div className={`grid grid-cols-1 gap-4 ${selectedBid.bid_attachments && selectedBid.bid_attachments.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+                          {isEditMode ? (
+                            <>
+                              {/* Edit Mode: Bid Edit Form */}
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Edit Bid</CardTitle>
+                                  <CardDescription>Update bid amount, timeline, and notes</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                  <BidEditForm
+                                    bid={selectedBid}
+                                    onSave={handleSaveBidEdit}
+                                    onCancel={() => setIsEditMode(false)}
+                                    loading={refreshingBid}
+                                  />
+                                </CardContent>
+                              </Card>
+
+                              {/* Edit Mode: Line Items Editor */}
+                              <Card>
+                                <CardHeader>
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <CardTitle>Edit Line Items</CardTitle>
+                                      <CardDescription>Add, edit, or delete line items. Mark items as optional to create options.</CardDescription>
+                                    </div>
+                                    {bidLineItems.some(item => item.is_optional) && (
+                                      <BidOptionsIndicator lineItems={bidLineItems} />
+                                    )}
+                                  </div>
+                                </CardHeader>
+                                <CardContent>
+                                  <BidLineItemsEditor
+                                    bidId={selectedBidId!}
+                                    lineItems={bidLineItems}
+                                    onItemAdded={handleLineItemsRefresh}
+                                    onItemUpdated={handleLineItemsRefresh}
+                                    onItemDeleted={handleLineItemsRefresh}
+                                    loading={refreshingBid}
+                                  />
+                                </CardContent>
+                              </Card>
+                            </>
+                          ) : (
+                            <>
+                              {/* View Mode: Stats Cards */}
+                              <div className={`grid grid-cols-1 gap-4 ${selectedBid.bid_attachments && selectedBid.bid_attachments.length > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
                             <Card>
                               <CardContent className="p-4">
                                 <div className="text-sm font-medium text-gray-500 mb-1">Scope Coverage</div>
@@ -2336,94 +2513,171 @@ export default function BidComparisonModal({
                             )}
                           </div>
 
-                          {/* Line Items Table - Redesigned */}
-                          <Card className="overflow-hidden border-gray-200 shadow-sm">
-                            <CardHeader className="bg-white border-b py-4">
-                              <CardTitle className="text-lg flex items-center gap-2">
-                                <FileText className="h-5 w-5 text-blue-600" />
-                                Bid Line Items
-                              </CardTitle>
-                            </CardHeader>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm text-left">
-                                <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
-                                  <tr>
-                                    <th className="px-6 py-3 font-medium w-[100px]">Cost Code</th>
-                                    <th className="px-6 py-3 font-medium">Description</th>
-                                    <th className="px-6 py-3 font-medium">Category</th>
-                                    <th className="px-6 py-3 font-medium text-right">Qty</th>
-                                    <th className="px-6 py-3 font-medium text-right">Unit Price</th>
-                                    <th className="px-6 py-3 font-medium text-right">Total</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white">
-                                  {bidLineItems.length > 0 ? (
-                                    bidLineItems.map((item) => (
-                                      <tr key={item.id} className="hover:bg-gray-50/50">
-                                        <td className="px-6 py-4 text-gray-500">
-                                          {item.cost_code ? (
-                                            <span className="font-mono text-xs">{item.cost_code}</span>
-                                          ) : (
-                                            item.item_number
-                                          )}
-                                        </td>
-                                        <td className="px-6 py-4 font-medium text-gray-900">
-                                          {item.description}
-                                          {item.notes && <div className="text-xs text-gray-500 font-normal mt-1">{item.notes}</div>}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                          <Badge variant="secondary" className="font-normal bg-gray-100 text-gray-600">
-                                            {item.category}
-                                          </Badge>
-                                        </td>
-                                        <td className="px-6 py-4 text-right tabular-nums">
-                                          {item.quantity ? (
-                                            <span>
-                                              {item.quantity} <span className="text-gray-400 text-xs">{item.unit}</span>
-                                            </span>
-                                          ) : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 text-right tabular-nums">
-                                          {item.unit_price ? `$${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 text-right font-medium tabular-nums">
-                                          ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                        </td>
+                              {/* Line Items Table - Redesigned */}
+                              <Card className="overflow-hidden border-gray-200 shadow-sm">
+                                <CardHeader className="bg-white border-b py-4">
+                                  <CardTitle className="text-lg flex items-center gap-2">
+                                    <FileText className="h-5 w-5 text-blue-600" />
+                                    Bid Line Items
+                                  </CardTitle>
+                                </CardHeader>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                                      <tr>
+                                        <th className="px-6 py-3 font-medium w-[50px]"></th>
+                                        <th className="px-6 py-3 font-medium w-[100px]">Cost Code</th>
+                                        <th className="px-6 py-3 font-medium">Description</th>
+                                        <th className="px-6 py-3 font-medium">Category</th>
+                                        <th className="px-6 py-3 font-medium text-right">Qty</th>
+                                        <th className="px-6 py-3 font-medium text-right">Unit Price</th>
+                                        <th className="px-6 py-3 font-medium text-right">Total</th>
                                       </tr>
-                                    ))
-                                  ) : (
-                                    <tr>
-                                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                                        No line items found in this bid.
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                                {bidLineItems.length > 0 && (
-                                  <tfoot className="bg-gray-50 border-t font-semibold text-gray-900">
-                                    <tr>
-                                      <td colSpan={5} className="px-6 py-4 text-right">Total</td>
-                                      <td className="px-6 py-4 text-right">
-                                        ${bidLineItems.reduce((sum, i) => sum + i.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                      </td>
-                                    </tr>
-                                  </tfoot>
-                                )}
-                              </table>
-                            </div>
-                          </Card>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                      {bidLineItems.length > 0 ? (
+                                        bidLineItems.map((item) => {
+                                          const isSelected = item.is_optional && selectedOptionalItems.has(item.id)
+                                          return (
+                                            <tr 
+                                              key={item.id} 
+                                              className={
+                                                item.is_optional 
+                                                  ? isSelected 
+                                                    ? "hover:bg-orange-100 bg-orange-100/50" 
+                                                    : "hover:bg-orange-50/50 bg-orange-50/30"
+                                                  : "hover:bg-gray-50/50"
+                                              }
+                                            >
+                                              <td className="px-6 py-4">
+                                                {item.is_optional && (
+                                                  <Checkbox
+                                                    id={`optional-${item.id}`}
+                                                    checked={!!isSelected}
+                                                    onCheckedChange={() => {
+                                                      setSelectedOptionalItems(prev => {
+                                                        const next = new Set(prev)
+                                                        if (next.has(item.id)) {
+                                                          next.delete(item.id)
+                                                        } else {
+                                                          next.add(item.id)
+                                                        }
+                                                        return next
+                                                      })
+                                                    }}
+                                                  />
+                                                )}
+                                              </td>
+                                              <td className="px-6 py-4 text-gray-500">
+                                                {item.cost_code ? (
+                                                  <span className="font-mono text-xs">{item.cost_code}</span>
+                                                ) : (
+                                                  item.item_number
+                                                )}
+                                              </td>
+                                              <td className="px-6 py-4 font-medium text-gray-900">
+                                                <div className="flex items-center gap-2">
+                                                  {item.description}
+                                                  {item.is_optional && (
+                                                    <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
+                                                      Optional
+                                                    </Badge>
+                                                  )}
+                                                  {item.option_group && (
+                                                    <Badge variant="outline" className="text-xs bg-orange-100 text-orange-800 border-orange-400">
+                                                      {item.option_group}
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                                {item.notes && <div className="text-xs text-gray-500 font-normal mt-1">{item.notes}</div>}
+                                              </td>
+                                              <td className="px-6 py-4">
+                                                <Badge variant="secondary" className="font-normal bg-gray-100 text-gray-600">
+                                                  {item.category}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-6 py-4 text-right tabular-nums">
+                                                {item.quantity ? (
+                                                  <span>
+                                                    {item.quantity} <span className="text-gray-400 text-xs">{item.unit}</span>
+                                                  </span>
+                                                ) : '-'}
+                                              </td>
+                                              <td className="px-6 py-4 text-right tabular-nums">
+                                                {item.unit_price ? `$${item.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                                              </td>
+                                              <td className="px-6 py-4 text-right font-medium tabular-nums">
+                                                ${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                              </td>
+                                            </tr>
+                                          )
+                                        })
+                                      ) : (
+                                        <tr>
+                                          <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                                            No line items found in this bid.
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                    {bidLineItems.length > 0 && (() => {
+                                      const standardTotal = bidLineItems.filter(i => !i.is_optional).reduce((sum, i) => sum + i.amount, 0)
+                                      const selectedOptionalTotal = bidLineItems
+                                        .filter(i => i.is_optional && selectedOptionalItems.has(i.id))
+                                        .reduce((sum, i) => sum + i.amount, 0)
+                                      const grandTotal = standardTotal + selectedOptionalTotal
+                                      return (
+                                        <tfoot className="bg-gray-50 border-t font-semibold text-gray-900">
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-2 text-right text-sm text-gray-600">
+                                              Standard Items:
+                                            </td>
+                                            <td className="px-6 py-2 text-right text-sm">
+                                              ${standardTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </td>
+                                          </tr>
+                                          {selectedOptionalTotal > 0 && (
+                                            <tr>
+                                              <td colSpan={6} className="px-6 py-2 text-right text-sm text-orange-700">
+                                                Selected Optional Items:
+                                              </td>
+                                              <td className="px-6 py-2 text-right text-sm text-orange-700">
+                                                ${selectedOptionalTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                              </td>
+                                            </tr>
+                                          )}
+                                          <tr>
+                                            <td colSpan={6} className="px-6 py-4 text-right text-lg">
+                                              Total {selectedOptionalTotal > 0 ? '(with selected options)' : '(Standard Items)'}:
+                                            </td>
+                                            <td className="px-6 py-4 text-right text-lg text-green-600">
+                                              ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </td>
+                                          </tr>
+                                        </tfoot>
+                                      )
+                                    })()}
+                                  </table>
+                                </div>
+                              </Card>
 
-                          {/* Notes Section */}
-                          {selectedBid.notes && (
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="text-base">Bidder Notes</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <p className="text-gray-700 whitespace-pre-wrap">{selectedBid.notes}</p>
-                              </CardContent>
-                            </Card>
+                              {/* Notes Section */}
+                              {selectedBid.notes && (
+                                <Card>
+                                  <CardHeader>
+                                    <CardTitle className="text-base">Bidder Notes</CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <p className="text-gray-700 whitespace-pre-wrap">{selectedBid.notes}</p>
+                                  </CardContent>
+                                </Card>
+                              )}
+                            </>
                           )}
+                        </TabsContent>
+
+                        <TabsContent value="history" className="mt-0">
+                          {selectedBidId && <BidEditHistory bidId={selectedBidId} />}
                         </TabsContent>
 
                         <TabsContent value="comparison" className="mt-0 space-y-6">

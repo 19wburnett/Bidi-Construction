@@ -250,28 +250,61 @@ export async function generateAnswer(
     const modelsWithoutCustomTemperature = ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini']
     const supportsCustomTemperature = !modelsWithoutCustomTemperature.includes(OPENAI_MODEL)
 
-    const response = await aiGateway.generate({
-      model: selectedModel,
-      messages: messages as any,
-      maxTokens: mode === 'TAKEOFF' ? 500 : mode === 'TAKEOFF_MODIFY' ? 3000 : 1500, // More tokens for modifications (increased to prevent cutoff)
-      temperature: supportsCustomTemperature ? (mode === 'TAKEOFF' ? 0.3 : mode === 'TAKEOFF_MODIFY' ? 0.4 : 0.6) : undefined
-    })
+    let response
+    try {
+      response = await aiGateway.generate({
+        model: selectedModel,
+        messages: messages as any,
+        maxTokens: mode === 'TAKEOFF' ? 500 : mode === 'TAKEOFF_MODIFY' ? 3000 : 1500, // More tokens for modifications (increased to prevent cutoff)
+        temperature: supportsCustomTemperature ? (mode === 'TAKEOFF' ? 0.3 : mode === 'TAKEOFF_MODIFY' ? 0.4 : 0.6) : undefined
+      })
+    } catch (gatewayError) {
+      console.error('[PlanChatV3] AI Gateway error:', {
+        error: gatewayError instanceof Error ? gatewayError.message : String(gatewayError),
+        model: selectedModel,
+        mode,
+        userQuestion: userQuestion.substring(0, 100),
+      })
+      throw new Error(`AI Gateway failed to generate response: ${gatewayError instanceof Error ? gatewayError.message : String(gatewayError)}`)
+    }
 
-    let answer = response.content?.trim()
+    // Validate response structure
+    if (!response) {
+      console.error('[PlanChatV3] AI Gateway returned null/undefined response')
+      throw new Error('AI Gateway returned an invalid response (null/undefined)')
+    }
+
+    // Safely extract answer content, handling undefined/null cases
+    let answer: string = ''
+    if (response && response.content && typeof response.content === 'string') {
+      answer = response.content.trim()
+    } else {
+      console.warn('[PlanChatV3] AI Gateway response missing or invalid content:', {
+        hasResponse: !!response,
+        hasContent: !!response?.content,
+        contentType: typeof response?.content,
+        finishReason: response?.finishReason,
+      })
+      // answer remains empty string, will be handled by fallback logic below
+    }
 
     // Log what we got from LLM for debugging
     if (process.env.NODE_ENV === 'development' || process.env.PLAN_CHAT_V3_DEBUG === 'true') {
       console.log('[PlanChatV3] LLM response:', {
+        hasResponse: !!response,
+        hasContent: !!response?.content,
+        contentType: typeof response?.content,
         answerLength: answer?.length || 0,
         answerPreview: answer?.substring(0, 200) || 'empty',
         hasBlueprint: context.blueprint_context.chunks.length > 0,
         hasTakeoff: context.takeoff_context.items.length > 0,
         mode,
+        finishReason: response?.finishReason,
       })
     }
 
     // Only use fallback if answer is truly empty - trust the LLM otherwise
-    const isEmptyAnswer = !answer || answer.trim().length < 5
+    const isEmptyAnswer = !answer || answer.length < 5
 
     if (isEmptyAnswer) {
       // Check what context we have
@@ -487,6 +520,16 @@ export async function generateAnswer(
       // Don't fail the request if memory persistence fails
     })
 
+    // Final validation: ensure answer is always a valid non-empty string
+    if (!answer || typeof answer !== 'string' || answer.trim().length === 0) {
+      console.error('[PlanChatV3] Final validation failed - answer is invalid:', {
+        answerType: typeof answer,
+        answerValue: answer,
+        answerLength: answer?.length || 0,
+      })
+      answer = "I'm sorry, I encountered an error generating a response. Please try again or rephrase your question."
+    }
+
     // Step 7: Return final answer with metadata
     logAnswerGeneration({
       mode: mode === 'TAKEOFF_MODIFY' ? 'TAKEOFF' : mode,
@@ -494,7 +537,7 @@ export async function generateAnswer(
     })
 
     return {
-      answer,
+      answer: answer.trim(),
       classification,
       mode,
       metadata: {

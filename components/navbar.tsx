@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Building2, Menu, X, User, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
-import logo from '../public/brand/Bidi Contracting Logo.svg'
+const logoPath = '/brand/Bidi Contracting Logo.svg'
 import ThemeToggle from '@/components/theme-toggle'
 
 export default function Navbar() {
@@ -90,7 +90,7 @@ export default function Navbar() {
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-3 group">
             <div className="relative">
-              <img src={logo.src} alt="Bidi Contracting" className="h-8 w-8 sm:h-10 sm:w-10 text-black transition-transform duration-300 group-hover:scale-105" />
+              <img src={logoPath} alt="Bidi Contracting" className="h-8 w-8 sm:h-10 sm:w-10 text-black transition-transform duration-300 group-hover:scale-105" />
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange rounded-full animate-pulse"></div>
             </div>
             <div className="flex items-center space-x-3">

@@ -39,7 +39,7 @@ import {
   UserPlus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
-import logo from '../public/brand/Bidi Contracting Logo.svg'
+const logoPath = '/brand/Bidi Contracting Logo.svg'
 
 interface SidebarProps {
   className?: string
@@ -327,7 +327,7 @@ export default function DashboardSidebar({ className }: SidebarProps) {
               !isCollapsed && 'space-x-2.5'
             )}>
               <img 
-                src={logo.src} 
+                src={logoPath} 
                 alt="BIDI" 
                 className="h-9 w-9"
               />

@@ -50,6 +50,8 @@ import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
+import TakeoffReviewPanel from '@/components/takeoff-review-panel'
+import MissingInformationPanel from '@/components/missing-information-panel'
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 import PlanChatPanel from '@/components/plan/plan-chat-panel'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
@@ -107,6 +109,8 @@ export default function EnhancedPlanViewer() {
   const [isUpdatingTitle, setIsUpdatingTitle] = useState(false)
 
   const [takeoffResults, setTakeoffResults] = useState<any>(null)
+  const [reviewResults, setReviewResults] = useState<any>(null)
+  const [missingInformation, setMissingInformation] = useState<any[]>([])
   const [modalTakeoffItems, setModalTakeoffItems] = useState<Array<{
     id: string
     category: string
@@ -116,7 +120,7 @@ export default function EnhancedPlanViewer() {
     unit_cost?: number
   }>>([])
   const [shareLink, setShareLink] = useState<string | null>(null)
-  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number; timeEstimate?: string }>({ step: '', percent: 0 })
+  const [analysisProgress, setAnalysisProgress] = useState<{ step: string; percent: number; timeEstimate?: string; stage?: string }>({ step: '', percent: 0 })
   const [goToPage, setGoToPage] = useState<number | undefined>(undefined)
   const [goToCoordinate, setGoToCoordinate] = useState<{ x: number; y: number; pageNumber: number } | undefined>(undefined)
   
@@ -1516,23 +1520,35 @@ export default function EnhancedPlanViewer() {
     }
 
     try {
-      // Step 1: Convert PDF to images (0-70%)
-      const images = await convertPdfToImages(retryCount)
-      const totalPages = images.length
+      // Step 1: Check vectorization status (using vectorized text chunks instead of images)
+      setAnalysisProgress({ step: 'Checking plan vectorization status...', percent: 10, stage: 'primary' })
+      
+      // Step 2: Convert only a few sample pages for visual context (optional)
+      // Since we're using vectorized text, we only need a few sample images
+      // Check if convertPdfToImages supports a limit parameter
+      let sampleImages: string[] = []
+      try {
+        // Try to get just first 5 pages for visual context
+        const allImages = await convertPdfToImages(retryCount)
+        sampleImages = allImages.slice(0, Math.min(5, allImages.length))
+      } catch (imageError) {
+        console.warn('Could not convert sample images, proceeding with text-only analysis:', imageError)
+        // Continue without images - text chunks are sufficient
+      }
+      const totalPages = plan?.num_pages || sampleImages.length
 
-      // Step 2: Send to AI (70-90%)
+      // Step 3: Primary AI Analysis using vectorized text chunks
       const timeEstimate = calculateTimeEstimate(totalPages)
-      setAnalysisProgress({ step: 'Analyzing with AI...', percent: 75, timeEstimate })
+      setAnalysisProgress({ step: 'Stage 1: Primary AI Analysis using vectorized text...', percent: 20, timeEstimate, stage: 'primary' })
       const startTime = Date.now()
       
-      const analysisResponse = await fetch('/api/plan/analyze-enhanced', {
+      const analysisResponse = await fetch('/api/plan/analyze-takeoff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: planId,
-          images: images,
-          drawings: drawings,
-          taskType: 'takeoff'
+          images: sampleImages, // Only send sample images for visual context (optional)
+          drawings: drawings
         })
       })
 
@@ -1555,6 +1571,30 @@ export default function EnhancedPlanViewer() {
       }
 
       if (!analysisResponse.ok) {
+        // Handle vectorization error
+        if (analysisResponse.status === 400 || analysisResponse.status === 202) {
+          const errorData = await analysisResponse.json().catch(() => ({}))
+          if (errorData.error === 'PLAN_NOT_VECTORIZED' || errorData.error === 'NO_TEXT_CHUNKS') {
+            const message = errorData.vectorizationStatus?.autoQueued
+              ? '⚠️ Plan needs to be vectorized first. Vectorization has been queued automatically. This usually takes 2-5 minutes. Please wait and try again.'
+              : errorData.message || 'Plan needs to be vectorized before running takeoff analysis. Vectorization extracts text from plans which helps the AI provide more accurate results.'
+            
+            setAnalysisProgress({ 
+              step: message,
+              percent: 100,
+              stage: 'vectorization_required'
+            })
+            
+            // Show message for longer since user needs to wait
+            setTimeout(() => {
+              setIsRunningTakeoff(false)
+              setAnalysisProgress({ step: '', percent: 0 })
+            }, 15000) // Show for 15 seconds to give user time to read
+            
+            return
+          }
+        }
+        
         if (analysisResponse.status === 413) {
           // Check if server suggests using batch endpoint
           let errorData
@@ -1576,7 +1616,7 @@ export default function EnhancedPlanViewer() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 planId: planId,
-                images: images,
+                images: sampleImages,
                 drawings: drawings,
                 taskType: 'takeoff'
               })
@@ -1617,14 +1657,34 @@ export default function EnhancedPlanViewer() {
         throw new Error(errorData.error || 'Analysis failed')
       }
 
-      setAnalysisProgress({ step: 'Processing results...', percent: 90 })
+      setAnalysisProgress({ step: 'Stage 2: Multi-AI Review...', percent: 50, stage: 'review' })
       const analysisData = await analysisResponse.json()
       
-      // Step 3: Complete (90-100%)
-      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1)
-      setAnalysisProgress({ step: 'Complete!', percent: 100 })
+      // Extract review and missing information from response
+      if (analysisData.review) {
+        setReviewResults(analysisData.review)
+      }
+      if (analysisData.missing_information?.missingInformation) {
+        setMissingInformation(analysisData.missing_information.missingInformation)
+      }
       
-      setTakeoffResults(analysisData)
+      setAnalysisProgress({ step: 'Stage 3: Missing Information Analysis...', percent: 75, stage: 'missing_info' })
+      
+      setAnalysisProgress({ step: 'Stage 4: Estimate Enhancement...', percent: 90, stage: 'estimate' })
+      
+      // Step 5: Complete (90-100%)
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1)
+      setAnalysisProgress({ step: 'Complete!', percent: 100, stage: 'complete' })
+      
+      setTakeoffResults({
+        results: {
+          items: analysisData.items || [],
+          summary: analysisData.summary || {}
+        },
+        review: analysisData.review,
+        missing_information: analysisData.missing_information,
+        estimate_enhancement: analysisData.estimate_enhancement
+      })
       
       
       // Complete analysis
@@ -2151,21 +2211,55 @@ export default function EnhancedPlanViewer() {
                               </div>
                               <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                                 <div 
-                                  className="bg-blue-600 h-2 transition-all duration-300 ease-out rounded-full"
+                                  className={`h-2 transition-all duration-300 ease-out rounded-full ${
+                                    analysisProgress.stage === 'primary' ? 'bg-blue-600' :
+                                    analysisProgress.stage === 'review' ? 'bg-purple-600' :
+                                    analysisProgress.stage === 'missing_info' ? 'bg-orange-600' :
+                                    analysisProgress.stage === 'estimate' ? 'bg-green-600' :
+                                    'bg-blue-600'
+                                  }`}
                                   style={{ width: `${analysisProgress.percent}%` }}
                                 />
                               </div>
+                              {analysisProgress.stage && analysisProgress.stage !== 'complete' && (
+                                <div className="flex gap-2 text-xs text-gray-500">
+                                  <span className={analysisProgress.stage === 'primary' ? 'font-semibold text-blue-600' : ''}>
+                                    Stage 1: Primary Analysis
+                                  </span>
+                                  <span>•</span>
+                                  <span className={analysisProgress.stage === 'review' ? 'font-semibold text-purple-600' : ''}>
+                                    Stage 2: Review
+                                  </span>
+                                  <span>•</span>
+                                  <span className={analysisProgress.stage === 'missing_info' ? 'font-semibold text-orange-600' : ''}>
+                                    Stage 3: Missing Info
+                                  </span>
+                                  <span>•</span>
+                                  <span className={analysisProgress.stage === 'estimate' ? 'font-semibold text-green-600' : ''}>
+                                    Stage 4: Estimate
+                                  </span>
+                                </div>
+                              )}
                               {analysisProgress.step.includes('underway') ? (
                                 <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
                                   <p className="text-xs text-blue-800 font-medium">
                                     ✅ Your request has been queued for processing. You will receive an email notification when the AI takeoff is complete.
                                   </p>
                                 </div>
-                              ) : (
+                              ) : analysisProgress.stage === 'vectorization_required' ? (
+                                <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+                                  <p className="text-xs text-orange-800 font-medium">
+                                    {analysisProgress.step}
+                                  </p>
+                                  <p className="text-xs text-orange-600 mt-1">
+                                    Vectorization extracts text from your plans, which helps the AI provide more accurate takeoff results with better cost code assignments.
+                                  </p>
+                                </div>
+                              ) : analysisProgress.percent < 100 ? (
                                 <p className="text-xs text-gray-500">
                                   Estimated time: {analysisProgress.timeEstimate || 'Calculating...'}
                                 </p>
-                              )}
+                              ) : null}
                             </div>
                           )}
                           {takeoffResults ? (
@@ -2181,12 +2275,32 @@ export default function EnhancedPlanViewer() {
                                   }
                                 </Badge>
                               </div>
+                              
+                              {/* Missing Information Panel */}
+                              {missingInformation && missingInformation.length > 0 && (
+                                <div className="mb-4">
+                                  <MissingInformationPanel 
+                                    missingInformation={missingInformation}
+                                  />
+                                </div>
+                              )}
+                              
+                              {/* Review Panel */}
+                              {reviewResults && (
+                                <div className="mb-4">
+                                  <TakeoffReviewPanel 
+                                    reviewFindings={reviewResults}
+                                  />
+                                </div>
+                              )}
+                              
                               <TakeoffSpreadsheet
                                 items={takeoffResults.results?.items || []}
                                 summary={takeoffResults.results?.summary}
                                 onPageNavigate={handlePageNavigate}
                                 editable
                                 onItemsChange={handleItemsChange}
+                                missingInformation={missingInformation}
                               />
                             </div>
                           ) : (

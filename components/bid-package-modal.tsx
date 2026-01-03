@@ -37,6 +37,7 @@ import {
   Star,
   Globe,
   Mail,
+  MessageSquare,
   Wrench,
   Hammer,
   Home,
@@ -191,6 +192,7 @@ export default function BidPackageModal({
   const [loadingPhase, setLoadingPhase] = useState<'creating' | 'sending' | 'loading-recipients'>('creating')
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [selectedProfileSubcontractorId, setSelectedProfileSubcontractorId] = useState<string | null>(null)
+  const [deliveryChannel, setDeliveryChannel] = useState<'email' | 'sms' | 'both'>('email')
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -443,12 +445,13 @@ export default function BidPackageModal({
               fetch('/api/bid-packages/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                  body: JSON.stringify({
                   bidPackageId: pkg.id,
                   subcontractorIds: tradeSubs.map(sub => sub.id),
                   planId: planId,
                   reportIds: selectedReportIds, // Pass report IDs to API
-                  templateId: selectedTemplateId || undefined // Pass template ID if selected
+                  templateId: selectedTemplateId || undefined, // Pass template ID if selected
+                  deliveryChannel: deliveryChannel // Pass delivery channel preference
                 })
               }).then(async (response) => {
                 if (!response.ok) {
@@ -1946,6 +1949,39 @@ export default function BidPackageModal({
                                   />
                                   <p className="text-xs text-gray-500">
                                     Set a deadline for when subcontractors should submit their bids.
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label className="text-sm font-semibold">Delivery Method</Label>
+                                  <Select value={deliveryChannel} onValueChange={(val: 'email' | 'sms' | 'both') => setDeliveryChannel(val)}>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="email">
+                                        <div className="flex items-center gap-2">
+                                          <Mail className="h-4 w-4" />
+                                          <span>Email Only</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="sms">
+                                        <div className="flex items-center gap-2">
+                                          <MessageSquare className="h-4 w-4" />
+                                          <span>SMS Only</span>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="both">
+                                        <div className="flex items-center gap-2">
+                                          <Mail className="h-4 w-4" />
+                                          <MessageSquare className="h-4 w-4" />
+                                          <span>Email & SMS</span>
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <p className="text-xs text-gray-500">
+                                    Choose how to send bid requests: email, SMS text messages, or both.
                                   </p>
                                 </div>
                               </AccordionContent>

@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   // Verify plan exists and user has access
   const { data: plan, error: planError } = await supabase
     .from('plans')
-    .select('id, job_id, user_id, num_pages')
+    .select('id, job_id, created_by, num_pages')
     .eq('id', planId)
     .maybeSingle()
 
@@ -43,13 +43,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
   }
 
-  // Check access
+  // Check access via job membership (plans are now accessed via job_id, not user_id)
   const targetJobId = plan.job_id || jobId
-  if (plan.user_id !== user.id && targetJobId) {
-    const hasAccess = await userHasJobAccess(supabase, targetJobId, user.id)
-    if (!hasAccess) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-    }
+  if (!targetJobId) {
+    return NextResponse.json({ error: 'Plan must have a job_id' }, { status: 400 })
+  }
+  
+  const hasAccess = await userHasJobAccess(supabase, targetJobId, user.id)
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Access denied' }, { status: 403 })
   }
 
   // Check if there's already a pending or processing job for this plan

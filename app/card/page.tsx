@@ -3,7 +3,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Download, ExternalLink, Building2, Phone, Mail, Globe } from 'lucide-react';
-import logo from '../../public/brand/Bidi Contracting Logo.svg';
+const logoPath = '/brand/Bidi Contracting Logo.svg';
 
 export default function BusinessCardPage() {
   // Contact information
@@ -13,7 +13,7 @@ export default function BusinessCardPage() {
     phone: "+1-385-216-9587", // Replace with actual phone number
     email: "weston@bidicontracting.com", // Replace with actual email
     website: "https://bidicontracting.com",
-    image: logo.src,
+    image: logoPath,
   };
 
   // Generate vCard data
@@ -52,7 +52,7 @@ END:VCARD`;
         <div className="text-center mb-8">
           <div className="mb-6 flex justify-center">
             <div className="relative">
-              <img src={logo.src} alt="Bidi Contracting" className="h-24 w-24 md:h-32 md:w-32" />
+              <img src={logoPath} alt="Bidi Contracting" className="h-24 w-24 md:h-32 md:w-32" />
               <div className="absolute -top-1 -right-1 w-4 h-4 bg-orange rounded-full animate-pulse"></div>
             </div>
           </div>

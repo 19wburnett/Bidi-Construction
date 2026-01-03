@@ -85,6 +85,30 @@ export interface Plan {
   created_at?: string
   updated_at?: string
   last_accessed_at?: string
+  trade_tags?: PlanTradeTag[] // Trade categories assigned to this plan
+}
+
+export interface PlanTradeTag {
+  id: string
+  plan_id: string
+  trade_category: string
+  created_at: string
+}
+
+export interface TradeDocument {
+  id: string
+  job_id: string
+  plan_id: string | null
+  trade_category: string
+  document_type: 'sow' | 'specification' | 'addendum' | 'other'
+  file_name: string
+  file_path: string
+  file_size: number
+  file_type: string
+  description: string | null
+  uploaded_by: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Takeoff {
@@ -136,6 +160,24 @@ export interface TakeoffItem {
   updated_at: string
   created_by: string | null
   updated_by: string | null
+  // Estimate information fields
+  material_specs?: {
+    grade?: string
+    type?: string
+    size?: string
+    manufacturer?: string
+    model?: string
+  }
+  labor?: {
+    hours?: number
+    rate?: number
+    trade?: string
+  }
+  waste_factor?: number
+  equipment_needs?: string[]
+  site_conditions?: string[]
+  subcontractor_required?: boolean
+  estimate_data?: any // JSONB field for additional estimate information
 }
 
 export interface DetectionCoordinates {
@@ -425,6 +467,19 @@ export function getConfidenceLabel(score: number | null): string {
   if (score >= 0.7) return 'High'
   if (score >= 0.5) return 'Moderate'
   return 'Low'
+}
+
+// Missing Information Interface
+export interface MissingInformation {
+  item_id?: string
+  item_name: string
+  category: 'measurement' | 'quantity' | 'specification' | 'detail' | 'other'
+  missing_data: string // What specific information is missing
+  why_needed: string // Why this information is needed for estimate
+  where_to_find: string // Where to find it (sheet numbers, schedules, etc.)
+  impact: 'critical' | 'high' | 'medium' | 'low' // Impact on estimate accuracy
+  suggested_action?: string // What the user should do
+  location?: string // Where in the plans this item appears
 }
 
 
