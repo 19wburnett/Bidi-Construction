@@ -75,14 +75,19 @@ export async function ingestPlanTextChunks(
     throw new Error('Plan file path is missing')
   }
 
+  console.log(`[Vectorization] Downloading PDF from: ${plan.file_path}`)
   const pdfBuffer = await downloadPlanPdf(supabase, plan.file_path)
+  console.log(`[Vectorization] PDF downloaded, size: ${pdfBuffer.length} bytes`)
 
   // Step 1: Try regular text extraction first (for native PDFs)
   // For large PDFs, this is done page by page to avoid memory issues
+  console.log(`[Vectorization] Starting text extraction from PDF (${pdfBuffer.length} bytes)...`)
+  const extractionStartTime = Date.now()
   let pageTexts = await extractTextPerPage(pdfBuffer)
+  const extractionTime = Date.now() - extractionStartTime
   const pageCount = pageTexts.length
   
-  console.log(`[Vectorization] Extracted text from ${pageCount} pages`)
+  console.log(`[Vectorization] Extracted text from ${pageCount} pages in ${extractionTime}ms`)
 
   const warnings: string[] = []
 
@@ -197,9 +202,19 @@ export async function ingestPlanTextChunks(
   const batchSize = 50 // Process 50 chunks at a time
   const embeddings: number[][] = []
   
+  console.log(`[Vectorization] Generating embeddings for ${chunkCandidates.length} chunks in batches of ${batchSize}...`)
+  
   for (let i = 0; i < chunkCandidates.length; i += batchSize) {
     const batch = chunkCandidates.slice(i, i + batchSize)
+    const batchNum = Math.floor(i / batchSize) + 1
+    const totalBatches = Math.ceil(chunkCandidates.length / batchSize)
+    console.log(`[Vectorization] Processing embedding batch ${batchNum}/${totalBatches} (${batch.length} chunks)`)
+    
+    const embeddingStartTime = Date.now()
     const batchEmbeddings = await embedChunks(batch.map((chunk) => chunk.snippet_text))
+    const embeddingTime = Date.now() - embeddingStartTime
+    console.log(`[Vectorization] Batch ${batchNum} embeddings generated in ${embeddingTime}ms`)
+    
     embeddings.push(...batchEmbeddings)
     
     // Log progress for large PDFs
@@ -418,14 +433,31 @@ async function loadSheetMetadataByPage(
 }
 
 async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Promise<Buffer> {
+  console.log(`[Vectorization] Starting PDF download from: ${filePath}`)
+  
   // Handle full URLs by downloading directly
   if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
-    const response = await fetch(filePath)
-    if (!response.ok) {
-      throw new Error(`Failed to download plan file (${response.status} ${response.statusText})`)
+    console.log(`[Vectorization] Downloading from full URL`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000) // 5 minute timeout for download
+    
+    try {
+      const response = await fetch(filePath, { signal: controller.signal })
+      clearTimeout(timeoutId)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download plan file (${response.status} ${response.statusText})`)
+      }
+      const arrayBuffer = await response.arrayBuffer()
+      console.log(`[Vectorization] PDF downloaded from URL, size: ${arrayBuffer.byteLength} bytes`)
+      return Buffer.from(arrayBuffer)
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('PDF download timeout after 5 minutes')
+      }
+      throw error
     }
-    const arrayBuffer = await response.arrayBuffer()
-    return Buffer.from(arrayBuffer)
   }
 
   let storagePath = filePath
@@ -465,17 +497,23 @@ async function downloadPlanPdf(supabase: GenericSupabase, filePath: string): Pro
     )
   )
 
+  console.log(`[Vectorization] Trying to download from buckets: ${bucketCandidates.join(', ')}`)
+  
   for (const bucket of bucketCandidates) {
     for (const candidatePath of [cleanPath, originalCleanPath]) {
+      console.log(`[Vectorization] Trying bucket "${bucket}" with path "${candidatePath}"`)
       const signedUrl = await tryCreateSignedUrl(supabase, bucket, candidatePath)
       if (signedUrl) {
-        return fetchBuffer(signedUrl)
+        console.log(`[Vectorization] Successfully created signed URL, downloading...`)
+        const buffer = await fetchBuffer(signedUrl)
+        console.log(`[Vectorization] PDF downloaded from storage, size: ${buffer.length} bytes`)
+        return buffer
       }
     }
   }
 
   throw new Error(
-    `Failed to create signed URL for plan file. Tried buckets: ${bucketCandidates.join(', ')}.`
+    `Failed to create signed URL for plan file. Tried buckets: ${bucketCandidates.join(', ')}. Path: ${filePath}`
   )
 }
 
@@ -495,13 +533,28 @@ async function tryCreateSignedUrl(
 }
 
 async function fetchBuffer(url: string): Promise<Buffer> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Failed to download plan file (${response.status} ${response.statusText})`)
-  }
+  console.log(`[Vectorization] Fetching buffer from signed URL...`)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000) // 5 minute timeout
+  
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    clearTimeout(timeoutId)
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download plan file (${response.status} ${response.statusText})`)
+    }
 
-  const arrayBuffer = await response.arrayBuffer()
-  return Buffer.from(arrayBuffer)
+    const arrayBuffer = await response.arrayBuffer()
+    console.log(`[Vectorization] Buffer fetched, size: ${arrayBuffer.byteLength} bytes`)
+    return Buffer.from(arrayBuffer)
+  } catch (error) {
+    clearTimeout(timeoutId)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('PDF download timeout after 5 minutes')
+    }
+    throw error
+  }
 }
 
 function chunkPageText(

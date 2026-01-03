@@ -207,22 +207,60 @@ async function ingestPlanTextChunksWithProgress(
 
     await updateProgress(supabase, queueJobId, 20, 'Extracting text from PDF...')
 
-    // Run vectorization (this will handle the actual work)
+    // Run vectorization with timeout and progress updates
     // For large PDFs, this may take several minutes
     console.log(`[VectorizationProcess] Starting vectorization for plan ${planId}`)
-    const result = await ingestPlanTextChunks(supabase, planId)
     
-    console.log(`[VectorizationProcess] Vectorization complete: ${result.chunkCount} chunks, ${result.pageCount} pages`)
+    // Wrap in Promise.race with timeout to prevent hanging
+    const vectorizationPromise = ingestPlanTextChunks(supabase, planId)
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Vectorization timeout after 15 minutes. The PDF may be too large or there may be a processing issue.'))
+      }, 15 * 60 * 1000) // 15 minute timeout
+    })
     
-    if (result.chunkCount === 0) {
-      console.warn(`[VectorizationProcess] WARNING: No chunks created for plan ${planId}. This may indicate an issue with the PDF or text extraction.`)
-    }
+    // Add periodic progress updates while processing
+    const progressInterval = setInterval(async () => {
+      // Check current progress and update if needed
+      const { data: currentJob } = await supabase
+        .from('plan_vectorization_queue')
+        .select('progress, current_step')
+        .eq('id', queueJobId)
+        .single()
+      
+      if (currentJob && currentJob.progress < 90) {
+        // Increment progress slowly to show it's still working
+        const newProgress = Math.min(currentJob.progress + 5, 85)
+        await updateProgress(supabase, queueJobId, newProgress, currentJob.current_step || 'Processing...')
+      }
+    }, 30000) // Update every 30 seconds
     
-    if (result.warnings && result.warnings.length > 0) {
-      console.warn(`[VectorizationProcess] Warnings:`, result.warnings)
-    }
+    try {
+      const result = await Promise.race([vectorizationPromise, timeoutPromise])
+      clearInterval(progressInterval)
+      
+      console.log(`[VectorizationProcess] Vectorization complete: ${result.chunkCount} chunks, ${result.pageCount} pages`)
+      
+      if (result.chunkCount === 0) {
+        console.warn(`[VectorizationProcess] WARNING: No chunks created for plan ${planId}. This may indicate an issue with the PDF or text extraction.`)
+      }
+      
+      if (result.warnings && result.warnings.length > 0) {
+        console.warn(`[VectorizationProcess] Warnings:`, result.warnings)
+      }
 
-    await updateProgress(supabase, queueJobId, 90, 'Finalizing vectorization...')
+      await updateProgress(supabase, queueJobId, 90, 'Finalizing vectorization...')
+      
+      return {
+        success: true,
+        chunkCount: result.chunkCount,
+        pageCount: result.pageCount,
+        warnings: result.warnings,
+      }
+    } catch (timeoutError) {
+      clearInterval(progressInterval)
+      throw timeoutError
+    }
 
     return {
       success: true,
