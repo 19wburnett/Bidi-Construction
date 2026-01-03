@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
   const { data: plan, error: planError } = await supabase
     .from('plans')
-    .select('id, user_id, job_id')
+    .select('id, created_by, job_id')
     .eq('id', planId)
     .maybeSingle()
 
@@ -49,7 +49,8 @@ export async function POST(request: NextRequest) {
   const isAdmin = userData && (userData.role === 'admin' || userData.is_admin === true)
 
   // If not admin, check plan ownership or job access
-  if (!isAdmin && plan.user_id !== user.id) {
+  // Note: plans table uses created_by, not user_id
+  if (!isAdmin && plan.created_by !== user.id) {
     const targetJobId = plan.job_id || jobId
     if (!targetJobId) {
       return NextResponse.json({ error: 'You do not have access to this plan.' }, { status: 403 })
@@ -63,7 +64,19 @@ export async function POST(request: NextRequest) {
 
   // Use admin client for ingestion to bypass RLS policies
   // This ensures we can read plan files and insert chunks regardless of RLS
-  const supabaseAdmin = createAdminSupabaseClient()
+  let supabaseAdmin
+  try {
+    supabaseAdmin = createAdminSupabaseClient()
+  } catch (adminClientError) {
+    console.error('[Ingestion] Failed to create admin client:', adminClientError)
+    return NextResponse.json(
+      {
+        error: 'Failed to initialize admin client. Service role key may not be configured.',
+        details: adminClientError instanceof Error ? adminClientError.message : 'Unknown error',
+      },
+      { status: 500 }
+    )
+  }
 
   try {
     console.log(`[Ingestion] Starting ingestion for plan ${planId} using admin client (bypasses RLS)`)
@@ -71,10 +84,18 @@ export async function POST(request: NextRequest) {
     console.log(`[Ingestion] Successfully ingested plan ${planId}: ${result.chunkCount} chunks, ${result.pageCount} pages`)
     return NextResponse.json(result, { status: 200 })
   } catch (error) {
-    console.error('Plan text ingestion failed:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    console.error('[Ingestion] Plan text ingestion failed:', errorMessage)
+    if (errorStack) {
+      console.error('[Ingestion] Error stack:', errorStack)
+    }
+    
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Failed to ingest plan text',
+        error: errorMessage,
+        details: errorStack ? 'Check server logs for full stack trace' : undefined,
       },
       { status: 500 }
     )
