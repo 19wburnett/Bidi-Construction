@@ -261,13 +261,6 @@ async function ingestPlanTextChunksWithProgress(
       clearInterval(progressInterval)
       throw timeoutError
     }
-
-    return {
-      success: true,
-      chunkCount: result.chunkCount,
-      pageCount: result.pageCount,
-      warnings: result.warnings,
-    }
   } catch (error) {
     const errorMessage = error instanceof Error 
       ? `${error.name}: ${error.message}`
