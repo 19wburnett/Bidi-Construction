@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase-server'
 import { ingestPlanTextChunks } from '@/lib/plan-text-chunks'
 import { userHasJobAccess } from '@/lib/job-access'
 
@@ -61,8 +61,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Use admin client for ingestion to bypass RLS policies
+  // This ensures we can read plan files and insert chunks regardless of RLS
+  const supabaseAdmin = createAdminSupabaseClient()
+
   try {
-    const result = await ingestPlanTextChunks(supabase, planId)
+    console.log(`[Ingestion] Starting ingestion for plan ${planId} using admin client (bypasses RLS)`)
+    const result = await ingestPlanTextChunks(supabaseAdmin, planId)
+    console.log(`[Ingestion] Successfully ingested plan ${planId}: ${result.chunkCount} chunks, ${result.pageCount} pages`)
     return NextResponse.json(result, { status: 200 })
   } catch (error) {
     console.error('Plan text ingestion failed:', error)
