@@ -183,17 +183,24 @@ export default function PlanTextIngestionAdminPage() {
       const timestamp = Date.now()
 
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        const errorMessage =
-          payload?.error ||
-          'Plan text ingestion failed. Check the plan/job IDs and ensure the plan file is accessible.'
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+        try {
+          const payload = await response.json()
+          errorMessage = payload?.error || payload?.details || errorMessage
+          if (payload?.details && payload?.error) {
+            errorMessage = `${payload.error} (${payload.details})`
+          }
+        } catch (parseError) {
+          // If JSON parsing fails, use the status text
+          console.error('Failed to parse error response:', parseError)
+        }
 
         setResults((prev) => [
           {
             timestamp,
             request: { planId: planId.trim(), jobId: jobId.trim() || undefined },
             status: 'error',
-            errorMessage,
+            errorMessage: errorMessage || 'Plan text ingestion failed. Check the plan/job IDs and ensure the plan file is accessible.',
           },
           ...prev,
         ])

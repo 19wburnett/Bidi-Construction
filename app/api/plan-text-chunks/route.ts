@@ -80,21 +80,36 @@ export async function POST(request: NextRequest) {
 
   try {
     console.log(`[Ingestion] Starting ingestion for plan ${planId} using admin client (bypasses RLS)`)
-    const result = await ingestPlanTextChunks(supabaseAdmin, planId)
+    
+    // Wrap ingestion in a timeout to prevent hanging (20 minutes max for very large PDFs)
+    const ingestionPromise = ingestPlanTextChunks(supabaseAdmin, planId)
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Ingestion timeout after 20 minutes. The PDF may be too large or complex. Try splitting the PDF or contact support.'))
+      }, 20 * 60 * 1000) // 20 minute timeout
+    })
+    
+    const result = await Promise.race([ingestionPromise, timeoutPromise])
     console.log(`[Ingestion] Successfully ingested plan ${planId}: ${result.chunkCount} chunks, ${result.pageCount} pages`)
     return NextResponse.json(result, { status: 200 })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     const errorStack = error instanceof Error ? error.stack : undefined
+    const errorName = error instanceof Error ? error.name : 'Error'
     
-    console.error('[Ingestion] Plan text ingestion failed:', errorMessage)
+    console.error(`[Ingestion] Plan text ingestion failed for plan ${planId}:`)
+    console.error(`[Ingestion] Error name: ${errorName}`)
+    console.error(`[Ingestion] Error message: ${errorMessage}`)
     if (errorStack) {
-      console.error('[Ingestion] Error stack:', errorStack)
+      console.error(`[Ingestion] Error stack:\n${errorStack}`)
     }
     
+    // Include more context in the error response
     return NextResponse.json(
       {
         error: errorMessage,
+        errorType: errorName,
+        planId: planId,
         details: errorStack ? 'Check server logs for full stack trace' : undefined,
       },
       { status: 500 }
