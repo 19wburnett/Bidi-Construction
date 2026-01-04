@@ -77,71 +77,131 @@ export async function ingestPlanTextChunks(
 
   console.log(`[Vectorization] Downloading PDF from: ${plan.file_path}`)
   const pdfBuffer = await downloadPlanPdf(supabase, plan.file_path)
-  console.log(`[Vectorization] PDF downloaded, size: ${pdfBuffer.length} bytes`)
+  const pdfSizeMB = (pdfBuffer.length / (1024 * 1024)).toFixed(2)
+  console.log(`[Vectorization] PDF downloaded, size: ${pdfBuffer.length} bytes (${pdfSizeMB} MB)`)
+  
+  // Log PDF characteristics that might affect processing
+  if (pdfBuffer.length > 50 * 1024 * 1024) {
+    console.warn(`[Vectorization] Large PDF detected (${pdfSizeMB} MB). Processing may take longer.`)
+  }
 
   // Step 1: Try regular text extraction first (for native PDFs)
   // For large PDFs, this is done page by page to avoid memory issues
   console.log(`[Vectorization] Starting text extraction from PDF (${pdfBuffer.length} bytes)...`)
   const extractionStartTime = Date.now()
-  let pageTexts = await extractTextPerPage(pdfBuffer)
-  const extractionTime = Date.now() - extractionStartTime
-  const pageCount = pageTexts.length
   
-  console.log(`[Vectorization] Extracted text from ${pageCount} pages in ${extractionTime}ms`)
+  let pageTexts: PageText[] = []
+  let extractionError: Error | null = null
+  let extractionTime = 0
+  
+  try {
+    pageTexts = await extractTextPerPage(pdfBuffer)
+    extractionTime = Date.now() - extractionStartTime
+    console.log(`[Vectorization] Extracted text from ${pageTexts.length} pages in ${extractionTime}ms`)
+  } catch (error) {
+    extractionError = error instanceof Error ? error : new Error(String(error))
+    extractionTime = Date.now() - extractionStartTime
+    console.warn(`[Vectorization] Text extraction failed after ${extractionTime}ms:`, extractionError.message)
+    console.warn(`[Vectorization] This PDF may have unsupported features. Will attempt OCR fallback if available.`)
+  }
 
   const warnings: string[] = []
+  
+  // If extraction failed, add warning and prepare for OCR fallback
+  if (extractionError) {
+    warnings.push(`Text extraction failed: ${extractionError.message}. Attempting OCR fallback.`)
+  }
 
-  // Step 2: Check if we got meaningful text
-  // If no text or very sparse text (< 50 chars per page average), try OCR
+  // Step 2: Check if we got meaningful text OR if extraction failed
+  // If no text, very sparse text (< 50 chars per page average), or extraction failed, try OCR
+  const pageCount = pageTexts.length
   const totalTextLength = pageTexts.reduce((sum, page) => sum + (page.text?.length || 0), 0)
   const avgTextPerPage = pageCount > 0 ? totalTextLength / pageCount : 0
   const isScannedPDF = pageCount === 0 || avgTextPerPage < 50
+  const shouldTryOCR = (extractionError || isScannedPDF) && process.env.PDF_CO_API_KEY
 
-  if (isScannedPDF && process.env.PDF_CO_API_KEY) {
-    console.log(`Low text content detected (avg ${avgTextPerPage.toFixed(0)} chars/page). Attempting OCR...`)
-    warnings.push('Low text content detected - using OCR for scanned blueprint')
-    
-    // Try OCR extraction
-    const ocrPageTexts = await extractTextWithOCR(pdfBuffer, plan.file_name || 'plan.pdf')
-    
-    if (ocrPageTexts.length > 0) {
-      // Merge OCR results with existing text (OCR takes precedence for pages with OCR data)
-      const ocrByPage = new Map<number, OCRPageText>()
-      ocrPageTexts.forEach((ocrPage) => {
-        ocrByPage.set(ocrPage.pageNumber, ocrPage)
-      })
-
-      // Combine: use OCR text if available, otherwise use original text
-      const combinedPages: PageText[] = []
-      const maxPages = Math.max(pageTexts.length, ocrPageTexts.length)
-      
-      for (let i = 1; i <= maxPages; i++) {
-        const ocrPage = ocrByPage.get(i)
-        const originalPage = pageTexts.find((p) => p.pageNumber === i)
-        
-        if (ocrPage) {
-          // Use OCR text, but merge with original if it exists
-          const combinedText = ocrPage.text + (originalPage?.text ? `\n${originalPage.text}` : '')
-          combinedPages.push({
-            pageNumber: i,
-            text: combinedText,
-            textItems: ocrPage.textItems || originalPage?.textItems || [],
-          })
-        } else if (originalPage) {
-          // Use original text
-          combinedPages.push(originalPage)
-        }
-      }
-      
-      pageTexts = combinedPages
-      console.log(`OCR extracted text from ${ocrPageTexts.length} pages. Total pages with text: ${pageTexts.length}`)
+  if (shouldTryOCR) {
+    if (extractionError) {
+      console.log(`[Vectorization] Text extraction failed, attempting OCR as fallback...`)
+      warnings.push('Text extraction failed - using OCR as fallback')
     } else {
-      warnings.push('OCR extraction attempted but returned no text. Plan may be image-only.')
+      console.log(`[Vectorization] Low text content detected (avg ${avgTextPerPage.toFixed(0)} chars/page). Attempting OCR...`)
+      warnings.push('Low text content detected - using OCR for scanned blueprint')
     }
+    
+    try {
+      // Try OCR extraction
+      const ocrPageTexts = await extractTextWithOCR(pdfBuffer, plan.file_name || 'plan.pdf')
+      
+      if (ocrPageTexts.length > 0) {
+        // Merge OCR results with existing text (OCR takes precedence for pages with OCR data)
+        const ocrByPage = new Map<number, OCRPageText>()
+        ocrPageTexts.forEach((ocrPage) => {
+          ocrByPage.set(ocrPage.pageNumber, ocrPage)
+        })
+
+        // Combine: use OCR text if available, otherwise use original text
+        const combinedPages: PageText[] = []
+        const maxPages = Math.max(pageTexts.length, ocrPageTexts.length)
+        
+        for (let i = 1; i <= maxPages; i++) {
+          const ocrPage = ocrByPage.get(i)
+          const originalPage = pageTexts.find((p) => p.pageNumber === i)
+          
+          if (ocrPage) {
+            // Use OCR text, but merge with original if it exists
+            const combinedText = ocrPage.text + (originalPage?.text ? `\n${originalPage.text}` : '')
+            combinedPages.push({
+              pageNumber: i,
+              text: combinedText,
+              textItems: ocrPage.textItems || originalPage?.textItems || [],
+            })
+          } else if (originalPage) {
+            // Use original text
+            combinedPages.push(originalPage)
+          }
+        }
+        
+        pageTexts = combinedPages
+        console.log(`[Vectorization] OCR extracted text from ${ocrPageTexts.length} pages. Total pages with text: ${pageTexts.length}`)
+      } else {
+        warnings.push('OCR extraction attempted but returned no text. Plan may be image-only.')
+      }
+    } catch (ocrError) {
+      const ocrErrorMessage = ocrError instanceof Error ? ocrError.message : String(ocrError)
+      console.error(`[Vectorization] OCR extraction also failed:`, ocrErrorMessage)
+      warnings.push(`OCR extraction failed: ${ocrErrorMessage}`)
+      
+      // If both extraction methods failed, throw an error
+      if (extractionError) {
+        throw new Error(
+          `Both text extraction and OCR failed. Text extraction error: ${extractionError.message}. OCR error: ${ocrErrorMessage}. ` +
+          `This PDF may be corrupted, password-protected, or in an unsupported format.`
+        )
+      }
+    }
+  } else if (extractionError && !process.env.PDF_CO_API_KEY) {
+    // Extraction failed and OCR is not available
+    throw new Error(
+      `Text extraction failed: ${extractionError.message}. ` +
+      `OCR is not configured (PDF_CO_API_KEY not set), so cannot attempt fallback. ` +
+      `This PDF may have unsupported features or be corrupted.`
+    )
   }
 
   if (pageCount === 0 && pageTexts.length === 0) {
-    warnings.push('No text extracted from the plan file (neither native text nor OCR).')
+    const errorContext = extractionError 
+      ? `Text extraction failed: ${extractionError.message}. ` 
+      : ''
+    warnings.push(`${errorContext}No text extracted from the plan file (neither native text nor OCR).`)
+    
+    // Log PDF characteristics for debugging
+    console.error(`[Vectorization] No text extracted from PDF. Characteristics:`)
+    console.error(`  - File size: ${(pdfBuffer.length / (1024 * 1024)).toFixed(2)} MB`)
+    console.error(`  - File name: ${plan.file_name || 'unknown'}`)
+    console.error(`  - Extraction error: ${extractionError?.message || 'none'}`)
+    console.error(`  - OCR attempted: ${shouldTryOCR ? 'yes' : 'no'}`)
+    console.error(`  - OCR available: ${process.env.PDF_CO_API_KEY ? 'yes' : 'no'}`)
   }
 
   const sheetIndexByPage = await loadSheetMetadataByPage(supabase, planId)
