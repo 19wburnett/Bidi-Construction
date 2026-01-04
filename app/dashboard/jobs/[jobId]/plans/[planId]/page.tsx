@@ -64,6 +64,7 @@ import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-sc
 import { getJobForUser } from '@/lib/job-access'
 import PDFSearch from '@/components/pdf-search'
 import MeasurementSummaryPanel from '@/components/measurement-summary-panel'
+import { PlanProcessingStatus } from '@/components/plan-processing-status'
 
 
 type AnalysisMode = 'takeoff' | 'chat' | 'comments' | 'items'
@@ -1965,6 +1966,15 @@ export default function EnhancedPlanViewer() {
                   </div>
                 )}
               </div>
+              
+              {/* Processing Status Indicator */}
+              <PlanProcessingStatus 
+                planId={planId as string}
+                jobId={jobId as string}
+                compact
+                autoHideOnComplete
+                autoHideDelay={5000}
+              />
             </div>
             
             <div className="flex items-center space-x-1 md:space-x-2 flex-wrap">

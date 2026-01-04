@@ -10,13 +10,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import { listJobsForUser } from '@/lib/job-access'
-import { Upload, FileText, X, CheckCircle, AlertCircle } from 'lucide-react'
+import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 
 export default function UploadPlanPage() {
   const router = useRouter()
   const { user } = useAuth()
   const [uploading, setUploading] = useState(false)
+  const [uploadComplete, setUploadComplete] = useState<{ planId: string; jobId: string } | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [formData, setFormData] = useState({
     title: '',
@@ -141,7 +142,7 @@ export default function UploadPlanPage() {
         // This runs automatically when plans are uploaded, so they're ready for chat
         // Note: Database trigger also queues this automatically, but this ensures it happens
         import('@/lib/queue-plan-vectorization').then(({ queuePlanVectorization }) => {
-          queuePlanVectorization(plan.id, null, 5).then((result) => {
+          queuePlanVectorization(plan.id, jobId, 5).then((result) => {
             if (result.success) {
               console.log(`✅ Vectorization queued for plan ${plan.id}: job ${result.jobId}`)
             } else {
@@ -155,8 +156,14 @@ export default function UploadPlanPage() {
         })
       }
 
-      // Redirect to plan editor (ingestion will happen in background)
-      router.push(`/dashboard/plans/${plan.id}`)
+      // Show success message with link before redirect
+      setUploadComplete({ planId: plan.id, jobId })
+      setUploading(false)
+      
+      // Redirect to plan viewer after brief delay (user can click link immediately)
+      setTimeout(() => {
+        router.push(`/dashboard/jobs/${jobId}/plans/${plan.id}`)
+      }, 2000)
 
     } catch (err) {
       console.error('Upload error:', err)
@@ -341,6 +348,31 @@ export default function UploadPlanPage() {
                     <p className="text-sm text-blue-700">
                       This may take a moment for large files
                     </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {uploadComplete && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-medium text-green-900">Plan uploaded successfully!</p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Processing in background. You can close this page and return later.
+                    </p>
+                    <div className="flex items-center gap-2 mt-3">
+                      <Loader2 className="h-4 w-4 animate-spin text-green-600" />
+                      <span className="text-sm text-green-700">Redirecting to plan viewer...</span>
+                    </div>
+                    <a
+                      href={`/dashboard/jobs/${uploadComplete.jobId}/plans/${uploadComplete.planId}`}
+                      className="inline-flex items-center gap-1 text-sm text-green-700 hover:text-green-800 font-medium mt-2"
+                    >
+                      Go to plan now
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
                   </div>
                 </div>
               </div>

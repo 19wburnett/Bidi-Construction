@@ -17,6 +17,12 @@ const nextConfig = {
     ],
   },
   skipTrailingSlashRedirect: true,
+  // Mark native modules as external to prevent bundling issues
+  serverExternalPackages: ['@napi-rs/canvas', 'canvas'],
+  // For older Next.js versions, also use experimental config
+  experimental: {
+    serverComponentsExternalPackages: ['@napi-rs/canvas', 'canvas'],
+  },
 }
 
 module.exports = nextConfig

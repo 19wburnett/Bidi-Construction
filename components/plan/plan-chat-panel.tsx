@@ -335,11 +335,12 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
         return
       }
 
-      if (!response.ok) {
+      // Handle vectorization queued/in progress (202 Accepted)
+      // Note: 202 is in the OK range (200-299) so we must check this BEFORE !response.ok
+      if (response.status === 202) {
         const payload = await response.json().catch(() => ({}))
         
-        // Handle vectorization queued/in progress (202 Accepted)
-        if (response.status === 202 && (payload?.error === 'VECTORIZATION_QUEUED' || payload?.error === 'VECTORIZATION_IN_PROGRESS')) {
+        if (payload?.error === 'VECTORIZATION_QUEUED' || payload?.error === 'VECTORIZATION_IN_PROGRESS') {
           const queueJobId = payload.queueJobId
           const progress = payload.progress || 0
           
@@ -360,6 +361,10 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
           pollVectorizationStatus(planId, queueJobId, trimmed)
           return
         }
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
         
         // Handle vectorization failure
         if (response.status === 500 && payload?.error === 'VECTORIZATION_FAILED') {

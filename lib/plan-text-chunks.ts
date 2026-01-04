@@ -1,7 +1,9 @@
 import { aiGateway } from './ai-gateway-provider'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { extractTextWithPdfjs } from '@/lib/ingestion/pdf-text-extractor-pdfjs'
 import { extractTextPerPage } from '@/lib/ingestion/pdf-text-extractor'
 import { extractTextWithOCR } from '@/lib/ingestion/pdf-ocr-extractor'
+import { generatePageDescriptions, isVisionDescriptionEnabled } from '@/lib/ingestion/vision-page-describer'
 import type { OCRPageText } from '@/lib/ingestion/pdf-ocr-extractor'
 import type { PageText } from '@/types/ingestion'
 
@@ -77,70 +79,133 @@ export async function ingestPlanTextChunks(
 
   console.log(`[Vectorization] Downloading PDF from: ${plan.file_path}`)
   const pdfBuffer = await downloadPlanPdf(supabase, plan.file_path)
-  const pdfSizeMB = (pdfBuffer.length / (1024 * 1024)).toFixed(2)
-  console.log(`[Vectorization] PDF downloaded, size: ${pdfBuffer.length} bytes (${pdfSizeMB} MB)`)
+  const pdfSizeMB = pdfBuffer.length / (1024 * 1024)
+  console.log(`[Vectorization] PDF downloaded, size: ${pdfBuffer.length} bytes (${pdfSizeMB.toFixed(2)} MB)`)
   
   // Log PDF characteristics that might affect processing
-  if (pdfBuffer.length > 50 * 1024 * 1024) {
-    console.warn(`[Vectorization] Large PDF detected (${pdfSizeMB} MB). Processing may take longer.`)
+  if (pdfSizeMB > 50) {
+    console.warn(`[Vectorization] Large PDF detected (${pdfSizeMB.toFixed(2)} MB). Processing may take longer.`)
   }
 
-  // Step 1: Try regular text extraction first (for native PDFs)
-  // For large PDFs, this is done page by page to avoid memory issues
+  // =========================================================================
+  // TEXT EXTRACTION: 3-Tier Approach
+  // 1. pdfjs-dist (PRIMARY) - Most reliable, handles complex PDFs well
+  // 2. pdf2json (FALLBACK) - Good for edge cases pdfjs might miss
+  // 3. PDF.co OCR (LAST RESORT) - For scanned/image-only PDFs
+  // =========================================================================
+  
   console.log(`[Vectorization] Starting text extraction from PDF (${pdfBuffer.length} bytes)...`)
   const extractionStartTime = Date.now()
   
   let pageTexts: PageText[] = []
-  let extractionError: Error | null = null
-  let extractionTime = 0
-  
-  try {
-    pageTexts = await extractTextPerPage(pdfBuffer)
-    extractionTime = Date.now() - extractionStartTime
-    console.log(`[Vectorization] Extracted text from ${pageTexts.length} pages in ${extractionTime}ms`)
-  } catch (error) {
-    extractionError = error instanceof Error ? error : new Error(String(error))
-    extractionTime = Date.now() - extractionStartTime
-    console.warn(`[Vectorization] Text extraction failed after ${extractionTime}ms:`, extractionError.message)
-    console.warn(`[Vectorization] This PDF may have unsupported features. Will attempt OCR fallback if available.`)
-  }
-
+  let extractionMethod: 'pdfjs-dist' | 'pdf2json' | 'ocr' | 'none' = 'none'
   const warnings: string[] = []
   
-  // If extraction failed, add warning and prepare for OCR fallback
-  if (extractionError) {
-    warnings.push(`Text extraction failed: ${extractionError.message}. Attempting OCR fallback.`)
-  }
-
-  // Step 2: Check if we got meaningful text OR if extraction failed
-  // If no text, very sparse text (< 50 chars per page average), or extraction failed, try OCR
-  const pageCount = pageTexts.length
-  const totalTextLength = pageTexts.reduce((sum, page) => sum + (page.text?.length || 0), 0)
-  const avgTextPerPage = pageCount > 0 ? totalTextLength / pageCount : 0
-  const isScannedPDF = pageCount === 0 || avgTextPerPage < 50
-  const shouldTryOCR = (extractionError || isScannedPDF) && process.env.PDF_CO_API_KEY
-
-  if (shouldTryOCR) {
-    if (extractionError) {
-      console.log(`[Vectorization] Text extraction failed, attempting OCR as fallback...`)
-      warnings.push('Text extraction failed - using OCR as fallback')
+  // ---------------------------------------------------------------------------
+  // TIER 1: Try pdfjs-dist first (most reliable for complex PDFs)
+  // ---------------------------------------------------------------------------
+  console.log(`[Vectorization] [Tier 1] Trying pdfjs-dist extraction...`)
+  try {
+    const pdfjsResult = await extractTextWithPdfjs(pdfBuffer, {
+      timeoutMs: 3 * 60 * 1000, // 3 minute timeout
+      onProgress: (page, total) => {
+        if (page % 20 === 0) {
+          console.log(`[Vectorization] [pdfjs-dist] Progress: ${page}/${total} pages`)
+        }
+      }
+    })
+    
+    pageTexts = pdfjsResult.pages
+    const totalText = pageTexts.reduce((sum, p) => sum + (p.text?.length || 0), 0)
+    const avgTextPerPage = pageTexts.length > 0 ? totalText / pageTexts.length : 0
+    
+    console.log(`[Vectorization] [pdfjs-dist] Extracted ${pageTexts.length} pages, ${totalText} total chars (avg ${avgTextPerPage.toFixed(0)}/page) in ${pdfjsResult.extractionTimeMs}ms`)
+    
+    // Check if we got meaningful text (at least 50 chars avg per page)
+    if (pageTexts.length > 0 && avgTextPerPage >= 50) {
+      extractionMethod = 'pdfjs-dist'
+      if (pdfjsResult.warnings.length > 0) {
+        warnings.push(...pdfjsResult.warnings.map(w => `[pdfjs-dist] ${w}`))
+      }
+      console.log(`[Vectorization] [pdfjs-dist] SUCCESS - Got meaningful text`)
     } else {
-      console.log(`[Vectorization] Low text content detected (avg ${avgTextPerPage.toFixed(0)} chars/page). Attempting OCR...`)
-      warnings.push('Low text content detected - using OCR for scanned blueprint')
+      console.log(`[Vectorization] [pdfjs-dist] Low text content (${avgTextPerPage.toFixed(0)} chars/page avg). Will try fallbacks.`)
+      warnings.push(`pdfjs-dist extracted only ${avgTextPerPage.toFixed(0)} chars/page avg - trying fallback`)
     }
+  } catch (pdfjsError) {
+    const errorMsg = pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)
+    console.warn(`[Vectorization] [pdfjs-dist] Failed:`, errorMsg)
+    warnings.push(`pdfjs-dist extraction failed: ${errorMsg}`)
+  }
+  
+  // ---------------------------------------------------------------------------
+  // TIER 2: Try pdf2json as fallback (if pdfjs didn't get enough text)
+  // ---------------------------------------------------------------------------
+  if (extractionMethod === 'none') {
+    console.log(`[Vectorization] [Tier 2] Trying pdf2json extraction...`)
+    try {
+      const pdf2jsonStartTime = Date.now()
+      
+      // Use timeout to prevent hanging on complex PDFs
+      const extractionPromise = extractTextPerPage(pdfBuffer)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('pdf2json timeout after 60s'))
+        }, 60000) // 60 second timeout
+      })
+      
+      const pdf2jsonPages = await Promise.race([extractionPromise, timeoutPromise])
+      const pdf2jsonTime = Date.now() - pdf2jsonStartTime
+      
+      const totalText = pdf2jsonPages.reduce((sum, p) => sum + (p.text?.length || 0), 0)
+      const avgTextPerPage = pdf2jsonPages.length > 0 ? totalText / pdf2jsonPages.length : 0
+      
+      console.log(`[Vectorization] [pdf2json] Extracted ${pdf2jsonPages.length} pages, ${totalText} total chars (avg ${avgTextPerPage.toFixed(0)}/page) in ${pdf2jsonTime}ms`)
+      
+      // Use pdf2json results if they're better than what we have
+      const currentAvg = pageTexts.length > 0 
+        ? pageTexts.reduce((sum, p) => sum + (p.text?.length || 0), 0) / pageTexts.length 
+        : 0
+      
+      if (avgTextPerPage > currentAvg && avgTextPerPage >= 50) {
+        pageTexts = pdf2jsonPages
+        extractionMethod = 'pdf2json'
+        console.log(`[Vectorization] [pdf2json] SUCCESS - Got better results than pdfjs-dist`)
+      } else if (avgTextPerPage > currentAvg) {
+        // Even if below threshold, use it if it's the best we have
+        pageTexts = pdf2jsonPages
+        console.log(`[Vectorization] [pdf2json] Using results (better than pdfjs but still low text)`)
+      } else {
+        console.log(`[Vectorization] [pdf2json] Results not better than existing, keeping pdfjs results`)
+      }
+    } catch (pdf2jsonError) {
+      const errorMsg = pdf2jsonError instanceof Error ? pdf2jsonError.message : String(pdf2jsonError)
+      console.warn(`[Vectorization] [pdf2json] Failed:`, errorMsg)
+      warnings.push(`pdf2json extraction failed: ${errorMsg}`)
+    }
+  }
+  
+  // ---------------------------------------------------------------------------
+  // TIER 3: Try OCR as last resort (for scanned/image-only PDFs)
+  // ---------------------------------------------------------------------------
+  const totalTextSoFar = pageTexts.reduce((sum, p) => sum + (p.text?.length || 0), 0)
+  const avgTextSoFar = pageTexts.length > 0 ? totalTextSoFar / pageTexts.length : 0
+  const needsOCR = avgTextSoFar < 50 && process.env.PDF_CO_API_KEY
+  
+  if (needsOCR) {
+    console.log(`[Vectorization] [Tier 3] Low text content (${avgTextSoFar.toFixed(0)} chars/page). Trying OCR...`)
+    warnings.push('Low text content detected - attempting OCR for scanned blueprint')
     
     try {
-      // Try OCR extraction
       const ocrPageTexts = await extractTextWithOCR(pdfBuffer, plan.file_name || 'plan.pdf')
       
       if (ocrPageTexts.length > 0) {
-        // Merge OCR results with existing text (OCR takes precedence for pages with OCR data)
+        // Merge OCR results with existing text
         const ocrByPage = new Map<number, OCRPageText>()
         ocrPageTexts.forEach((ocrPage) => {
           ocrByPage.set(ocrPage.pageNumber, ocrPage)
         })
 
-        // Combine: use OCR text if available, otherwise use original text
         const combinedPages: PageText[] = []
         const maxPages = Math.max(pageTexts.length, ocrPageTexts.length)
         
@@ -149,7 +214,6 @@ export async function ingestPlanTextChunks(
           const originalPage = pageTexts.find((p) => p.pageNumber === i)
           
           if (ocrPage) {
-            // Use OCR text, but merge with original if it exists
             const combinedText = ocrPage.text + (originalPage?.text ? `\n${originalPage.text}` : '')
             combinedPages.push({
               pageNumber: i,
@@ -157,57 +221,106 @@ export async function ingestPlanTextChunks(
               textItems: ocrPage.textItems || originalPage?.textItems || [],
             })
           } else if (originalPage) {
-            // Use original text
             combinedPages.push(originalPage)
           }
         }
         
         pageTexts = combinedPages
-        console.log(`[Vectorization] OCR extracted text from ${ocrPageTexts.length} pages. Total pages with text: ${pageTexts.length}`)
+        extractionMethod = 'ocr'
+        console.log(`[Vectorization] [OCR] SUCCESS - Extracted text from ${ocrPageTexts.length} pages`)
       } else {
-        warnings.push('OCR extraction attempted but returned no text. Plan may be image-only.')
+        warnings.push('OCR extraction attempted but returned no text')
       }
     } catch (ocrError) {
-      const ocrErrorMessage = ocrError instanceof Error ? ocrError.message : String(ocrError)
-      console.error(`[Vectorization] OCR extraction also failed:`, ocrErrorMessage)
-      warnings.push(`OCR extraction failed: ${ocrErrorMessage}`)
-      
-      // If both extraction methods failed, throw an error
-      if (extractionError) {
-        throw new Error(
-          `Both text extraction and OCR failed. Text extraction error: ${extractionError.message}. OCR error: ${ocrErrorMessage}. ` +
-          `This PDF may be corrupted, password-protected, or in an unsupported format.`
-        )
-      }
+      const errorMsg = ocrError instanceof Error ? ocrError.message : String(ocrError)
+      console.error(`[Vectorization] [OCR] Failed:`, errorMsg)
+      warnings.push(`OCR extraction failed: ${errorMsg}`)
     }
-  } else if (extractionError && !process.env.PDF_CO_API_KEY) {
-    // Extraction failed and OCR is not available
-    throw new Error(
-      `Text extraction failed: ${extractionError.message}. ` +
-      `OCR is not configured (PDF_CO_API_KEY not set), so cannot attempt fallback. ` +
-      `This PDF may have unsupported features or be corrupted.`
-    )
+  }
+  
+  // ---------------------------------------------------------------------------
+  // Final extraction summary
+  // ---------------------------------------------------------------------------
+  const extractionTime = Date.now() - extractionStartTime
+  const finalPageCount = pageTexts.length
+  const finalTotalText = pageTexts.reduce((sum, p) => sum + (p.text?.length || 0), 0)
+  const finalAvgText = finalPageCount > 0 ? finalTotalText / finalPageCount : 0
+  
+  console.log(`[Vectorization] Text extraction complete:`)
+  console.log(`  - Method: ${extractionMethod}`)
+  console.log(`  - Pages: ${finalPageCount}`)
+  console.log(`  - Total text: ${finalTotalText} chars`)
+  console.log(`  - Avg per page: ${finalAvgText.toFixed(0)} chars`)
+  console.log(`  - Time: ${extractionTime}ms`)
+  
+  if (finalPageCount === 0 || finalTotalText === 0) {
+    console.error(`[Vectorization] No text extracted from PDF. Characteristics:`)
+    console.error(`  - File size: ${pdfSizeMB.toFixed(2)} MB`)
+    console.error(`  - File name: ${plan.file_name || 'unknown'}`)
+    console.error(`  - OCR available: ${process.env.PDF_CO_API_KEY ? 'yes' : 'no'}`)
+    warnings.push('No text extracted from the plan file')
+  }
+  
+  // Store extraction method in warnings for debugging
+  if (extractionMethod !== 'none') {
+    warnings.push(`Text extraction method: ${extractionMethod}`)
   }
 
-  if (pageCount === 0 && pageTexts.length === 0) {
-    const errorContext = extractionError 
-      ? `Text extraction failed: ${extractionError.message}. ` 
-      : ''
-    warnings.push(`${errorContext}No text extracted from the plan file (neither native text nor OCR).`)
+  // =========================================================================
+  // VISION DESCRIPTIONS: Generate GPT-4V descriptions for visual context
+  // These become searchable text chunks, enabling AI to answer visual questions
+  // =========================================================================
+  
+  let visionChunks: RawChunkCandidate[] = []
+  
+  if (isVisionDescriptionEnabled()) {
+    console.log(`[Vectorization] Vision descriptions enabled - generating page descriptions...`)
     
-    // Log PDF characteristics for debugging
-    console.error(`[Vectorization] No text extracted from PDF. Characteristics:`)
-    console.error(`  - File size: ${(pdfBuffer.length / (1024 * 1024)).toFixed(2)} MB`)
-    console.error(`  - File name: ${plan.file_name || 'unknown'}`)
-    console.error(`  - Extraction error: ${extractionError?.message || 'none'}`)
-    console.error(`  - OCR attempted: ${shouldTryOCR ? 'yes' : 'no'}`)
-    console.error(`  - OCR available: ${process.env.PDF_CO_API_KEY ? 'yes' : 'no'}`)
+    try {
+      const visionResult = await generatePageDescriptions(pdfBuffer, {
+        maxPages: 100, // Limit to first 100 pages for cost control
+        batchSize: 3,  // Process 3 pages in parallel
+        onProgress: (page, total) => {
+          if (page % 10 === 0) {
+            console.log(`[Vectorization] Vision progress: ${page}/${total} pages`)
+          }
+        }
+      })
+      
+      if (visionResult.descriptions.length > 0) {
+        console.log(`[Vectorization] Generated ${visionResult.descriptions.length} vision descriptions (est. cost: $${visionResult.totalCost.toFixed(4)})`)
+        
+        // Convert vision descriptions to chunks
+        visionChunks = visionResult.descriptions.map(desc => ({
+          snippet_text: desc.description,
+          page_number: desc.pageNumber,
+          metadata: {
+            content_type: 'vision_description',
+            page_type: desc.pageType || null,
+            source: 'gpt-4v',
+          }
+        }))
+        
+        warnings.push(`Vision descriptions: ${visionResult.descriptions.length} pages analyzed`)
+      }
+      
+      if (visionResult.warnings.length > 0) {
+        warnings.push(...visionResult.warnings.map(w => `[Vision] ${w}`))
+      }
+    } catch (visionError) {
+      const errorMsg = visionError instanceof Error ? visionError.message : String(visionError)
+      console.error(`[Vectorization] Vision description failed:`, errorMsg)
+      warnings.push(`Vision descriptions failed: ${errorMsg}`)
+      // Continue without vision descriptions - text extraction still works
+    }
+  } else {
+    console.log(`[Vectorization] Vision descriptions disabled (set ENABLE_VISION_DESCRIPTIONS=true to enable)`)
   }
 
   const sheetIndexByPage = await loadSheetMetadataByPage(supabase, planId)
 
   // Step 3: Chunk the text (for large PDFs, this is done in batches)
-  const chunkCandidates: RawChunkCandidate[] = []
+  const textChunks: RawChunkCandidate[] = []
   const chunkBatchSize = 50 // Process 50 pages at a time for very large PDFs
   
   for (let i = 0; i < pageTexts.length; i += chunkBatchSize) {
@@ -222,7 +335,7 @@ export async function ingestPlanTextChunks(
         sheetMeta,
         totalPages: pageTexts.length,
       })
-      chunkCandidates.push(...pageChunks)
+      textChunks.push(...pageChunks)
     })
     
     // Log progress for large PDFs
@@ -232,18 +345,25 @@ export async function ingestPlanTextChunks(
     }
   }
   
-  console.log(`[Vectorization] Created ${chunkCandidates.length} text chunks from ${pageTexts.length} pages`)
+  console.log(`[Vectorization] Created ${textChunks.length} text chunks from ${pageTexts.length} pages`)
+  
+  // Merge text chunks and vision chunks
+  const chunkCandidates: RawChunkCandidate[] = [...textChunks, ...visionChunks]
+  
+  if (visionChunks.length > 0) {
+    console.log(`[Vectorization] Total chunks: ${chunkCandidates.length} (${textChunks.length} text + ${visionChunks.length} vision)`)
+  }
 
   if (chunkCandidates.length === 0) {
     console.warn(`[Vectorization] WARNING: No chunks created for plan ${planId}. This may indicate:`)
-    console.warn(`  - No text was extracted from the PDF (${pageCount} pages processed)`)
+    console.warn(`  - No text was extracted from the PDF (${finalPageCount} pages processed)`)
     console.warn(`  - Text extraction failed or PDF is image-only`)
     console.warn(`  - Chunking function returned empty results`)
     
-    if (pageCount === 0) {
+    if (finalPageCount === 0) {
       warnings.push('No pages found in PDF file')
     } else if (pageTexts.length === 0) {
-      warnings.push(`PDF has ${pageCount} pages but no text was extracted`)
+      warnings.push(`PDF has ${finalPageCount} pages but no text was extracted`)
     } else {
       const totalTextLength = pageTexts.reduce((sum, page) => sum + (page.text?.length || 0), 0)
       warnings.push(`PDF has ${pageTexts.length} pages with text, but chunking produced no chunks (total text length: ${totalTextLength} chars)`)
@@ -253,7 +373,7 @@ export async function ingestPlanTextChunks(
     return {
       planId,
       chunkCount: 0,
-      pageCount,
+      pageCount: finalPageCount,
       warnings: warnings.length ? warnings : undefined,
     }
   }
@@ -335,7 +455,7 @@ export async function ingestPlanTextChunks(
   return {
     planId,
     chunkCount: recordsToInsert.length,
-    pageCount,
+    pageCount: finalPageCount,
     warnings: warnings.length ? warnings : undefined,
   }
 }
@@ -669,6 +789,7 @@ function chunkPageText(
   }
 
   const metadataBase: Record<string, any> = {
+    content_type: 'extracted_text', // Distinguish from 'vision_description' chunks
     chunk_page_index: context.pageIndex,
     total_pages: context.totalPages,
   }
