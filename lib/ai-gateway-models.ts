@@ -68,6 +68,7 @@ export function removeProviderPrefix(model: string): string {
  */
 export const MODEL_MAPPINGS: Record<string, GatewayModelName> = {
   // OpenAI
+  'gpt-5.2': 'openai/gpt-5.2',
   'gpt-5': 'openai/gpt-5',
   'gpt-5-mini': 'openai/gpt-5-mini',
   'gpt-5-nano': 'openai/gpt-5-nano',
@@ -81,16 +82,20 @@ export const MODEL_MAPPINGS: Record<string, GatewayModelName> = {
   'o4-mini': 'openai/o4-mini',
   
   // Anthropic
+  'claude-sonnet-4.5': 'anthropic/claude-sonnet-4.5',
   'claude-sonnet-4-20250514': 'anthropic/claude-sonnet-4-20250514',
   'claude-3-haiku-20240307': 'anthropic/claude-3-haiku-20240307',
   'claude-3.5-sonnet': 'anthropic/claude-3.5-sonnet',
   
   // Google
+  'gemini-3-flash': 'google/gemini-3-flash',
+  'gemini-3-pro': 'google/gemini-3-pro',
   'gemini-2.5-flash': 'google/gemini-2.5-flash',
   'gemini-1.5-pro': 'google/gemini-1.5-pro',
   'gemini-1.5-flash': 'google/gemini-1.5-flash',
   
   // XAI
+  'grok-4': 'xai/grok-4',
   'grok-2-1212': 'xai/grok-2-1212',
   'grok-2-vision-beta': 'xai/grok-2-vision-beta',
 }

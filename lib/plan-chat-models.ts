@@ -24,8 +24,8 @@ export const AVAILABLE_CHAT_MODELS: ChatModel[] = [
   },
   // Anthropic Models
   {
-    id: 'claude-4.5',
-    name: 'Claude 4.5',
+    id: 'claude-sonnet-4.5',
+    name: 'Claude Sonnet 4.5',
     provider: 'Anthropic',
     description: 'Latest Claude model, high quality',
     speed: 'medium',
