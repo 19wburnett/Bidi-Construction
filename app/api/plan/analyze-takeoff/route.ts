@@ -384,6 +384,25 @@ ${buildTakeoffUserPrompt(
         }
       }
       
+      // SCOPE-FIRST ENFORCEMENT: Ensure all quantities are 0 and items have required fields
+      // This allows users to measure quantities themselves using the Chat tab
+      takeoffData.items = takeoffData.items.map((item: any) => ({
+        ...item,
+        quantity: 0, // Always 0 - user will measure
+        needs_measurement: true, // Flag for UI to show measurement is needed
+        // Ensure assumptions array exists (AI should provide, but fallback if not)
+        assumptions: item.assumptions || [
+          {
+            type: 'pricing',
+            assumption: item.unit_cost ? `Unit cost of $${item.unit_cost} per ${item.unit || 'unit'}` : 'Unit cost to be determined',
+            basis: 'Based on typical market rates'
+          }
+        ],
+        // Ensure measurement instructions exist
+        measurement_instructions: item.measurement_instructions || 
+          `Measure the ${item.unit || 'quantity'} of ${item.name} from the plans. Check ${item.location || 'relevant sheets'} for dimensions.`
+      }))
+      
     } catch (parseError) {
       console.error('JSON parsing error:', parseError)
       
@@ -396,11 +415,22 @@ ${buildTakeoffUserPrompt(
         // Look for patterns like "Item: Quantity Unit"
         const itemMatch = line.match(/^[\-\*]?\s*(.+?):\s*(\d+(?:\.\d+)?)\s*(\w+)/i)
         if (itemMatch) {
+          const itemName = itemMatch[1].trim()
+          const unit = itemMatch[3]
           items.push({
-            name: itemMatch[1].trim(),
-            quantity: parseFloat(itemMatch[2]),
-            unit: itemMatch[3],
-            category: 'other'
+            name: itemName,
+            quantity: 0, // SCOPE-FIRST: Always 0
+            needs_measurement: true,
+            unit: unit,
+            category: 'other',
+            assumptions: [
+              {
+                type: 'material',
+                assumption: `Standard ${itemName} specification`,
+                basis: 'Extracted from plan text'
+              }
+            ],
+            measurement_instructions: `Measure the ${unit} of ${itemName} from the plans.`
           })
         }
       })
@@ -409,7 +439,7 @@ ${buildTakeoffUserPrompt(
         items: items,
         summary: {
           total_items: items.length,
-          notes: items.length > 0 ? 'Extracted from text analysis' : 'Unable to parse structured data',
+          notes: items.length > 0 ? 'Extracted from text analysis - scope defined, quantities need measurement' : 'Unable to parse structured data',
           confidence: 'low'
         },
         raw_response: aiContent
@@ -633,8 +663,17 @@ ${buildTakeoffUserPrompt(
 
     return NextResponse.json({
       success: true,
+      scope_first: true, // Indicates this is a scope-first takeoff with quantities at 0
       items: takeoffData.items || [],
-      summary: takeoffData.summary || takeoffData,
+      summary: {
+        ...(takeoffData.summary || takeoffData),
+        scope_first_message: 'Scope defined successfully. All quantities are set to 0 and ready for your measurements.'
+      },
+      measurement_guidance: {
+        message: 'Your takeoff scope is complete with all items identified and priced. Quantities are set to 0.',
+        next_step: 'Go to the Chat tab to get AI-guided assistance measuring and counting items from your plans.',
+        items_needing_measurement: (takeoffData.items || []).length
+      },
       analysisId: analysis?.id,
       review: reviewResults ? {
         reviewed_items: reviewResults.reviewResult.reviewed_items,

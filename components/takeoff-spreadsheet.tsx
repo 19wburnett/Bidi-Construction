@@ -1,12 +1,12 @@
 'use client'
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2, FolderInput, AlertTriangle } from 'lucide-react'
+import { ChevronRight, ChevronDown, Search, Download, FileSpreadsheet, FileText, Plus, Pencil, Trash2, Save, X, MapPin, DollarSign, Expand, Minimize2, FolderInput, AlertTriangle, Lightbulb, Ruler } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TakeoffItem, BoundingBox } from './takeoff-accordion'
+import { TakeoffItem, TakeoffItemAssumption, BoundingBox } from './takeoff-accordion'
 import { exportToCSV, exportToExcel } from '@/lib/takeoff-export'
 import { getAllTrades } from '@/lib/trade-types'
 import { createClient } from '@/lib/supabase'
@@ -21,9 +21,16 @@ interface TakeoffSpreadsheetProps {
     plan_scale?: string
     confidence?: string
     notes?: string
+    scope_first_message?: string
+  }
+  measurementGuidance?: {
+    message: string
+    next_step: string
+    items_needing_measurement: number
   }
   onItemHighlight?: (bbox: BoundingBox) => void
   onPageNavigate?: (page: number) => void
+  onOpenChatTab?: () => void
   editable?: boolean
   onItemsChange?: (items: TakeoffItem[]) => void
   missingInformation?: Array<{
@@ -35,6 +42,7 @@ interface TakeoffSpreadsheetProps {
     where_to_find: string
     impact: 'critical' | 'high' | 'medium' | 'low'
   }>
+  scopeFirst?: boolean
 }
 
 interface GroupedRow {
@@ -63,11 +71,14 @@ const CATEGORY_CONFIG: Record<string, { color: string; bgColor: string; label: s
 export default function TakeoffSpreadsheet({
   items,
   summary,
+  measurementGuidance,
   onItemHighlight,
   onPageNavigate,
+  onOpenChatTab,
   editable = false,
   onItemsChange,
-  missingInformation = []
+  missingInformation = [],
+  scopeFirst = false
 }: TakeoffSpreadsheetProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
@@ -81,6 +92,7 @@ export default function TakeoffSpreadsheet({
   const [showAddItemMenu, setShowAddItemMenu] = useState(false)
   const addItemMenuRef = useRef<HTMLDivElement>(null)
   const [movingItemId, setMovingItemId] = useState<string | null>(null)
+  const [expandedAssumptions, setExpandedAssumptions] = useState<Set<string>>(new Set())
   const [columnVisibility, setColumnVisibility] = useState({
     costCode: true,
     description: true,
@@ -461,6 +473,19 @@ export default function TakeoffSpreadsheet({
         next.delete(subcontractorId)
       } else {
         next.add(subcontractorId)
+      }
+      return next
+    })
+  }, [])
+
+  // Toggle assumptions expansion for an item
+  const toggleAssumptions = useCallback((itemId: string) => {
+    setExpandedAssumptions(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
       }
       return next
     })
@@ -902,6 +927,22 @@ export default function TakeoffSpreadsheet({
       ? itemMissingInfo.map(mi => `${mi.missing_data} (${mi.impact} impact)`).join(', ')
       : ''
 
+    // Check for assumptions
+    const hasAssumptions = item.assumptions && item.assumptions.length > 0
+    const assumptionsExpanded = expandedAssumptions.has(row.id)
+    const needsMeasurement = item.needs_measurement === true || item.quantity === 0
+
+    // Get assumption type colors
+    const getAssumptionTypeColor = (type: string) => {
+      switch (type) {
+        case 'material': return 'bg-blue-100 text-blue-700 border-blue-200'
+        case 'pricing': return 'bg-green-100 text-green-700 border-green-200'
+        case 'method': return 'bg-purple-100 text-purple-700 border-purple-200'
+        case 'code': return 'bg-amber-100 text-amber-700 border-amber-200'
+        default: return 'bg-gray-100 text-gray-700 border-gray-200'
+      }
+    }
+
     return (
       <tr
         key={row.id}
@@ -935,28 +976,111 @@ export default function TakeoffSpreadsheet({
             )}
         </td>
         <td className="py-2 px-4 text-sm">
-          {hasMissingInfo && (
-            <div className="flex items-center gap-1 mb-1">
-              <AlertTriangle 
-                className={`h-3 w-3 ${
+          {/* Info badges row */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            {/* Needs Measurement indicator */}
+            {needsMeasurement && (
+              <Badge 
+                variant="outline" 
+                className="text-[10px] h-5 px-1.5 bg-blue-50 border-blue-200 text-blue-700 cursor-help"
+                title={item.measurement_instructions || 'Quantity needs to be measured from plans'}
+              >
+                <Ruler className="h-3 w-3 mr-0.5" />
+                Needs Qty
+              </Badge>
+            )}
+            {/* Assumptions indicator */}
+            {hasAssumptions && (
+              <Badge 
+                variant="outline" 
+                className="text-[10px] h-5 px-1.5 bg-amber-50 border-amber-200 text-amber-700 cursor-pointer hover:bg-amber-100 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleAssumptions(row.id)
+                }}
+                title="Click to view assumptions"
+              >
+                <Lightbulb className="h-3 w-3 mr-0.5" />
+                {item.assumptions!.length} Assumption{item.assumptions!.length > 1 ? 's' : ''}
+                <ChevronDown className={`h-3 w-3 ml-0.5 transition-transform ${assumptionsExpanded ? 'rotate-180' : ''}`} />
+              </Badge>
+            )}
+            {/* Missing info indicator */}
+            {hasMissingInfo && (
+              <Badge 
+                variant="outline" 
+                className={`text-[10px] h-5 px-1.5 ${
                   criticalMissing 
-                    ? 'text-red-600' 
+                    ? 'bg-red-50 border-red-200 text-red-700' 
                     : highMissing 
-                    ? 'text-orange-600' 
-                    : 'text-yellow-600'
-                }`} 
-              />
-              <span className={`text-xs ${
-                criticalMissing 
-                  ? 'text-red-600' 
-                  : highMissing 
-                  ? 'text-orange-600' 
-                  : 'text-yellow-600'
-              }`}>
-                Missing: {itemMissingInfo.length} item{itemMissingInfo.length > 1 ? 's' : ''}
-              </span>
+                    ? 'bg-orange-50 border-orange-200 text-orange-700' 
+                    : 'bg-yellow-50 border-yellow-200 text-yellow-700'
+                }`}
+                title={missingInfoTooltip}
+              >
+                <AlertTriangle className="h-3 w-3 mr-0.5" />
+                {itemMissingInfo.length} Missing
+              </Badge>
+            )}
+          </div>
+          {/* Expanded assumptions panel */}
+          {hasAssumptions && assumptionsExpanded && (
+            <div className="mt-2 mb-2 p-2 bg-amber-50/50 border border-amber-100 rounded-md text-xs space-y-1.5">
+              <div className="font-medium text-amber-800 mb-1.5 flex items-center gap-1">
+                <Lightbulb className="h-3 w-3" />
+                AI Assumptions
+              </div>
+              {item.assumptions!.map((assumption, idx) => (
+                <div key={idx} className="flex items-start gap-2">
+                  <Badge variant="outline" className={`text-[9px] px-1 py-0 ${getAssumptionTypeColor(assumption.type)}`}>
+                    {assumption.type}
+                  </Badge>
+                  <div className="flex-1">
+                    <span className="text-gray-700">{assumption.assumption}</span>
+                    {assumption.basis && (
+                      <span className="text-gray-500 ml-1">— {assumption.basis}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* Measurement guidance section */}
+              {(item.measurement_instructions || item.quantity === 0) && (
+                <div className="mt-2 pt-2 border-t border-amber-200 bg-blue-50/50 -mx-2 px-2 py-2 rounded-b-md">
+                  <div className="font-medium text-blue-700 flex items-center gap-1 mb-1.5">
+                    <Ruler className="h-3 w-3" />
+                    How to Measure This Item
+                  </div>
+                  {item.measurement_instructions ? (
+                    <p className="text-gray-700 mb-2">{item.measurement_instructions}</p>
+                  ) : (
+                    <p className="text-gray-600 mb-2 italic">
+                      {item.unit === 'LF' && 'Measure the total linear feet from your plans using the scale provided.'}
+                      {item.unit === 'SF' && 'Calculate the square footage by multiplying length × width from your plans.'}
+                      {item.unit === 'EA' && 'Count the total number of this item shown in your plans.'}
+                      {item.unit === 'CY' && 'Calculate volume in cubic yards (length × width × depth ÷ 27).'}
+                      {item.unit === 'SQ' && 'Calculate roofing squares (total SF ÷ 100).'}
+                      {!['LF', 'SF', 'EA', 'CY', 'SQ'].includes(item.unit) && 'Measure according to the unit specified and enter below.'}
+                    </p>
+                  )}
+                  {item.quantity === 0 && editable && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="bg-blue-100 border-blue-300 text-blue-700 hover:bg-blue-200 h-7 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        startEdit(row.id, 'quantity', item.quantity)
+                      }}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Enter Measurement
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           )}
+          {/* Item name */}
           {isEditing && editingCell?.field === 'name' ? (
             <Input
               value={editValue}
@@ -1181,13 +1305,29 @@ export default function TakeoffSpreadsheet({
             />
           ) : (
             <div
-              className={`font-mono text-gray-700 ${editable ? 'cursor-text hover:text-orange-600' : ''}`}
+              className={`font-mono ${
+                item.quantity === 0 && editable
+                  ? 'cursor-pointer'
+                  : editable 
+                  ? 'cursor-text hover:text-orange-600 text-gray-700' 
+                  : 'text-gray-700'
+              }`}
               onClick={(e) => {
                 e.stopPropagation()
                 if (editable) startEdit(row.id, 'quantity', item.quantity)
               }}
             >
-              {item.quantity.toLocaleString()}
+              {item.quantity === 0 && editable ? (
+                <Badge 
+                  variant="outline" 
+                  className="bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100 cursor-pointer animate-pulse"
+                >
+                  <Plus className="h-3 w-3 mr-0.5" />
+                  Enter Qty
+                </Badge>
+              ) : (
+                item.quantity.toLocaleString()
+              )}
             </div>
           )}
         </td>
@@ -1414,7 +1554,10 @@ export default function TakeoffSpreadsheet({
     subcontractorSearchQuery,
     allTrades,
     movingItemId,
-    moveItemToCategory
+    moveItemToCategory,
+    toggleAssumptions,
+    expandedAssumptions,
+    missingInformation
   ])
 
   // Get category list for navigation
@@ -1427,8 +1570,82 @@ export default function TakeoffSpreadsheet({
     }))
   }, [groupedRows])
 
+  // Calculate items needing measurement
+  const itemsNeedingMeasurement = useMemo(() => {
+    return normalizedItems.filter(item => item.needs_measurement || item.quantity === 0).length
+  }, [normalizedItems])
+
   return (
     <div className="space-y-4">
+      {/* Scope-First Guidance Banner */}
+      {(scopeFirst || itemsNeedingMeasurement > 0) && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+              <Ruler className="h-5 w-5 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-blue-900 mb-1">
+                {measurementGuidance?.message || 'Scope Defined - Ready for Measurements'}
+              </h3>
+              <p className="text-sm text-blue-700 mb-2">
+                {measurementGuidance?.next_step || 
+                  `AI has identified ${itemsNeedingMeasurement} items from your plans. Now you need to measure quantities.`
+                }
+              </p>
+              
+              {/* Step-by-step workflow */}
+              <div className="bg-white/60 rounded-md p-3 mb-3 border border-blue-100">
+                <div className="text-xs font-semibold text-blue-800 mb-2 uppercase tracking-wide">How to Complete Your Takeoff:</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">1</div>
+                    <div>
+                      <div className="font-medium text-blue-900">Find the Item</div>
+                      <div className="text-blue-600">Click the page badge to jump to that location in your plans</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">2</div>
+                    <div>
+                      <div className="font-medium text-blue-900">Measure It</div>
+                      <div className="text-blue-600">Use the plan's scale to measure lengths, areas, or count items</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">3</div>
+                    <div>
+                      <div className="font-medium text-blue-900">Enter Quantity</div>
+                      <div className="text-blue-600">Click the quantity cell in the table below to enter your measurement</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <Badge variant="outline" className="bg-blue-100 border-blue-300 text-blue-700">
+                  {itemsNeedingMeasurement} items need quantities
+                </Badge>
+                {onOpenChatTab && (
+                  <Button 
+                    size="sm" 
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={onOpenChatTab}
+                  >
+                    <Lightbulb className="h-4 w-4 mr-1" />
+                    Get AI Help Measuring
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                )}
+                <span className="text-xs text-blue-600">
+                  Tip: The Chat tab can guide you step-by-step through measuring each item
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header with totals and controls */}
       <div className="bg-gradient-to-r from-orange-50 to-orange-50/50 border border-orange-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-4">

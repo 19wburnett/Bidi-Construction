@@ -282,7 +282,6 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
     setError(null)
     setIsSending(true)
-    setIsVectorizing(true) // Start vectorization loading state
     setInput('')
 
     const newMessage: PlanChatMessage = {
@@ -292,14 +291,6 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
     }
 
     setMessages((prev) => [...prev, newMessage])
-
-    // Add vectorization message
-    const vectorizationMessage: PlanChatMessage = {
-      id: `vectorizing-${Date.now()}`,
-      role: 'assistant',
-      content: 'Processing plans for AI... This may take a moment.',
-    }
-    setMessages((prev) => [...prev, vectorizationMessage])
 
     try {
       const response = await fetch('/api/plan-chat', {
@@ -338,24 +329,22 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
       // Handle vectorization queued/in progress (202 Accepted)
       // Note: 202 is in the OK range (200-299) so we must check this BEFORE !response.ok
       if (response.status === 202) {
+        setIsVectorizing(true) // Only set vectorizing state when actually needed
         const payload = await response.json().catch(() => ({}))
         
         if (payload?.error === 'VECTORIZATION_QUEUED' || payload?.error === 'VECTORIZATION_IN_PROGRESS') {
           const queueJobId = payload.queueJobId
           const progress = payload.progress || 0
           
-          // Update vectorization message with progress
-          setMessages((prev) => {
-            const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
-            const progressMessage: PlanChatMessage = {
-              id: `vectorizing-${Date.now()}`,
-              role: 'assistant',
-              content: progress > 0 
-                ? `Processing plans for AI... ${progress}% complete. This may take a few minutes for large plans.`
-                : 'Processing plans for AI... This may take a few minutes for large plans. You can close this page and come back later.',
-            }
-            return [...filtered, progressMessage]
-          })
+          // Add vectorization message only when actually needed
+          const vectorizationMessage: PlanChatMessage = {
+            id: `vectorizing-${Date.now()}`,
+            role: 'assistant',
+            content: progress > 0 
+              ? `Processing plans for AI... ${progress}% complete. This may take a few minutes for large plans.`
+              : 'Processing plans for AI... This may take a few minutes for large plans. You can close this page and come back later.',
+          }
+          setMessages((prev) => [...prev, vectorizationMessage])
           
           // Poll for completion
           pollVectorizationStatus(planId, queueJobId, trimmed)
@@ -407,11 +396,8 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
         throw new Error(errorMessage)
       }
       
-      // Remove vectorization message and add the actual response
-      setMessages((prev) => {
-        const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
-        return filtered
-      })
+      // Remove vectorization message if it exists (only added when vectorization was needed)
+      setMessages((prev) => prev.filter((msg) => !msg.id.startsWith('vectorizing-')))
       
       // Update selected chat ID if a new one was created
       if (payload.chatId && payload.chatId !== selectedChatId) {
@@ -433,10 +419,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
       }, 2000)
     } catch (err) {
       console.error('Plan Chat request failed', err)
-      // Remove vectorization message on error
+      // Remove vectorization message on error (if it exists)
       setMessages((prev) => {
         const filtered = prev.filter((msg) => !msg.id.startsWith('vectorizing-'))
-        return filtered.filter((message) => message.id !== newMessage.id)
+        // Don't remove the user message - keep it so user can see what they asked
+        return filtered
       })
       setInput(trimmed)
       setError({
@@ -581,8 +568,9 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+      <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+        {/* Header - Fixed at top */}
+        <div className="flex-shrink-0 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               <Bot className="h-4 w-4 text-orange-500" />
@@ -668,9 +656,9 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col bg-white">
-          <div className="flex-1 overflow-y-auto">
-            <div className="space-y-0">
+        {/* Scrollable messages area */}
+        <div className="flex-1 min-h-0 overflow-y-auto bg-white">
+          <div className="space-y-0">
               {isLoading ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 py-12">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -709,34 +697,37 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                   {messages.map((message) => (
                     <div
                       key={message.id}
-                      className={`group py-6 px-4 hover:bg-gray-50/50 transition-colors ${
-                        message.role === 'user' ? 'bg-gray-50' : 'bg-white'
+                      className={`group py-4 px-4 ${
+                        message.role === 'user' ? 'bg-white' : 'bg-white'
                       }`}
                     >
                       <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
                         {message.role === 'assistant' && (
                           <div className="flex-shrink-0">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
-                              <Bot className="h-5 w-5 text-white" />
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600">
+                              <Bot className="h-4 w-4 text-white" />
                             </div>
                           </div>
                         )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-xs font-medium text-gray-500">
-                              {message.role === 'user' ? 'You' : 'AI Estimator'}
-                            </span>
-                          </div>
-                          <div className="prose prose-sm max-w-none">
-                            <p className="text-gray-900 whitespace-pre-wrap leading-relaxed">
-                              {message.content}
-                            </p>
-                          </div>
+                        <div className={`flex-1 min-w-0 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                          {message.role === 'user' ? (
+                            <div className="max-w-[85%] rounded-2xl bg-gray-100 px-4 py-2.5">
+                              <div className="text-gray-900 whitespace-pre-wrap leading-relaxed text-[15px]">
+                                {message.content}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="prose prose-sm max-w-none">
+                              <div className="text-gray-900 whitespace-pre-wrap leading-relaxed text-[15px]">
+                                {message.content}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         {message.role === 'user' && (
                           <div className="flex-shrink-0">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gray-400 to-gray-600 shadow-sm">
-                              <UserIcon className="h-5 w-5 text-white" />
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-gray-500 to-gray-600">
+                              <UserIcon className="h-4 w-4 text-white" />
                             </div>
                           </div>
                         )}
@@ -749,21 +740,19 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 4 }}
-                        className="py-6 px-4 bg-white"
+                        className="py-4 px-4 bg-white"
                       >
                         <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
                           <div className="flex-shrink-0">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
-                              <Bot className="h-5 w-5 text-white" />
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600">
+                              <Bot className="h-4 w-4 text-white" />
                             </div>
                           </div>
                           <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1">
-                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                              </div>
+                            <div className="flex items-center gap-1.5 pt-1">
+                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
                             </div>
                           </div>
                         </div>
@@ -832,10 +821,11 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
               )}
               <div ref={chatEndRef} />
             </div>
-          </div>
+        </div>
 
-          <div className="border-t border-gray-200 bg-white">
-            <div className="px-4 py-3">
+        {/* Footer - Fixed at bottom */}
+        <div className="flex-shrink-0 border-t border-gray-200 bg-white">
+          <div className="px-4 py-3">
               <div className="relative flex items-end gap-3 rounded-2xl border border-gray-300 bg-white shadow-sm hover:border-gray-400 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 transition-all">
                 <Textarea
                   placeholder={
@@ -876,29 +866,25 @@ export function PlanChatPanel({ jobId, planId }: PlanChatPanelProps) {
                   </Button>
                 </div>
               </div>
-              <div className="mt-2 flex items-center justify-between">
+              <div className="mt-2 flex items-center justify-between gap-4">
                 <Select value={selectedModel} onValueChange={setSelectedModel} disabled={isSending}>
-                  <SelectTrigger className="h-6 w-auto border-0 bg-transparent text-xs text-gray-500 hover:text-gray-700 px-0">
-                    <Sparkles className="mr-1.5 h-3 w-3" />
+                  <SelectTrigger className="h-6 w-auto border-0 bg-transparent text-xs text-gray-500 hover:text-gray-700 px-0 gap-1.5">
+                    <Sparkles className="h-3 w-3" />
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {AVAILABLE_CHAT_MODELS.map((model) => (
                       <SelectItem key={model.id} value={model.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{model.name}</span>
-                          <span className="text-xs text-gray-500">{model.description}</span>
-                        </div>
+                        {model.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 whitespace-nowrap">
                   AI can make mistakes. Check important info.
                 </p>
               </div>
             </div>
-          </div>
         </div>
       </div>
     </div>

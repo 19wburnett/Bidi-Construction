@@ -23,6 +23,12 @@ export interface BoundingBox {
   height: number
 }
 
+export interface TakeoffItemAssumption {
+  type: 'material' | 'pricing' | 'method' | 'code'
+  assumption: string
+  basis: string
+}
+
 export interface TakeoffItem {
   id?: string
   name: string
@@ -46,6 +52,10 @@ export interface TakeoffItem {
   parent_id?: string
   user_created?: boolean
   user_modified?: boolean
+  // Scope-first fields
+  needs_measurement?: boolean
+  measurement_instructions?: string
+  assumptions?: TakeoffItemAssumption[]
 }
 
 interface TakeoffAccordionProps {

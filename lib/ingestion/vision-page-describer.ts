@@ -7,16 +7,17 @@
  * 
  * This enables the AI to answer questions like "Where is the kitchen?"
  * by finding the vision description chunk that mentions it.
+ * 
+ * PDF-to-Image conversion strategies:
+ * 1. Local: pdfjs-dist + @napi-rs/canvas (works in development)
+ * 2. Serverless: PDF.co API (works in Vercel/serverless environments)
  */
 
 import { generateTextWithGateway } from '@/lib/ai-gateway-provider'
 
-// Import the PDF extractor to ensure DOMMatrix polyfill is installed
-// This must happen before any pdfjs-dist usage
-import '@/lib/ingestion/pdf-text-extractor-pdfjs'
-
 // Vision analysis model - GPT-4o is recommended for best quality/cost ratio
 const VISION_MODEL = process.env.VISION_MODEL || 'gpt-4o'
+const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY
 
 // Prompt for analyzing construction plan pages
 const VISION_DESCRIPTION_PROMPT = `Analyze this construction plan page and provide a structured description.
@@ -186,6 +187,221 @@ async function convertPdfToImages(
 }
 
 /**
+ * Convert PDF to images using PDF.co API
+ * This works reliably in serverless environments (Vercel, etc.)
+ * 
+ * @param pdfBuffer - PDF file as Buffer
+ * @param fileName - Original filename (for upload)
+ * @param options - Conversion options
+ * @returns Array of base64 image strings
+ */
+async function convertPdfToImagesWithPdfCo(
+  pdfBuffer: Buffer,
+  fileName: string = 'plan.pdf',
+  options: ConvertPdfToImagesOptions = {}
+): Promise<string[]> {
+  const { maxPages, startPage = 1 } = options
+  
+  if (!PDF_CO_API_KEY) {
+    console.warn('[VisionDescriber] PDF_CO_API_KEY not set - cannot use PDF.co for image conversion')
+    return []
+  }
+  
+  try {
+    const fileSizeMB = pdfBuffer.length / (1024 * 1024)
+    console.log(`[VisionDescriber] Using PDF.co API for PDF-to-image conversion (${fileSizeMB.toFixed(1)} MB)...`)
+    
+    let fileUrl: string
+    
+    // For large files (>10MB), use presigned URL upload to avoid timeout
+    if (pdfBuffer.length > 10 * 1024 * 1024) {
+      console.log('[VisionDescriber] Large file detected, using presigned URL upload...')
+      
+      // Step 1a: Get presigned URL for upload
+      const presignedResponse = await fetch('https://api.pdf.co/v1/file/upload/get-presigned-url', {
+        method: 'GET',
+        headers: {
+          'x-api-key': PDF_CO_API_KEY,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!presignedResponse.ok) {
+        const errorText = await presignedResponse.text()
+        console.error('[VisionDescriber] PDF.co presigned URL request failed:', errorText)
+        return []
+      }
+      
+      const presignedData = await presignedResponse.json()
+      
+      if (!presignedData.presignedUrl || !presignedData.url) {
+        console.error('[VisionDescriber] PDF.co did not return presigned URL')
+        return []
+      }
+      
+      // Step 1b: Upload to presigned URL (direct to S3, no timeout issues)
+      console.log('[VisionDescriber] Uploading to presigned URL...')
+      const uploadResponse = await fetch(presignedData.presignedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/pdf',
+        },
+        body: new Uint8Array(pdfBuffer),
+      })
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text()
+        console.error('[VisionDescriber] Presigned URL upload failed:', errorText)
+        return []
+      }
+      
+      fileUrl = presignedData.url
+      console.log('[VisionDescriber] Large file uploaded successfully via presigned URL')
+    } else {
+      // Step 1: Standard upload for smaller files
+      const formData = new FormData()
+      const uint8Array = new Uint8Array(pdfBuffer)
+      const blob = new Blob([uint8Array], { type: 'application/pdf' })
+      formData.append('file', blob, fileName)
+      
+      const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {
+        method: 'POST',
+        headers: {
+          'x-api-key': PDF_CO_API_KEY,
+        },
+        body: formData,
+      })
+      
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text()
+        console.error('[VisionDescriber] PDF.co upload failed:', errorText)
+        return []
+      }
+      
+      const uploadData = await uploadResponse.json()
+      fileUrl = uploadData.url
+    }
+    
+    if (!fileUrl) {
+      console.error('[VisionDescriber] PDF.co upload did not return a URL')
+      return []
+    }
+    
+    console.log('[VisionDescriber] PDF uploaded to PDF.co, converting to images...')
+    
+    // Step 2: Convert to PNG images using PDF.co (async mode for large files)
+    // Calculate page range - limit to first 20 pages for cost/time efficiency
+    const effectiveMaxPages = maxPages || 20 // Default limit for vision descriptions
+    const pagesParam = `${startPage - 1}-${Math.min(startPage + effectiveMaxPages - 2, 99)}` // PDF.co uses 0-indexed, max 100 pages
+    
+    console.log(`[VisionDescriber] Converting pages ${pagesParam} via PDF.co (async mode)...`)
+    
+    const convertResponse = await fetch('https://api.pdf.co/v1/pdf/convert/to/png', {
+      method: 'POST',
+      headers: {
+        'x-api-key': PDF_CO_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: fileUrl,
+        pages: pagesParam,
+        async: true, // Use async mode for large files - returns job ID
+        inline: false, // Return URLs, not inline data
+      }),
+    })
+    
+    if (!convertResponse.ok) {
+      const errorText = await convertResponse.text()
+      console.error('[VisionDescriber] PDF.co conversion request failed:', errorText)
+      return []
+    }
+    
+    let convertData = await convertResponse.json()
+    
+    // Handle async job - poll for completion
+    if (convertData.jobId) {
+      console.log(`[VisionDescriber] PDF.co job started: ${convertData.jobId}, polling for completion...`)
+      
+      const maxPolls = 60 // Max 5 minutes (60 * 5 seconds)
+      let pollCount = 0
+      
+      while (pollCount < maxPolls) {
+        await new Promise(resolve => setTimeout(resolve, 5000)) // Wait 5 seconds
+        
+        const statusResponse = await fetch(`https://api.pdf.co/v1/job/check?jobid=${convertData.jobId}`, {
+          headers: { 'x-api-key': PDF_CO_API_KEY },
+        })
+        
+        if (!statusResponse.ok) {
+          console.error('[VisionDescriber] PDF.co job status check failed')
+          return []
+        }
+        
+        const statusData = await statusResponse.json()
+        
+        if (statusData.status === 'success') {
+          console.log(`[VisionDescriber] PDF.co job completed after ${(pollCount + 1) * 5}s`)
+          convertData = statusData
+          break
+        } else if (statusData.status === 'error' || statusData.status === 'failed') {
+          console.error('[VisionDescriber] PDF.co job failed:', statusData.message)
+          return []
+        }
+        
+        pollCount++
+        if (pollCount % 6 === 0) { // Log every 30 seconds
+          console.log(`[VisionDescriber] PDF.co job still processing... (${pollCount * 5}s)`)
+        }
+      }
+      
+      if (pollCount >= maxPolls) {
+        console.error('[VisionDescriber] PDF.co job timed out after 5 minutes')
+        return []
+      }
+    }
+    
+    if (convertData.error) {
+      console.error('[VisionDescriber] PDF.co conversion error:', convertData.message)
+      return []
+    }
+    
+    // Step 3: Fetch each image and convert to base64
+    const imageUrls = convertData.urls || []
+    console.log(`[VisionDescriber] PDF.co returned ${imageUrls.length} image URLs`)
+    
+    const images: string[] = []
+    
+    for (let i = 0; i < imageUrls.length; i++) {
+      try {
+        const imageResponse = await fetch(imageUrls[i])
+        if (!imageResponse.ok) {
+          console.warn(`[VisionDescriber] Failed to fetch image ${i + 1}`)
+          continue
+        }
+        
+        const imageBuffer = await imageResponse.arrayBuffer()
+        const base64 = Buffer.from(imageBuffer).toString('base64')
+        images.push(base64)
+        
+        if ((i + 1) % 10 === 0) {
+          console.log(`[VisionDescriber] Downloaded ${i + 1}/${imageUrls.length} images`)
+        }
+      } catch (fetchError) {
+        console.warn(`[VisionDescriber] Error fetching image ${i + 1}:`, fetchError)
+      }
+    }
+    
+    console.log(`[VisionDescriber] Successfully converted ${images.length} pages via PDF.co`)
+    return images
+    
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    console.error('[VisionDescriber] PDF.co conversion error:', errorMsg)
+    return []
+  }
+}
+
+/**
  * Generate descriptions for PDF pages using GPT-4V
  * 
  * @param pdfBuffer - PDF file as Buffer
@@ -198,10 +414,11 @@ export async function generatePageDescriptions(
     maxPages?: number        // Limit pages to process (for cost control)
     startPage?: number       // Start from this page
     batchSize?: number       // Pages to process in parallel (default: 3)
+    fileName?: string        // Original filename (for PDF.co upload)
     onProgress?: (page: number, total: number, description: string) => void
   } = {}
 ): Promise<VisionDescriptionResult> {
-  const { maxPages, startPage = 1, batchSize = 3, onProgress } = options
+  const { maxPages, startPage = 1, batchSize = 3, fileName = 'plan.pdf', onProgress } = options
   const startTime = Date.now()
   const warnings: string[] = []
   let totalCost = 0
@@ -213,16 +430,35 @@ export async function generatePageDescriptions(
   
   console.log(`[VisionDescriber] Starting vision analysis with model: ${VISION_MODEL}`)
   
-  // Convert PDF to images
-  const images = await convertPdfToImages(pdfBuffer, {
+  // Strategy 1: Try local pdfjs-dist + canvas conversion first
+  // This works in development but often fails in serverless
+  let images = await convertPdfToImages(pdfBuffer, {
     scale: 0.5,      // Half size for cost efficiency
     quality: 0.4,    // Low quality OK for GPT-4V
     maxPages,
     startPage,
   })
   
+  let conversionMethod = 'local'
+  
+  // Strategy 2: If local conversion failed, try PDF.co API
+  // This works reliably in serverless environments
+  if (images.length === 0 && PDF_CO_API_KEY) {
+    console.log('[VisionDescriber] Local conversion failed, trying PDF.co API...')
+    warnings.push('Local PDF-to-image conversion failed, using PDF.co API')
+    
+    images = await convertPdfToImagesWithPdfCo(pdfBuffer, fileName, {
+      maxPages,
+      startPage,
+    })
+    conversionMethod = 'pdf.co'
+  }
+  
   if (images.length === 0) {
-    warnings.push('No images could be converted from PDF')
+    const noApiKeyMsg = !PDF_CO_API_KEY 
+      ? ' Set PDF_CO_API_KEY for serverless PDF-to-image conversion.'
+      : ''
+    warnings.push(`No images could be converted from PDF.${noApiKeyMsg}`)
     return {
       descriptions: [],
       warnings,
@@ -230,6 +466,8 @@ export async function generatePageDescriptions(
       processingTimeMs: Date.now() - startTime,
     }
   }
+  
+  console.log(`[VisionDescriber] Using ${conversionMethod} conversion: ${images.length} images`)
   
   const descriptions: VisionDescription[] = []
   

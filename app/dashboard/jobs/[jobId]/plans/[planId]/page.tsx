@@ -30,7 +30,9 @@ import {
   Check,
   X,
   Plus,
-  Tag
+  Tag,
+  Trash2,
+  RotateCcw
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -274,6 +276,77 @@ export default function EnhancedPlanViewer() {
 
   // Track current takeoff analysis row id for updates
   const [takeoffAnalysisRowId, setTakeoffAnalysisRowId] = useState<string | null>(null)
+  
+  // Admin state for reset functionality
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [isResettingTakeoff, setIsResettingTakeoff] = useState(false)
+  
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user) return
+      const { data } = await supabase
+        .from('users')
+        .select('is_admin')
+        .eq('id', user.id)
+        .single()
+      setIsAdmin(data?.is_admin || false)
+    }
+    checkAdminStatus()
+  }, [user, supabase])
+  
+  // Reset takeoff function - deletes all takeoff data and starts fresh
+  const handleResetTakeoff = async () => {
+    if (!isAdmin || !planId || !confirm('Are you sure you want to delete all takeoff data and start over? This cannot be undone.')) {
+      return
+    }
+    
+    setIsResettingTakeoff(true)
+    try {
+      // Get the analysis ID first
+      const { data: analysis } = await supabase
+        .from('plan_takeoff_analysis')
+        .select('id')
+        .eq('plan_id', planId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      
+      if (analysis?.id) {
+        // Delete missing information
+        await supabase
+          .from('takeoff_missing_information')
+          .delete()
+          .eq('takeoff_analysis_id', analysis.id)
+        
+        // Delete reviews
+        await supabase
+          .from('takeoff_reviews')
+          .delete()
+          .eq('takeoff_analysis_id', analysis.id)
+        
+        // Delete the analysis itself
+        await supabase
+          .from('plan_takeoff_analysis')
+          .delete()
+          .eq('id', analysis.id)
+      }
+      
+      // Clear local state
+      setTakeoffResults(null)
+      setReviewResults(null)
+      setMissingInformation([])
+      setTakeoffAnalysisRowId(null)
+      setModalTakeoffItems([])
+      
+      alert('Takeoff data has been reset. You can now run a new AI takeoff.')
+    } catch (error) {
+      console.error('Error resetting takeoff:', error)
+      alert('Failed to reset takeoff data. Please try again.')
+    } finally {
+      setIsResettingTakeoff(false)
+    }
+  }
 
   const ensureItemIds = (items: any[]): any[] => {
     return (items || []).map((it: any) => ({
@@ -697,8 +770,30 @@ export default function EnhancedPlanViewer() {
             items: itemsWithSource,
             summary: takeoffAnalysis.summary || {},
             quality_analysis: normalizedQualityAnalysisFromTakeoff || undefined // Include quality analysis from takeoff
-          }
+          },
+          review: takeoffAnalysis.review_results,
+          missing_information: takeoffAnalysis.review_results?.allMissingInformation ? {
+            missingInformation: takeoffAnalysis.review_results.allMissingInformation
+          } : undefined
         })
+        
+        // Load missing information from separate table
+        const { data: missingInfoFromDb } = await supabase
+          .from('takeoff_missing_information')
+          .select('*')
+          .eq('takeoff_analysis_id', takeoffAnalysis.id)
+        
+        if (missingInfoFromDb && missingInfoFromDb.length > 0) {
+          setMissingInformation(missingInfoFromDb)
+        } else if (takeoffAnalysis.review_results?.allMissingInformation) {
+          // Fallback to review_results if separate table is empty
+          setMissingInformation(takeoffAnalysis.review_results.allMissingInformation)
+        }
+        
+        // Load review results
+        if (takeoffAnalysis.review_results) {
+          setReviewResults(takeoffAnalysis.review_results)
+        }
         
         // Prepare items for BidPackageModal
         const items = itemsWithIds.map((it: any, idx: number) => ({
@@ -2278,12 +2373,52 @@ export default function EnhancedPlanViewer() {
                                 <h4 className="font-semibold text-gray-900">
                                   Takeoff Results ({takeoffResults.results?.items?.length || 0} items)
                                 </h4>
-                                <Badge variant="outline" className="text-xs">
-                                  {takeoffResults.consensus?.confidence ? 
-                                    `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
-                                    'High confidence'
-                                  }
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {takeoffResults.consensus?.confidence ? 
+                                      `${Math.round(takeoffResults.consensus.confidence * 100)}% confidence` : 
+                                      'High confidence'
+                                    }
+                                  </Badge>
+                                  {/* Admin Controls */}
+                                  {isAdmin && (
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300"
+                                        onClick={() => handleRunAITakeoff()}
+                                        disabled={isRunningTakeoff || isResettingTakeoff}
+                                      >
+                                        {isRunningTakeoff ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <>
+                                            <Sparkles className="h-3 w-3 mr-1" />
+                                            Re-run
+                                          </>
+                                        )}
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300"
+                                        onClick={handleResetTakeoff}
+                                        disabled={isResettingTakeoff || isRunningTakeoff}
+                                        title="Delete all takeoff data and start fresh"
+                                      >
+                                        {isResettingTakeoff ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <>
+                                            <Trash2 className="h-3 w-3 mr-1" />
+                                            Delete
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               
                               {/* Missing Information Panel */}
@@ -2291,6 +2426,15 @@ export default function EnhancedPlanViewer() {
                                 <div className="mb-4">
                                   <MissingInformationPanel 
                                     missingInformation={missingInformation}
+                                    onOpenChat={() => setActiveTab('chat')}
+                                    onEnterData={(itemName, category) => {
+                                      // Scroll to spreadsheet and potentially highlight the item
+                                      const spreadsheetElement = document.getElementById('takeoff-spreadsheet')
+                                      if (spreadsheetElement) {
+                                        spreadsheetElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                      }
+                                      // Could also trigger a search/filter in the spreadsheet
+                                    }}
                                   />
                                 </div>
                               )}
@@ -2304,14 +2448,17 @@ export default function EnhancedPlanViewer() {
                                 </div>
                               )}
                               
-                              <TakeoffSpreadsheet
-                                items={takeoffResults.results?.items || []}
-                                summary={takeoffResults.results?.summary}
-                                onPageNavigate={handlePageNavigate}
-                                editable
-                                onItemsChange={handleItemsChange}
-                                missingInformation={missingInformation}
-                              />
+                              <div id="takeoff-spreadsheet">
+                                <TakeoffSpreadsheet
+                                  items={takeoffResults.results?.items || []}
+                                  summary={takeoffResults.results?.summary}
+                                  onPageNavigate={handlePageNavigate}
+                                  editable
+                                  onItemsChange={handleItemsChange}
+                                  missingInformation={missingInformation}
+                                  onOpenChatTab={() => setActiveTab('chat')}
+                                />
+                              </div>
                             </div>
                           ) : (
                             <div className="text-center py-8">
@@ -2323,7 +2470,7 @@ export default function EnhancedPlanViewer() {
                         </div>
                       </TabsContent>
 
-                      <TabsContent value="chat" className="mt-0">
+                      <TabsContent value="chat" className="h-full mt-0">
                         <PlanChatPanel jobId={jobId} planId={planId} />
                       </TabsContent>
                       

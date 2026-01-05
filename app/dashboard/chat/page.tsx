@@ -323,31 +323,33 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
-      {/* Header */}
-      <div className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500">
-              <Bot className="h-6 w-6 text-white" />
+      {/* Sticky Header Section */}
+      <div className="sticky top-0 z-20 bg-white">
+        {/* Header */}
+        <div className="border-b border-gray-200 px-6 py-4">
+          <div className="mx-auto flex max-w-4xl items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500">
+                <Bot className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold text-gray-900">Blueprint Chat</h1>
+                <p className="text-sm text-gray-500">Ask questions about your uploaded blueprints</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">Blueprint Chat</h1>
-              <p className="text-sm text-gray-500">Ask questions about your uploaded blueprints</p>
-            </div>
+            <Button
+              variant="outline"
+              onClick={() => router.push('/dashboard/plans')}
+              className="gap-2"
+            >
+              <FileText className="h-4 w-4" />
+              View Plans
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => router.push('/dashboard/plans')}
-            className="gap-2"
-          >
-            <FileText className="h-4 w-4" />
-            View Plans
-          </Button>
         </div>
-      </div>
 
-      {/* Plan Selector */}
-      <div className="border-b border-gray-200 bg-white px-6 py-3">
+        {/* Plan Selector */}
+        <div className="border-b border-gray-200 px-6 py-3">
         <div className="mx-auto max-w-4xl">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-4">
@@ -455,6 +457,7 @@ export default function ChatPage() {
             )}
           </div>
         </div>
+        </div>
       </div>
 
       {/* Chat Area */}
@@ -522,33 +525,36 @@ export default function ChatPage() {
                     messages.map((message) => (
                       <div
                         key={message.id}
-                        className={`group py-6 px-4 md:px-8 hover:bg-gray-50/50 transition-colors ${
-                          message.role === 'user' ? 'bg-gray-50' : 'bg-white'
+                        className={`group py-4 px-4 md:px-8 ${
+                          message.role === 'user' ? 'bg-white' : 'bg-white'
                         }`}
                       >
                         <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
                           {message.role === 'assistant' && (
                             <div className="flex-shrink-0">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
-                                <Bot className="h-5 w-5 text-white" />
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600">
+                                <Bot className="h-4 w-4 text-white" />
                               </div>
                             </div>
                           )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xs font-medium text-gray-500">
-                                {message.role === 'user' ? 'You' : 'AI Assistant'}
-                              </span>
-                            </div>
-                            <div className="prose prose-sm max-w-none">
-                              <p className="text-gray-900 whitespace-pre-wrap leading-relaxed">
-                                {message.content}
-                              </p>
-                            </div>
+                          <div className={`flex-1 min-w-0 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                            {message.role === 'user' ? (
+                              <div className="max-w-[85%] rounded-2xl bg-gray-100 px-4 py-2.5">
+                                <div className="text-gray-900 whitespace-pre-wrap leading-relaxed text-[15px]">
+                                  {message.content}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="prose prose-sm max-w-none">
+                                <div className="text-gray-900 whitespace-pre-wrap leading-relaxed text-[15px]">
+                                  {message.content}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           {message.role === 'user' && (
                             <div className="flex-shrink-0">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gray-400 to-gray-600 shadow-sm">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-gray-500 to-gray-600">
                                 <span className="text-xs font-semibold text-white">U</span>
                               </div>
                             </div>
@@ -558,20 +564,18 @@ export default function ChatPage() {
                     ))
                   )}
                   {isSending && (
-                    <div className="py-6 px-4 md:px-8 bg-white">
+                    <div className="py-4 px-4 md:px-8 bg-white">
                       <div className="mx-auto max-w-3xl flex gap-4 md:gap-6">
                         <div className="flex-shrink-0">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm">
-                            <Bot className="h-5 w-5 text-white" />
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600">
+                            <Bot className="h-4 w-4 text-white" />
                           </div>
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <div className="flex gap-1">
-                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                              <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                            </div>
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
                           </div>
                         </div>
                       </div>
@@ -582,7 +586,7 @@ export default function ChatPage() {
               </div>
 
               {/* Input Area */}
-              <div className="border-t border-gray-200 bg-white">
+              <div className="sticky bottom-0 z-10 border-t border-gray-200 bg-white">
                 <div className="mx-auto max-w-3xl px-4 md:px-8 py-4">
                   <div className="relative flex items-end gap-3 rounded-2xl border border-gray-300 bg-white shadow-sm hover:border-gray-400 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 transition-all">
                     <Textarea
@@ -620,24 +624,21 @@ export default function ChatPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="mt-2 flex items-center justify-between gap-4">
                     <Select value={selectedModel} onValueChange={setSelectedModel} disabled={isSending}>
-                      <SelectTrigger className="h-7 w-auto border-0 bg-transparent text-xs text-gray-500 hover:text-gray-700 px-0">
-                        <Sparkles className="mr-1.5 h-3 w-3" />
+                      <SelectTrigger className="h-6 w-auto border-0 bg-transparent text-xs text-gray-500 hover:text-gray-700 px-0 gap-1.5">
+                        <Sparkles className="h-3 w-3" />
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {AVAILABLE_CHAT_MODELS.map((model) => (
                           <SelectItem key={model.id} value={model.id}>
-                            <div className="flex flex-col">
-                              <span className="font-medium">{model.name}</span>
-                              <span className="text-xs text-gray-500">{model.description}</span>
-                            </div>
+                            {model.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-400 whitespace-nowrap">
                       AI can make mistakes. Check important info.
                     </p>
                   </div>

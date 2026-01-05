@@ -24,7 +24,7 @@ export interface GatewayCallOptions {
   prompt?: string
   messages?: Array<{
     role: 'system' | 'user' | 'assistant'
-    content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+    content: string | Array<{ type: 'text'; text: string } | { type: 'image'; image: string }>
   }>
   images?: string[] // Base64 data URLs or URLs
   maxTokens?: number
@@ -58,10 +58,11 @@ export async function generateTextWithGateway(
 
   const gatewayModel = getGatewayModel(options.model)
   
-  // Build messages array
+  // Build messages array using AI SDK v5 CoreMessage format
+  type MessageContent = string | Array<{ type: 'text'; text: string } | { type: 'image'; image: string }>
   const messages: Array<{
     role: 'system' | 'user' | 'assistant'
-    content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+    content: MessageContent
   }> = []
 
   // Add system message if provided
@@ -69,23 +70,20 @@ export async function generateTextWithGateway(
     messages.push({ role: 'system', content: options.system })
   }
 
-  // Build user content
-  const userContent: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }> = []
+  // Build user content using AI SDK v5 format
+  const userContent: Array<{ type: 'text'; text: string } | { type: 'image'; image: string }> = []
   
   // Add text prompt
   if (options.prompt) {
     userContent.push({ type: 'text', text: options.prompt })
   }
 
-  // Add images
+  // Add images using AI SDK v5 format: { type: 'image', image: 'url-or-base64' }
   if (options.images && options.images.length > 0) {
     options.images.forEach(img => {
       userContent.push({
-        type: 'image_url',
-        image_url: {
-          url: img.startsWith('http') ? img : img,
-          detail: 'high'
-        }
+        type: 'image',
+        image: img
       })
     })
   }
@@ -95,7 +93,13 @@ export async function generateTextWithGateway(
     messages.push(...options.messages)
   } else if (userContent.length > 0) {
     // Otherwise use the built user content
-    messages.push({ role: 'user', content: userContent.length === 1 && userContent[0].type === 'text' ? userContent[0].text! : userContent })
+    // If only text, use string content; otherwise use array format
+    messages.push({ 
+      role: 'user', 
+      content: userContent.length === 1 && userContent[0].type === 'text' 
+        ? userContent[0].text 
+        : userContent 
+    })
   }
 
   try {
@@ -139,30 +143,30 @@ export async function streamTextWithGateway(
 
   const gatewayModel = getGatewayModel(options.model)
   
-  // Build messages array (same logic as generateTextWithGateway)
+  // Build messages array using AI SDK v5 CoreMessage format (same logic as generateTextWithGateway)
+  type MessageContent = string | Array<{ type: 'text'; text: string } | { type: 'image'; image: string }>
   const messages: Array<{
     role: 'system' | 'user' | 'assistant'
-    content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }>
+    content: MessageContent
   }> = []
 
   if (options.system) {
     messages.push({ role: 'system', content: options.system })
   }
 
-  const userContent: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'low' | 'high' | 'auto' } }> = []
+  // Build user content using AI SDK v5 format
+  const userContent: Array<{ type: 'text'; text: string } | { type: 'image'; image: string }> = []
   
   if (options.prompt) {
     userContent.push({ type: 'text', text: options.prompt })
   }
 
+  // Add images using AI SDK v5 format: { type: 'image', image: 'url-or-base64' }
   if (options.images && options.images.length > 0) {
     options.images.forEach(img => {
       userContent.push({
-        type: 'image_url',
-        image_url: {
-          url: img.startsWith('http') ? img : img,
-          detail: 'high'
-        }
+        type: 'image',
+        image: img
       })
     })
   }
@@ -170,7 +174,13 @@ export async function streamTextWithGateway(
   if (options.messages && options.messages.length > 0) {
     messages.push(...options.messages)
   } else if (userContent.length > 0) {
-    messages.push({ role: 'user', content: userContent.length === 1 && userContent[0].type === 'text' ? userContent[0].text! : userContent })
+    // If only text, use string content; otherwise use array format
+    messages.push({ 
+      role: 'user', 
+      content: userContent.length === 1 && userContent[0].type === 'text' 
+        ? userContent[0].text 
+        : userContent 
+    })
   }
 
   try {

@@ -38,9 +38,19 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
     {
       "name": "Specific item name",
       "description": "Detailed description",
-      "quantity": 150.5,
+      "quantity": 0,
+      "needs_measurement": true,
+      "measurement_instructions": "Clear instructions on how to measure this item from the plans (e.g., 'Measure total linear feet of exterior walls at top plate level')",
       "unit": "LF|SF|CF|CY|EA|SQ",
       "unit_cost": 2.50,
+      "cost_type": "labor|materials|allowance",
+      "assumptions": [
+        {
+          "type": "material|pricing|method|code",
+          "assumption": "What was assumed (e.g., 'Douglas Fir #2 grade lumber')",
+          "basis": "Why this was assumed (e.g., 'Standard residential framing specification')"
+        }
+      ],
       "location": "Specific location",
       "category": "structural|exterior|interior|mep|finishes|other",
       "IMPORTANT: 'master' is NOT a valid category. Use one of: structural, exterior, interior, mep, finishes, or other. 'MasterFormat' refers to the cost code standard, NOT the category field.",
@@ -49,7 +59,7 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
       "cost_code": "The standardized cost code",
       "cost_code_description": "Cost code description",
       "notes": "Additional notes",
-      "dimensions": "Original dimensions from plan",
+      "dimensions": "Original dimensions from plan (for reference - user will verify)",
       "bounding_box": {
         "page": 1,
         "x": 0.25,
@@ -223,18 +233,81 @@ RESIDENTIAL PROJECT FOCUS:
       return basePrompt + jobTypePrompt + generateTemplateInstructions() + `
 
 TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
-- Extract ALL material quantities and measurements
-- Calculate accurate quantities based on visible dimensions
-- Identify all construction materials, fixtures, and components
-- Use standard construction estimating practices
-- Cross-reference dimensions to ensure accuracy
-- Assign appropriate ${standardName} cost codes to each item
-- Provide realistic unit_cost pricing for each item
-- Extract material specifications when visible (grade, type, size, manufacturer)
-- Identify labor requirements and trade assignments
-- Consider waste factors based on material type
-- Identify equipment needs for installation
-- Check construction code compliance requirements
+⚠️ SCOPE-FIRST APPROACH: You are defining the SCOPE of work, NOT calculating final quantities.
+- Set quantity to 0 for ALL items - the user will measure quantities later using the Chat tab
+- Set needs_measurement to true for all items
+- Provide clear measurement_instructions explaining HOW to measure each item
+
+⚠️ CRITICAL: BREAK OUT LABOR AND MATERIALS SEPARATELY
+For EVERY work item, create SEPARATE line items for:
+1. "materials" - The physical materials (lumber, drywall, fixtures, etc.)
+2. "labor" - The installation labor cost
+3. "allowance" - For items that need pricing from subcontractors or are not fully specified
+
+Example: For "Exterior Wall Framing", create THREE items:
+- "Exterior Wall Framing - Materials (2x6 SPF Studs)" with cost_type: "materials"
+- "Exterior Wall Framing - Labor" with cost_type: "labor"  
+- "Exterior Wall Framing - Hardware/Fasteners" with cost_type: "materials"
+
+COST TYPE ASSIGNMENT (REQUIRED for every item):
+- "materials" = Physical materials, products, fixtures, equipment
+- "labor" = Installation, assembly, finishing work
+- "allowance" = Placeholder for subcontractor bids, unspecified items, or contingency
+
+MINIMUM EXTRACTION REQUIREMENTS:
+⚠️ You MUST extract AT LEAST 50-100 items for a complete plan set
+⚠️ For each trade/system, extract BOTH materials AND labor as separate items
+⚠️ Better to have 150 granular items than 3 broad items
+
+REQUIRED ITEM CATEGORIES (extract items for ALL of these):
+STRUCTURAL (10-20 items minimum):
+- Foundation materials + labor (concrete, rebar, forms)
+- Framing materials + labor (studs, plates, headers, joists, rafters, trusses)
+- Structural steel/hardware + labor
+
+EXTERIOR (10-15 items minimum):
+- Sheathing materials + labor
+- Housewrap/WRB materials + labor
+- Siding/cladding materials + labor
+- Windows materials + labor
+- Exterior doors materials + labor
+- Roofing materials + labor
+- Gutters/downspouts materials + labor
+
+INTERIOR (15-25 items minimum):
+- Drywall materials + labor
+- Interior doors materials + labor
+- Trim/millwork materials + labor
+- Cabinets materials + labor
+- Countertops materials + labor
+- Interior paint/finishes materials + labor
+
+MEP (15-25 items minimum):
+- Plumbing rough-in materials + labor
+- Plumbing fixtures materials + labor
+- Electrical rough-in materials + labor  
+- Electrical fixtures/devices materials + labor
+- HVAC equipment + labor
+- HVAC distribution materials + labor
+
+FINISHES (10-15 items minimum):
+- Flooring by type materials + labor
+- Tile materials + labor
+- Appliances materials + labor
+- Hardware/accessories materials + labor
+
+PER-ITEM ASSUMPTIONS (REQUIRED):
+For EVERY item, you MUST include an "assumptions" array documenting what you assumed:
+- "material": Material grade, type, manufacturer assumptions (e.g., "Douglas Fir #2 grade")
+- "pricing": Basis for unit_cost (e.g., "2024 market rates for residential construction")
+- "method": Installation method assumptions (e.g., "Standard nail-on installation")
+- "code": Code compliance assumptions (e.g., "Assumes IRC 2021 residential code")
+
+MEASUREMENT INSTRUCTIONS (REQUIRED):
+For EVERY item, provide clear "measurement_instructions" explaining:
+- WHAT to measure (e.g., "linear feet of top plate", "square feet of drywall")
+- WHERE to find it (e.g., "from floor plan dimensions", "from elevation views")
+- HOW to calculate (e.g., "perimeter of each room", "multiply length x height for each wall")
 
 3-LEVEL CATEGORIZATION:
 LEVEL 1: CATEGORY - MUST be one of: structural, exterior, interior, mep, finishes, or other
@@ -245,31 +318,43 @@ LEVEL 3: LINE ITEMS (individual materials with ${standardName} cost codes)
 
 PRICING REQUIREMENTS:
 - For each item, you MUST provide a realistic "unit_cost" based on material type, grade, and typical market rates (as of 2024)
-- Include both material and labor costs where applicable
-- Use industry-standard pricing ranges appropriate for the material and unit type
+- Materials: Use current material pricing (per unit)
+- Labor: Use industry-standard labor rates ($45-85/hr depending on trade)
 - Price per LF, SF, CF, CY, EA, or SQ depending on the unit
+- Document pricing assumptions in the "assumptions" array with type "pricing"
+- Remember: quantity is 0 - user will multiply unit_cost by their measured quantity
 
-BE THOROUGH: Extract every measurable element visible in the plan - you MUST extract MULTIPLE items per page
-EXPECTED COVERAGE: For a 19-page plan, expect 5-15 items per page minimum
-BE SPECIFIC: "2x6 Top Plate" not just "lumber"
-SHOW YOUR MATH: Include dimensions used for calculations
+BE THOROUGH: Extract every measurable element visible in the plan
+BE SPECIFIC: "2x6 Top Plate - Materials" and "2x6 Top Plate - Labor" not just "lumber"
+REFERENCE DIMENSIONS: Include dimensions you see in notes, but set quantity to 0
 USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
-ASSIGN CATEGORIES: Every item MUST have a category from: structural, exterior, interior, mep, finishes, or other. NEVER use "master" as a category.
+ASSIGN COST TYPES: Every item MUST have cost_type: "labor", "materials", or "allowance"
+ASSIGN CATEGORIES: Every item MUST have a category from: structural, exterior, interior, mep, finishes, or other
 ASSIGN SUBCATEGORIES: Every item must have a subcategory
 ASSIGN COST CODES: Use the ${standardName} cost codes provided in the reference section
 INCLUDE LOCATIONS: Specify where each item is located
 PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
 INCLUDE PRICING: Every item must have a realistic unit_cost
+INCLUDE ASSUMPTIONS: Every item must have an "assumptions" array
+INCLUDE MEASUREMENT INSTRUCTIONS: Every item must have "measurement_instructions"
 
-EXTRACT COMPREHENSIVELY:
-- Count ALL doors, windows, fixtures, outlets, switches visible
-- Measure ALL walls, floors, roofs, foundations
-- Quantify ALL materials: lumber, concrete, drywall, insulation, roofing, siding
-- Include ALL mechanical: HVAC equipment, plumbing fixtures, electrical components
-- List ALL finishes: paint, flooring, cabinets, countertops, appliances
-- Calculate areas, volumes, lengths for EVERY measurable element
+EXTRACT COMPREHENSIVELY - BOTH MATERIALS AND LABOR FOR EACH:
+- Foundation: concrete materials + labor, rebar materials + labor, forms materials + labor
+- Framing: lumber materials + labor, hardware materials, sheathing materials + labor
+- Roofing: shingles materials + labor, underlayment materials + labor, flashing materials + labor
+- Siding: siding materials + labor, trim materials + labor
+- Windows: window units + installation labor
+- Doors: door units + installation labor
+- Drywall: drywall sheets materials + hanging labor + taping/finishing labor
+- Electrical: wire/conduit materials + rough-in labor, devices materials + trim-out labor
+- Plumbing: pipe materials + rough-in labor, fixtures materials + trim-out labor
+- HVAC: equipment materials + installation labor, ductwork materials + labor
+- Flooring: flooring materials + installation labor (by room/type)
+- Cabinets: cabinet materials + installation labor
+- Paint: paint materials + labor
+- Trim: trim materials + installation labor
 
-DO NOT SKIP: Even if an item appears simple or small, include it. Better to over-extract than under-extract.
+DO NOT SKIP: Even if an item appears simple or small, include it with proper cost_type.
 
 QUALITY ANALYSIS FOCUS (REQUIRED SECTION):
 You MUST also provide a complete quality_analysis object with:
@@ -477,14 +562,15 @@ MULTI-MODEL STRATEGY:
 - Each model should find DIFFERENT items - we'll aggregate all findings
 - Cross-validate against template to ensure nothing is missed
 
-TAKEOFF REQUIREMENTS:
+TAKEOFF REQUIREMENTS (SCOPE-FIRST APPROACH):
+⚠️ CRITICAL: Set quantity=0 for ALL items. User will measure quantities using the Chat tab.
 1. Examine EVERY dimension, measurement, and annotation visible in the plan
-2. Calculate quantities based on visible dimensions and scale
-3. Identify all construction materials, fixtures, and components
-4. Use standard construction estimating practices
-5. Cross-reference dimensions to ensure accuracy
-6. Assign appropriate ${standardName} cost codes to each item
-7. Include realistic unit_cost pricing for every item
+2. Identify all construction materials, fixtures, and components (set quantity=0)
+3. Use standard construction estimating practices
+4. Assign appropriate ${standardName} cost codes to each item
+5. Include realistic unit_cost pricing for every item
+6. Include "assumptions" array for EVERY item documenting material/pricing/method assumptions
+7. Include "measurement_instructions" for EVERY item explaining how to measure it
 
 CRITICAL: You must extract MULTIPLE items per page. A single page typically contains:
 - Multiple wall sections (exterior, interior, different materials)
@@ -504,21 +590,23 @@ QUALITY ANALYSIS REQUIREMENTS:
 11. Document audit trail - what was analyzed, what assumptions were made
 12. Build a trade_scope_review showing each trade's status (complete/partial/missing) with notes and page references
 
-IMPORTANT:
+IMPORTANT (SCOPE-FIRST APPROACH):
+⚠️ ALL quantities MUST be 0 - user will measure using the Chat tab
 - Be SPECIFIC: "2x6 Top Plate" not just "lumber"
-- SHOW YOUR MATH: Include dimensions used for calculations
+- REFERENCE DIMENSIONS: Note dimensions you see, but quantity stays 0
 - USE CORRECT UNITS: LF (linear feet), SF (square feet), CF (cubic feet), CY (cubic yards), EA (each), SQ (100 SF for roofing)
 - BE THOROUGH: Extract every measurable element visible in the plan
 - ASSIGN SUBCATEGORIES: Every item must have a subcategory
 - ASSIGN COST CODES: Use the ${standardName} cost codes provided
 - INCLUDE LOCATIONS: Specify where each item is located
 - PROVIDE BOUNDING BOXES: Every item must have a bounding_box with coordinates
+- INCLUDE ASSUMPTIONS: Document all assumptions (material, pricing, method, code) per item
+- INCLUDE MEASUREMENT INSTRUCTIONS: Explain how to measure each item
 - If dimensions are unclear or not visible, state "dimension not visible" in notes AND add to quality_analysis.completeness.missing_dimensions
-- **CRITICAL**: For each item where you cannot determine a complete quantity or estimate, explicitly state:
-  - What information is missing (measurements, quantities, specifications)
-  - Why it's needed for the estimate
-  - Where to find it (sheet numbers, schedules, details)
-  - Impact level (critical/high/medium/low)
+- **CRITICAL**: For each item, include:
+  - "needs_measurement": true
+  - "measurement_instructions": How to measure this item from the plans
+  - "assumptions": Array of assumptions made for this item
 
 QUALITY ANALYSIS REQUIREMENTS - POPULATE ALL FIELDS:
 - completeness: Assess what's missing (sheets, dimensions, details, sections)

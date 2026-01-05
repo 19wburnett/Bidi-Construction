@@ -231,11 +231,8 @@ async function extractTextWithGPT4Vision(imageUrls: string[]): Promise<string> {
                   text: 'Extract all text from this invoice/bid document page. Include everything: headers, company info, line items, totals, notes, and any other text.'
                 },
                 {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageUrl,
-                    detail: 'high' as const
-                  }
+                  type: 'image',
+                  image: imageUrl
                 }
               ]
             }

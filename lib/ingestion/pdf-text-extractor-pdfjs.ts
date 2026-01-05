@@ -1,9 +1,12 @@
 /**
- * PDF Text Extractor using pdf-parse
+ * PDF Text Extractor - Alternative methods
  * 
- * This is the PRIMARY text extractor - designed specifically for
- * server-side Node.js usage. It's simple, reliable, and doesn't
- * require canvas or web workers.
+ * This module provides alternative PDF text extraction using pdf2json.
+ * pdf2json is the most reliable option for serverless environments
+ * as it doesn't require web workers or canvas.
+ * 
+ * Note: The primary extraction is now handled by pdf2json directly
+ * in plan-text-chunks.ts. This module exists for compatibility.
  */
 
 import type { PageText } from '@/types/ingestion'
@@ -15,10 +18,10 @@ export interface PdfjsExtractionResult {
 }
 
 /**
- * Extract text from PDF buffer using pdf-parse
+ * Extract text from PDF buffer
  * 
- * pdf-parse is specifically designed for server-side Node.js usage
- * and doesn't require web workers or canvas.
+ * Note: This function now delegates to pdf2json since pdfjs-dist
+ * has issues in serverless environments (worker requirements).
  * 
  * @param buffer - PDF file as Buffer
  * @param options - Extraction options
@@ -35,86 +38,67 @@ export async function extractTextWithPdfjs(
   const startTime = Date.now()
   const warnings: string[] = []
 
-  // Dynamic import to avoid bundling issues
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse') as (buffer: Buffer, options?: Record<string, unknown>) => Promise<{ text: string; numpages: number }>
+  // Use pdf2json for extraction - it's the most reliable in serverless
+  const PDFParser = (await import('pdf2json')).default
+  
+  const pdfParser = new PDFParser()
 
   // Create a timeout promise
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
-      reject(new Error(`pdf-parse text extraction timeout after ${timeoutMs / 1000}s`))
+      reject(new Error(`PDF text extraction timeout after ${timeoutMs / 1000}s`))
     }, timeoutMs)
   })
 
-  const extractionPromise = (async () => {
-    // pdf-parse options
-    const parseOptions = {
-      // Return per-page text
-      pagerender: async (pageData: { pageIndex: number; getTextContent: () => Promise<{ items: Array<{ str?: string; transform?: number[] }> }> }) => {
-        const textContent = await pageData.getTextContent()
-        let text = ''
-        let lastY: number | null = null
+  const extractionPromise = new Promise<PageText[]>((resolve, reject) => {
+    pdfParser.on('pdfParser_dataError', (errData: { parserError: Error } | Error) => {
+      const errorMsg = errData instanceof Error ? errData.message : errData.parserError?.message || 'PDF parsing error'
+      reject(new Error(errorMsg))
+    })
+
+    pdfParser.on('pdfParser_dataReady', (pdfData: { Pages: Array<{ Texts: Array<{ R: Array<{ T: string }>, x: number, y: number }> }> }) => {
+      const pages: PageText[] = []
+      
+      for (let i = 0; i < pdfData.Pages.length; i++) {
+        const page = pdfData.Pages[i]
+        const textItems: PageText['textItems'] = []
+        let pageText = ''
         
-        for (const item of textContent.items) {
-          if (item.str) {
-            // Get Y position from transform if available
-            const y = item.transform ? item.transform[5] : null
-            const fontSize = item.transform ? Math.abs(item.transform[0]) : 12
-            
-            // Add newline when Y position changes significantly
-            if (lastY !== null && y !== null && Math.abs(y - lastY) > fontSize * 0.5) {
-              text += '\n'
-            }
-            if (y !== null) lastY = y
-            
-            text += item.str + ' '
+        for (const textItem of page.Texts) {
+          const text = textItem.R.map((r: { T: string }) => decodeURIComponent(r.T)).join('')
+          if (text) {
+            pageText += text + ' '
+            textItems.push({
+              text,
+              x: textItem.x || 0,
+              y: textItem.y || 0,
+              fontSize: 12, // pdf2json doesn't provide font size directly
+            })
           }
         }
         
-        return text.trim()
+        pages.push({
+          pageNumber: i + 1,
+          text: pageText.trim(),
+          textItems,
+        })
+        
+        if (onProgress) {
+          onProgress(i + 1, pdfData.Pages.length)
+        }
       }
-    }
+      
+      resolve(pages)
+    })
 
-    console.log('[pdf-parse] Extracting text from PDF...')
-    
-    const result = await pdfParse(buffer, parseOptions)
-    
-    const pages: PageText[] = []
-    const numPages = result.numpages || 1
-    
-    // pdf-parse returns all text concatenated, but we need per-page
-    // Split by page breaks or use the text as a single page if no page info
-    const pageTexts = result.text.split(/\f/) // Form feed character often separates pages
-    
-    for (let i = 0; i < numPages; i++) {
-      const pageText = pageTexts[i] || ''
-      
-      pages.push({
-        pageNumber: i + 1,
-        text: pageText.trim(),
-        textItems: [], // pdf-parse doesn't provide position info in simple mode
-      })
-      
-      if (onProgress) {
-        onProgress(i + 1, numPages)
-      }
-      
-      // Log progress every 10 pages
-      if ((i + 1) % 10 === 0 || i + 1 === numPages) {
-        console.log(`[pdf-parse] Processed ${i + 1}/${numPages} pages`)
-      }
-    }
-
-    console.log(`[pdf-parse] Extracted text from ${numPages} pages`)
-    
-    return pages
-  })()
+    pdfParser.parseBuffer(buffer)
+  })
 
   // Race between extraction and timeout
   const pages = await Promise.race([extractionPromise, timeoutPromise])
 
   const extractionTimeMs = Date.now() - startTime
-  console.log(`[pdf-parse] Extraction completed in ${extractionTimeMs}ms`)
+  console.log(`[pdf2json-alt] Extraction completed in ${extractionTimeMs}ms, ${pages.length} pages`)
 
   return {
     pages,
@@ -124,7 +108,7 @@ export async function extractTextWithPdfjs(
 }
 
 /**
- * Check if a PDF likely has extractable text using pdf-parse
+ * Check if a PDF likely has extractable text
  * Quick check without full extraction
  */
 export async function checkPdfHasText(buffer: Buffer): Promise<{
@@ -132,24 +116,44 @@ export async function checkPdfHasText(buffer: Buffer): Promise<{
   pageCount: number
   sampleText: string
 }> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse') as (buffer: Buffer, options?: Record<string, unknown>) => Promise<{ text: string; numpages: number }>
+  const PDFParser = (await import('pdf2json')).default
+  const pdfParser = new PDFParser()
   
   try {
-    // Quick parse to check for text
-    const result = await pdfParse(buffer, {
-      max: 1, // Only parse first page
-    } as Record<string, unknown>)
-    
-    const sampleText = (result.text || '').trim().slice(0, 200)
-    
-    return {
-      hasText: sampleText.length > 10,
-      pageCount: result.numpages || 0,
-      sampleText,
-    }
+    return new Promise((resolve) => {
+      pdfParser.on('pdfParser_dataError', () => {
+        resolve({
+          hasText: false,
+          pageCount: 0,
+          sampleText: '',
+        })
+      })
+
+      pdfParser.on('pdfParser_dataReady', (pdfData: { Pages: Array<{ Texts: Array<{ R: Array<{ T: string }> }> }> }) => {
+        const pageCount = pdfData.Pages.length
+        let sampleText = ''
+        
+        // Get text from first page
+        if (pageCount > 0) {
+          const firstPage = pdfData.Pages[0]
+          for (const textItem of firstPage.Texts) {
+            const text = textItem.R.map((r: { T: string }) => decodeURIComponent(r.T)).join('')
+            sampleText += text + ' '
+            if (sampleText.length > 200) break
+          }
+        }
+        
+        resolve({
+          hasText: sampleText.trim().length > 10,
+          pageCount,
+          sampleText: sampleText.trim().slice(0, 200),
+        })
+      })
+
+      pdfParser.parseBuffer(buffer)
+    })
   } catch (error) {
-    console.warn('[pdf-parse] Error checking PDF for text:', error)
+    console.warn('[pdf2json-alt] Error checking PDF for text:', error)
     return {
       hasText: false,
       pageCount: 0,
