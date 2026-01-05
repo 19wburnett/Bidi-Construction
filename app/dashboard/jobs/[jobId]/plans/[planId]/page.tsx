@@ -303,34 +303,61 @@ export default function EnhancedPlanViewer() {
     
     setIsResettingTakeoff(true)
     try {
-      // Get the analysis ID first
-      const { data: analysis } = await supabase
+      // Get ALL analysis IDs for this plan (there might be multiple)
+      const { data: analyses } = await supabase
         .from('plan_takeoff_analysis')
         .select('id')
         .eq('plan_id', planId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
       
-      if (analysis?.id) {
-        // Delete missing information
-        await supabase
-          .from('takeoff_missing_information')
-          .delete()
-          .eq('takeoff_analysis_id', analysis.id)
-        
-        // Delete reviews
-        await supabase
-          .from('takeoff_reviews')
-          .delete()
-          .eq('takeoff_analysis_id', analysis.id)
-        
-        // Delete the analysis itself
-        await supabase
+      const analysisIds = analyses?.map(a => a.id) || []
+      
+      // Delete in correct order to avoid foreign key constraints
+      // Even though we have ON DELETE CASCADE, explicit deletion is safer
+      
+      // 1. Delete takeoff item embeddings (by plan_id)
+      const { error: embeddingsError } = await supabase
+        .from('takeoff_item_embeddings')
+        .delete()
+        .eq('plan_id', planId)
+      if (embeddingsError) console.log('Note: takeoff_item_embeddings delete:', embeddingsError.message)
+      
+      // 2. Delete missing information (by plan_id to catch all)
+      const { error: missingError } = await supabase
+        .from('takeoff_missing_information')
+        .delete()
+        .eq('plan_id', planId)
+      if (missingError) console.log('Note: takeoff_missing_information delete:', missingError.message)
+      
+      // 3. Delete reviews (by plan_id to catch all)
+      const { error: reviewsError } = await supabase
+        .from('takeoff_reviews')
+        .delete()
+        .eq('plan_id', planId)
+      if (reviewsError) console.log('Note: takeoff_reviews delete:', reviewsError.message)
+      
+      // 4. Delete all analyses for this plan
+      if (analysisIds.length > 0) {
+        const { error: analysisError } = await supabase
           .from('plan_takeoff_analysis')
           .delete()
-          .eq('id', analysis.id)
+          .in('id', analysisIds)
+        if (analysisError) console.log('Note: plan_takeoff_analysis delete:', analysisError.message)
       }
+      
+      // 5. Also try to delete by plan_id directly (catches any orphaned records)
+      await supabase
+        .from('plan_takeoff_analysis')
+        .delete()
+        .eq('plan_id', planId)
+      
+      // 6. Reset the plan's takeoff status
+      await supabase
+        .from('plans')
+        .update({
+          has_takeoff_analysis: false,
+          takeoff_analysis_status: null
+        })
+        .eq('id', planId)
       
       // Clear local state
       setTakeoffResults(null)

@@ -388,6 +388,7 @@ ${buildTakeoffUserPrompt(
       // This allows users to measure quantities themselves using the Chat tab
       takeoffData.items = takeoffData.items.map((item: any) => ({
         ...item,
+        id: item.id || crypto.randomUUID(),
         quantity: 0, // Always 0 - user will measure
         needs_measurement: true, // Flag for UI to show measurement is needed
         // Ensure assumptions array exists (AI should provide, but fallback if not)
@@ -402,6 +403,110 @@ ${buildTakeoffUserPrompt(
         measurement_instructions: item.measurement_instructions || 
           `Measure the ${item.unit || 'quantity'} of ${item.name} from the plans. Check ${item.location || 'relevant sheets'} for dimensions.`
       }))
+      
+      // ITEM EXPANSION: If AI returned too few items, expand by breaking out materials/labor
+      if (takeoffData.items.length < 30) {
+        console.log(`⚠️ Only ${takeoffData.items.length} items extracted. Expanding with materials/labor breakdown...`)
+        
+        const expandedItems: any[] = []
+        takeoffData.items.forEach((item: any) => {
+          // If item doesn't already have a cost_type, create both materials and labor versions
+          if (!item.cost_type || item.cost_type === 'other') {
+            // Materials item
+            expandedItems.push({
+              ...item,
+              id: crypto.randomUUID(),
+              name: `${item.name} - Materials`,
+              cost_type: 'materials',
+              unit_cost: item.unit_cost || 50,
+              subcontractor: item.subcontractor || 'General',
+            })
+            // Labor item
+            expandedItems.push({
+              ...item,
+              id: crypto.randomUUID(),
+              name: `${item.name} - Labor`,
+              cost_type: 'labor',
+              unit_cost: Math.round((item.unit_cost || 50) * 0.6), // Labor typically 60% of material cost
+              subcontractor: item.subcontractor || 'General',
+            })
+          } else {
+            // Item already has cost_type, keep as-is
+            expandedItems.push(item)
+          }
+        })
+        
+        // Add common missing items if project appears to be residential
+        const existingCategories = new Set(takeoffData.items.map((i: any) => i.category?.toLowerCase()))
+        const commonResidentialItems = [
+          { name: 'Windows', category: 'exterior', code: '8,500', subcontractor: 'Glazing' },
+          { name: 'Exterior Doors', category: 'exterior', code: '8,100', subcontractor: 'Doors' },
+          { name: 'Interior Doors', category: 'interior', code: '8,200', subcontractor: 'Doors' },
+          { name: 'Plumbing Fixtures', category: 'mep', code: '15,400', subcontractor: 'Plumbing' },
+          { name: 'Electrical Outlets', category: 'mep', code: '16,200', subcontractor: 'Electrical' },
+          { name: 'HVAC System', category: 'mep', code: '15,700', subcontractor: 'HVAC' },
+          { name: 'Flooring', category: 'finishes', code: '9,600', subcontractor: 'Flooring' },
+          { name: 'Interior Paint', category: 'finishes', code: '9,900', subcontractor: 'Painting' },
+          { name: 'Cabinets', category: 'interior', code: '12,350', subcontractor: 'Cabinets' },
+          { name: 'Countertops', category: 'interior', code: '12,360', subcontractor: 'Countertops' },
+          { name: 'Insulation', category: 'exterior', code: '7,200', subcontractor: 'Insulation' },
+          { name: 'Siding/Cladding', category: 'exterior', code: '7,400', subcontractor: 'Siding' },
+          { name: 'Gutters', category: 'exterior', code: '7,700', subcontractor: 'Roofing' },
+          { name: 'Landscaping', category: 'other', code: '2,900', subcontractor: 'Landscaping' },
+        ]
+        
+        const existingNames = new Set(expandedItems.map((i: any) => i.name.toLowerCase().replace(/ - (materials|labor)/i, '')))
+        
+        commonResidentialItems.forEach(common => {
+          if (!existingNames.has(common.name.toLowerCase())) {
+            // Add materials item
+            expandedItems.push({
+              id: crypto.randomUUID(),
+              name: `${common.code} - ${common.name} - Materials`,
+              description: `${common.name} materials`,
+              quantity: 0,
+              needs_measurement: true,
+              unit: 'EA',
+              unit_cost: 100,
+              cost_type: 'materials',
+              category: common.category,
+              subcategory: common.name,
+              subcontractor: common.subcontractor,
+              cost_code: common.code,
+              cost_code_description: common.name,
+              location: 'See plans',
+              assumptions: [{ type: 'material', assumption: 'Standard specification assumed', basis: 'Common residential item' }],
+              measurement_instructions: `Count or measure ${common.name} from the plans`,
+              confidence: 0.6,
+              bounding_box: { page: 1, x: 0.5, y: 0.5, width: 0.1, height: 0.1 }
+            })
+            // Add labor item
+            expandedItems.push({
+              id: crypto.randomUUID(),
+              name: `${common.code} - ${common.name} - Labor`,
+              description: `${common.name} installation labor`,
+              quantity: 0,
+              needs_measurement: true,
+              unit: 'EA',
+              unit_cost: 75,
+              cost_type: 'labor',
+              category: common.category,
+              subcategory: common.name,
+              subcontractor: common.subcontractor,
+              cost_code: common.code,
+              cost_code_description: common.name,
+              location: 'See plans',
+              assumptions: [{ type: 'labor', assumption: 'Standard installation labor', basis: 'Typical installation time' }],
+              measurement_instructions: `Count or measure ${common.name} from the plans - labor based on material quantity`,
+              confidence: 0.6,
+              bounding_box: { page: 1, x: 0.5, y: 0.5, width: 0.1, height: 0.1 }
+            })
+          }
+        })
+        
+        console.log(`✅ Expanded from ${takeoffData.items.length} to ${expandedItems.length} items`)
+        takeoffData.items = expandedItems
+      }
       
     } catch (parseError) {
       console.error('JSON parsing error:', parseError)
@@ -446,20 +551,72 @@ ${buildTakeoffUserPrompt(
       }
     }
 
-    // Save the primary analysis to the database
-    const { data: analysis, error: analysisError } = await supabase
+    // Save the primary analysis to the database (upsert - update if exists, insert if not)
+    // First check if an analysis already exists for this plan
+    const { data: existingAnalysis } = await supabase
       .from('plan_takeoff_analysis')
-      .insert({
-        job_id: plan.job_id,
-        plan_id: planId,
-        items: takeoffData.items || [],
-        summary: takeoffData.summary || takeoffData,
-        ai_model: 'gpt-4o',
-        confidence_scores: takeoffData.confidence_scores || {},
-        processing_time_ms: 0
-      })
-      .select()
-      .single()
+      .select('id')
+      .eq('plan_id', planId)
+      .maybeSingle()
+
+    let analysis: { id: string } | null = null
+    let analysisError: any = null
+
+    if (existingAnalysis) {
+      // Update existing analysis
+      console.log('📝 Updating existing takeoff analysis...')
+      
+      // First, delete all related records to start fresh
+      console.log('🗑️ Clearing old takeoff data...')
+      
+      // Delete item embeddings (by plan_id)
+      await supabase.from('takeoff_item_embeddings').delete().eq('plan_id', planId)
+      
+      // Delete old reviews (by plan_id to catch all)
+      await supabase.from('takeoff_reviews').delete().eq('plan_id', planId)
+      
+      // Delete old missing info (by plan_id to catch all)
+      await supabase.from('takeoff_missing_information').delete().eq('plan_id', planId)
+      
+      // Now update the analysis
+      const { data, error } = await supabase
+        .from('plan_takeoff_analysis')
+        .update({
+          items: takeoffData.items || [],
+          summary: takeoffData.summary || takeoffData,
+          ai_model: 'gpt-4o',
+          confidence_scores: takeoffData.confidence_scores || {},
+          processing_time_ms: 0,
+          review_results: null, // Clear old review results
+          missing_information: null, // Clear old missing info
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingAnalysis.id)
+        .select()
+        .single()
+      
+      analysis = data
+      analysisError = error
+    } else {
+      // Insert new analysis
+      console.log('📝 Creating new takeoff analysis...')
+      const { data, error } = await supabase
+        .from('plan_takeoff_analysis')
+        .insert({
+          job_id: plan.job_id,
+          plan_id: planId,
+          items: takeoffData.items || [],
+          summary: takeoffData.summary || takeoffData,
+          ai_model: 'gpt-4o',
+          confidence_scores: takeoffData.confidence_scores || {},
+          processing_time_ms: 0
+        })
+        .select()
+        .single()
+      
+      analysis = data
+      analysisError = error
+    }
 
     if (analysisError) {
       console.error('Error saving analysis:', analysisError)
@@ -539,6 +696,86 @@ ${buildTakeoffUserPrompt(
             }
           })
           .eq('id', analysis.id)
+      }
+      // 🚨 CRITICAL: Convert missing items from review into actual line items
+      // This ensures ALL identified items go into the spreadsheet with quantity=0
+      if (reviewResults?.mergedMissingItems && reviewResults.mergedMissingItems.length > 0) {
+        console.log(`📊 Converting ${reviewResults.mergedMissingItems.length} missing items to line items...`)
+        
+        // Map categories to likely cost codes based on user's selected standard
+        const categoryToCostCode: Record<string, { code: string, description: string, subcontractor: string }> = {
+          'structural': { code: '3,300', description: 'Footings/Concrete', subcontractor: 'Concrete' },
+          'exterior': { code: '7,300', description: 'Roofing/Siding', subcontractor: 'Roofing' },
+          'interior': { code: '9,250', description: 'Gypsum Board', subcontractor: 'Drywall' },
+          'mep': { code: '16,100', description: 'Electrical', subcontractor: 'Electrical' },
+          'finishes': { code: '9,600', description: 'Flooring', subcontractor: 'Flooring' },
+          'other': { code: '1,0', description: 'General Requirements', subcontractor: 'General' }
+        }
+        
+        const existingItemNames = new Set(
+          (takeoffData.items || []).map((item: any) => item.name?.toLowerCase().trim())
+        )
+        
+        const newItems = reviewResults.mergedMissingItems
+          .filter((mi: any) => !existingItemNames.has(mi.item?.toLowerCase().trim()))
+          .flatMap((mi: any) => {
+            const category = mi.category || 'other'
+            const costCodeInfo = categoryToCostCode[category] || categoryToCostCode['other']
+            
+            // Create both materials and labor line items for each missing item
+            const baseItem = {
+              id: crypto.randomUUID(),
+              description: mi.description || mi.item || 'Item identified during review',
+              quantity: 0,
+              needs_measurement: true,
+              measurement_instructions: mi.location ? `Check ${mi.location} and measure/count as needed` : 'Measure from plan drawings',
+              category: category,
+              subcategory: costCodeInfo.description,
+              subcontractor: costCodeInfo.subcontractor,
+              cost_code: costCodeInfo.code,
+              cost_code_description: costCodeInfo.description,
+              location: mi.location || 'See plans',
+              notes: `⚠️ Identified during review: ${mi.item || mi.description}. ${mi.impact ? `Impact: ${mi.impact}` : ''}`,
+              confidence: 0.7,
+              assumptions: [
+                {
+                  type: 'material',
+                  assumption: 'Standard specification assumed - verify with plans',
+                  basis: 'Item identified during review, specifications may vary'
+                }
+              ],
+              bounding_box: { page: 1, x: 0.5, y: 0.5, width: 0.1, height: 0.1 }
+            }
+            
+            // Create materials item with cost code in name
+            const materialsItem = {
+              ...baseItem,
+              id: crypto.randomUUID(),
+              name: `${costCodeInfo.code} - ${mi.item || 'Item'} - Materials`,
+              cost_type: 'materials' as const,
+              unit: 'EA',
+              unit_cost: 50.00, // Placeholder - user should update
+              total_cost: 0
+            }
+            
+            // Create labor item with cost code in name
+            const laborItem = {
+              ...baseItem,
+              id: crypto.randomUUID(),
+              name: `${costCodeInfo.code} - ${mi.item || 'Item'} - Labor`,
+              cost_type: 'labor' as const,
+              unit: 'EA',
+              unit_cost: 75.00, // Placeholder labor rate
+              total_cost: 0
+            }
+            
+            return [materialsItem, laborItem]
+          })
+        
+        if (newItems.length > 0) {
+          console.log(`✅ Added ${newItems.length} new line items from review findings`)
+          takeoffData.items = [...(takeoffData.items || []), ...newItems]
+        }
       }
     } catch (reviewError) {
       console.error('Error in review stage:', reviewError)

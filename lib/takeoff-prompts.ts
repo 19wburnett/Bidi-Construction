@@ -36,29 +36,28 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
 {
   "items": [
     {
-      "name": "Specific item name",
-      "description": "Detailed description",
+      "name": "COST_CODE - Item Name - Materials|Labor|Allowance (e.g., '3,300 - Footings - Concrete Materials')",
+      "description": "Detailed description of what this line item covers",
       "quantity": 0,
       "needs_measurement": true,
-      "measurement_instructions": "Clear instructions on how to measure this item from the plans (e.g., 'Measure total linear feet of exterior walls at top plate level')",
+      "measurement_instructions": "Clear instructions on how to measure this item from the plans (e.g., 'Calculate volume: length x width x depth of footing from foundation plan')",
       "unit": "LF|SF|CF|CY|EA|SQ",
-      "unit_cost": 2.50,
-      "cost_type": "labor|materials|allowance",
+      "unit_cost": 125.00,
+      "cost_type": "materials|labor|allowance",
       "assumptions": [
         {
           "type": "material|pricing|method|code",
-          "assumption": "What was assumed (e.g., 'Douglas Fir #2 grade lumber')",
-          "basis": "Why this was assumed (e.g., 'Standard residential framing specification')"
+          "assumption": "What was assumed (e.g., '3000 PSI concrete mix')",
+          "basis": "Why this was assumed (e.g., 'Standard residential foundation specification')"
         }
       ],
-      "location": "Specific location",
+      "location": "Specific location (e.g., 'Foundation perimeter')",
       "category": "structural|exterior|interior|mep|finishes|other",
-      "IMPORTANT: 'master' is NOT a valid category. Use one of: structural, exterior, interior, mep, finishes, or other. 'MasterFormat' refers to the cost code standard, NOT the category field.",
-      "subcontractor": "Trade Type (e.g. Electrical, Plumbing, Framing)",
-      "subcategory": "Specific subcategory",
-      "cost_code": "The standardized cost code",
-      "cost_code_description": "Cost code description",
-      "notes": "Additional notes",
+      "subcontractor": "Trade Type (e.g., Concrete, Electrical, Plumbing, Framing, Roofing)",
+      "subcategory": "Specific subcategory from cost code",
+      "cost_code": "The standardized cost code (e.g., '3,300')",
+      "cost_code_description": "Cost code description (e.g., 'Footings')",
+      "notes": "Additional notes including any missing information",
       "dimensions": "Original dimensions from plan (for reference - user will verify)",
       "bounding_box": {
         "page": 1,
@@ -70,6 +69,21 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
       "confidence": 0.95
     }
   ],
+  
+  NAMING CONVENTION FOR ITEMS (CRITICAL):
+  Format: "COST_CODE - Description - Materials|Labor|Allowance"
+  
+  Examples:
+  - "3,300 - Footings - Concrete Materials"
+  - "3,300 - Footings - Rebar Materials"  
+  - "3,300 - Footings - Labor"
+  - "6,100 - Wall Framing - 2x6 Stud Materials"
+  - "6,100 - Wall Framing - Labor"
+  - "7,300 - Roofing - Shingle Materials"
+  - "7,300 - Roofing - Labor"
+  - "16,50 - Electrical - Subcontractor Allowance"
+  
+  IMPORTANT: 'master' is NOT a valid category. Use one of: structural, exterior, interior, mep, finishes, or other.
   "issues": [
     {
       "severity": "critical|warning|info",
@@ -233,10 +247,17 @@ RESIDENTIAL PROJECT FOCUS:
       return basePrompt + jobTypePrompt + generateTemplateInstructions() + `
 
 TAKEOFF ANALYSIS FOCUS (REQUIRED SECTION):
+
+🚨🚨🚨 CRITICAL RULE: ALL ITEMS GO IN THE "items" ARRAY 🚨🚨🚨
+Every single construction element MUST be added to the "items" array with quantity: 0.
+DO NOT put items only in "missing information" - they MUST be in the items array.
+Missing information is METADATA about items, not a separate list of items.
+
 ⚠️ SCOPE-FIRST APPROACH: You are defining the SCOPE of work, NOT calculating final quantities.
 - Set quantity to 0 for ALL items - the user will measure quantities later using the Chat tab
 - Set needs_measurement to true for all items
 - Provide clear measurement_instructions explaining HOW to measure each item
+- Even if you can't see the exact quantity, ADD THE ITEM with quantity: 0
 
 ⚠️ CRITICAL: BREAK OUT LABOR AND MATERIALS SEPARATELY
 For EVERY work item, create SEPARATE line items for:
@@ -244,57 +265,65 @@ For EVERY work item, create SEPARATE line items for:
 2. "labor" - The installation labor cost
 3. "allowance" - For items that need pricing from subcontractors or are not fully specified
 
-Example: For "Exterior Wall Framing", create THREE items:
-- "Exterior Wall Framing - Materials (2x6 SPF Studs)" with cost_type: "materials"
-- "Exterior Wall Framing - Labor" with cost_type: "labor"  
-- "Exterior Wall Framing - Hardware/Fasteners" with cost_type: "materials"
+Example: For "Exterior Wall Framing", you MUST create ALL THREE items in the "items" array:
+- "Exterior Wall Framing - Materials (2x6 SPF Studs)" with cost_type: "materials", quantity: 0
+- "Exterior Wall Framing - Labor" with cost_type: "labor", quantity: 0
+- "Exterior Wall Framing - Hardware/Fasteners" with cost_type: "materials", quantity: 0
 
 COST TYPE ASSIGNMENT (REQUIRED for every item):
 - "materials" = Physical materials, products, fixtures, equipment
 - "labor" = Installation, assembly, finishing work
 - "allowance" = Placeholder for subcontractor bids, unspecified items, or contingency
 
-MINIMUM EXTRACTION REQUIREMENTS:
-⚠️ You MUST extract AT LEAST 50-100 items for a complete plan set
-⚠️ For each trade/system, extract BOTH materials AND labor as separate items
-⚠️ Better to have 150 granular items than 3 broad items
+🚨🚨🚨 COST CODE BASED EXTRACTION - THIS IS CRITICAL 🚨🚨🚨
 
-REQUIRED ITEM CATEGORIES (extract items for ALL of these):
-STRUCTURAL (10-20 items minimum):
-- Foundation materials + labor (concrete, rebar, forms)
-- Framing materials + labor (studs, plates, headers, joists, rafters, trusses)
-- Structural steel/hardware + labor
+You MUST base your items on the ${standardName} cost codes provided in the reference section above.
+For EACH relevant cost code from the user's selected standard, create line items broken out by:
+1. **Materials** - cost_type: "materials" - Physical products, materials, fixtures
+2. **Labor** - cost_type: "labor" - Installation, assembly, finishing work  
+3. **Allowance** - cost_type: "allowance" - For subcontractor bids or unspecified items
 
-EXTERIOR (10-15 items minimum):
-- Sheathing materials + labor
-- Housewrap/WRB materials + labor
-- Siding/cladding materials + labor
-- Windows materials + labor
-- Exterior doors materials + labor
-- Roofing materials + labor
-- Gutters/downspouts materials + labor
+EXAMPLE: For cost code "3,300 - Footings":
+- "3,300 - Footings - Concrete Materials" (cost_type: "materials", unit: "CY")
+- "3,300 - Footings - Rebar Materials" (cost_type: "materials", unit: "LF")
+- "3,300 - Footings - Forming Materials" (cost_type: "materials", unit: "SF")
+- "3,300 - Footings - Labor" (cost_type: "labor", unit: "CY")
 
-INTERIOR (15-25 items minimum):
-- Drywall materials + labor
-- Interior doors materials + labor
-- Trim/millwork materials + labor
-- Cabinets materials + labor
-- Countertops materials + labor
-- Interior paint/finishes materials + labor
+EXAMPLE: For cost code "6,100 - Rough Carpentry":
+- "6,100 - Wall Framing - 2x6 Studs Materials" (cost_type: "materials", unit: "LF")
+- "6,100 - Wall Framing - Plates Materials" (cost_type: "materials", unit: "LF")
+- "6,100 - Wall Framing - Headers Materials" (cost_type: "materials", unit: "EA")
+- "6,100 - Rough Carpentry - Labor" (cost_type: "labor", unit: "SF")
 
-MEP (15-25 items minimum):
-- Plumbing rough-in materials + labor
-- Plumbing fixtures materials + labor
-- Electrical rough-in materials + labor  
-- Electrical fixtures/devices materials + labor
-- HVAC equipment + labor
-- HVAC distribution materials + labor
+WHEN TO USE ALLOWANCE:
+- Subcontractor-provided work (e.g., "16,50 - Electrical Subcontractor - Allowance")
+- Items not fully specified in plans (e.g., "9,300 - Tile - Allowance")
+- Complex systems where labor is bundled (e.g., "15,400 - Plumbing Fixtures - Allowance")
 
-FINISHES (10-15 items minimum):
-- Flooring by type materials + labor
-- Tile materials + labor
-- Appliances materials + labor
-- Hardware/accessories materials + labor
+🚨 MINIMUM EXTRACTION REQUIREMENTS - THIS IS MANDATORY:
+⚠️ You MUST extract AT LEAST 80-150 items for a complete plan set
+⚠️ For each cost code, extract materials + labor (or allowance) as separate items
+⚠️ If you extract fewer than 50 items, you are doing it WRONG
+⚠️ A typical residential house has 100+ line items when broken out by materials/labor/allowance
+
+COUNT YOUR ITEMS: Before responding, count your items array. If it has fewer than 50 items, GO BACK and add more.
+EVERY cost code that applies gets at least materials + labor (or an allowance) items.
+
+SCAN THE COST CODE LIST and create items for ALL applicable codes:
+- Division 2: Site work items (grading, excavation, landscaping)
+- Division 3: Concrete items (footings, slabs, walls)
+- Division 4: Masonry items if applicable
+- Division 5: Metal items (structural steel, metal fabrications)
+- Division 6: Wood/carpentry items (rough framing, finish carpentry)
+- Division 7: Roofing and waterproofing items
+- Division 8: Doors and windows
+- Division 9: Finishes (drywall, paint, flooring, tile)
+- Division 10: Specialties (bath accessories, signage)
+- Division 11: Equipment (appliances, residential equipment)
+- Division 15: Mechanical/HVAC items
+- Division 16: Electrical items
+
+For EACH division that applies to the project, you should have multiple items!
 
 PER-ITEM ASSUMPTIONS (REQUIRED):
 For EVERY item, you MUST include an "assumptions" array documenting what you assumed:
@@ -385,33 +414,32 @@ You MUST also provide a complete quality_analysis object with:
 CRITICAL: Even if the plan is unclear or incomplete, you MUST still populate all quality_analysis fields. Use them to document what's missing or unclear.
 
 MISSING INFORMATION IDENTIFICATION (CRITICAL):
-For each item you extract, you MUST explicitly identify what information CANNOT be determined from the plans:
-1. **Missing Measurements**: If dimensions, lengths, widths, heights are not visible or unclear
-   - State what measurement is missing (e.g., "Window width not visible", "Wall height unclear")
-   - Explain why it's needed (e.g., "Cannot calculate window quantity without width")
-   - Specify where to find it (e.g., "Check Window Schedule on Sheet A-3")
-   - Assign impact level: "critical" (blocks quantity calculation), "high" (significantly affects estimate), "medium" (affects accuracy), "low" (minor impact)
+🚨 IMPORTANT: Missing information is metadata ATTACHED to items in the "items" array.
+🚨 DO NOT create a separate list of "missing items" - ADD THEM TO THE ITEMS ARRAY with quantity: 0!
 
-2. **Missing Quantities**: If item counts are not specified
-   - State what count is missing (e.g., "Number of outlets not specified", "Door count unclear")
-   - Explain why needed (e.g., "Cannot estimate electrical work without outlet count")
-   - Specify where to find it (e.g., "Check Electrical Schedule on Sheet E-1")
-   - Assign impact level
+For each item you extract, identify what information CANNOT be determined from the plans:
+1. **Missing Measurements**: If dimensions, lengths, widths, heights are not visible
+   - Still ADD THE ITEM to "items" with quantity: 0
+   - Note what measurement is missing in the item's "notes" field
+   - Provide measurement_instructions on HOW to find/measure it
 
-3. **Missing Specifications**: If material grades, types, sizes, or manufacturers are not shown
-   - State what spec is missing (e.g., "Concrete strength not specified", "Lumber grade unclear")
-   - Explain why needed (e.g., "Cannot price concrete without strength specification")
-   - Specify where to find it (e.g., "Check Specifications Section or Detail 3/S-1")
-   - Assign impact level
+2. **Missing Quantities**: If item counts are not specified  
+   - Still ADD THE ITEM to "items" with quantity: 0
+   - Note what count is missing (e.g., "outlet count needed from electrical plans")
+   - User will count and enter the quantity
 
-4. **Missing Details**: If installation methods, finishes, or accessories are not specified
-   - State what detail is missing (e.g., "Roofing installation method not shown", "Paint finish type unclear")
-   - Explain why needed (e.g., "Affects labor hours and material costs")
-   - Specify where to find it (e.g., "Check Details Section or Specifications")
-   - Assign impact level
+3. **Missing Specifications**: If material grades, types, sizes are not shown
+   - Still ADD THE ITEM to "items" with quantity: 0 and your best assumption
+   - Document the assumption in the "assumptions" array
+   - Note where to find the actual spec
 
-For each missing information item, add to the item's "notes" field in this format:
-"⚠️ MISSING: [what's missing]. WHY NEEDED: [why it's needed]. WHERE TO FIND: [where to find it]. IMPACT: [critical/high/medium/low]"
+4. **Missing Details**: If installation methods or finishes are not specified
+   - Still ADD THE ITEM to "items" with quantity: 0
+   - Use industry-standard assumptions
+   - Document in "assumptions" array
+
+REMEMBER: An item with missing information is STILL AN ITEM. Add it to the items array!
+Use the notes field format: "⚠️ MISSING: [what's missing]. WHERE TO FIND: [where to find it]. IMPACT: [critical/high/medium/low]"
 
 Also add missing information to quality_analysis.completeness.missing_dimensions or appropriate field.
 
