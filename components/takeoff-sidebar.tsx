@@ -26,7 +26,8 @@ import {
   User as UserIcon,
   TrendingUp,
   Filter,
-  Search
+  Search,
+  Ruler
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
@@ -44,6 +45,8 @@ interface TakeoffItem {
   notes: string | null
   detected_by: 'ai' | 'manual' | 'imported'
   tags: string[] | null
+  needs_measurement?: boolean
+  measurement_instructions?: string
 }
 
 interface ChatMessage {
@@ -619,6 +622,28 @@ export default function TakeoffSidebar({
                             </p>
                           </div>
                         </div>
+
+                        {/* Measurement guidance section */}
+                        {(item.measurement_instructions || item.quantity === 0 || item.needs_measurement) && (
+                          <div className="mt-3 pt-3 border-t border-amber-200 bg-blue-50/50 rounded-md px-2 py-2">
+                            <div className="font-medium text-blue-700 flex items-center gap-1 mb-1.5">
+                              <Ruler className="h-3 w-3" />
+                              How to Measure This Item
+                            </div>
+                            {item.measurement_instructions ? (
+                              <p className="text-gray-700 text-xs mb-2">{item.measurement_instructions}</p>
+                            ) : (
+                              <p className="text-gray-600 text-xs mb-2 italic">
+                                {item.unit === 'linear ft' || item.unit === 'LF' ? 'Measure the total linear feet from your plans using the scale provided.' :
+                                 item.unit === 'sq ft' || item.unit === 'SF' ? 'Calculate the square footage by multiplying length × width from your plans.' :
+                                 item.unit === 'each' || item.unit === 'EA' ? 'Count the total number of this item shown in your plans.' :
+                                 item.unit === 'cu yd' || item.unit === 'CY' ? 'Calculate volume in cubic yards (length × width × depth ÷ 27).' :
+                                 item.unit === 'SQ' ? 'Calculate roofing squares (total SF ÷ 100).' :
+                                 'Measure according to the unit specified and enter below.'}
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         {item.notes && (
                           <p className="text-xs text-gray-600 mt-2 italic">{item.notes}</p>

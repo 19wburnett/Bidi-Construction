@@ -412,11 +412,14 @@ ${buildTakeoffUserPrompt(
         takeoffData.items.forEach((item: any) => {
           // If item doesn't already have a cost_type, create both materials and labor versions
           if (!item.cost_type || item.cost_type === 'other') {
+            // Strip any cost code prefix from name (format: "CODE - Name" or "CODE - Name - Type")
+            const baseName = item.name.replace(/^\d+[,\s]?\d*\s*-\s*/i, '').replace(/\s*-\s*(Materials|Labor|Allowance)$/i, '').trim()
+            
             // Materials item
             expandedItems.push({
               ...item,
               id: crypto.randomUUID(),
-              name: `${item.name} - Materials`,
+              name: `${baseName} - Materials`,
               cost_type: 'materials',
               unit_cost: item.unit_cost || 50,
               subcontractor: item.subcontractor || 'General',
@@ -425,14 +428,18 @@ ${buildTakeoffUserPrompt(
             expandedItems.push({
               ...item,
               id: crypto.randomUUID(),
-              name: `${item.name} - Labor`,
+              name: `${baseName} - Labor`,
               cost_type: 'labor',
               unit_cost: Math.round((item.unit_cost || 50) * 0.6), // Labor typically 60% of material cost
               subcontractor: item.subcontractor || 'General',
             })
           } else {
-            // Item already has cost_type, keep as-is
-            expandedItems.push(item)
+            // Item already has cost_type, but strip cost code from name if present
+            const cleanedName = item.name.replace(/^\d+[,\s]?\d*\s*-\s*/i, '').trim()
+            expandedItems.push({
+              ...item,
+              name: cleanedName !== item.name ? cleanedName : item.name
+            })
           }
         })
         
@@ -462,7 +469,7 @@ ${buildTakeoffUserPrompt(
             // Add materials item
             expandedItems.push({
               id: crypto.randomUUID(),
-              name: `${common.code} - ${common.name} - Materials`,
+              name: `${common.name} - Materials`,
               description: `${common.name} materials`,
               quantity: 0,
               needs_measurement: true,
@@ -483,7 +490,7 @@ ${buildTakeoffUserPrompt(
             // Add labor item
             expandedItems.push({
               id: crypto.randomUUID(),
-              name: `${common.code} - ${common.name} - Labor`,
+              name: `${common.name} - Labor`,
               description: `${common.name} installation labor`,
               quantity: 0,
               needs_measurement: true,
@@ -747,22 +754,22 @@ ${buildTakeoffUserPrompt(
               bounding_box: { page: 1, x: 0.5, y: 0.5, width: 0.1, height: 0.1 }
             }
             
-            // Create materials item with cost code in name
+            // Create materials item
             const materialsItem = {
               ...baseItem,
               id: crypto.randomUUID(),
-              name: `${costCodeInfo.code} - ${mi.item || 'Item'} - Materials`,
+              name: `${mi.item || 'Item'} - Materials`,
               cost_type: 'materials' as const,
               unit: 'EA',
               unit_cost: 50.00, // Placeholder - user should update
               total_cost: 0
             }
             
-            // Create labor item with cost code in name
+            // Create labor item
             const laborItem = {
               ...baseItem,
               id: crypto.randomUUID(),
-              name: `${costCodeInfo.code} - ${mi.item || 'Item'} - Labor`,
+              name: `${mi.item || 'Item'} - Labor`,
               cost_type: 'labor' as const,
               unit: 'EA',
               unit_cost: 75.00, // Placeholder labor rate

@@ -36,7 +36,7 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
 {
   "items": [
     {
-      "name": "COST_CODE - Item Name - Materials|Labor|Allowance (e.g., '3,300 - Footings - Concrete Materials')",
+      "name": "Item Name - Materials|Labor|Allowance (e.g., 'Footings - Concrete Materials')",
       "description": "Detailed description of what this line item covers",
       "quantity": 0,
       "needs_measurement": true,
@@ -71,17 +71,18 @@ Return ONLY a valid JSON object with this EXACT structure. Both "items" and "qua
   ],
   
   NAMING CONVENTION FOR ITEMS (CRITICAL):
-  Format: "COST_CODE - Description - Materials|Labor|Allowance"
+  Format: "Description - Materials|Labor|Allowance"
+  DO NOT include cost code in the name - use the separate "cost_code" field instead.
   
   Examples:
-  - "3,300 - Footings - Concrete Materials"
-  - "3,300 - Footings - Rebar Materials"  
-  - "3,300 - Footings - Labor"
-  - "6,100 - Wall Framing - 2x6 Stud Materials"
-  - "6,100 - Wall Framing - Labor"
-  - "7,300 - Roofing - Shingle Materials"
-  - "7,300 - Roofing - Labor"
-  - "16,50 - Electrical - Subcontractor Allowance"
+  - "Footings - Concrete Materials" (with cost_code: "3,300")
+  - "Footings - Rebar Materials" (with cost_code: "3,300")
+  - "Footings - Labor" (with cost_code: "3,300")
+  - "Wall Framing - 2x6 Stud Materials" (with cost_code: "6,100")
+  - "Wall Framing - Labor" (with cost_code: "6,100")
+  - "Roofing - Shingle Materials" (with cost_code: "7,300")
+  - "Roofing - Labor" (with cost_code: "7,300")
+  - "Electrical - Subcontractor Allowance" (with cost_code: "16,50")
   
   IMPORTANT: 'master' is NOT a valid category. Use one of: structural, exterior, interior, mep, finishes, or other.
   "issues": [
@@ -284,21 +285,21 @@ For EACH relevant cost code from the user's selected standard, create line items
 3. **Allowance** - cost_type: "allowance" - For subcontractor bids or unspecified items
 
 EXAMPLE: For cost code "3,300 - Footings":
-- "3,300 - Footings - Concrete Materials" (cost_type: "materials", unit: "CY")
-- "3,300 - Footings - Rebar Materials" (cost_type: "materials", unit: "LF")
-- "3,300 - Footings - Forming Materials" (cost_type: "materials", unit: "SF")
-- "3,300 - Footings - Labor" (cost_type: "labor", unit: "CY")
+- "Footings - Concrete Materials" (cost_type: "materials", unit: "CY", cost_code: "3,300")
+- "Footings - Rebar Materials" (cost_type: "materials", unit: "LF", cost_code: "3,300")
+- "Footings - Forming Materials" (cost_type: "materials", unit: "SF", cost_code: "3,300")
+- "Footings - Labor" (cost_type: "labor", unit: "CY", cost_code: "3,300")
 
 EXAMPLE: For cost code "6,100 - Rough Carpentry":
-- "6,100 - Wall Framing - 2x6 Studs Materials" (cost_type: "materials", unit: "LF")
-- "6,100 - Wall Framing - Plates Materials" (cost_type: "materials", unit: "LF")
-- "6,100 - Wall Framing - Headers Materials" (cost_type: "materials", unit: "EA")
-- "6,100 - Rough Carpentry - Labor" (cost_type: "labor", unit: "SF")
+- "Wall Framing - 2x6 Studs Materials" (cost_type: "materials", unit: "LF", cost_code: "6,100")
+- "Wall Framing - Plates Materials" (cost_type: "materials", unit: "LF", cost_code: "6,100")
+- "Wall Framing - Headers Materials" (cost_type: "materials", unit: "EA", cost_code: "6,100")
+- "Rough Carpentry - Labor" (cost_type: "labor", unit: "SF", cost_code: "6,100")
 
 WHEN TO USE ALLOWANCE:
-- Subcontractor-provided work (e.g., "16,50 - Electrical Subcontractor - Allowance")
-- Items not fully specified in plans (e.g., "9,300 - Tile - Allowance")
-- Complex systems where labor is bundled (e.g., "15,400 - Plumbing Fixtures - Allowance")
+- Subcontractor-provided work (e.g., "Electrical Subcontractor - Allowance" with cost_code: "16,50")
+- Items not fully specified in plans (e.g., "Tile - Allowance" with cost_code: "9,300")
+- Complex systems where labor is bundled (e.g., "Plumbing Fixtures - Allowance" with cost_code: "15,400")
 
 🚨 MINIMUM EXTRACTION REQUIREMENTS - THIS IS MANDATORY:
 ⚠️ You MUST extract AT LEAST 80-150 items for a complete plan set

@@ -267,12 +267,27 @@ The component supports multiple JSON formats for backwards compatibility:
 
 All of these formats are automatically normalized to the standard format.
 
+## Naming Convention for AI Takeoff Items
+
+When items include a `cost_type` field (materials, labor, or allowance), the name should follow this format:
+
+**Format**: `"Description - Materials|Labor|Allowance"`
+
+**Important**: Do NOT include the cost code in the name. Use the separate `cost_code` field instead.
+
+**Examples**:
+- `"Footings - Concrete Materials"` (with `cost_code: "3,300"`)
+- `"Footings - Labor"` (with `cost_code: "3,300"`)
+- `"Wall Framing - 2x6 Stud Materials"` (with `cost_code: "6,100"`)
+- `"Electrical - Subcontractor Allowance"` (with `cost_code: "16,50"`)
+
 ## Notes
 
-1. **IDs**: If `id` is not provided, the component will auto-generate one
+1. **IDs**: If `id` is not provided, the component will auto-generate one (must be a valid UUID)
 2. **Subcontractor**: If not provided, items default to "Unassigned" and appear under that group
 3. **Total Cost**: If `total_cost` is not provided, it's calculated as `quantity × unit_cost`
 4. **Bounding Box**: Coordinates are normalized (0-1) relative to page dimensions
 5. **Category**: Must be lowercase (will be capitalized for display)
-6. **Backwards Compatible**: The component handles old JSON formats automatically
+6. **Cost Code**: Should be stored in the `cost_code` field, not included in the `name` field
+7. **Backwards Compatible**: The component handles old JSON formats automatically
 
