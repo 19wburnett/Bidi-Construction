@@ -115,43 +115,117 @@ async function handleOutboundEvent(body: any) {
     return NextResponse.json({ message: 'No email ID in event' })
   }
 
-  // Find recipient by resend_email_id
-  let { data: recipient, error: recipientError } = await supabase
-    .from('bid_package_recipients')
-    .select('*')
-    .eq('resend_email_id', emailId)
-    .single()
-
-  if (recipientError || !recipient) {
-    console.log('📧 [webhook] Recipient not found for email ID:', emailId, 'Error:', recipientError)
+  // Find recipient by resend_email_id with retry logic and fallback lookup
+  let recipient: any = null
+  let recipientError: any = null
+  
+  // Try to find recipient by resend_email_id with exponential backoff retries
+  const maxRetries = 5
+  const retryDelays = [1000, 2000, 4000, 8000, 16000] // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = retryDelays[attempt - 1]
+      console.log(`📧 [webhook] Retry attempt ${attempt}/${maxRetries} after ${delay}ms delay...`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+    }
     
-    // Retry after a short delay - the recipient record might not be committed yet
-    console.log('📧 [webhook] Retrying after 1 second delay...')
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    const { data: retryRecipient, error: retryError } = await supabase
+    const { data: foundRecipient, error: foundError } = await supabase
       .from('bid_package_recipients')
       .select('*')
       .eq('resend_email_id', emailId)
       .single()
     
-    if (retryError || !retryRecipient) {
-      // Try to find by any resend_email_id that might match for debugging
-      const { data: allRecipients } = await supabase
-        .from('bid_package_recipients')
-        .select('id, resend_email_id, subcontractor_email, status')
-        .not('resend_email_id', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(10)
-      console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
-      console.log('📧 [webhook] Looking for email_id:', emailId)
-      return NextResponse.json({ message: 'Recipient not found' }, { status: 200 }) // Return 200 to prevent retries
-  }
+    if (!foundError && foundRecipient) {
+      recipient = foundRecipient
+      recipientError = null
+      if (attempt > 0) {
+        console.log(`📧 [webhook] ✅ Found recipient on retry attempt ${attempt}:`, recipient.id)
+      }
+      break
+    }
     
-    // Use the retry recipient
-    recipient = retryRecipient
-    recipientError = null
-    console.log('📧 [webhook] Found recipient on retry:', recipient.id)
+    recipientError = foundError
+    if (attempt < maxRetries) {
+      console.log(`📧 [webhook] ⚠️ Recipient not found on attempt ${attempt + 1}, will retry...`)
+    }
+  }
+  
+  // If still not found by resend_email_id, try fallback lookup by email + bid_package_id
+  if (!recipient) {
+    console.log('📧 [webhook] ⚠️ Recipient not found by resend_email_id, trying fallback lookup...')
+    
+    // Extract email from webhook payload if available
+    const recipientEmail = body.data?.to?.[0] || body.data?.to || body.to?.[0] || body.to
+    
+    if (recipientEmail) {
+      // Get all bid packages created in the last 10 minutes (to narrow search)
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      
+      // Try to find recipient by email and recent timestamp
+      const { data: fallbackRecipients, error: fallbackError } = await supabase
+        .from('bid_package_recipients')
+        .select('*, bid_packages!inner(id, job_id)')
+        .eq('subcontractor_email', recipientEmail)
+        .gte('created_at', tenMinutesAgo)
+        .is('resend_email_id', null) // Only look for recipients without resend_email_id yet
+        .order('created_at', { ascending: false })
+        .limit(5)
+      
+      if (!fallbackError && fallbackRecipients && fallbackRecipients.length > 0) {
+        // Found potential match - update it with the resend_email_id
+        const potentialRecipient = fallbackRecipients[0]
+        console.log(`📧 [webhook] 🔍 Found potential recipient by email fallback:`, {
+          id: potentialRecipient.id,
+          email: potentialRecipient.subcontractor_email,
+          bid_package_id: potentialRecipient.bid_package_id,
+          created_at: potentialRecipient.created_at
+        })
+        
+        // Update the recipient with the resend_email_id
+        const { data: updatedRecipient, error: updateError } = await supabase
+          .from('bid_package_recipients')
+          .update({ resend_email_id: emailId })
+          .eq('id', potentialRecipient.id)
+          .select()
+          .single()
+        
+        if (!updateError && updatedRecipient) {
+          recipient = updatedRecipient
+          recipientError = null
+          console.log(`📧 [webhook] ✅ Updated recipient with resend_email_id via fallback lookup:`, recipient.id)
+        } else {
+          console.error('📧 [webhook] ❌ Error updating recipient with resend_email_id:', updateError)
+        }
+      } else {
+        console.log('📧 [webhook] ⚠️ No fallback recipient found by email:', recipientEmail)
+      }
+    } else {
+      console.log('📧 [webhook] ⚠️ No recipient email found in webhook payload for fallback lookup')
+    }
+  }
+  
+  // If still not found, log debugging info and return
+  if (!recipient) {
+    console.error('📧 [webhook] ❌ Recipient not found after all retries and fallback attempts')
+    console.log('📧 [webhook] Debug info:', {
+      emailId,
+      recipientEmail: body.data?.to?.[0] || body.data?.to || body.to?.[0] || body.to,
+      eventType,
+      bodyStructure: Object.keys(body)
+    })
+    
+    // Try to find by any resend_email_id that might match for debugging
+    const { data: allRecipients } = await supabase
+      .from('bid_package_recipients')
+      .select('id, resend_email_id, subcontractor_email, status, created_at')
+      .not('resend_email_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10)
+    console.log('📧 [webhook] Sample recipients with resend_email_id:', allRecipients)
+    console.log('📧 [webhook] Looking for email_id:', emailId)
+    
+    return NextResponse.json({ message: 'Recipient not found' }, { status: 200 }) // Return 200 to prevent retries
   }
 
   console.log('📧 [webhook] Found recipient:', recipient.id, 'Current status:', recipient.status, 'Email:', recipient.subcontractor_email)

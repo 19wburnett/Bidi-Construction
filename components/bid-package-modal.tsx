@@ -215,14 +215,39 @@ export default function BidPackageModal({
     setLoadingTrades(true)
     try {
       const trades = await getAllTrades(supabase)
-      setAllTrades(trades)
+      
+      // Extract unique subcontractor types from takeoff items
+      const subcontractorTypesFromTakeoff = new Set<string>()
+      propsTakeoffItems.forEach(item => {
+        if (item.subcontractor && item.subcontractor.trim()) {
+          subcontractorTypesFromTakeoff.add(item.subcontractor.trim())
+        }
+      })
+      
+      // Merge base trades with custom trades and subcontractor types from takeoff
+      const allTradesSet = new Set<string>([...trades])
+      subcontractorTypesFromTakeoff.forEach(subType => {
+        allTradesSet.add(subType)
+      })
+      
+      // Convert to sorted array
+      const allTradesArray = Array.from(allTradesSet).sort()
+      setAllTrades(allTradesArray)
     } catch (err: any) {
       console.error('Error loading custom trades:', err)
-      setAllTrades([...TRADE_CATEGORIES])
+      // Fallback: extract from takeoff items even if database fails
+      const subcontractorTypesFromTakeoff = new Set<string>()
+      propsTakeoffItems.forEach(item => {
+        if (item.subcontractor && item.subcontractor.trim()) {
+          subcontractorTypesFromTakeoff.add(item.subcontractor.trim())
+        }
+      })
+      const fallbackTrades = new Set([...TRADE_CATEGORIES, ...Array.from(subcontractorTypesFromTakeoff)])
+      setAllTrades(Array.from(fallbackTrades).sort())
     } finally {
       setLoadingTrades(false)
     }
-  }, [user, supabase])
+  }, [user, supabase, propsTakeoffItems])
 
   // Keep custom trade in sync with selected trades and save to database
   useEffect(() => {
@@ -284,6 +309,30 @@ export default function BidPackageModal({
       loadCustomTrades()
     }
   }, [isOpen, jobId, loadCustomTrades])
+
+  // Update trades when takeoff items change
+  useEffect(() => {
+    if (isOpen && allTrades.length > 0) {
+      // Extract unique subcontractor types from current takeoff items
+      const subcontractorTypesFromTakeoff = new Set<string>()
+      takeoffItems.forEach(item => {
+        if (item.subcontractor && item.subcontractor.trim()) {
+          subcontractorTypesFromTakeoff.add(item.subcontractor.trim())
+        }
+      })
+      
+      // Merge with existing trades
+      const allTradesSet = new Set<string>(allTrades)
+      subcontractorTypesFromTakeoff.forEach(subType => {
+        allTradesSet.add(subType)
+      })
+      
+      // Update if new trades were added
+      if (allTradesSet.size > allTrades.length) {
+        setAllTrades(Array.from(allTradesSet).sort())
+      }
+    }
+  }, [takeoffItems, isOpen])
 
   async function loadData() {
     try {
@@ -1014,7 +1063,42 @@ export default function BidPackageModal({
                       <div className="flex-1 overflow-y-auto min-h-0 pr-2">
                         <motion.div variants={staggerItem} className="space-y-4">
                           <div>
-                            <Label className="text-base font-semibold">Trade Categories *</Label>
+                            <div className="flex items-center justify-between mb-2">
+                              <Label className="text-base font-semibold">Trade Categories *</Label>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  // Filter trades that match search and exist in allTrades
+                                  const filtered = allTrades.filter(trade => 
+                                    trade.toLowerCase().includes(tradeSearch.toLowerCase())
+                                  )
+                                  const allFilteredSelected = filtered.length > 0 && filtered.every(t => selectedTrades.includes(t))
+                                  
+                                  if (allFilteredSelected) {
+                                    // Deselect all filtered trades
+                                    setSelectedTrades(prev => prev.filter(t => !filtered.includes(t)))
+                                  } else {
+                                    // Select all filtered trades
+                                    setSelectedTrades(prev => {
+                                      const newSelected = new Set(prev)
+                                      filtered.forEach(trade => newSelected.add(trade))
+                                      return Array.from(newSelected)
+                                    })
+                                  }
+                                }}
+                                className="h-8 text-xs"
+                              >
+                                {(() => {
+                                  const filtered = allTrades.filter(trade => 
+                                    trade.toLowerCase().includes(tradeSearch.toLowerCase())
+                                  )
+                                  const allFilteredSelected = filtered.length > 0 && filtered.every(t => selectedTrades.includes(t))
+                                  return allFilteredSelected ? 'Deselect All' : 'Select All'
+                                })()}
+                              </Button>
+                            </div>
                             <Input
                               placeholder="Search trades (e.g., Electrical, Roofing, Fire Alarm)"
                               value={tradeSearch}

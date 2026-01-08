@@ -578,6 +578,14 @@ export async function POST(request: NextRequest) {
           recipientData.status = 'sent'
           recipientData.sent_at = new Date().toISOString()
           recipientData.response_text = emailTextContent || null
+          
+          console.log('📧 [send] Email sent successfully:', {
+            resend_email_id: resendData.id,
+            message_id: messageId,
+            to: sub.email,
+            subject: emailSubject,
+            bid_package_id: bidPackageId
+          })
         }
 
         // Add SMS fields if SMS was sent
@@ -596,6 +604,16 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`📧 [send] Creating recipient record for ${sub.email || sub.phone} in package ${bidPackageId}`)
+        console.log('📧 [send] Recipient data being inserted:', {
+          bid_package_id: recipientData.bid_package_id,
+          subcontractor_email: recipientData.subcontractor_email,
+          subcontractor_name: recipientData.subcontractor_name,
+          resend_email_id: recipientData.resend_email_id || 'N/A (SMS only)',
+          telnyx_message_id: recipientData.telnyx_message_id || 'N/A (Email only)',
+          delivery_channel: recipientData.delivery_channel,
+          status: recipientData.status,
+          thread_id: recipientData.thread_id
+        })
         
         const { data: recipient, error: recipientError } = await supabase
           .from('bid_package_recipients')
@@ -604,7 +622,17 @@ export async function POST(request: NextRequest) {
           .single()
         
         if (recipientError) {
-          console.error(`📧 [send] Error creating recipient record:`, recipientError)
+          console.error(`📧 [send] ❌ Error creating recipient record:`, {
+            error: recipientError,
+            errorMessage: recipientError.message,
+            errorCode: recipientError.code,
+            errorDetails: recipientError.details,
+            recipientData: {
+              bid_package_id: recipientData.bid_package_id,
+              subcontractor_email: recipientData.subcontractor_email,
+              resend_email_id: recipientData.resend_email_id
+            }
+          })
           errors.push({ 
             subcontractor: sub.email || sub.phone || subId, 
             error: `Failed to create recipient record: ${recipientError.message}` 
@@ -613,16 +641,27 @@ export async function POST(request: NextRequest) {
         }
 
         if (!recipient) {
-          console.error(`📧 [send] Recipient insert returned no data`)
+          console.error(`📧 [send] ❌ Recipient insert returned no data`, {
+            recipientData: {
+              bid_package_id: recipientData.bid_package_id,
+              subcontractor_email: recipientData.subcontractor_email,
+              resend_email_id: recipientData.resend_email_id
+            }
+          })
           errors.push({ subcontractor: sub.email || sub.phone || subId, error: 'Recipient insert returned no data' })
           throw new Error('Recipient insert returned no data')
         }
 
-        console.log('📧 [send] Recipient created successfully:', {
+        console.log('📧 [send] ✅ Recipient created successfully:', {
           id: recipient.id,
           email: recipient.subcontractor_email,
           phone: recipient.subcontractor_phone,
-          deliveryChannel: recipient.delivery_channel
+          deliveryChannel: recipient.delivery_channel,
+          resend_email_id: recipient.resend_email_id || 'N/A',
+          telnyx_message_id: recipient.telnyx_message_id || 'N/A',
+          status: recipient.status,
+          created_at: recipient.created_at,
+          bid_package_id: recipient.bid_package_id
         })
 
         results.push({
