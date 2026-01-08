@@ -13,7 +13,9 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { generatePreviewHtml, generatePreviewSubject, TEMPLATE_VARIABLES } from '@/lib/email-templates/preview'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
-import { Loader2, Plus, X, Code, Eye, Palette, Save, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Loader2, Plus, X, Code, Eye, Palette, Save, Trash2, Sparkles } from 'lucide-react'
+import EmailTemplateAIAssistant from '@/components/email-template-ai-assistant'
 
 interface EmailTemplate {
   id?: string
@@ -32,6 +34,7 @@ interface EmailTemplateEditorProps {
   onClose: () => void
   onSave: () => void
   templateType?: 'bid_package' | 'reminder' | 'response'
+  openAIAssistant?: boolean
 }
 
 export default function EmailTemplateEditor({
@@ -39,7 +42,8 @@ export default function EmailTemplateEditor({
   isOpen,
   onClose,
   onSave,
-  templateType = 'bid_package'
+  templateType = 'bid_package',
+  openAIAssistant = false
 }: EmailTemplateEditorProps) {
   const { user } = useAuth()
   const supabase = createClient()
@@ -63,10 +67,22 @@ export default function EmailTemplateEditor({
   const [logoUrl, setLogoUrl] = useState<string>('')
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [signature, setSignature] = useState('')
   
   // Preview
   const [previewHtml, setPreviewHtml] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
   const previewIframeRef = useRef<HTMLIFrameElement>(null)
+  
+  // AI Assistant
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(openAIAssistant)
+  
+  // Update AI assistant state when prop changes
+  useEffect(() => {
+    if (isOpen && openAIAssistant) {
+      setAiAssistantOpen(true)
+    }
+  }, [isOpen, openAIAssistant])
 
   useEffect(() => {
     if (isOpen) {
@@ -90,6 +106,7 @@ export default function EmailTemplateEditor({
           setFontFamily(vars.font_family || 'Arial, sans-serif')
           setCompanyName(vars.company_name || '')
           setLogoUrl(vars.logo_url || '')
+          setSignature(vars.signature || '')
         }
       } else {
         // New template - use defaults
@@ -105,71 +122,167 @@ export default function EmailTemplateEditor({
         setFontFamily('Arial, sans-serif')
         setCompanyName('')
         setLogoUrl('')
+        setSignature('')
       }
       updatePreview()
     }
   }, [isOpen, template])
 
   useEffect(() => {
-    updatePreview()
-  }, [htmlBody, subject, primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, companyName, logoUrl])
+    if (activeTab === 'preview') {
+      // Small delay to ensure iframe is mounted
+      const timer = setTimeout(() => {
+        updatePreview()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [activeTab])
+  
+  // Update preview when content changes, but only if on preview tab
+  useEffect(() => {
+    if (activeTab === 'preview') {
+      // Debounce updates to avoid constant re-rendering while typing
+      const timer = setTimeout(() => {
+        updatePreview()
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [htmlBody, subject, primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, companyName, logoUrl, signature])
 
   const getDefaultHtmlBody = (): string => {
+    // Branding is applied using placeholder variables that get replaced when emails are sent
+    // Signature appears at the bottom with logo and company info
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 0; font-family: ${fontFamily}; background-color: ${backgroundColor};">
-  <div style="max-width: 600px; margin: 0 auto; background-color: ${backgroundColor}; padding: 32px;">
-    <h1 style="color: ${primaryColor}; font-size: 24px; margin-bottom: 16px;">{jobName}</h1>
-    <p style="color: ${textColor}; font-size: 16px; margin-bottom: 8px;"><strong>Location:</strong> {jobLocation}</p>
-    <p style="color: ${textColor}; font-size: 16px; margin-bottom: 8px;"><strong>Trade:</strong> {tradeCategory}</p>
-    <p style="color: ${textColor}; font-size: 16px; margin-bottom: 8px;"><strong>Deadline:</strong> {deadline}</p>
+<body style="margin: 0; padding: 20px; font-family: {fontFamily}; background-color: #f5f5f5; color: {textColor};">
+  <div style="max-width: 600px; margin: 0 auto; background-color: {backgroundColor}; padding: 20px;">
+    <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.5;">Hi there,</p>
     
-    {description && (
-      <div style="margin-top: 24px; padding: 16px; background-color: #F3F4F6; border-radius: 8px;">
-        <p style="color: ${textColor}; margin: 0;">{description}</p>
-      </div>
-    )}
+    <!-- Primary color used here for job name highlight -->
+    <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.5;">
+      I'm reaching out about a new project opportunity: <strong style="color: {primaryColor};">{jobName}</strong> located at {jobLocation}.
+    </p>
     
-    {lineItems && (
-      <div style="margin-top: 24px;">
-        <h2 style="color: ${textColor}; font-size: 18px; margin-bottom: 12px;">Minimum Required Line Items</h2>
-        {lineItems}
-      </div>
-    )}
+    <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.5;">
+      We're looking for a <strong>{tradeCategory}</strong> contractor for this project.
+    </p>
     
-    {planLink && (
-      <div style="margin-top: 24px; text-align: center;">
-        <a href="{planLink}" style="display: inline-block; padding: 12px 24px; background-color: ${primaryColor}; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
-          View & Download Plans
-        </a>
-      </div>
-    )}
+    <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.5;">
+      {description}
+    </p>
     
-    {reports && (
-      <div style="margin-top: 24px;">
-        <p style="color: ${textColor}; margin-bottom: 8px;"><strong>Attached Reports:</strong></p>
-        {reports}
-      </div>
-    )}
+    <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.5;">
+      <strong>Deadline:</strong> {deadline}
+    </p>
     
-    <p style="color: ${textColor}; margin-top: 24px;">Thank you for your interest!</p>
+    <div style="margin: 16px 0;">
+      <p style="margin: 0 0 8px 0; font-size: 16px; line-height: 1.5;"><strong>Required items:</strong></p>
+      {lineItems}
+    </div>
+    
+    <!-- Primary color used here for links -->
+    <p style="margin: 16px 0; font-size: 16px; line-height: 1.5;">
+      You can view and download the plans here: <a href="{planLink}" style="color: {primaryColor}; text-decoration: underline;">{planLink}</a>
+    </p>
+    
+    <div style="margin: 16px 0;">
+      <p style="margin: 0 0 8px 0; font-size: 16px; line-height: 1.5;"><strong>Additional documents:</strong></p>
+      {reports}
+    </div>
+    
+    <p style="margin: 16px 0 0 0; font-size: 16px; line-height: 1.5;">
+      Let me know if you're interested and we can discuss further.
+    </p>
+    
+    <p style="margin: 20px 0 0 0; font-size: 16px; line-height: 1.5;">
+      <strong>Important:</strong> Please send all bids to {bidEmail}. If you send a separate email in a new thread, make sure to use this email address so we can track your submission properly.
+    </p>
+    
+    <!-- Signature section with logo and custom signature -->
+    <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #e5e5e5;">
+      {signature}
+    </div>
   </div>
 </body>
 </html>`
   }
 
   const updatePreview = () => {
-    // Generate preview with current HTML body
-    const preview = generatePreviewHtml(htmlBody)
-    setPreviewHtml(preview)
-    
-    // Update iframe
-    if (previewIframeRef.current) {
-      previewIframeRef.current.srcdoc = preview
+    if (!previewIframeRef.current) {
+      return
+    }
+
+    // Only update if we're on the preview tab to avoid unnecessary updates
+    if (activeTab !== 'preview') {
+      return
+    }
+
+    if (!htmlBody || htmlBody.trim() === '') {
+      setPreviewHtml('')
+      previewIframeRef.current.srcdoc = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="padding: 20px; font-family: Arial, sans-serif; color: #666;"><p>Enter HTML content to see preview</p></body></html>'
+      return
+    }
+
+    setPreviewLoading(true)
+    try {
+      // Generate preview with current HTML body and branding
+      const preview = generatePreviewHtml(htmlBody, undefined, {
+        primaryColor,
+        secondaryColor,
+        backgroundColor,
+        textColor,
+        fontFamily,
+        companyName,
+        logoUrl,
+        signature
+      })
+      setPreviewHtml(preview)
+      
+      // Ensure preview is valid HTML
+      let finalPreview = preview
+      if (!finalPreview.includes('<!DOCTYPE') && !finalPreview.includes('<html')) {
+        finalPreview = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${finalPreview}</body></html>`
+      }
+      
+      // Store current scroll position if iframe content exists
+      let scrollTop = 0
+      try {
+        const iframeDoc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow?.document
+        if (iframeDoc) {
+          scrollTop = iframeDoc.documentElement.scrollTop || iframeDoc.body.scrollTop || 0
+        }
+      } catch (e) {
+        // Cross-origin or other error, ignore
+      }
+      
+      // Update iframe directly
+      if (previewIframeRef.current) {
+        previewIframeRef.current.srcdoc = finalPreview
+        
+        // Restore scroll position after content loads
+        setTimeout(() => {
+          try {
+            const iframeDoc = previewIframeRef.current?.contentDocument || previewIframeRef.current?.contentWindow?.document
+            if (iframeDoc && scrollTop > 0) {
+              iframeDoc.documentElement.scrollTop = scrollTop
+              iframeDoc.body.scrollTop = scrollTop
+            }
+          } catch (e) {
+            // Cross-origin or other error, ignore
+          }
+        }, 100)
+      }
+      setPreviewLoading(false)
+    } catch (error) {
+      console.error('Error generating preview:', error)
+      if (previewIframeRef.current) {
+        previewIframeRef.current.srcdoc = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="padding: 20px; font-family: Arial, sans-serif; color: #d32f2f;"><p>Error generating preview. Please check your HTML.</p></body></html>'
+      }
+      setPreviewLoading(false)
     }
   }
 
@@ -179,17 +292,44 @@ export default function EmailTemplateEditor({
 
     setUploadingLogo(true)
     try {
-      // Convert to base64 for email compatibility
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        const base64 = reader.result as string
-        setLogoUrl(base64)
-        setLogoFile(file)
+      // Upload to Supabase Storage for email compatibility
+      // Email clients require publicly accessible URLs, not base64
+      const fileExt = file.name.split('.').pop() || 'png'
+      const fileName = `email-templates/${user.id}/logo_${Date.now()}.${fileExt}`
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('bid-documents')
+        .upload(fileName, file, {
+          contentType: file.type,
+          upsert: true
+        })
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('bid-documents')
+        .getPublicUrl(fileName)
+
+      if (!publicUrl) {
+        // Fallback to signed URL if public URL not available
+        const { data: signedData } = await supabase.storage
+          .from('bid-documents')
+          .createSignedUrl(fileName, 31536000) // 1 year expiration
+        
+        if (signedData?.signedUrl) {
+          setLogoUrl(signedData.signedUrl)
+        } else {
+          throw new Error('Failed to get logo URL')
+        }
+      } else {
+        setLogoUrl(publicUrl)
       }
-      reader.readAsDataURL(file)
+      
+      setLogoFile(file)
     } catch (error) {
       console.error('Error uploading logo:', error)
-      alert('Failed to upload logo')
+      alert('Failed to upload logo. Please try again.')
     } finally {
       setUploadingLogo(false)
     }
@@ -234,7 +374,8 @@ export default function EmailTemplateEditor({
         },
         font_family: fontFamily,
         company_name: companyName,
-        logo_url: logoUrl
+        logo_url: logoUrl,
+        signature: signature
       }
 
       const templateData: EmailTemplate = {
@@ -304,16 +445,37 @@ export default function EmailTemplateEditor({
     }
   }
 
+  const handleApplyAIGenerated = (generatedHtmlBody: string, generatedSubject: string) => {
+    setHtmlBody(generatedHtmlBody)
+    setSubject(generatedSubject)
+    // Optionally close AI assistant after applying
+    // setAiAssistantOpen(false)
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={cn("max-w-5xl max-h-[90vh] overflow-y-auto", aiAssistantOpen && "max-w-7xl")}>
         <DialogHeader>
-          <DialogTitle>
-            {template ? 'Edit Email Template' : 'Create Email Template'}
-          </DialogTitle>
-          <DialogDescription>
-            Create a custom email template for bid packages with your branding
-          </DialogDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle>
+                {template ? 'Edit Email Template' : 'Create Email Template'}
+              </DialogTitle>
+              <DialogDescription>
+                Create a custom email template for bid packages with your branding
+              </DialogDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setAiAssistantOpen(!aiAssistantOpen)}
+              className="ml-4"
+            >
+              <Sparkles className={cn("h-4 w-4 mr-2", aiAssistantOpen && "text-orange-500")} />
+              AI Assistant
+            </Button>
+          </div>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -477,7 +639,7 @@ export default function EmailTemplateEditor({
                   </div>
 
                   <div>
-                    <Label htmlFor="logo">Logo</Label>
+                    <Label htmlFor="logo">Logo (for signature)</Label>
                     <Input
                       id="logo"
                       type="file"
@@ -499,7 +661,51 @@ export default function EmailTemplateEditor({
                         </Button>
                       </div>
                     )}
+                    <p className="text-xs text-gray-500 mt-1">
+                      Logo will appear in your email signature
+                    </p>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Email Signature</CardTitle>
+                  <CardDescription>Create a custom signature that appears at the bottom of emails</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="signature">Signature HTML</Label>
+                    <Textarea
+                      id="signature"
+                      value={signature}
+                      onChange={(e) => setSignature(e.target.value)}
+                      rows={8}
+                      className="font-mono text-sm"
+                      placeholder={`Example:\n<p style="margin: 0 0 4px 0;">Thanks,</p>\n${logoUrl ? '<img src="{logoUrl}" alt="{companyName}" style="max-height: 40px; margin: 8px 0;" />' : ''}\n<p style="margin: 0; font-size: 14px; color: {textColor};">{companyName}</p>\n<p style="margin: 0; font-size: 14px; color: {textColor};">Your Title</p>\n<p style="margin: 0; font-size: 14px; color: {textColor};">your.email@company.com</p>`}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Use HTML to create your signature. You can use {`{logoUrl}`}, {`{companyName}`}, {`{primaryColor}`}, {`{textColor}`} as variables.
+                    </p>
+                  </div>
+                  {!signature && (
+                    <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded border">
+                      <p className="font-medium mb-2">Quick signature builder:</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const defaultSig = `<p style="margin: 0 0 4px 0; font-size: 16px; line-height: 1.5;">Thanks,</p>
+${logoUrl ? `<div style="margin: 8px 0;"><img src="{logoUrl}" alt="{companyName}" style="max-height: 40px;" /></div>` : ''}
+<p style="margin: 0; font-size: 14px; line-height: 1.5; color: {textColor};">{companyName}</p>`
+                          setSignature(defaultSig)
+                        }}
+                      >
+                        Use Default Signature
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -604,14 +810,24 @@ export default function EmailTemplateEditor({
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="border rounded-lg overflow-hidden">
-                    <iframe
-                      ref={previewIframeRef}
-                      className="w-full h-[600px] border-0"
-                      title="Email Preview"
-                      sandbox="allow-same-origin"
-                    />
-                  </div>
+                  {previewLoading ? (
+                    <div className="flex items-center justify-center h-[600px] border rounded-lg">
+                      <div className="text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-gray-400" />
+                        <p className="text-sm text-gray-500">Generating preview...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden bg-white">
+                      <iframe
+                        ref={previewIframeRef}
+                        className="w-full h-[600px] border-0"
+                        title="Email Preview"
+                        sandbox="allow-same-origin allow-scripts"
+                        style={{ display: 'block' }}
+                      />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -655,6 +871,20 @@ export default function EmailTemplateEditor({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* AI Assistant Sidebar */}
+      <EmailTemplateAIAssistant
+        isOpen={aiAssistantOpen}
+        onClose={() => setAiAssistantOpen(false)}
+        htmlBody={htmlBody}
+        subject={subject}
+        branding={{
+          companyName,
+          primaryColor,
+          fontFamily
+        }}
+        onApply={handleApplyAIGenerated}
+      />
     </Dialog>
   )
 }

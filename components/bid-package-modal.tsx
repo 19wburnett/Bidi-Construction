@@ -67,12 +67,15 @@ interface BidPackageModalProps {
   planId: string
   takeoffItems: Array<{
     id: string
+    name?: string
     category: string
     description: string
     quantity: number
     unit: string
     unit_cost?: number
     subcontractor?: string
+    subcategory?: string
+    cost_code?: string
   }>
   isOpen: boolean
   onClose: () => void
@@ -81,12 +84,15 @@ interface BidPackageModalProps {
 
 interface TakeoffItem {
   id: string
+  name?: string
   category: string
   description: string
   quantity: number
   unit: string
   unit_cost?: number
   subcontractor?: string
+  subcategory?: string
+  cost_code?: string
 }
 
 interface Subcontractor {
@@ -368,11 +374,13 @@ export default function BidPackageModal({
           .filter((item): item is TakeoffItem => Boolean(item))
           .map(item => ({
             id: item.id,
+            name: item.name,
             category: trade,
             description: item.description,
             quantity: item.quantity,
             unit: item.unit,
-            unit_cost: item.unit_cost
+            unit_cost: item.unit_cost,
+            cost_code: item.cost_code
           }))
 
         // Convert date-only input to end of day in local timezone, then to ISO string
@@ -626,25 +634,48 @@ export default function BidPackageModal({
       'exterior': ['Siding', 'Roofing', 'Windows & Doors']
     }
     
+    // Helper function to check if an item matches a trade
+    const itemMatchesTrade = (item: TakeoffItem, trade: string): boolean => {
+      const normalizedTrade = normalizeTrade(trade)
+      const itemSubcontractorNormalized = item.subcontractor ? normalizeTrade(item.subcontractor) : ''
+      const itemCategoryNormalized = item.category ? normalizeTrade(item.category) : ''
+      const itemSubcategoryNormalized = item.subcategory ? normalizeTrade(item.subcategory) : ''
+      
+      // Direct exact matches - these take highest priority
+      if (itemSubcontractorNormalized === normalizedTrade) return true
+      if (itemCategoryNormalized === normalizedTrade) return true
+      if (itemSubcategoryNormalized === normalizedTrade) return true
+      
+      // Check if subcontractor contains the trade name (e.g., "Plumbing Contractor" contains "Plumbing")
+      // This handles variations like "Plumbing Contractor", "Plumbing Subcontractor", etc.
+      if (itemSubcontractorNormalized && itemSubcontractorNormalized.includes(normalizedTrade)) return true
+      
+      // For category mapping (e.g., "mep" → multiple trades), only match if we have a specific indicator:
+      // - subcategory matches the trade, OR
+      // - subcontractor matches the trade (already checked above)
+      // This prevents all "mep" items from matching every MEP trade indiscriminately
+      const categoryTrades = categoryToTradeMap[itemCategoryNormalized] || []
+      const categoryMapsToTrade = categoryTrades.some(t => normalizeTrade(t) === normalizedTrade)
+      
+      if (categoryMapsToTrade) {
+        // Category maps to this trade, but we need a specific indicator to confirm
+        // Check if subcategory matches (this is the key indicator for MEP items)
+        if (itemSubcategoryNormalized === normalizedTrade) return true
+        // Subcontractor match already checked above, so if we get here and subcontractor matches, return true
+        // Otherwise, don't match - we need either subcategory or subcontractor to confirm
+        return false
+      }
+      
+      return false
+    }
+    
     if (!activeTrade) {
-      // If no active trade selected, show items that match any selected trade via subcontractor or category
+      // If no active trade selected, show items that match any selected trade
       if (selectedTrades.length === 0) return { prioritized: visibleTakeoffItems, remaining: [] }
       
-      const normalizedSelectedTrades = new Set(selectedTrades.map(t => normalizeTrade(t)))
-      const filtered = visibleTakeoffItems.filter(item => {
-        const itemSubcontractorNormalized = item.subcontractor ? normalizeTrade(item.subcontractor) : ''
-        const itemCategoryNormalized = item.category ? normalizeTrade(item.category) : ''
-        
-        // Direct matches
-        const matchesSubcontractor = itemSubcontractorNormalized && normalizedSelectedTrades.has(itemSubcontractorNormalized)
-        const matchesCategory = itemCategoryNormalized && normalizedSelectedTrades.has(itemCategoryNormalized)
-        
-        // Check if category maps to any selected trade
-        const categoryTrades = categoryToTradeMap[itemCategoryNormalized] || []
-        const matchesCategoryMapping = categoryTrades.some(trade => normalizedSelectedTrades.has(normalizeTrade(trade)))
-        
-        return matchesSubcontractor || matchesCategory || matchesCategoryMapping
-      })
+      const filtered = visibleTakeoffItems.filter(item => 
+        selectedTrades.some(trade => itemMatchesTrade(item, trade))
+      )
       return { prioritized: filtered, remaining: [] }
     }
     
@@ -655,27 +686,33 @@ export default function BidPackageModal({
     const remaining: TakeoffItem[] = []
 
     for (const item of visibleTakeoffItems) {
-      // Normalize item fields for comparison
-      const itemSubcontractorNormalized = item.subcontractor ? normalizeTrade(item.subcontractor) : ''
-      const itemCategoryNormalized = item.category ? normalizeTrade(item.category) : ''
-      
-      // Check if item matches the active trade
-      const matchesCategory = normalizedActiveTrade && itemCategoryNormalized === normalizedActiveTrade
-      const matchesSubcontractor = itemSubcontractorNormalized && itemSubcontractorNormalized === normalizedActiveTrade
-      
-      // Check if category maps to active trade
-      const categoryTrades = categoryToTradeMap[itemCategoryNormalized] || []
-      const matchesCategoryMapping = categoryTrades.some(trade => normalizeTrade(trade) === normalizedActiveTrade)
-      
+      const matches = itemMatchesTrade(item, activeTrade)
       const isAssigned = assignedIds.has(item.id)
       
-      // Prioritize items that match the active trade (via category, subcontractor, or category mapping) or are already assigned
-      if (matchesCategory || matchesSubcontractor || matchesCategoryMapping || isAssigned) {
+      // Prioritize items that match the active trade or are already assigned
+      if (matches || isAssigned) {
         prioritized.push(item)
       } else {
         // Add all other items to remaining (subcontractors might do multiple trades)
         remaining.push(item)
       }
+    }
+    
+    // Debug: Log matching results for Plumbing trade
+    if (activeTrade && normalizeTrade(activeTrade) === 'plumbing') {
+      console.log(`[BidPackage] Plumbing trade matching:`, {
+        activeTrade,
+        totalItems: visibleTakeoffItems.length,
+        prioritized: prioritized.length,
+        remaining: remaining.length,
+        prioritizedItems: prioritized.map(i => ({
+          id: i.id,
+          description: i.description,
+          category: i.category,
+          subcategory: i.subcategory,
+          subcontractor: i.subcontractor
+        }))
+      })
     }
 
     // If no prioritized items but there are remaining items, show them as prioritized
@@ -1306,7 +1343,17 @@ export default function BidPackageModal({
                                     />
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="font-medium text-gray-900 flex-1">{item.description}</div>
+                                        <div className="flex-1 min-w-0">
+                                          {item.name && (
+                                            <div className="font-semibold text-gray-900 mb-1">{item.name}</div>
+                                          )}
+                                          <div className="font-medium text-gray-900">{item.description}</div>
+                                          {item.cost_code && (
+                                            <div className="text-xs text-gray-500 mt-1">
+                                              Cost Code: {item.cost_code}
+                                            </div>
+                                          )}
+                                        </div>
                                         {isAssignedElsewhere && (
                                           <Badge variant="secondary" className="text-[10px] text-gray-700 bg-gray-200 shrink-0">
                                             {assignedTrade}
@@ -1380,7 +1427,17 @@ export default function BidPackageModal({
                                     />
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="font-medium text-gray-900 flex-1">{item.description}</div>
+                                        <div className="flex-1 min-w-0">
+                                          {item.name && (
+                                            <div className="font-semibold text-gray-900 mb-1">{item.name}</div>
+                                          )}
+                                          <div className="font-medium text-gray-900">{item.description}</div>
+                                          {item.cost_code && (
+                                            <div className="text-xs text-gray-500 mt-1">
+                                              Cost Code: {item.cost_code}
+                                            </div>
+                                          )}
+                                        </div>
                                         {isAssignedElsewhere && (
                                           <Badge variant="secondary" className="text-[10px] text-gray-700 bg-gray-200 shrink-0">
                                             {assignedTrade}
@@ -1571,7 +1628,13 @@ export default function BidPackageModal({
                                         const originalMatchesTrade = normalizeTrade(item.category) === normalizeTrade(trade)
                                         return (
                                           <li key={item.id} className="flex flex-col gap-1 pb-2 border-b border-blue-100 last:border-0 last:pb-0">
+                                            {item.name && (
+                                              <div className="font-semibold text-sm text-gray-900">{item.name}</div>
+                                            )}
                                             <div className="font-medium text-sm text-gray-900">{item.description}</div>
+                                            {item.cost_code && (
+                                              <div className="text-xs text-gray-500">Cost Code: {item.cost_code}</div>
+                                            )}
                                             <div className="text-xs text-gray-600 flex items-center gap-2 flex-wrap">
                                               <span className="font-mono">{item.quantity} {item.unit}</span>
                                               {item.unit_cost && (

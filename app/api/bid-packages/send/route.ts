@@ -279,18 +279,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get email template if provided
-    let emailTemplate: { subject: string; html_body: string; text_body?: string } | null = null
+    // Get email template if provided (including variables for branding)
+    // Check both owned templates and shared templates
+    let emailTemplate: { subject: string; html_body: string; text_body?: string; variables?: any } | null = null
     if (templateId) {
-      const { data: template } = await supabase
+      // First check if user owns the template
+      const { data: ownedTemplate } = await supabase
         .from('email_templates')
-        .select('subject, html_body, text_body')
+        .select('subject, html_body, text_body, variables')
         .eq('id', templateId)
         .eq('user_id', user.id)
         .single()
       
-      if (template) {
-        emailTemplate = template
+      if (ownedTemplate) {
+        emailTemplate = ownedTemplate
+      } else {
+        // Check if template is shared with user
+        const { data: sharedTemplate } = await supabase
+          .from('email_template_shares')
+          .select(`
+            email_templates (
+              subject,
+              html_body,
+              text_body,
+              variables
+            )
+          `)
+          .eq('template_id', templateId)
+          .eq('shared_with_user_id', user.id)
+          .single()
+        
+        if (sharedTemplate?.email_templates) {
+          const templates = Array.isArray(sharedTemplate.email_templates) 
+            ? sharedTemplate.email_templates 
+            : [sharedTemplate.email_templates]
+          if (templates.length > 0) {
+            emailTemplate = templates[0]
+          }
+        }
       }
     }
 
@@ -649,9 +675,21 @@ function generateCustomTemplateBody(
   bidPackage: any,
   planLink: string | null,
   reportLinks: { title: string; url: string }[],
-  template: { subject: string; html_body: string; text_body?: string }
+  template: { subject: string; html_body: string; text_body?: string; variables?: any }
 ): string {
   let htmlBody = template.html_body
+  
+  // Apply branding from template variables if they exist
+  const branding = template.variables || {}
+  const brandColors = branding.brand_colors || {}
+  const primaryColor = brandColors.primary || '#EB5023'
+  const secondaryColor = brandColors.secondary || '#1E1D1E'
+  const backgroundColor = brandColors.background || '#FFFFFF'
+  const textColor = brandColors.text || '#1E1D1E'
+  const fontFamily = branding.font_family || 'Arial, sans-serif'
+  const companyName = branding.company_name || ''
+  const logoUrl = branding.logo_url || ''
+  const signature = branding.signature || ''
   
   // Helper function to escape HTML
   const escapeHtml = (text: string): string => {
@@ -679,73 +717,236 @@ function generateCustomTemplateBody(
   }
   
   // Replace template variables (escape user content to prevent XSS)
-  htmlBody = htmlBody.replace(/{jobName}/g, escapeHtml(bidPackage.jobs.name || ''))
-  htmlBody = htmlBody.replace(/{jobLocation}/g, escapeHtml(bidPackage.jobs.location || ''))
-  htmlBody = htmlBody.replace(/{tradeCategory}/g, escapeHtml(bidPackage.trade_category || ''))
-  htmlBody = htmlBody.replace(/{deadline}/g, formatDeadline(bidPackage.deadline))
-  htmlBody = htmlBody.replace(/{description}/g, escapeHtml(bidPackage.description || ''))
+  const jobName = escapeHtml(bidPackage.jobs.name || '')
+  const jobLocation = escapeHtml(bidPackage.jobs.location || '')
+  const tradeCategory = escapeHtml(bidPackage.trade_category || '')
+  const formattedDeadline = formatDeadline(bidPackage.deadline)
+  const description = escapeHtml(bidPackage.description || '')
   
-  // Replace line items - build HTML table
-  const lineItemsHtml = bidPackage.minimum_line_items && bidPackage.minimum_line_items.length > 0
-    ? `<table role="presentation" style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-        <thead>
-          <tr>
-            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Description</th>
-            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Quantity</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${bidPackage.minimum_line_items.map((item: any) => 
-            `<tr>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(item.description || '')}</td>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}</td>
-            </tr>`
-          ).join('')}
-        </tbody>
-      </table>
-      <!-- Important Disclaimer -->
-      <div style="background-color: #FFF7ED; border-left: 4px solid #F59E0B; border-radius: 0 8px 8px 0; padding: 20px; margin: 24px 0;">
-        <h3 style="font-size: 15px; font-weight: 600; color: #92400E; margin: 0 0 12px 0;">
-          ⚠️ Important: Verify Measurements & Check for Missing Scope
-        </h3>
-        <p style="font-size: 15px; color: #78350F; margin: 0 0 12px 0; line-height: 1.7;">
-          Please note that the line items provided above are <strong>minimum requirements</strong> based on initial takeoff measurements. We strongly recommend that you:
-        </p>
-        <ul style="margin: 16px 0; padding-left: 20px;">
-          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
-            <strong>Perform your own measurements</strong> to verify quantities and ensure accuracy
-          </li>
-          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
-            <strong>Review the plans thoroughly</strong> to identify any additional scope or items that may be missing from the list above
-          </li>
-          <li style="font-size: 15px; color: #78350F; margin: 8px 0; line-height: 1.6;">
-            <strong>Include any additional work</strong> you identify in your bid, as the provided line items may not represent the complete scope
-          </li>
-        </ul>
-        <p style="font-size: 13px; color: #92400E; margin: 0;">
-          Your bid should reflect your own measurements and assessment of the full scope of work required.
-        </p>
-      </div>`
-    : '<p style="padding: 12px 16px; text-align: center; color: #777878;">No specific line items required</p>'
+  // Handle JSX-style conditionals: {variable && ( ... )}
+  // Process conditionals by finding matching pairs
+  const processConditional = (variable: string, hasValue: boolean) => {
+    const openPattern = new RegExp(`\\{[\\s]*${variable}[\\s]*&&[\\s]*\\(`, 'g')
+    const matches: Array<{ openStart: number; openEnd: number; closeStart: number; closeEnd: number }> = []
+    
+    // Find all opening patterns
+    let match
+    while ((match = openPattern.exec(htmlBody)) !== null) {
+      const openStart = match.index
+      const openEnd = match.index + match[0].length
+      
+      // Find matching closing )} by counting parentheses, skipping strings
+      let depth = 1
+      let pos = openEnd
+      let inString = false
+      let stringChar = ''
+      
+      while (pos < htmlBody.length && depth > 0) {
+        const char = htmlBody[pos]
+        
+        // Handle string literals
+        if (!inString && (char === '"' || char === "'")) {
+          inString = true
+          stringChar = char
+        } else if (inString) {
+          if (char === stringChar && htmlBody[pos - 1] !== '\\') {
+            inString = false
+          }
+        } else {
+          // Count parentheses only when not in string
+          if (char === '(') depth++
+          else if (char === ')') {
+            depth--
+            if (depth === 0) {
+              // Check if followed by }
+              let nextPos = pos + 1
+              while (nextPos < htmlBody.length && /\s/.test(htmlBody[nextPos])) {
+                nextPos++
+              }
+              if (htmlBody[nextPos] === '}') {
+                // Find end of }
+                let closeEnd = nextPos + 1
+                while (closeEnd < htmlBody.length && /\s/.test(htmlBody[closeEnd])) {
+                  closeEnd++
+                }
+                matches.push({ openStart, openEnd, closeStart: pos, closeEnd })
+                break
+              }
+            }
+          }
+        }
+        pos++
+      }
+    }
+    
+    // Process matches in reverse order to maintain indices
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const { openStart, openEnd, closeStart, closeEnd } = matches[i]
+      if (hasValue) {
+        // Remove just the conditional syntax, keep content
+        htmlBody = htmlBody.substring(0, openStart) + 
+                   htmlBody.substring(openEnd, closeStart) + 
+                   htmlBody.substring(closeEnd)
+      } else {
+        // Remove entire block
+        htmlBody = htmlBody.substring(0, openStart) + htmlBody.substring(closeEnd)
+      }
+    }
+  }
   
-  htmlBody = htmlBody.replace(/{lineItems}/g, lineItemsHtml)
+  // Process conditionals for each variable
+  processConditional('description', !!description)
+  processConditional('deadline', formattedDeadline !== 'No deadline set' && !!formattedDeadline)
   
-  // Replace plan link
-  if (planLink) {
-    htmlBody = htmlBody.replace(/{planLink}/g, `<a href="${escapeHtml(planLink)}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View & Download All Project Plans</a>`)
+  htmlBody = htmlBody.replace(/{jobName}/g, jobName)
+  htmlBody = htmlBody.replace(/{jobLocation}/g, jobLocation)
+  htmlBody = htmlBody.replace(/{tradeCategory}/g, tradeCategory)
+  htmlBody = htmlBody.replace(/{deadline}/g, formattedDeadline)
+  
+  // Handle description - only show if it exists
+  if (description) {
+    htmlBody = htmlBody.replace(/{description}/g, description)
   } else {
+    // Remove description paragraph if empty
+    htmlBody = htmlBody.replace(/<p[^>]*>\s*\{description\}\s*<\/p>/gi, '')
+    htmlBody = htmlBody.replace(/{description}/g, '')
+  }
+  
+  // Replace line items - build simple text-based list (matching preview style)
+  const lineItemsHtml = bidPackage.minimum_line_items && bidPackage.minimum_line_items.length > 0
+    ? `<ul style="margin: 16px 0; padding-left: 20px; list-style-type: disc;">
+        ${bidPackage.minimum_line_items.map((item: any) => {
+          const parts = []
+          if (item.name) parts.push(`<strong>${escapeHtml(item.name)}</strong>`)
+          parts.push(escapeHtml(item.description || ''))
+          if (item.cost_code) parts.push(`<span style="color: #6b7280; font-size: 14px;">(Cost Code: ${escapeHtml(item.cost_code)})</span>`)
+          parts.push(`- ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}`)
+          return `<li style="margin: 8px 0; font-size: 16px; line-height: 1.5;">${parts.join(' ')}</li>`
+        }).join('')}
+      </ul>`
+    : ''
+  
+  // Handle lineItems conditional block
+  processConditional('lineItems', !!lineItemsHtml)
+  
+  // Only replace {lineItems} if there are items, otherwise remove the section
+  if (lineItemsHtml) {
+    htmlBody = htmlBody.replace(/{lineItems}/g, lineItemsHtml)
+  } else {
+    // Remove line items section if empty
+    htmlBody = htmlBody.replace(/<div[^>]*>\s*<p[^>]*>[\s\S]*?Required items[\s\S]*?<\/p>\s*\{lineItems\}\s*<\/div>/gi, '')
+    htmlBody = htmlBody.replace(/{lineItems}/g, '')
+  }
+  
+  // Replace plan link - handle both href and text content
+  const hasPlanLink = !!planLink && planLink !== '#'
+  processConditional('planLink', hasPlanLink)
+  
+  if (hasPlanLink) {
+    // First, replace {planLink} in href attributes
+    htmlBody = htmlBody.replace(/href=["']\{planLink\}["']/gi, `href="${escapeHtml(planLink)}"`)
+    // Then replace remaining {planLink} in text content (not in href)
+    // Use a function to check context
+    htmlBody = htmlBody.replace(/{planLink}/g, (match, offset) => {
+      // Check if we're inside an href attribute by looking backwards
+      const before = htmlBody.substring(Math.max(0, offset - 50), offset)
+      if (before.match(/href\s*=\s*["'][^"']*$/)) {
+        // We're inside an href, skip (already replaced above)
+        return ''
+      }
+      // Replace with just the URL text (not wrapped in <a> since template may already have one)
+      return escapeHtml(planLink)
+    })
+  } else {
+    // Remove plan link section if no link
+    htmlBody = htmlBody.replace(/<p[^>]*>[\s\S]*?You can view and download[\s\S]*?\{planLink\}[\s\S]*?<\/p>/gi, '')
+    htmlBody = htmlBody.replace(/href=["']\{planLink\}["']/gi, 'href="#"')
     htmlBody = htmlBody.replace(/{planLink}/g, 'Plans will be provided separately')
   }
   
-  // Replace reports
-  if (reportLinks.length > 0) {
+  // Replace reports - simple text list
+  const hasReports = reportLinks.length > 0
+  processConditional('reports', hasReports)
+  
+  if (hasReports) {
     const reportsHtml = reportLinks.map(r => 
-      `<a href="${escapeHtml(r.url)}" style="color: #EB5023; text-decoration: none; margin-right: 12px; display: inline-block; margin-bottom: 8px; padding: 10px 16px; border: 2px solid #EB5023; border-radius: 6px; font-size: 13px;">📄 ${escapeHtml(r.title)}</a>`
+      `<p style="margin: 8px 0; font-size: 16px; line-height: 1.5;"><a href="${escapeHtml(r.url)}" style="color: ${primaryColor}; text-decoration: underline;">${escapeHtml(r.title)}</a></p>`
     ).join('')
     htmlBody = htmlBody.replace(/{reports}/g, reportsHtml)
   } else {
+    // Remove reports section if empty
+    htmlBody = htmlBody.replace(/<div[^>]*>\s*<p[^>]*>[\s\S]*?Additional documents[\s\S]*?<\/p>\s*\{reports\}\s*<\/div>/gi, '')
     htmlBody = htmlBody.replace(/{reports}/g, '')
   }
+  
+  // Replace bid email - use the reply-to email address
+  const bidEmail = `bids+${bidPackage.id}@bids.bidicontracting.com`
+  htmlBody = htmlBody.replace(/{bidEmail}/g, escapeHtml(bidEmail))
+  
+  // Apply branding variables to the template
+  // Replace branding placeholders that might be in the template
+  htmlBody = htmlBody.replace(/\$\{primaryColor\}/g, primaryColor)
+  htmlBody = htmlBody.replace(/\$\{secondaryColor\}/g, secondaryColor)
+  htmlBody = htmlBody.replace(/\$\{backgroundColor\}/g, backgroundColor)
+  htmlBody = htmlBody.replace(/\$\{textColor\}/g, textColor)
+  htmlBody = htmlBody.replace(/\$\{fontFamily\}/g, fontFamily)
+  htmlBody = htmlBody.replace(/\$\{companyName\}/g, escapeHtml(companyName))
+  htmlBody = htmlBody.replace(/\$\{logoUrl\}/g, logoUrl)
+  
+  // Also handle template literal style replacements (without $)
+  htmlBody = htmlBody.replace(/\{primaryColor\}/g, primaryColor)
+  htmlBody = htmlBody.replace(/\{secondaryColor\}/g, secondaryColor)
+  htmlBody = htmlBody.replace(/\{backgroundColor\}/g, backgroundColor)
+  htmlBody = htmlBody.replace(/\{textColor\}/g, textColor)
+  htmlBody = htmlBody.replace(/\{fontFamily\}/g, fontFamily)
+  htmlBody = htmlBody.replace(/\{companyName\}/g, escapeHtml(companyName))
+  htmlBody = htmlBody.replace(/\{logoUrl\}/g, logoUrl)
+  
+  // Apply signature - replace signature placeholder with actual signature
+  if (signature) {
+    // Replace signature variables in the signature HTML
+    let signatureHtml = signature
+    signatureHtml = signatureHtml.replace(/\{primaryColor\}/g, primaryColor)
+    signatureHtml = signatureHtml.replace(/\{secondaryColor\}/g, secondaryColor)
+    signatureHtml = signatureHtml.replace(/\{backgroundColor\}/g, backgroundColor)
+    signatureHtml = signatureHtml.replace(/\{textColor\}/g, textColor)
+    signatureHtml = signatureHtml.replace(/\{fontFamily\}/g, fontFamily)
+    signatureHtml = signatureHtml.replace(/\{companyName\}/g, escapeHtml(companyName))
+    // Don't escape logoUrl - it needs to be a valid URL for img src
+    signatureHtml = signatureHtml.replace(/\{logoUrl\}/g, logoUrl || '')
+    
+    htmlBody = htmlBody.replace(/\{signature\}/g, signatureHtml)
+  } else {
+    // Default signature if none provided
+    let defaultSignature = '<p style="margin: 0 0 4px 0; font-size: 16px; line-height: 1.5;">Thanks,</p>'
+    if (logoUrl) {
+      // Use the logo URL directly (it's already a URL, don't escape it for img src)
+      defaultSignature += `<div style="margin: 8px 0;"><img src="${logoUrl}" alt="${escapeHtml(companyName || 'Company')}" style="max-height: 40px;" /></div>`
+    }
+    if (companyName) {
+      defaultSignature += `<p style="margin: 0; font-size: 14px; line-height: 1.5; color: ${textColor};">${escapeHtml(companyName)}</p>`
+    } else {
+      defaultSignature += `<p style="margin: 0; font-size: 14px; line-height: 1.5; color: ${textColor};">The Team</p>`
+    }
+    htmlBody = htmlBody.replace(/\{signature\}/g, defaultSignature)
+  }
+  
+  // Final cleanup - remove any remaining conditional syntax fragments
+  // This handles cases where templates might have been edited with JSX-like syntax
+  htmlBody = htmlBody.replace(/\{[a-zA-Z]+\s*&&\s*\(/g, '')
+  htmlBody = htmlBody.replace(/\)\s*\}\s*/g, '')
+  htmlBody = htmlBody.replace(/\{[a-zA-Z]+\s*\?/g, '')
+  htmlBody = htmlBody.replace(/:\s*'[^']*'\s*\}/g, '')
+  htmlBody = htmlBody.replace(/\{[a-zA-Z]+\s*&&\s*\(/g, '')
+  htmlBody = htmlBody.replace(/\)\s*\}\s*\)/g, '')
+  
+  return htmlBody
+  
+  // Final cleanup - remove any remaining conditional syntax fragments
+  htmlBody = htmlBody.replace(/\{[a-zA-Z]+\s*&&\s*\(/g, '')
+  htmlBody = htmlBody.replace(/\)\s*\}\s*/g, '')
+  htmlBody = htmlBody.replace(/\{[a-zA-Z]+\s*\?/g, '')
+  htmlBody = htmlBody.replace(/:\s*'[^']*'\s*\}/g, '')
   
   return htmlBody
 }

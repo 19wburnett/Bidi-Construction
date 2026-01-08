@@ -22,6 +22,7 @@ type PlanDrawingRow = {
   geometry: any
   style: any
   measurement_data?: any
+  measurement_tag?: any
   label?: string | null
   notes?: string | null
   layer_name?: string | null
@@ -108,6 +109,7 @@ export class MeasurementPersistence {
       area?: number
       unit?: Drawing['measurements'] extends infer M ? M extends { unit?: infer U } ? U : never : never
     }>(row.measurement_data)
+    const measurementTag = normalizeJson<{ id: string; name: string; color: string }>(row.measurement_tag)
 
     const type = this.measurementTypeFromRow(row)
     // Convert points to numbers - coordinates are stored as-is in PDF space
@@ -141,6 +143,7 @@ export class MeasurementPersistence {
       },
       pageNumber: row.page_number,
       measurements,
+      measurementTag: measurementTag || undefined,
       label: row.label || undefined,
       notes: row.notes || undefined,
       layerName: row.layer_name || undefined,
@@ -178,6 +181,7 @@ export class MeasurementPersistence {
         opacity: measurement.style?.opacity ?? 1
       },
       measurement_data: measurementData,
+      measurement_tag: measurement.measurementTag || null,
       label: measurement.label || null,
       notes: measurement.notes || null,
       layer_name: measurement.layerName || 'measurements',
@@ -210,6 +214,7 @@ export class MeasurementPersistence {
         opacity: measurement.style?.opacity ?? 1
       },
       measurement_data: measurementData,
+      measurement_tag: measurement.measurementTag || null,
       label: measurement.label || null,
       notes: measurement.notes || null,
       layer_name: measurement.layerName || 'measurements',

@@ -5,6 +5,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { 
   MessageSquare,
   ZoomIn,
@@ -27,7 +28,9 @@ import {
   PanelRightOpen,
   PanelRightClose,
   MousePointerClick,
-  Tag
+  Tag,
+  Palette,
+  Check
 } from 'lucide-react'
 
 import { Drawing } from '@/lib/canvas-utils'
@@ -35,6 +38,8 @@ import CommentPopup from '@/components/comment-popup'
 import CommentBubble from '@/components/comment-bubble'
 import ItemTagModal from '@/components/item-tag-modal'
 import { getItemTypeById } from '@/lib/item-types'
+import MeasurementTagManager from '@/components/measurement-tag-manager'
+import { MeasurementTagPersistence, MeasurementTag } from '@/lib/measurement-tag-persistence'
 
 // Dynamically import react-pdf to avoid SSR issues
 const Document = dynamic(
@@ -173,6 +178,13 @@ interface FastPlanCanvasProps {
   selectedItemIds?: Set<string>
   onSelectedItemsChange?: (ids: Set<string>) => void
   sidebarHoveredItemId?: string | null
+  planId?: string
+  userId?: string
+  guestUser?: { id: string; name: string }
+  filteredTagIds?: Set<string>
+  onFilteredTagIdsChange?: (tagIds: Set<string>) => void
+  onMeasurementHighlight?: (measurementIds: string[]) => void
+  highlightedMeasurementIds?: string[]
 }
 
 type DrawingTool = 'comment' | 'none' | 'measurement_line' | 'measurement_area' | 'measurement_edit' | 'measurement_select' | 'item' | 'item_select'
@@ -330,7 +342,14 @@ export default function FastPlanCanvas({
   onSelectedItemsChange,
   selectedItemType: externalSelectedItemType,
   onSelectedItemTypeChange,
-  sidebarHoveredItemId
+  sidebarHoveredItemId,
+  planId,
+  userId,
+  guestUser,
+  filteredTagIds: externalFilteredTagIds,
+  onFilteredTagIdsChange,
+  onMeasurementHighlight,
+  highlightedMeasurementIds: externalHighlightedMeasurementIds
 }: FastPlanCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -382,8 +401,32 @@ export default function FastPlanCanvas({
   const [isDrawingMeasurement, setIsDrawingMeasurement] = useState(false)
   const [editingMeasurement, setEditingMeasurement] = useState<EditingMeasurementState | null>(null)
   const [isAdjustingMeasurement, setIsAdjustingMeasurement] = useState(false)
+  // Refs to prevent duplicate finalization
+  const isFinalizingRef = useRef(false)
+  const drawingsRef = useRef(drawings)
   const [isSnappingToStart, setIsSnappingToStart] = useState(false)
   const [hoveredMeasurementId, setHoveredMeasurementId] = useState<string | null>(null)
+  // Drawing color state
+  const [selectedColor, setSelectedColor] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('fast-plan-selected-color')
+      return saved || '#3b82f6' // Default blue
+    }
+    return '#3b82f6'
+  })
+  // Measurement tag state
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null)
+  const [tags, setTags] = useState<MeasurementTag[]>([])
+  const [tagPersistence] = useState(() => planId ? new MeasurementTagPersistence(planId, userId, guestUser) : null)
+  const [internalFilteredTagIds, setInternalFilteredTagIds] = useState<Set<string>>(new Set())
+  const filteredTagIds = externalFilteredTagIds !== undefined ? externalFilteredTagIds : internalFilteredTagIds
+  const setFilteredTagIds = useCallback((tagIds: Set<string>) => {
+    if (onFilteredTagIdsChange) {
+      onFilteredTagIdsChange(tagIds)
+    } else {
+      setInternalFilteredTagIds(tagIds)
+    }
+  }, [onFilteredTagIdsChange])
   // Calibration mode state
   const [internalIsCalibrating, setInternalIsCalibrating] = useState(false)
   const [internalCalibrationPoints, setInternalCalibrationPoints] = useState<{ x: number; y: number }[]>([])
@@ -640,6 +683,18 @@ export default function FastPlanCanvas({
       console.warn('Failed to save visibility settings to localStorage:', error)
     }
   }, [visibilitySettings])
+
+  // Keep drawingsRef updated with latest drawings
+  useEffect(() => {
+    drawingsRef.current = drawings
+  }, [drawings])
+
+  // Save selected color to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('fast-plan-selected-color', selectedColor)
+    }
+  }, [selectedColor])
 
   // Store callback in ref to avoid dependency issues
   const onPageDimensionsChangeRef = useRef(onPageDimensionsChange)
@@ -1209,12 +1264,26 @@ export default function FastPlanCanvas({
 
     // Get drawings for current page only (paginated view)
     const currentPageComments = drawings.filter(d => d.type === 'comment' && d.pageNumber === currentPage)
-    const currentPageMeasurements = drawings.filter(d => {
+    
+    // Filter measurements by tag and visibility settings
+    let measurementsToRender = drawings.filter(d => {
       if (d.pageNumber !== currentPage) return false
       if (d.type === 'measurement_line' && !visibilitySettings.showMeasurementLines) return false
       if (d.type === 'measurement_area' && !visibilitySettings.showMeasurementAreas) return false
       return d.type === 'measurement_line' || d.type === 'measurement_area'
     })
+    
+    // Apply tag filtering if filters are active
+    if (filteredTagIds.size > 0) {
+      measurementsToRender = measurementsToRender.filter(d => {
+        if (!d.measurementTag) {
+          return filteredTagIds.has('untagged')
+        }
+        return filteredTagIds.has(d.measurementTag.id)
+      })
+    }
+    
+    const currentPageMeasurements = measurementsToRender
     
     // Draw measurement lines for current page
     const isEditMode = selectedTool === 'measurement_edit'
@@ -1222,6 +1291,7 @@ export default function FastPlanCanvas({
     currentPageMeasurements.forEach(drawing => {
       const isEditingThis = editingMeasurement?.id === drawing.id
       const isSelected = selectedMeasurementIds?.has(drawing.id) || false
+      const isHighlighted = externalHighlightedMeasurementIds?.includes(drawing.id) || false
       // Get raw points (stored in PDF base coordinates)
       const rawPoints = (isEditingThis ? editingMeasurement?.points : drawing.geometry?.points) || []
       if (drawing.type === 'measurement_line' && rawPoints.length < 4) {
@@ -1250,9 +1320,10 @@ export default function FastPlanCanvas({
         (measurementData && 'unit' in measurementData && measurementData.unit) ||
         scaleSetting?.unit ||
         'ft'
-      const baseColor = drawing.style?.color || '#3b82f6'
-      // Use orange highlight for selected measurements
-      const color = isSelected ? '#f97316' : baseColor
+      // Use tag color if measurement has tag, otherwise use style color
+      const baseColor = drawing.measurementTag?.color || drawing.style?.color || '#3b82f6'
+      // Use orange highlight for selected measurements, yellow for highlighted
+      const color = isSelected ? '#f97316' : (isHighlighted ? '#fbbf24' : baseColor)
 
       ctx.save()
       
@@ -1302,8 +1373,8 @@ export default function FastPlanCanvas({
         ctx.stroke()
         ctx.setLineDash([])
         
-        // Draw labels for each segment (only when hovered, selected, or editing)
-        const showLabels = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        // Draw labels for each segment (only when hovered, selected, highlighted, or editing)
+        const showLabels = hoveredMeasurementId === drawing.id || isSelected || isHighlighted || isEditingThis
         if (showLabels && measurementData && 'segmentLengths' in (measurementData as any) && Array.isArray((measurementData as any).segmentLengths) && scaleSetting) {
           const segmentLengths = (measurementData as any).segmentLengths as number[]
           for (let i = 0; i < points.length - 2; i += 2) {
@@ -1316,7 +1387,10 @@ export default function FastPlanCanvas({
             const length = segmentLengths[i / 2]
             
             // Draw label background
-            const label = formatMeasurement(length, unit)
+            let label = formatMeasurement(length, unit)
+            if (drawing.measurementTag) {
+              label = `${drawing.measurementTag.name}: ${label}`
+            }
             ctx.font = '10px Arial'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
@@ -1339,7 +1413,10 @@ export default function FastPlanCanvas({
           if ((measurementData as any)?.totalLength && points.length > 4) {
             const lastX = points[points.length - 2]
             const lastY = points[points.length - 1]
-            const label = `Total: ${formatMeasurement((measurementData as any).totalLength, unit)}`
+            let label = `Total: ${formatMeasurement((measurementData as any).totalLength, unit)}`
+            if (drawing.measurementTag) {
+              label = `${drawing.measurementTag.name} - ${label}`
+            }
             ctx.font = '11px Arial'
             ctx.textAlign = 'left'
             const textWidth = ctx.measureText(label).width
@@ -1386,8 +1463,8 @@ export default function FastPlanCanvas({
         ctx.fill()
         ctx.stroke()
         
-        // Draw area label at centroid (only when hovered, selected, or editing)
-        const showAreaLabel = hoveredMeasurementId === drawing.id || isSelected || isEditingThis
+        // Draw area label at centroid (only when hovered, selected, highlighted, or editing)
+        const showAreaLabel = hoveredMeasurementId === drawing.id || isSelected || isHighlighted || isEditingThis
         if (showAreaLabel && measurementData && 'area' in (measurementData as any) && scaleSetting) {
           // Calculate centroid
           let sumX = 0, sumY = 0
@@ -1400,7 +1477,10 @@ export default function FastPlanCanvas({
           
           // Format area (convert to sqft if needed)
           let area = (measurementData as any).area
-          const areaLabel = formatArea(area, unit)
+          let areaLabel = formatArea(area, unit)
+          if (drawing.measurementTag) {
+            areaLabel = `${drawing.measurementTag.name}: ${areaLabel}`
+          }
           
           ctx.font = '11px Arial'
           ctx.textAlign = 'center'
@@ -1626,7 +1706,7 @@ export default function FastPlanCanvas({
     }
 
     // Comments are now rendered as HTML elements, not on canvas
-  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool, selectedMeasurementIds, isSnappingToStart, hoveredMeasurementId, visibilitySettings])
+  }, [drawings, selectedComment, currentMeasurement, measurementScaleSettings, isCalibrating, calibrationPoints, currentPage, getScaleSetting, editingMeasurement, computeLineMeasurementData, computeAreaMeasurementData, selectedTool, selectedMeasurementIds, isSnappingToStart, hoveredMeasurementId, visibilitySettings, filteredTagIds, externalHighlightedMeasurementIds, onMeasurementHighlight])
 
   // Set canvas dimensions to match current page (zoom handled by transform)
   useEffect(() => {
@@ -1710,6 +1790,32 @@ export default function FastPlanCanvas({
       }, 100)
     }
   }, [pageHeights.size])
+
+  // Load measurement tags
+  useEffect(() => {
+    if (!tagPersistence) return
+    
+    const loadTags = async () => {
+      try {
+        const loadedTags = await tagPersistence.loadTags()
+        setTags(loadedTags)
+      } catch (error) {
+        console.error('Error loading measurement tags:', error)
+      }
+    }
+    
+    loadTags()
+  }, [tagPersistence, planId])
+
+  // Update selected color when tag changes
+  useEffect(() => {
+    if (selectedTagId) {
+      const selectedTag = tags.find(t => t.id === selectedTagId)
+      if (selectedTag) {
+        setSelectedColor(selectedTag.color)
+      }
+    }
+  }, [selectedTagId, tags])
 
   // Render drawings when dependencies change
   useEffect(() => {
@@ -2603,6 +2709,9 @@ export default function FastPlanCanvas({
       // Start or continue measurement drawing
       if (!currentMeasurement || !isDrawingMeasurement) {
         // Start new measurement (store at base scale)
+        // Get selected tag if any
+        const selectedTag = tags.find(t => t.id === selectedTagId)
+        
         const newMeasurement: Drawing = {
           id: Date.now().toString(),
           type: selectedTool,
@@ -2610,14 +2719,19 @@ export default function FastPlanCanvas({
             points: [baseWorldX, baseWorldY, baseWorldX, baseWorldY]
           },
           style: {
-            color: '#3b82f6',
+            color: selectedTag?.color || selectedColor,
             strokeWidth: 2,
             opacity: 1
           },
           pageNumber,
           measurements: {
             unit: scaleSetting?.unit || 'ft'
-          }
+          },
+          measurementTag: selectedTag ? {
+            id: selectedTag.id,
+            name: selectedTag.name,
+            color: selectedTag.color
+          } : undefined
         }
         setCurrentMeasurement(newMeasurement)
         setIsDrawingMeasurement(true)
@@ -2651,18 +2765,33 @@ export default function FastPlanCanvas({
             }
             
             // Finalize the closed measurement
+            // Prevent multiple simultaneous finalizations
+            if (isFinalizingRef.current) {
+              return
+            }
+            
+            isFinalizingRef.current = true
+            
             const finalized = finalizeMeasurementFromDrawing(closedMeasurement)
             if (finalized) {
+              // Use ref to get latest drawings to prevent stale closure issues
+              const latestDrawings = drawingsRef.current
               // Check if measurement already exists (by ID) to prevent duplicates
-              const alreadyExists = drawings.some(d => d.id === finalized.id)
+              const alreadyExists = latestDrawings.some(d => d.id === finalized.id)
               if (!alreadyExists) {
-                onDrawingsChange([...drawings, finalized])
+                onDrawingsChange([...latestDrawings, finalized])
               }
             }
             
             setCurrentMeasurement(null)
             setIsDrawingMeasurement(false)
             setIsSnappingToStart(false)
+            
+            // Reset the guard after a short delay to allow state updates
+            setTimeout(() => {
+              isFinalizingRef.current = false
+            }, 100)
+            
             return
           }
         }
@@ -2912,6 +3041,60 @@ export default function FastPlanCanvas({
     setIsAdjustingMeasurement(false)
   }, [editingMeasurement, drawings, onDrawingsChange, computeLineMeasurementData, computeAreaMeasurementData])
 
+  const updateMeasurementTag = useCallback(
+    (measurementId: string, tagId: string | null) => {
+      const nextDrawings = drawings.map(drawing => {
+        if (drawing.id === measurementId && (drawing.type === 'measurement_line' || drawing.type === 'measurement_area')) {
+          const tag = tagId ? tags.find(t => t.id === tagId) : null
+          return {
+            ...drawing,
+            measurementTag: tag ? {
+              id: tag.id,
+              name: tag.name,
+              color: tag.color
+            } : undefined,
+            style: {
+              ...drawing.style,
+              color: tag ? tag.color : drawing.style.color
+            }
+          }
+        }
+        return drawing
+      })
+
+      onDrawingsChange(nextDrawings)
+    },
+    [drawings, tags, onDrawingsChange]
+  )
+
+  const updateSelectedMeasurementsTag = useCallback(
+    (tagId: string | null) => {
+      if (!selectedMeasurementIds || selectedMeasurementIds.size === 0) return
+
+      const nextDrawings = drawings.map(drawing => {
+        if (selectedMeasurementIds.has(drawing.id) && (drawing.type === 'measurement_line' || drawing.type === 'measurement_area')) {
+          const tag = tagId ? tags.find(t => t.id === tagId) : null
+          return {
+            ...drawing,
+            measurementTag: tag ? {
+              id: tag.id,
+              name: tag.name,
+              color: tag.color
+            } : undefined,
+            style: {
+              ...drawing.style,
+              color: tag ? tag.color : drawing.style.color
+            }
+          }
+        }
+        return drawing
+      })
+
+      onDrawingsChange(nextDrawings)
+    },
+    [drawings, tags, selectedMeasurementIds, onDrawingsChange]
+  )
+
   const deleteMeasurement = useCallback(
     (id: string) => {
       // Find the measurement to verify it exists
@@ -3002,20 +3185,34 @@ export default function FastPlanCanvas({
   // Finalize measurement (calculate and save)
   const finalizeMeasurement = useCallback(() => {
     if (!currentMeasurement || !isDrawingMeasurement) return
+    
+    // Prevent multiple simultaneous finalizations
+    if (isFinalizingRef.current) {
+      return
+    }
+    
+    isFinalizingRef.current = true
 
     const finalized = finalizeMeasurementFromDrawing(currentMeasurement)
     if (finalized) {
+      // Use ref to get latest drawings to prevent stale closure issues
+      const latestDrawings = drawingsRef.current
       // Check if measurement already exists (by ID) to prevent duplicates
-      const alreadyExists = drawings.some(d => d.id === finalized.id)
+      const alreadyExists = latestDrawings.some(d => d.id === finalized.id)
       if (!alreadyExists) {
-        onDrawingsChange([...drawings, finalized])
+        onDrawingsChange([...latestDrawings, finalized])
       }
     }
 
     setCurrentMeasurement(null)
     setIsDrawingMeasurement(false)
     setIsSnappingToStart(false)
-  }, [currentMeasurement, isDrawingMeasurement, finalizeMeasurementFromDrawing, drawings, onDrawingsChange])
+    
+    // Reset the guard after a short delay to allow state updates
+    setTimeout(() => {
+      isFinalizingRef.current = false
+    }, 100)
+  }, [currentMeasurement, isDrawingMeasurement, finalizeMeasurementFromDrawing, onDrawingsChange])
 
   // Handle double-click to finish measurement
   const handleDoubleClick = useCallback(() => {
@@ -4091,6 +4288,161 @@ export default function FastPlanCanvas({
            >
              <MousePointerClick className="h-5 w-5" />
            </Button>
+           
+          <div className="w-px h-6 bg-gray-200 mx-1" />
+          
+          {/* Tag Manager */}
+          {planId && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={selectedTagId ? 'default' : 'ghost'}
+                  size="icon"
+                  title="Measurement Tags"
+                  className="rounded-full h-10 w-10"
+                >
+                  <div className="relative">
+                    <Tag className="h-5 w-5" />
+                    {selectedTagId && (
+                      <div 
+                        className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white shadow-sm"
+                        style={{ backgroundColor: tags.find(t => t.id === selectedTagId)?.color || '#3b82f6' }}
+                      />
+                    )}
+                  </div>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-3" align="start">
+                <MeasurementTagManager
+                  planId={planId}
+                  userId={userId}
+                  guestUser={guestUser}
+                  selectedTagId={selectedTagId}
+                  onTagSelect={(tagId) => {
+                    setSelectedTagId(tagId)
+                    // If measurements are selected, update their tags
+                    if (selectedMeasurementIds && selectedMeasurementIds.size > 0) {
+                      updateSelectedMeasurementsTag(tagId)
+                    }
+                  }}
+                  onTagChange={() => {
+                    if (tagPersistence) {
+                      tagPersistence.loadTags().then(setTags).catch(console.error)
+                    }
+                  }}
+                />
+                {selectedMeasurementIds && selectedMeasurementIds.size > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-600">
+                    {selectedMeasurementIds.size} measurement{selectedMeasurementIds.size !== 1 ? 's' : ''} selected
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
+          
+          {/* Color Picker */}
+          <Popover>
+             <PopoverTrigger asChild>
+               <Button
+                 variant="ghost"
+                 size="icon"
+                 title="Choose Color"
+                 className="rounded-full h-10 w-10"
+               >
+                 <div className="relative">
+                   <Palette className="h-5 w-5" />
+                   <div 
+                     className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white shadow-sm"
+                     style={{ backgroundColor: selectedColor }}
+                   />
+                 </div>
+               </Button>
+             </PopoverTrigger>
+             <PopoverContent className="w-64 p-3" align="start">
+               <div className="space-y-2">
+                 <div className="text-sm font-medium text-gray-700 mb-2">Choose Color</div>
+                 {selectedTagId && (
+                   <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                     Using tag: <strong>{tags.find(t => t.id === selectedTagId)?.name}</strong>
+                   </div>
+                 )}
+                 <div className="grid grid-cols-8 gap-2">
+                   {[
+                     '#3b82f6', // Blue
+                     '#ef4444', // Red
+                     '#22c55e', // Green
+                     '#f59e0b', // Amber
+                     '#8b5cf6', // Purple
+                     '#ec4899', // Pink
+                     '#06b6d4', // Cyan
+                     '#84cc16', // Lime
+                     '#f97316', // Orange
+                     '#6366f1', // Indigo
+                     '#14b8a6', // Teal
+                     '#a855f7', // Violet
+                     '#eab308', // Yellow
+                     '#64748b', // Slate
+                     '#dc2626', // Dark Red
+                     '#16a34a', // Dark Green
+                   ].map((color) => {
+                     const tagUsingColor = tags.find(t => t.color.toLowerCase() === color.toLowerCase())
+                     return (
+                       <button
+                         key={color}
+                         onClick={() => {
+                           setSelectedColor(color)
+                           // If a tag uses this color and no tag is selected, clear tag selection
+                           if (tagUsingColor && selectedTagId === tagUsingColor.id) {
+                             // Keep tag selected if it matches
+                           } else if (!selectedTagId) {
+                             // Allow manual color selection without tag
+                           }
+                         }}
+                         className={`w-8 h-8 rounded-md border-2 transition-all hover:scale-110 relative ${
+                           selectedColor === color
+                             ? 'border-gray-900 shadow-md ring-2 ring-offset-1 ring-gray-400'
+                             : 'border-gray-300 hover:border-gray-500'
+                         }`}
+                         style={{ backgroundColor: color }}
+                         title={tagUsingColor ? `${color} - ${tagUsingColor.name}` : color}
+                       >
+                         {selectedColor === color && (
+                           <Check className="h-4 w-4 text-white m-auto drop-shadow-md" />
+                         )}
+                         {tagUsingColor && (
+                           <div className="absolute -top-1 -right-1 w-2 h-2 bg-white rounded-full border border-gray-400" />
+                         )}
+                       </button>
+                     )
+                   })}
+                 </div>
+                 <div className="pt-2 border-t border-gray-200">
+                   <label className="text-xs text-gray-600 mb-1 block">Custom Color</label>
+                   <div className="flex items-center gap-2">
+                     <input
+                       type="color"
+                       value={selectedColor}
+                       onChange={(e) => setSelectedColor(e.target.value)}
+                       className="w-full h-8 rounded border border-gray-300 cursor-pointer"
+                     />
+                     <Input
+                       type="text"
+                       value={selectedColor}
+                       onChange={(e) => {
+                         const value = e.target.value
+                         if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+                           setSelectedColor(value)
+                         }
+                       }}
+                       placeholder="#3b82f6"
+                       className="h-8 text-xs font-mono"
+                       maxLength={7}
+                     />
+                   </div>
+                 </div>
+               </div>
+             </PopoverContent>
+           </Popover>
         </div>
       </div>
 

@@ -25,7 +25,17 @@ interface PreviewData {
  */
 export function generatePreviewHtml(
   htmlBody: string,
-  sampleData?: Partial<PreviewData>
+  sampleData?: Partial<PreviewData>,
+  branding?: {
+    primaryColor?: string
+    secondaryColor?: string
+    backgroundColor?: string
+    textColor?: string
+    fontFamily?: string
+    companyName?: string
+    logoUrl?: string
+    signature?: string
+  }
 ): string {
   const data: PreviewData = {
     jobName: 'Sample Construction Project',
@@ -95,43 +105,117 @@ export function generatePreviewHtml(
   previewHtml = previewHtml.replace(/{deadline}/g, formatDeadline(data.deadline ?? null))
   previewHtml = previewHtml.replace(/{description}/g, escapeHtml(data.description || ''))
 
-  // Replace line items - build HTML table with proper structure
+  // Replace line items - build simple text-based list
   const lineItemsHtml = data.lineItems && data.lineItems.length > 0
-    ? `<table role="presentation" style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-        <thead>
-          <tr>
-            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Description</th>
-            <th style="padding: 12px 16px; text-align: left; background-color: #F3F4F6; border-bottom: 2px solid #EB5023; font-size: 13px; font-weight: 600; color: #404042; text-transform: uppercase;">Quantity</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.lineItems.map(item => 
-            `<tr>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(item.description || '')}</td>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #F3F4F6; font-size: 14px; color: #404042;">${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}</td>
-            </tr>`
-          ).join('')}
-        </tbody>
-      </table>`
-    : '<p style="padding: 12px 16px; text-align: center; color: #777878;">No specific line items required</p>'
+    ? `<ul style="margin: 16px 0; padding-left: 20px; list-style-type: disc;">
+        ${data.lineItems.map(item => 
+          `<li style="margin: 8px 0; font-size: 16px; line-height: 1.5;">${escapeHtml(item.description || '')} - ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}</li>`
+        ).join('')}
+      </ul>`
+    : '<p style="margin: 16px 0; font-size: 16px; line-height: 1.5;">No specific line items required</p>'
   
   previewHtml = previewHtml.replace(/{lineItems}/g, lineItemsHtml)
 
-  // Replace plan link
+  // Replace plan link - simple text link
   if (data.planLink) {
-    previewHtml = previewHtml.replace(/{planLink}/g, `<a href="${escapeHtml(data.planLink)}" style="color: #EB5023; text-decoration: none; font-weight: 600;">📐 View & Download All Project Plans</a>`)
+    previewHtml = previewHtml.replace(/{planLink}/g, `<a href="${escapeHtml(data.planLink)}" style="color: #EB5023; text-decoration: underline;">${escapeHtml(data.planLink)}</a>`)
   } else {
     previewHtml = previewHtml.replace(/{planLink}/g, 'Plans will be provided separately')
   }
 
-  // Replace reports
+  // Replace reports - simple text list
   if (data.reportLinks && data.reportLinks.length > 0) {
     const reportsHtml = data.reportLinks.map(r => 
-      `<a href="${escapeHtml(r.url)}" style="color: #EB5023; text-decoration: none; margin-right: 12px; display: inline-block; margin-bottom: 8px; padding: 10px 16px; border: 2px solid #EB5023; border-radius: 6px; font-size: 13px;">📄 ${escapeHtml(r.title)}</a>`
+      `<p style="margin: 8px 0; font-size: 16px; line-height: 1.5;"><a href="${escapeHtml(r.url)}" style="color: #EB5023; text-decoration: underline;">${escapeHtml(r.title)}</a></p>`
     ).join('')
     previewHtml = previewHtml.replace(/{reports}/g, reportsHtml)
   } else {
     previewHtml = previewHtml.replace(/{reports}/g, '')
+  }
+
+  // Replace bid email
+  const bidEmail = 'bids+sample@bids.bidicontracting.com'
+  previewHtml = previewHtml.replace(/{bidEmail}/g, escapeHtml(bidEmail))
+
+  // Apply branding if provided
+  if (branding) {
+    previewHtml = previewHtml.replace(/\$\{primaryColor\}/g, branding.primaryColor || '#EB5023')
+    previewHtml = previewHtml.replace(/\$\{secondaryColor\}/g, branding.secondaryColor || '#1E1D1E')
+    previewHtml = previewHtml.replace(/\$\{backgroundColor\}/g, branding.backgroundColor || '#FFFFFF')
+    previewHtml = previewHtml.replace(/\$\{textColor\}/g, branding.textColor || '#1E1D1E')
+    previewHtml = previewHtml.replace(/\$\{fontFamily\}/g, branding.fontFamily || 'Arial, sans-serif')
+    previewHtml = previewHtml.replace(/\$\{companyName\}/g, escapeHtml(branding.companyName || ''))
+    previewHtml = previewHtml.replace(/\$\{logoUrl\}/g, branding.logoUrl || '')
+    
+    // Also handle without $ prefix
+    previewHtml = previewHtml.replace(/\{primaryColor\}/g, branding.primaryColor || '#EB5023')
+    previewHtml = previewHtml.replace(/\{secondaryColor\}/g, branding.secondaryColor || '#1E1D1E')
+    previewHtml = previewHtml.replace(/\{backgroundColor\}/g, branding.backgroundColor || '#FFFFFF')
+    previewHtml = previewHtml.replace(/\{textColor\}/g, branding.textColor || '#1E1D1E')
+    previewHtml = previewHtml.replace(/\{fontFamily\}/g, branding.fontFamily || 'Arial, sans-serif')
+    previewHtml = previewHtml.replace(/\{companyName\}/g, escapeHtml(branding.companyName || ''))
+    previewHtml = previewHtml.replace(/\{logoUrl\}/g, branding.logoUrl || '')
+    
+    // Apply signature
+    if (branding.signature) {
+      let signatureHtml = branding.signature
+      signatureHtml = signatureHtml.replace(/\{primaryColor\}/g, branding.primaryColor || '#EB5023')
+      signatureHtml = signatureHtml.replace(/\{secondaryColor\}/g, branding.secondaryColor || '#1E1D1E')
+      signatureHtml = signatureHtml.replace(/\{backgroundColor\}/g, branding.backgroundColor || '#FFFFFF')
+      signatureHtml = signatureHtml.replace(/\{textColor\}/g, branding.textColor || '#1E1D1E')
+      signatureHtml = signatureHtml.replace(/\{fontFamily\}/g, branding.fontFamily || 'Arial, sans-serif')
+      signatureHtml = signatureHtml.replace(/\{companyName\}/g, escapeHtml(branding.companyName || ''))
+      signatureHtml = signatureHtml.replace(/\{logoUrl\}/g, branding.logoUrl || '')
+      previewHtml = previewHtml.replace(/\{signature\}/g, signatureHtml)
+    } else {
+      // Default signature
+      let defaultSignature = '<p style="margin: 0 0 4px 0; font-size: 16px; line-height: 1.5;">Thanks,</p>'
+      if (branding.logoUrl) {
+        defaultSignature += `<div style="margin: 8px 0;"><img src="${branding.logoUrl}" alt="${escapeHtml(branding.companyName || '')}" style="max-height: 40px;" /></div>`
+      }
+      if (branding.companyName) {
+        defaultSignature += `<p style="margin: 0; font-size: 14px; line-height: 1.5; color: ${branding.textColor || '#1E1D1E'};">${escapeHtml(branding.companyName)}</p>`
+      } else {
+        defaultSignature += `<p style="margin: 0; font-size: 14px; line-height: 1.5; color: ${branding.textColor || '#1E1D1E'};">The Team</p>`
+      }
+      previewHtml = previewHtml.replace(/\{signature\}/g, defaultSignature)
+    }
+  } else {
+    // Default branding if not provided
+    previewHtml = previewHtml.replace(/\$\{primaryColor\}/g, '#EB5023')
+    previewHtml = previewHtml.replace(/\$\{secondaryColor\}/g, '#1E1D1E')
+    previewHtml = previewHtml.replace(/\$\{backgroundColor\}/g, '#FFFFFF')
+    previewHtml = previewHtml.replace(/\$\{textColor\}/g, '#1E1D1E')
+    previewHtml = previewHtml.replace(/\$\{fontFamily\}/g, 'Arial, sans-serif')
+    previewHtml = previewHtml.replace(/\$\{companyName\}/g, '')
+    previewHtml = previewHtml.replace(/\$\{logoUrl\}/g, '')
+    
+    previewHtml = previewHtml.replace(/\{primaryColor\}/g, '#EB5023')
+    previewHtml = previewHtml.replace(/\{secondaryColor\}/g, '#1E1D1E')
+    previewHtml = previewHtml.replace(/\{backgroundColor\}/g, '#FFFFFF')
+    previewHtml = previewHtml.replace(/\{textColor\}/g, '#1E1D1E')
+    previewHtml = previewHtml.replace(/\{fontFamily\}/g, 'Arial, sans-serif')
+    previewHtml = previewHtml.replace(/\{companyName\}/g, 'The Team')
+    previewHtml = previewHtml.replace(/\{logoUrl\}/g, '')
+    
+    // Default signature
+    const defaultSignature = '<p style="margin: 0 0 4px 0; font-size: 16px; line-height: 1.5;">Thanks,</p><p style="margin: 0; font-size: 14px; line-height: 1.5; color: #1E1D1E;">The Team</p>'
+    previewHtml = previewHtml.replace(/\{signature\}/g, defaultSignature)
+  }
+
+  // Ensure we return a complete HTML document
+  // If the template doesn't include DOCTYPE/html tags, wrap it
+  if (!previewHtml.includes('<!DOCTYPE') && !previewHtml.includes('<html')) {
+    previewHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+${previewHtml}
+</body>
+</html>`
   }
 
   return previewHtml
@@ -199,6 +283,7 @@ export const TEMPLATE_VARIABLES = [
   { name: '{description}', description: 'Package description' },
   { name: '{lineItems}', description: 'HTML table of line items' },
   { name: '{planLink}', description: 'Link to view/download plans' },
-  { name: '{reports}', description: 'HTML links to attached reports' }
+  { name: '{reports}', description: 'HTML links to attached reports' },
+  { name: '{bidEmail}', description: 'Email address for submitting bids' }
 ] as const
 

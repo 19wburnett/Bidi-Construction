@@ -66,6 +66,8 @@ import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-sc
 import { getJobForUser } from '@/lib/job-access'
 import PDFSearch from '@/components/pdf-search'
 import MeasurementSummaryPanel from '@/components/measurement-summary-panel'
+import TaggedMeasurementSummary from '@/components/tagged-measurement-summary'
+import { MeasurementTagPersistence, MeasurementTag } from '@/lib/measurement-tag-persistence'
 import { PlanProcessingStatus } from '@/components/plan-processing-status'
 
 
@@ -164,6 +166,9 @@ export default function EnhancedPlanViewer() {
   const [searchCurrentMatch, setSearchCurrentMatch] = useState(0)
   const [selectedMeasurementIds, setSelectedMeasurementIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+  const [filteredTagIds, setFilteredTagIds] = useState<Set<string>>(new Set())
+  const [measurementTags, setMeasurementTags] = useState<MeasurementTag[]>([])
+  const [highlightedMeasurementIds, setHighlightedMeasurementIds] = useState<string[]>([])
   const [calibrationPoints, setCalibrationPoints] = useState<{ x: number; y: number }[]>([])
   const [isCalibrating, setIsCalibrating] = useState(false)
   // Store page dimensions for scale calculations
@@ -522,6 +527,23 @@ export default function EnhancedPlanViewer() {
     }
   }, [planId, user])
 
+  // Load measurement tags
+  useEffect(() => {
+    if (!planId || !user) return
+
+    const loadTags = async () => {
+      try {
+        const tagPersistence = new MeasurementTagPersistence(planId, user.id)
+        const loadedTags = await tagPersistence.loadTags()
+        setMeasurementTags(loadedTags)
+      } catch (error) {
+        console.error('Error loading measurement tags:', error)
+      }
+    }
+
+    loadTags()
+  }, [planId, user])
+
   // Load data and PDF images
   useEffect(() => {
     if (user && jobId && planId) {
@@ -825,11 +847,15 @@ export default function EnhancedPlanViewer() {
         // Prepare items for BidPackageModal
         const items = itemsWithIds.map((it: any, idx: number) => ({
           id: it.id,
+          name: it.name || it.item_name || undefined,
           category: it.category || 'General Contractor',
           description: it.description || it.item_description || 'Line item',
           quantity: typeof it.quantity === 'number' ? it.quantity : Number(it.quantity) || 1,
           unit: it.unit || 'unit',
-          unit_cost: typeof it.unit_cost === 'number' ? it.unit_cost : Number(it.unit_cost) || undefined
+          unit_cost: typeof it.unit_cost === 'number' ? it.unit_cost : Number(it.unit_cost) || undefined,
+          subcontractor: it.subcontractor || undefined,
+          subcategory: it.subcategory || undefined,
+          cost_code: it.cost_code || undefined
         }))
         setModalTakeoffItems(items)
       }
@@ -2179,6 +2205,8 @@ export default function EnhancedPlanViewer() {
                   }
                 }}
                 onCalibrationPointsChange={setCalibrationPoints}
+                planId={params.planId as string}
+                userId={user?.id}
                 calibrationPoints={calibrationPoints}
                 isCalibrating={isCalibrating}
                 onSetCalibrating={setIsCalibrating}
@@ -2193,6 +2221,10 @@ export default function EnhancedPlanViewer() {
                 onSelectedMeasurementsChange={setSelectedMeasurementIds}
                 selectedItemIds={selectedItemIds}
                 onSelectedItemsChange={setSelectedItemIds}
+                filteredTagIds={filteredTagIds}
+                onFilteredTagIdsChange={setFilteredTagIds}
+                onMeasurementHighlight={setHighlightedMeasurementIds}
+                highlightedMeasurementIds={highlightedMeasurementIds}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
@@ -2471,6 +2503,20 @@ export default function EnhancedPlanViewer() {
                                 <div className="mb-4">
                                   <TakeoffReviewPanel 
                                     reviewFindings={reviewResults}
+                                  />
+                                </div>
+                              )}
+                              
+                              {/* Tagged Measurement Summary */}
+                              {drawings.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area').length > 0 && (
+                                <div className="mb-4">
+                                  <TaggedMeasurementSummary
+                                    measurements={drawings.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area')}
+                                    tags={measurementTags}
+                                    selectedTagIds={filteredTagIds}
+                                    onTagFilter={setFilteredTagIds}
+                                    onMeasurementHighlight={setHighlightedMeasurementIds}
+                                    unit={measurementScaleSettings[currentPage]?.unit || 'ft'}
                                   />
                                 </div>
                               )}

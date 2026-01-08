@@ -40,6 +40,7 @@ interface Bid {
 
 interface TakeoffItem {
   id: string
+  name?: string
   category: string
   description: string
   quantity: number
@@ -47,6 +48,7 @@ interface TakeoffItem {
   unit_cost?: number | null
   total_cost?: number | null
   subcontractor?: string | null
+  cost_code?: string | null
 }
 
 interface BudgetTradeCardProps {
@@ -236,9 +238,19 @@ export default function BudgetTradeCard({
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
+                                {item.name && (
+                                  <p className="font-semibold text-gray-900 truncate mb-1">
+                                    {item.name}
+                                  </p>
+                                )}
                                 <p className="font-medium text-gray-900 truncate">
                                   {item.description || 'Item'}
                                 </p>
+                                {item.cost_code && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    Cost Code: {item.cost_code}
+                                  </p>
+                                )}
                                 <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
                                   <span>
                                     {item.quantity.toLocaleString()} {item.unit || 'units'}

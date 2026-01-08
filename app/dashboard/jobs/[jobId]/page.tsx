@@ -1162,12 +1162,15 @@ export default function JobDetailPage() {
       // Ensure items have required fields
       const normalizedItems = itemsArray.map((item: any, index: number) => ({
         id: item.id || `item-${index}`,
+        name: item.name || item.item_name || undefined,
         category: item.category || 'Uncategorized',
         description: item.description || item.name || item.item_name || '',
         quantity: item.quantity || 0,
         unit: item.unit || '',
         unit_cost: item.unit_cost || null,
-        subcontractor: item.subcontractor || undefined
+        subcontractor: item.subcontractor || undefined,
+        subcategory: item.subcategory || undefined,
+        cost_code: item.cost_code || undefined
       }))
 
       setTakeoffItems(normalizedItems)

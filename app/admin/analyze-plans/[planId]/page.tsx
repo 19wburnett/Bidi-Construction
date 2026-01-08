@@ -1027,11 +1027,15 @@ export default function AdminAnalyzePlanPage() {
                 planId={planId}
                 takeoffItems={takeoffItems.map(item => ({
                   id: item.id,
+                  name: item.name,
                   category: item.category,
                   description: item.name,
                   quantity: item.quantity,
                   unit: item.unit,
-                  unit_cost: item.unit_cost
+                  unit_cost: item.unit_cost,
+                  subcontractor: undefined,
+                  subcategory: undefined,
+                  cost_code: undefined
                 }))}
                 isOpen={showPackageModal}
                 onClose={() => setShowPackageModal(false)}

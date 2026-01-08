@@ -56,6 +56,12 @@ export interface Drawing {
   itemLabel?: string // Optional custom label/name
   itemNotes?: string // Optional notes about the item
   itemCategory?: string // Category grouping (e.g., "Electrical", "Plumbing", "HVAC")
+  // Measurement tag fields
+  measurementTag?: {
+    id: string
+    name: string
+    color: string
+  }
 }
 
 // Removed DrawingPersistence class - drawing tools are no longer used, only comments

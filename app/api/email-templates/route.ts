@@ -33,30 +33,89 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const templateType = searchParams.get('template_type')
 
-    // Build query - always filter by user_id for security
-    let query = supabase
+    // Get templates owned by user
+    let ownedQuery = supabase
       .from('email_templates')
       .select('*')
       .eq('user_id', user.id)
-      .order('is_default', { ascending: false })
-      .order('created_at', { ascending: false })
 
     // Optional filter by template type
     if (templateType) {
-      query = query.eq('template_type', templateType)
+      ownedQuery = ownedQuery.eq('template_type', templateType)
     }
 
-    const { data, error } = await query
+    const { data: ownedTemplates, error: ownedError } = await ownedQuery
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching email templates:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch templates', details: error.message },
-        { status: 500 }
-      )
+    if (ownedError) {
+      console.error('Error fetching owned templates:', ownedError)
     }
 
-    return NextResponse.json({ templates: data || [] })
+    // Get templates shared with user
+    let sharedQuery = supabase
+      .from('email_template_shares')
+      .select(`
+        template_id,
+        email_templates!inner (
+          id,
+          user_id,
+          template_name,
+          template_type,
+          subject,
+          html_body,
+          text_body,
+          variables,
+          is_default,
+          created_at,
+          updated_at
+        )
+      `)
+      .eq('shared_with_user_id', user.id)
+
+    const { data: sharedData, error: sharedError } = await sharedQuery
+
+    if (sharedError) {
+      console.error('Error fetching shared templates:', sharedError)
+    }
+
+    // Combine owned and shared templates
+    const owned = (ownedTemplates || []).map((t: any) => ({
+      ...t,
+      is_shared: false,
+      is_owner: true
+    }))
+
+    const shared = (sharedData || [])
+      .filter((s: any) => s.email_templates) // Filter out null templates
+      .map((s: any) => ({
+        ...s.email_templates,
+        is_shared: true,
+        is_owner: false
+      }))
+      .filter((t: any) => {
+        // Filter by template type if specified
+        if (templateType) {
+          return t.template_type === templateType
+        }
+        return true
+      })
+
+    // Combine and deduplicate (in case user owns a template that's also shared with them)
+    const allTemplates = [...owned, ...shared]
+    const uniqueTemplates = Array.from(
+      new Map(allTemplates.map((t: any) => [t.id, t])).values()
+    )
+
+    // Sort: defaults first, then by created_at
+    uniqueTemplates.sort((a: any, b: any) => {
+      if (a.is_default !== b.is_default) {
+        return a.is_default ? -1 : 1
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+
+    return NextResponse.json({ templates: uniqueTemplates })
   } catch (error: any) {
     console.error('Error in GET /api/email-templates:', error)
     return NextResponse.json(

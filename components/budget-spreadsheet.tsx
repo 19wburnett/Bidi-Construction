@@ -41,12 +41,15 @@ interface AcceptedBid {
 
 interface TakeoffItem {
   id: string
+  name?: string
   category: string
   description: string
   quantity: number
   unit: string
   unit_cost?: number | null
   total_cost?: number | null
+  cost_code?: string | null
+  cost_code_description?: string | null
 }
 
 interface Scenario {
@@ -572,7 +575,9 @@ export default function BudgetSpreadsheet({
                 Trade: trade.name,
                 Bidder: bid.name,
                 Status: item.status === 'covered' ? 'Covered' : 'Needs Bid',
+                Name: takeoffItem.name || '',
                 Description: takeoffItem.description,
+                'Cost Code': takeoffItem.cost_code || '',
                 Quantity: takeoffItem.quantity,
                 Unit: takeoffItem.unit,
                 'Unit Cost': takeoffItem.unit_cost,
@@ -819,10 +824,15 @@ export default function BudgetSpreadsheet({
         className={`group border-b border-gray-50 hover:bg-orange-50/30 transition-colors ${isUncovered ? 'bg-yellow-50/20' : 'bg-white'}`}
       >
         <td className="py-2 px-4 border-l border-gray-100"></td>
-        <td className="py-2 px-4 text-sm font-medium text-gray-900">
-          {item.description || 'Item'}
+        <td className="py-2 px-4 text-sm">
+          {item.name && (
+            <div className="font-semibold text-gray-900 mb-1">{item.name}</div>
+          )}
+          <div className="font-medium text-gray-900">{item.description || 'Item'}</div>
         </td>
-        <td className="py-2 px-4 text-sm text-gray-500">—</td>
+        <td className="py-2 px-4 text-sm text-gray-500 font-mono">
+          {item.cost_code || '—'}
+        </td>
         <td className="py-2 px-4 text-sm text-gray-600 truncate max-w-[300px]">
           {item.category}
         </td>

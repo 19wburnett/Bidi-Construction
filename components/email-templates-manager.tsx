@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/app/providers'
 import EmailTemplateEditor from '@/components/email-template-editor'
-import { Mail, Plus, Edit, Trash2, Star, Loader2 } from 'lucide-react'
+import { Mail, Plus, Edit, Trash2, Star, Loader2, Sparkles } from 'lucide-react'
 import { generatePreviewHtml } from '@/lib/email-templates/preview'
 
 interface EmailTemplate {
@@ -30,6 +30,7 @@ export default function EmailTemplatesManager() {
   const [loading, setLoading] = useState(true)
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [openAIAssistant, setOpenAIAssistant] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -56,6 +57,12 @@ export default function EmailTemplatesManager() {
 
   const handleCreateNew = () => {
     setEditingTemplate(null)
+    setEditorOpen(true)
+  }
+
+  const handleCreateWithAI = () => {
+    setEditingTemplate(null)
+    setOpenAIAssistant(true)
     setEditorOpen(true)
   }
 
@@ -155,10 +162,16 @@ export default function EmailTemplatesManager() {
                 Create and manage custom email templates for bid packages with your branding
               </CardDescription>
             </div>
-            <Button onClick={handleCreateNew} variant="orange" size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              New Template
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={handleCreateNew} variant="orange" size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                New Template
+              </Button>
+              <Button onClick={handleCreateWithAI} variant="outline" size="sm">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Generate with AI
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -249,9 +262,11 @@ export default function EmailTemplatesManager() {
         onClose={() => {
           setEditorOpen(false)
           setEditingTemplate(null)
+          setOpenAIAssistant(false)
         }}
         onSave={fetchTemplates}
         templateType="bid_package"
+        openAIAssistant={openAIAssistant}
       />
     </>
   )

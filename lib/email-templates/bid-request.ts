@@ -12,10 +12,12 @@ import {
 } from './base'
 
 interface LineItem {
+  name?: string
   description: string
   quantity?: number | string
   unit?: string
   unit_cost?: number
+  cost_code?: string
 }
 
 interface BidRequestEmailData {
@@ -51,18 +53,24 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
   const hasReports = reportLinks && reportLinks.length > 0
 
   // Build line items table
+  const hasNameColumn = lineItems.some(item => item.name)
+  const hasCostCodeColumn = lineItems.some(item => item.cost_code)
   const lineItemsTable = hasLineItems ? `
     <table role="presentation" style="${EMAIL_STYLES.table}">
       <thead>
         <tr>
+          ${hasNameColumn ? `<th style="${EMAIL_STYLES.tableHeader}">Name</th>` : ''}
           <th style="${EMAIL_STYLES.tableHeader}">Description</th>
+          ${hasCostCodeColumn ? `<th style="${EMAIL_STYLES.tableHeader}">Cost Code</th>` : ''}
           <th style="${EMAIL_STYLES.tableHeader}">Quantity</th>
         </tr>
       </thead>
       <tbody>
         ${lineItems.map(item => `
           <tr>
+            ${hasNameColumn ? `<td style="${EMAIL_STYLES.tableCell}">${item.name || '—'}</td>` : ''}
             <td style="${EMAIL_STYLES.tableCell}">${item.description || '—'}</td>
+            ${hasCostCodeColumn ? `<td style="${EMAIL_STYLES.tableCell}">${item.cost_code || '—'}</td>` : ''}
             <td style="${EMAIL_STYLES.tableCell}">${item.quantity || ''} ${item.unit || ''}</td>
           </tr>
         `).join('')}
