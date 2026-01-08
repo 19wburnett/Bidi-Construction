@@ -3,6 +3,8 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { matchBidLineItems, type BidLineItem } from '@/lib/bid-comparison/ai-matcher'
 import { generateBidAnalysis, type Bid } from '@/lib/bid-comparison/ai-analyzer'
 import { sortBidIds } from '@/lib/bid-comparison/cache-utils'
+// @ts-ignore - pdf2json doesn't have TypeScript types
+import PDFParser from 'pdf2json'
 
 export async function POST(request: NextRequest) {
   try {
@@ -161,12 +163,66 @@ export async function POST(request: NextRequest) {
       gc_contacts: bid.gc_contacts,
     }))
 
-    // Generate comprehensive AI analysis
+    // Fetch PDF attachments and extract text for all bids
+    const allBidIds = [selectedBidId, ...comparisonBidIds]
+    const pdfTexts: Record<string, string> = {}
+    
+    try {
+      // Load attachments for all bids
+      const { data: attachments, error: attachmentsError } = await supabase
+        .from('bid_attachments')
+        .select('bid_id, file_path, file_name, file_type')
+        .in('bid_id', allBidIds)
+        .eq('file_type', 'application/pdf')
+
+      if (!attachmentsError && attachments && attachments.length > 0) {
+        console.log(`📄 Found ${attachments.length} PDF attachments for bid comparison`)
+        
+        // Extract text from each PDF
+        for (const attachment of attachments) {
+          try {
+            // Download PDF from storage
+            const { data: pdfData, error: downloadError } = await supabase.storage
+              .from('bid-attachments')
+              .download(attachment.file_path)
+
+            if (downloadError || !pdfData) {
+              console.warn(`⚠️ Failed to download PDF ${attachment.file_name}:`, downloadError?.message)
+              continue
+            }
+
+            // Convert blob to buffer
+            const arrayBuffer = await pdfData.arrayBuffer()
+            const buffer = Buffer.from(arrayBuffer)
+
+            // Extract text from PDF
+            const extractedText = await extractTextFromPDF(buffer)
+            
+            if (extractedText && extractedText.trim().length > 0) {
+              const existingText = pdfTexts[attachment.bid_id] || ''
+              pdfTexts[attachment.bid_id] = existingText 
+                ? `${existingText}\n\n=== PDF: ${attachment.file_name} ===\n${extractedText}`
+                : `=== PDF: ${attachment.file_name} ===\n${extractedText}`
+              console.log(`✅ Extracted ${extractedText.length} characters from ${attachment.file_name} for bid ${attachment.bid_id}`)
+            }
+          } catch (error: any) {
+            console.error(`❌ Error processing PDF ${attachment.file_name}:`, error.message)
+            // Continue with other PDFs even if one fails
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Error fetching PDF attachments:', error)
+      // Continue with analysis even if PDF extraction fails
+    }
+
+    // Generate comprehensive AI analysis with PDF content
     const analysis = await generateBidAnalysis(
       selectedBid,
       comparisonBids,
       matchingResult.matches,
-      matchingResult.unmatchedItems
+      matchingResult.unmatchedItems,
+      pdfTexts
     )
 
     // Save to cache using RPC function
@@ -204,3 +260,87 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * Extract text from PDF buffer using pdf2json
+ */
+async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser()
+    let timeoutId: NodeJS.Timeout | null = null
+    let resolved = false
+
+    timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        reject(new Error('PDF parsing timed out'))
+      }
+    }, 30000)
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+    }
+
+    pdfParser.on('pdfParser_dataError', (errData: any) => {
+      cleanup()
+      if (resolved) return
+      resolved = true
+      reject(new Error(errData?.parserError || 'PDF parsing error'))
+    })
+
+    pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+      cleanup()
+      if (resolved) return
+      
+      try {
+        let text = ''
+        
+        if (pdfData.Pages && Array.isArray(pdfData.Pages)) {
+          pdfData.Pages.forEach((page: any, pageIndex: number) => {
+            text += `\n=== PAGE ${pageIndex + 1} ===\n`
+            
+            if (page.Texts && Array.isArray(page.Texts)) {
+              const sortedTexts = page.Texts.sort((a: any, b: any) => {
+                const yDiff = a.y - b.y
+                if (Math.abs(yDiff) > 0.5) return yDiff
+                return a.x - b.x
+              })
+              
+              sortedTexts.forEach((textItem: any) => {
+                if (textItem.R && Array.isArray(textItem.R)) {
+                  textItem.R.forEach((r: any) => {
+                    if (r.T) {
+                      try {
+                        text += decodeURIComponent(r.T) + ' '
+                      } catch {
+                        text += (r.T || '') + ' '
+                      }
+                    }
+                  })
+                }
+              })
+              text += '\n'
+            }
+          })
+        }
+        
+        resolved = true
+        resolve(text.trim())
+      } catch (error: any) {
+        resolved = true
+        reject(new Error(`Error extracting text: ${error.message}`))
+      }
+    })
+
+    try {
+      pdfParser.parseBuffer(buffer)
+    } catch (error: any) {
+      cleanup()
+      if (resolved) return
+      resolved = true
+      reject(new Error(`Failed to start PDF parsing: ${error.message}`))
+    }
+  })
+}

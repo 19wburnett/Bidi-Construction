@@ -606,8 +606,13 @@ function DashboardContent() {
                     </span>
                   </div>
                   <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Monthly Subscription</h3>
-                  <div className="text-3xl font-bold text-orange mb-2">$300<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
+                  <div className="text-3xl font-bold text-orange mb-2">$500<span className="text-base text-gray-600 dark:text-gray-400">/month</span></div>
                   <p className="text-gray-600 dark:text-gray-300">Complete AI-powered estimating solution</p>
+                  <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-xs text-blue-800 dark:text-blue-300 font-medium">
+                      <strong>Beta Customer Lock:</strong> As a beta customer, you're locked at this price for 1 year.
+                    </p>
+                  </div>
                 </div>
                 
                 <div className="space-y-3 mb-6">

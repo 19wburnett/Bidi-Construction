@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase-server'
+import { createServerSupabaseClient, getAuthenticatedUser, createAdminSupabaseClient } from '@/lib/supabase-server'
+import { getJobForUser } from '@/lib/job-access'
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
     const fileNameFromPath = pathParts[pathParts.length - 1]
     
     // Try to find the attachment record to verify access
+    // Match by file_path first (most reliable), then fall back to file_name
     const { data: attachmentRecord, error: attachmentError } = await supabase
       .from('bid_attachments')
       .select(`
@@ -38,68 +40,81 @@ export async function GET(request: NextRequest) {
         bid_id,
         bids!inner (
           id,
-          job_id,
-          jobs!inner (
-            id,
-            user_id
-          )
+          job_id
         )
       `)
       .or(`file_path.eq.${path},file_name.eq.${fileNameFromPath}`)
       .limit(1)
       .maybeSingle()
 
-    // If we found the record, verify the user owns the job
-    if (attachmentRecord) {
-      const jobUserId = (attachmentRecord.bids as any)?.jobs?.user_id
-      if (jobUserId !== user.id) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-      }
+    // Handle lookup errors
+    if (attachmentError) {
+      console.error('Error looking up attachment:', attachmentError)
+      return NextResponse.json({ error: 'Failed to verify attachment access' }, { status: 500 })
     }
 
-    // Try to download using signed URL first (respects RLS better)
-    // If that fails, fall back to direct download
+    // Require attachment record to exist for security
+    if (!attachmentRecord) {
+      return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+    }
+
+    // Verify the user has access to the job (as owner or collaborator)
+    const jobId = (attachmentRecord.bids as any)?.job_id
+    if (!jobId) {
+      return NextResponse.json({ error: 'Invalid attachment record: missing job_id' }, { status: 400 })
+    }
+
+    const jobAccess = await getJobForUser(supabase, jobId, user.id)
+    if (!jobAccess) {
+      return NextResponse.json({ error: 'Access denied: You do not have access to this job' }, { status: 403 })
+    }
+
+    // Use the stored file_path from the attachment record for the download
+    // This ensures we use the canonical path that matches what's in storage
+    const storagePath = attachmentRecord.file_path || path
+
+    // Use admin client to bypass RLS for storage download
+    // We've already verified the user has access to the job above
+    const adminSupabase = createAdminSupabaseClient()
     let arrayBuffer: ArrayBuffer
     let contentType = 'application/pdf'
     
     try {
-      // First, try to create a signed URL (this respects RLS policies)
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      // Try direct download first with admin client (bypasses RLS)
+      const { data, error } = await adminSupabase.storage
         .from('bid-attachments')
-        .createSignedUrl(path, 60) // 60 seconds validity
+        .download(storagePath)
 
-      if (!signedUrlError && signedUrlData?.signedUrl) {
-        // Fetch the file using the signed URL
-        const fileResponse = await fetch(signedUrlData.signedUrl)
-        if (!fileResponse.ok) {
-          throw new Error(`Failed to fetch file: ${fileResponse.statusText}`)
-        }
-        arrayBuffer = await fileResponse.arrayBuffer()
-        // Try to get content type from response
-        const responseContentType = fileResponse.headers.get('content-type')
-        if (responseContentType) {
-          contentType = responseContentType
-        }
-      } else {
-        // Fall back to direct download
-        console.log('Signed URL failed, trying direct download:', signedUrlError?.message)
-        const { data, error } = await supabase.storage
+      if (error) {
+        console.error('Supabase download error:', error)
+        // If direct download fails, try signed URL as fallback
+        const { data: signedUrlData, error: signedUrlError } = await adminSupabase.storage
           .from('bid-attachments')
-          .download(path)
+          .createSignedUrl(storagePath, 60) // 60 seconds validity
 
-        if (error) {
-          console.error('Supabase download error:', error)
+        if (!signedUrlError && signedUrlData?.signedUrl) {
+          // Fetch the file using the signed URL
+          const fileResponse = await fetch(signedUrlData.signedUrl)
+          if (!fileResponse.ok) {
+            throw new Error(`Failed to fetch file: ${fileResponse.statusText}`)
+          }
+          arrayBuffer = await fileResponse.arrayBuffer()
+          // Try to get content type from response
+          const responseContentType = fileResponse.headers.get('content-type')
+          if (responseContentType) {
+            contentType = responseContentType
+          }
+        } else {
           let errorMessage = error.message || 'Failed to download file'
-          if (errorMessage.includes('http')) {
+          if (errorMessage.includes('http') || errorMessage.includes('Access denied')) {
             errorMessage = 'File not found or access denied. Please check the file path and permissions.'
           }
           return NextResponse.json({ error: errorMessage }, { status: 500 })
         }
-
+      } else {
         if (!data) {
           return NextResponse.json({ error: 'File not found' }, { status: 404 })
         }
-
         arrayBuffer = await data.arrayBuffer()
       }
     } catch (fetchError: any) {

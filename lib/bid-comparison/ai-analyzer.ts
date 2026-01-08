@@ -65,9 +65,24 @@ export async function generateBidAnalysis(
   unmatchedItems: {
     selectedBid: BidLineItem[]
     comparisonBids: Record<string, BidLineItem[]>
-  }
+  },
+  pdfTexts?: Record<string, string>
 ): Promise<AIAnalysisResult> {
   const systemPrompt = `You are an expert construction bid analyst with 20+ years of experience. Your task is to provide comprehensive analysis of construction bid comparisons.
+
+You have access to:
+1. Structured bid data (line items, amounts, timelines, notes)
+2. Original PDF documents from each bidder (full text content)
+
+HYBRID ANALYSIS APPROACH:
+- Use structured data for precise line-item comparisons and price analysis
+- Use PDF text content to identify:
+  * Additional context, terms, and conditions not captured in structured data
+  * Material specifications and quality indicators
+  * Warranty information, guarantees, or exclusions
+  * Timeline details and scheduling constraints
+  * Scope clarifications or assumptions
+  * Any discrepancies between structured data and original documents
 
 Analyze the provided bid data and generate insights including:
 1. Best value identification (not just lowest price, but best overall value)
@@ -87,6 +102,7 @@ Be thorough, professional, and provide actionable insights. Consider:
 - Material quality differences
 - Timeline implications
 - Risk factors
+- Terms and conditions from PDFs that may affect the bid value
 
 Return your analysis as JSON with this exact structure:
 {
@@ -156,6 +172,30 @@ Return your analysis as JSON with this exact structure:
     ),
   ].join('\n')
 
+  // Build PDF content section
+  let pdfContentSection = ''
+  if (pdfTexts && Object.keys(pdfTexts).length > 0) {
+    pdfContentSection = '\n\n=== ORIGINAL PDF DOCUMENTS ===\n'
+    
+    // Add selected bid PDF
+    if (pdfTexts[selectedBid.id]) {
+      const pdfText = pdfTexts[selectedBid.id]
+      const truncatedText = pdfText.length > 8000 ? pdfText.slice(0, 8000) + '\n\n...(PDF text truncated for length)' : pdfText
+      pdfContentSection += `\nSelected Bid (${bidSummaries[0].name}) PDF Content:\n${truncatedText}\n`
+    }
+    
+    // Add comparison bid PDFs
+    for (const bid of bidSummaries.slice(1)) {
+      if (pdfTexts[bid.id]) {
+        const pdfText = pdfTexts[bid.id]
+        const truncatedText = pdfText.length > 8000 ? pdfText.slice(0, 8000) + '\n\n...(PDF text truncated for length)' : pdfText
+        pdfContentSection += `\nComparison Bid (${bid.name}) PDF Content:\n${truncatedText}\n`
+      }
+    }
+    
+    pdfContentSection += '\nUse the PDF content above to identify additional context, terms, conditions, specifications, and any information not captured in the structured line items. Cross-reference PDF content with structured data to identify discrepancies or important details.'
+  }
+
   const userPrompt = `BID COMPARISON DATA
 
 Selected Bid:
@@ -172,9 +212,9 @@ MATCHED LINE ITEMS:
 ${matchesSummary || 'No matches found'}
 
 UNMATCHED ITEMS:
-${unmatchedSummary || 'All items matched'}
+${unmatchedSummary || 'All items matched'}${pdfContentSection}
 
-Please provide comprehensive analysis of these bids.`
+Please provide comprehensive analysis of these bids, incorporating insights from both the structured data and the original PDF documents.`
 
   try {
     const response = await callAnalysisLLM(

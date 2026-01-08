@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     // Determine price and product details based on subscription type
     const isSubcontractor = subscriptionType === 'sub'
-    const unitAmount = isSubcontractor ? 20000 : 30000 // $200 for subs, $300 for GCs
+    const unitAmount = isSubcontractor ? 20000 : 50000 // $200 for subs, $500 for GCs
     const productName = isSubcontractor ? 'BIDI Quote Service' : 'BIDI Professional Plan'
     const productDescription = isSubcontractor 
       ? 'Monthly subscription for subcontractors - quote generation service'

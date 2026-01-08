@@ -173,13 +173,18 @@ export default function PricingPage() {
                     Unlimited job requests - perfect for active contractors
                   </CardDescription>
                   <div className="text-center flex items-end justify-center mb-2">
-                    <span className="text-6xl font-bold text-black dark:text-white tracking-tighter">$300</span>
+                    <span className="text-6xl font-bold text-black dark:text-white tracking-tighter">$500</span>
                     <span className="text-gray-600 dark:text-gray-400 ml-2 font-medium mb-2 text-lg">/month</span>
                   </div>
                   <div className="mt-2 inline-block">
                     <span className="bg-orange-100 text-orange-800 px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider">
                       Limited Time Beta Pricing
                     </span>
+                  </div>
+                  <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-blue-800 dark:text-blue-300 font-medium text-center">
+                      <strong>Beta Customer Lock:</strong> As a beta customer, you're locked at this price for 1 year.
+                    </p>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-8 px-8 pb-10">
