@@ -71,14 +71,14 @@ export default function PDFSearch({
 
   return (
     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[100] bg-white border border-gray-300 rounded-lg shadow-xl p-2 flex items-center gap-2 min-w-[400px]">
-      <Search className="h-4 w-4 text-gray-400 flex-shrink-0" />
       <Input
         ref={inputRef}
         type="text"
         value={searchQuery}
         onChange={handleSearchChange}
         placeholder="Search in PDF..."
-        className="flex-1 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8"
+        leftIcon={<Search className="h-4 w-4" />}
+        className="flex-1 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-8 pl-10"
       />
       {searchQuery && (
         <>

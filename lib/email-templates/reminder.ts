@@ -175,6 +175,151 @@ export function generateReminderSubject(jobName: string, tradeCategory: string, 
   return `📬 Reminder: ${jobName} - ${tradeCategory} Bid Request`
 }
 
+interface DeadlineReminderEmailData {
+  jobName: string
+  jobLocation: string
+  tradeCategory: string
+  deadline: string | Date
+  daysUntilDeadline: number
+  planLink?: string | null
+  recipientName?: string
+}
+
+/**
+ * Generates a deadline reminder email HTML
+ * Sent X days before the bid deadline
+ */
+export function generateDeadlineReminderEmail(data: DeadlineReminderEmailData): string {
+  const {
+    jobName,
+    jobLocation,
+    tradeCategory,
+    deadline,
+    daysUntilDeadline,
+    planLink,
+    recipientName,
+  } = data
+
+  const formattedDeadline = formatEmailDate(deadline)
+  
+  // Determine urgency based on days remaining
+  let urgencyColor = BRAND_COLORS.orange
+  let urgencyText = `${daysUntilDeadline} day${daysUntilDeadline !== 1 ? 's' : ''} remaining`
+  let urgencyBannerColor = BRAND_COLORS.orangeLight
+  let urgencyBannerBorder = BRAND_COLORS.orange
+  
+  if (daysUntilDeadline <= 1) {
+    urgencyColor = '#DC2626' // Red
+    urgencyText = daysUntilDeadline === 1 ? 'Deadline is tomorrow!' : 'Deadline is today!'
+    urgencyBannerColor = '#FEF2F2'
+    urgencyBannerBorder = '#DC2626'
+  } else if (daysUntilDeadline <= 3) {
+    urgencyColor = '#F59E0B' // Amber
+    urgencyText = `Only ${daysUntilDeadline} days left!`
+    urgencyBannerColor = '#FFFBEB'
+    urgencyBannerBorder = '#F59E0B'
+  }
+
+  const content = `
+    <!-- Greeting -->
+    ${recipientName ? `<p style="${EMAIL_STYLES.paragraph}">Hello ${recipientName},</p>` : `<p style="${EMAIL_STYLES.paragraph}">Hello,</p>`}
+    
+    <!-- Deadline Reminder Banner -->
+    <div style="background-color: ${urgencyBannerColor}; border-left: 4px solid ${urgencyBannerBorder}; border-radius: 0 8px 8px 0; padding: 16px 20px; margin-bottom: 24px;">
+      <p style="font-size: 14px; font-weight: 600; color: ${urgencyBannerBorder}; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 1px;">
+        ⏰ Deadline Reminder
+      </p>
+      <p style="${EMAIL_STYLES.paragraph}; margin: 0; color: ${BRAND_COLORS.darkGray};">
+        The bid deadline for this project is approaching. ${daysUntilDeadline === 1 ? 'Don\'t miss your chance to submit!' : 'Make sure to submit your bid before the deadline.'}
+      </p>
+    </div>
+
+    <p style="${EMAIL_STYLES.paragraph}">
+      This is a friendly reminder about the bid request for the following project:
+    </p>
+
+    <!-- Project Title -->
+    <h1 style="${EMAIL_STYLES.title}">${jobName}</h1>
+    <p style="${EMAIL_STYLES.subtitle}">${tradeCategory} Services</p>
+
+    <!-- Key Details Box -->
+    <div style="${EMAIL_STYLES.infoBoxHighlight}">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="50%" style="vertical-align: top; padding-right: 16px;">
+            <p style="${EMAIL_STYLES.infoLabel}">📍 Location</p>
+            <p style="${EMAIL_STYLES.infoValue}">${jobLocation}</p>
+          </td>
+          <td width="50%" style="vertical-align: top;">
+            <p style="${EMAIL_STYLES.infoLabel}">📅 Bid Deadline</p>
+            <p style="${EMAIL_STYLES.infoValue}; color: ${urgencyColor}; font-weight: 600;">${formattedDeadline}</p>
+            <p style="font-size: 13px; font-weight: 600; color: ${urgencyColor}; margin: 4px 0 0 0;">
+              ${urgencyText}
+            </p>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    ${planLink ? `
+      <!-- View Plans Button -->
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${planLink}" class="button" style="${EMAIL_STYLES.buttonPrimary}">
+          📐 View Project Plans
+        </a>
+      </div>
+    ` : ''}
+
+    <div style="${EMAIL_STYLES.divider}"></div>
+
+    <!-- How to Submit -->
+    <div style="${EMAIL_STYLES.infoBox}">
+      <h3 style="font-size: 16px; font-weight: 600; color: ${BRAND_COLORS.black}; margin: 0 0 12px 0;">
+        Ready to Submit?
+      </h3>
+      <p style="${EMAIL_STYLES.paragraph}; margin-bottom: 12px;">
+        Simply <strong>reply to this email</strong> with:
+      </p>
+      <ul style="${EMAIL_STYLES.list}">
+        <li style="${EMAIL_STYLES.listItem}"><strong>Bid Amount:</strong> Your total price</li>
+        <li style="${EMAIL_STYLES.listItem}"><strong>Timeline:</strong> Start date and completion estimate</li>
+        <li style="${EMAIL_STYLES.listItem}"><strong>Questions:</strong> Any clarifications needed</li>
+      </ul>
+    </div>
+
+    ${daysUntilDeadline <= 3 ? `
+      <!-- Urgency Notice -->
+      <div style="background-color: #FEF3C7; border: 1px solid #F59E0B; border-radius: 8px; padding: 16px 20px; margin-top: 24px;">
+        <p style="${EMAIL_STYLES.paragraph}; margin: 0; color: #92400E; font-size: 14px;">
+          <strong>⚠️ Important:</strong> The deadline is ${daysUntilDeadline === 1 ? 'tomorrow' : `in ${daysUntilDeadline} days`}. 
+          Please submit your bid before ${formattedDeadline} to be considered.
+        </p>
+      </div>
+    ` : ''}
+
+    <!-- Closing -->
+    <p style="${EMAIL_STYLES.paragraph}; margin-top: 24px;">
+      We look forward to receiving your bid before the deadline!
+    </p>
+  `
+
+  const preheader = `Deadline reminder: ${jobName} - ${urgencyText}`
+
+  return generateEmailWrapper(content, preheader)
+}
+
+/**
+ * Generates a subject line for deadline reminder emails
+ */
+export function generateDeadlineReminderSubject(jobName: string, tradeCategory: string, daysUntilDeadline: number): string {
+  if (daysUntilDeadline <= 1) {
+    return `⏰ URGENT: ${jobName} - ${tradeCategory} Bid Deadline ${daysUntilDeadline === 1 ? 'Tomorrow' : 'Today'}`
+  } else if (daysUntilDeadline <= 3) {
+    return `⏰ Reminder: ${jobName} - ${tradeCategory} Bid Deadline in ${daysUntilDeadline} Days`
+  }
+  return `⏰ Reminder: ${jobName} - ${tradeCategory} Bid Deadline in ${daysUntilDeadline} Days`
+}
+
 
 
 

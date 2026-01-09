@@ -618,15 +618,6 @@ export default function JobDetailPage() {
     // Check if we have items or an analysis ID (job-level takeoff)
     const hasTakeoff = aggregatedTakeoffItems.length > 0 || !!takeoffAnalysisId
     
-    if (!hasTakeoff) {
-      return { 
-        message: 'Run takeoff analysis on your plans', 
-        action: 'takeoff',
-        buttonText: 'Go to Plans',
-        onAction: () => setActiveTab('plans')
-      }
-    }
-    
     if (bidPackages.length === 0) {
       return { 
         message: 'Create a bid package to start collecting bids', 
@@ -635,7 +626,7 @@ export default function JobDetailPage() {
         onAction: () => setActiveTab('bids')
       }
     }
-    
+
     if (bids.length === 0) {
       return { 
         message: 'Waiting for bids from subcontractors', 
@@ -1149,14 +1140,8 @@ export default function JobDetailPage() {
   const handleCreatePackageClick = async () => {
     if (!user || plans.length === 0) return
 
-    // Check if we have takeoff items or an analysis ID
-    if (aggregatedTakeoffItems.length === 0 && !takeoffAnalysisId) {
-      alert('Please run takeoff analysis on at least one plan before creating a bid package.')
-      return
-    }
-
     try {
-      // Use existing items
+      // Use existing items (if any)
       const itemsArray = aggregatedTakeoffItems
 
       // Ensure items have required fields
@@ -1490,15 +1475,13 @@ export default function JobDetailPage() {
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-4">
-                      <div className="relative w-full md:w-64">
-                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
-                        <Input
-                          placeholder="Search plans..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="pl-8"
-                        />
-                      </div>
+                      <Input
+                        placeholder="Search plans..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        leftIcon={<Search className="h-4 w-4" />}
+                        className="w-full md:w-64"
+                      />
                       <div className="flex items-center space-x-2">
                         <input
                           type="file"

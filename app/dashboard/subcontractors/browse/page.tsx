@@ -219,17 +219,13 @@ function DashboardBrowseSubcontractorsPageContent() {
           <div className="max-w-7xl mx-auto px-4 py-4">
             <div className="flex flex-col md:flex-row gap-4">
               {/* Search */}
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder="Search by name, email, trade, or location..."
-                    value={search}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
+              <Input
+                placeholder="Search by name, email, trade, or location..."
+                value={search}
+                onChange={(e) => handleSearch(e.target.value)}
+                leftIcon={<Search className="h-4 w-4" />}
+                className="flex-1"
+              />
 
               {/* Trade Filter */}
               <Select value={tradeFilter} onValueChange={handleTradeFilter}>

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { createClient } from '@/lib/supabase'
@@ -199,6 +200,7 @@ export default function BidPackageModal({
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [selectedProfileSubcontractorId, setSelectedProfileSubcontractorId] = useState<string | null>(null)
   const [deliveryChannel, setDeliveryChannel] = useState<'email' | 'sms' | 'both'>('email')
+  const [includeQuantities, setIncludeQuantities] = useState(true)
   
   const { user } = useAuth()
   const supabase = createClient()
@@ -447,7 +449,8 @@ export default function BidPackageModal({
           description: description || null,
           minimum_line_items: minimumLineItems,
           status: 'draft',
-          deadline: deadlineISO
+          deadline: deadlineISO,
+          include_quantities: includeQuantities
         }
       })
 
@@ -508,7 +511,8 @@ export default function BidPackageModal({
                   planId: planId,
                   reportIds: selectedReportIds, // Pass report IDs to API
                   templateId: selectedTemplateId || undefined, // Pass template ID if selected
-                  deliveryChannel: deliveryChannel // Pass delivery channel preference
+                  deliveryChannel: deliveryChannel, // Pass delivery channel preference
+                  includeQuantities: includeQuantities // Pass whether to include quantities
                 })
               }).then(async (response) => {
                 if (!response.ok) {
@@ -930,7 +934,7 @@ export default function BidPackageModal({
     })
 
   const canProceedToStep2 = selectedTrades.length > 0
-  const canProceedToStep3 = totalSelectedLineItemCount > 0
+  const canProceedToStep3 = selectedTrades.length > 0
   const canCreatePackage = selectedSubs.length > 0
 
   if (!isOpen) return null
@@ -2131,6 +2135,19 @@ export default function BidPackageModal({
                                     Choose how to send bid requests: email, SMS text messages, or both.
                                   </p>
                                 </div>
+
+                                <div className="flex items-center justify-between space-y-2 py-2">
+                                  <div className="space-y-0.5">
+                                    <Label className="text-sm font-semibold">Include Quantities</Label>
+                                    <p className="text-xs text-gray-500">
+                                      Show takeoff quantities in the bid request email.
+                                    </p>
+                                  </div>
+                                  <Switch
+                                    checked={includeQuantities}
+                                    onCheckedChange={setIncludeQuantities}
+                                  />
+                                </div>
                               </AccordionContent>
                             </AccordionItem>
                           </Accordion>
@@ -2481,6 +2498,7 @@ export default function BidPackageModal({
                           selectedTemplateId={selectedTemplateId}
                           canCreatePackage={canCreatePackage}
                           loading={loading}
+                          includeQuantities={includeQuantities}
                         />
                       )}
                       {selectedProfileSubcontractorId && (

@@ -1661,15 +1661,13 @@ export default function TakeoffSpreadsheet({
 
         {/* Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search items..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          <Input
+            placeholder="Search items..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            leftIcon={<Search className="h-4 w-4" />}
+            className="flex-1 min-w-[200px]"
+          />
           {editable && (
             <div className="relative" ref={addItemMenuRef}>
               <Button 

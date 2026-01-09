@@ -166,15 +166,13 @@ export default function AdminAnalyzePlansPage() {
 
         {/* Filters */}
         <div className="flex gap-4 mb-6">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-            <Input
-              placeholder="Search by plan name, project, or user email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          <Input
+            placeholder="Search by plan name, project, or user email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            leftIcon={<Search className="h-5 w-5" />}
+            className="flex-1"
+          />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-48">
               <Filter className="h-4 w-4 mr-2" />

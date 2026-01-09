@@ -270,15 +270,13 @@ export default function SubcontractorSelectionModal({
 
         {/* Search and Actions */}
         <div className="flex items-center justify-between gap-3 py-4 px-6 bg-gray-50 border-b">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search by name, company, email, or location..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 bg-white"
-            />
-          </div>
+          <Input
+            placeholder="Search by name, company, email, or location..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            leftIcon={<Search className="h-4 w-4" />}
+            className="flex-1 bg-white"
+          />
           <Button
             variant="outline"
             size="sm"

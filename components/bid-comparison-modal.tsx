@@ -29,7 +29,8 @@ import {
   XCircle,
   RefreshCw,
   Edit2,
-  History
+  History,
+  Settings
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -44,6 +45,7 @@ import BidEditForm from '@/components/bid-edit-form'
 import BidLineItemsEditor from '@/components/bid-line-items-editor'
 import BidEditHistory from '@/components/bid-edit-history'
 import BidOptionsIndicator from '@/components/bid-options-indicator'
+import BidPackageAutomationSettings from '@/components/bid-package-automation-settings'
 
 interface BidComparisonModalProps {
   jobId: string
@@ -147,6 +149,9 @@ export default function BidComparisonModal({
   const [emailThreads, setEmailThreads] = useState<Record<string, any>>({})
   const [activeTab, setActiveTab] = useState<'details' | 'comparison' | 'conversation' | 'history'>('details')
   const [leftSideTab, setLeftSideTab] = useState<'bids' | 'emails'>('bids')
+  const [bidPackageId, setBidPackageId] = useState<string | null>(null)
+  const [bidPackageDeadline, setBidPackageDeadline] = useState<string | Date | null>(null)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [messageType, setMessageType] = useState<'email' | 'sms'>('email') // Tab within emails section
   const [selectedEmailRecipient, setSelectedEmailRecipient] = useState<any | null>(null)
   const [selectedSMSRecipient, setSelectedSMSRecipient] = useState<any | null>(null)
@@ -160,6 +165,17 @@ export default function BidComparisonModal({
   const [emailsSearchTerm, setEmailsSearchTerm] = useState('')
   const [comparisonMode, setComparisonMode] = useState<'takeoff' | 'bids'>('takeoff')
   const [selectedComparisonBidIds, setSelectedComparisonBidIds] = useState<Set<string>>(new Set())
+  const [selectedTradeCategory, setSelectedTradeCategory] = useState<string>('All')
+
+  // Get unique trade categories from bids
+  const tradeCategories = useMemo(() => {
+    const categories = new Set<string>()
+    bids.forEach(bid => {
+      const category = bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || 'Uncategorized'
+      categories.add(category)
+    })
+    return ['All', ...Array.from(categories).sort()]
+  }, [bids])
   const [comparisonBidLineItems, setComparisonBidLineItems] = useState<Record<string, BidLineItem[]>>({})
   const [loadingComparisonBids, setLoadingComparisonBids] = useState(false)
   const [aiAnalysis, setAiAnalysis] = useState<any>(null)
@@ -631,6 +647,39 @@ export default function BidComparisonModal({
               statusMap[recipient.subcontractor_email] = recipient
             })
             setEmailStatuses(statusMap)
+            
+            // Extract bid package ID and deadline from recipients
+            if (statusData.recipients && statusData.recipients.length > 0) {
+              const firstRecipient = statusData.recipients[0]
+              const pkgId = firstRecipient.bid_package_id || firstRecipient.bid_packages?.id
+              if (pkgId) {
+                setBidPackageId(pkgId)
+                // Try to get deadline from bid package
+                const { data: pkgData } = await supabase
+                  .from('bid_packages')
+                  .select('deadline')
+                  .eq('id', pkgId)
+                  .single()
+                if (pkgData?.deadline) {
+                  setBidPackageDeadline(pkgData.deadline)
+                }
+              }
+            } else if (bidsData && bidsData.length > 0) {
+              // Fallback: get bid package from first bid
+              const firstBid = bidsData[0]
+              const pkgId = (firstBid.bid_packages as any)?.id
+              if (pkgId) {
+                setBidPackageId(pkgId)
+                const { data: pkgData } = await supabase
+                  .from('bid_packages')
+                  .select('deadline')
+                  .eq('id', pkgId)
+                  .single()
+                if (pkgData?.deadline) {
+                  setBidPackageDeadline(pkgData.deadline)
+                }
+              }
+            }
           } else {
             setAllRecipients([])
           }
@@ -1502,6 +1551,17 @@ export default function BidComparisonModal({
               <p className="text-sm text-gray-500">Compare bids against your takeoff analysis</p>
             </div>
           </div>
+          {bidPackageId && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              <span className="hidden sm:inline">Settings</span>
+            </Button>
+          )}
         </div>
         
         {/* Main Content Area */}
@@ -1565,27 +1625,39 @@ export default function BidComparisonModal({
                     </div>
                     {/* Search Bar - Bids */}
                     {leftSideTab === 'bids' && (
-                      <div className="relative px-3 pb-3 border-b bg-white">
-                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <div className="px-3 pb-3 border-b bg-white flex flex-col gap-2">
                         <Input
                           type="text"
                           placeholder="Search bids..."
                           value={bidsSearchTerm}
                           onChange={(e) => setBidsSearchTerm(e.target.value)}
-                          className="pl-8 h-9 text-sm"
+                          leftIcon={<Search className="h-4 w-4" />}
+                          className="h-9 text-sm"
                         />
+                        <Select value={selectedTradeCategory} onValueChange={setSelectedTradeCategory}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="All Trades" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tradeCategories.map((category) => (
+                              <SelectItem key={category} value={category}>
+                                {category}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )}
                     {/* Search Bar - Emails */}
                     {leftSideTab === 'emails' && (
-                      <div className="relative px-3 pb-3 border-b bg-white">
-                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <div className="px-3 pb-3 border-b bg-white flex flex-col gap-2">
                         <Input
                           type="text"
                           placeholder="Search emails..."
                           value={emailsSearchTerm}
                           onChange={(e) => setEmailsSearchTerm(e.target.value)}
-                          className="pl-8 h-9 text-sm"
+                          leftIcon={<Search className="h-4 w-4" />}
+                          className="h-9 text-sm"
                         />
                       </div>
                     )}
@@ -1599,8 +1671,14 @@ export default function BidComparisonModal({
                         </div>
                       )}
                       {(() => {
-                        // Filter bids based on search term
+                        // Filter bids based on search term and trade category
                         const filteredBids = bids.filter((bid) => {
+                          // Filter by trade category if selected
+                          if (selectedTradeCategory !== 'All') {
+                            const category = bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || 'Uncategorized'
+                            if (category !== selectedTradeCategory) return false
+                          }
+
                           if (!bidsSearchTerm) return true
                           const searchLower = bidsSearchTerm.toLowerCase()
                           const subcontractorName = (bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown').toLowerCase()
@@ -2245,14 +2323,14 @@ export default function BidComparisonModal({
                                     Decline
                                   </Button>
                                   <Dialog open={showDeclineDialog} onOpenChange={setShowDeclineDialog}>
-                                    <DialogContent className="sm:max-w-[500px]">
+                                    <DialogContent className="sm:max-w-[500px] p-8">
                                       <DialogHeader>
                                         <DialogTitle>Decline Bid</DialogTitle>
                                         <DialogDescription>
                                           Select a reason for declining this bid and add any additional notes. You can optionally send this feedback to the subcontractor.
                                         </DialogDescription>
                                       </DialogHeader>
-                                      <div className="space-y-4 py-4">
+                                      <div className="space-y-6 py-6">
                                         <div className="space-y-2">
                                           <Label htmlFor="decline-reason">Decline Reason</Label>
                                           <Select
@@ -2786,12 +2864,12 @@ export default function BidComparisonModal({
                                         </Button>
                                       </div>
                                       <div className="relative">
-                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                                         <Input
                                           placeholder="Search items..."
                                           value={takeoffSearchTerm}
                                           onChange={(e) => setTakeoffSearchTerm(e.target.value)}
-                                          className="h-8 pl-8 text-xs"
+                                          leftIcon={<Search className="h-3.5 w-3.5" />}
+                                          className="h-8 text-xs"
                                         />
                                       </div>
                                     </div>
@@ -3962,6 +4040,33 @@ export default function BidComparisonModal({
             </motion.div>
           )}
         </AnimatePresence>
+        
+        {/* Settings Modal */}
+        <Dialog open={showSettingsModal} onOpenChange={setShowSettingsModal}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <DialogHeader>
+              <DialogTitle>Email Automation Settings</DialogTitle>
+              <DialogDescription>
+                Configure automated follow-up emails for this bid package
+              </DialogDescription>
+            </DialogHeader>
+            {bidPackageId ? (
+              <BidPackageAutomationSettings
+                bidPackageId={bidPackageId}
+                deadline={bidPackageDeadline}
+                onSave={() => {
+                  setShowSettingsModal(false)
+                  loadData()
+                }}
+              />
+            ) : (
+              <div className="p-6 text-center text-gray-500">
+                <Settings className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                <p className="text-sm">No bid package found. Send emails first to configure automation settings.</p>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -3995,9 +4100,22 @@ export default function BidComparisonModal({
               <p className="text-sm text-gray-500">Compare bids against your takeoff analysis</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-gray-100">
-            <X className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {bidPackageId && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowSettingsModal(true)}
+                className="flex items-center gap-2"
+              >
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-gray-100">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
         
         {/* Main Content Area */}
@@ -4061,27 +4179,39 @@ export default function BidComparisonModal({
                     </div>
                     {/* Search Bar - Bids */}
                     {leftSideTab === 'bids' && (
-                      <div className="relative px-3 pb-3 border-b bg-white">
-                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <div className="px-3 pb-3 border-b bg-white flex flex-col gap-2">
                         <Input
                           type="text"
                           placeholder="Search bids..."
                           value={bidsSearchTerm}
                           onChange={(e) => setBidsSearchTerm(e.target.value)}
-                          className="pl-8 h-9 text-sm"
+                          leftIcon={<Search className="h-4 w-4" />}
+                          className="h-9 text-sm"
                         />
+                        <Select value={selectedTradeCategory} onValueChange={setSelectedTradeCategory}>
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="All Trades" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tradeCategories.map((category) => (
+                              <SelectItem key={category} value={category}>
+                                {category}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )}
                     {/* Search Bar - Emails */}
                     {leftSideTab === 'emails' && (
-                      <div className="relative px-3 pb-3 border-b bg-white">
-                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <div className="px-3 pb-3 border-b bg-white flex flex-col gap-2">
                         <Input
                           type="text"
                           placeholder="Search emails..."
                           value={emailsSearchTerm}
                           onChange={(e) => setEmailsSearchTerm(e.target.value)}
-                          className="pl-8 h-9 text-sm"
+                          leftIcon={<Search className="h-4 w-4" />}
+                          className="h-9 text-sm"
                         />
                       </div>
                     )}
@@ -4095,8 +4225,14 @@ export default function BidComparisonModal({
                         </div>
                       )}
                       {(() => {
-                        // Filter bids based on search term
+                        // Filter bids based on search term and trade category
                         const filteredBids = bids.filter((bid) => {
+                          // Filter by trade category if selected
+                          if (selectedTradeCategory !== 'All') {
+                            const category = bid.subcontractors?.trade_category || bid.gc_contacts?.trade_category || (bid.bid_packages as any)?.trade_category || 'Uncategorized'
+                            if (category !== selectedTradeCategory) return false
+                          }
+
                           if (!bidsSearchTerm) return true
                           const searchLower = bidsSearchTerm.toLowerCase()
                           const subcontractorName = (bid.subcontractors?.name || bid.gc_contacts?.name || bid.subcontractor_email || 'Unknown').toLowerCase()
@@ -4725,14 +4861,14 @@ export default function BidComparisonModal({
                                     Decline
                                   </Button>
                                   <Dialog open={showDeclineDialog} onOpenChange={setShowDeclineDialog}>
-                                    <DialogContent className="sm:max-w-[500px]">
+                                    <DialogContent className="sm:max-w-[500px] p-8">
                                       <DialogHeader>
                                         <DialogTitle>Decline Bid</DialogTitle>
                                         <DialogDescription>
                                           Select a reason for declining this bid and add any additional notes. You can optionally send this feedback to the subcontractor.
                                         </DialogDescription>
                                       </DialogHeader>
-                                      <div className="space-y-4 py-4">
+                                      <div className="space-y-6 py-6">
                                         <div className="space-y-2">
                                           <Label htmlFor="decline-reason">Decline Reason</Label>
                                           <Select
@@ -5145,12 +5281,12 @@ export default function BidComparisonModal({
                                         </Button>
                                       </div>
                                       <div className="relative">
-                                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                                         <Input
                                           placeholder="Search items..."
                                           value={takeoffSearchTerm}
                                           onChange={(e) => setTakeoffSearchTerm(e.target.value)}
-                                          className="h-8 pl-8 text-xs"
+                                          leftIcon={<Search className="h-3.5 w-3.5" />}
+                                          className="h-8 text-xs"
                                         />
                                       </div>
                                     </div>
@@ -6323,6 +6459,32 @@ export default function BidComparisonModal({
         </AnimatePresence>
       </motion.div>
 
+      {/* Settings Modal */}
+      <Dialog open={showSettingsModal} onOpenChange={setShowSettingsModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Automation Settings</DialogTitle>
+            <DialogDescription>
+              Configure automated follow-up emails for this bid package
+            </DialogDescription>
+          </DialogHeader>
+          {bidPackageId ? (
+            <BidPackageAutomationSettings
+              bidPackageId={bidPackageId}
+              deadline={bidPackageDeadline}
+              onSave={() => {
+                setShowSettingsModal(false)
+                loadData()
+              }}
+            />
+          ) : (
+            <div className="p-6 text-center text-gray-500">
+              <Settings className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+              <p className="text-sm">No bid package found. Send emails first to configure automation settings.</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </motion.div>
   )
 }

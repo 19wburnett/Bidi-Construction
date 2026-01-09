@@ -278,7 +278,7 @@ export default function GuestJobPlansViewer() {
                             {plan.file_name}
                           </CardTitle>
                           <CardDescription className="mt-1">
-                            <div className="flex items-center gap-2 text-xs">
+                            <span className="inline-flex items-center gap-2 text-xs">
                               {plan.num_pages && (
                                 <span>{plan.num_pages} page{plan.num_pages !== 1 ? 's' : ''}</span>
                               )}
@@ -288,13 +288,14 @@ export default function GuestJobPlansViewer() {
                                   <span>{(plan.file_size / 1024 / 1024).toFixed(2)} MB</span>
                                 </>
                               )}
-                            </div>
-                            <div className="flex items-center gap-1 mt-1">
+                            </span>
+                            <br />
+                            <span className="inline-flex items-center gap-1 text-xs">
                               <Calendar className="h-3 w-3" />
-                              <span className="text-xs">
+                              <span>
                                 {new Date(plan.created_at).toLocaleDateString()}
                               </span>
-                            </div>
+                            </span>
                           </CardDescription>
                         </div>
                       </div>

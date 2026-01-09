@@ -159,6 +159,7 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
       let subcontractorId: string | null = null
       let contactId: string | null = null
       let rawEmail = ''
+      let subcontractorName = ''
 
       // Validate that at least one recipient is selected
       if (!selectedContactId && !selectedSubId) {
@@ -172,6 +173,7 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
         const contact = contacts.find(c => c.id === selectedContactId)
         if (contact) {
           rawEmail = contact.email
+          subcontractorName = contact.name
           contactId = contact.id
           subcontractorId = null // Clear subcontractor_id when using contact
         }
@@ -193,9 +195,11 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
         subcontractorId = newSub.id
         contactId = null // Clear contact_id when using subcontractor
         rawEmail = newSubEmail
+        subcontractorName = newSubName
       } else if (selectedSubId) {
         const selectedSub = subcontractors.find(s => s.id === selectedSubId)
         rawEmail = selectedSub?.email || ''
+        subcontractorName = selectedSub?.name || ''
         subcontractorId = selectedSubId
         contactId = null // Clear contact_id when using subcontractor
       }
@@ -206,6 +210,8 @@ export default function AddBidModal({ jobId, isOpen, onClose, onBidAdded }: AddB
         .insert({
           job_id: jobId,
           subcontractor_id: subcontractorId,
+          subcontractor_email: rawEmail,
+          subcontractor_name: subcontractorName,
           contact_id: contactId,
           bid_package_id: selectedPackageId === 'none' ? null : selectedPackageId,
           bid_amount: null, // Calculated from line items

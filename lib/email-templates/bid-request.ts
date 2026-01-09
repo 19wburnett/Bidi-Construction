@@ -30,6 +30,7 @@ interface BidRequestEmailData {
   planLink?: string | null
   reportLinks?: { title: string; url: string }[]
   recipientName?: string
+  includeQuantities?: boolean
 }
 
 /**
@@ -46,6 +47,7 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
     planLink,
     reportLinks = [],
     recipientName,
+    includeQuantities = true,
   } = data
 
   const formattedDeadline = formatEmailDate(deadline)
@@ -62,7 +64,7 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
           ${hasNameColumn ? `<th style="${EMAIL_STYLES.tableHeader}">Name</th>` : ''}
           <th style="${EMAIL_STYLES.tableHeader}">Description</th>
           ${hasCostCodeColumn ? `<th style="${EMAIL_STYLES.tableHeader}">Cost Code</th>` : ''}
-          <th style="${EMAIL_STYLES.tableHeader}">Quantity</th>
+          ${includeQuantities ? `<th style="${EMAIL_STYLES.tableHeader}">Quantity</th>` : ''}
         </tr>
       </thead>
       <tbody>
@@ -71,7 +73,7 @@ export function generateBidRequestEmail(data: BidRequestEmailData): string {
             ${hasNameColumn ? `<td style="${EMAIL_STYLES.tableCell}">${item.name || '—'}</td>` : ''}
             <td style="${EMAIL_STYLES.tableCell}">${item.description || '—'}</td>
             ${hasCostCodeColumn ? `<td style="${EMAIL_STYLES.tableCell}">${item.cost_code || '—'}</td>` : ''}
-            <td style="${EMAIL_STYLES.tableCell}">${item.quantity || ''} ${item.unit || ''}</td>
+            ${includeQuantities ? `<td style="${EMAIL_STYLES.tableCell}">${item.quantity || ''} ${item.unit || ''}</td>` : ''}
           </tr>
         `).join('')}
       </tbody>

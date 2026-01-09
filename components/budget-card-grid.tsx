@@ -572,15 +572,13 @@ export default function BudgetCardGrid({
           <div className="flex-1">
             {/* Search Bar and Filters - Sticky */}
             <div className="sticky top-0 z-20 mb-4 bg-white pb-4 pt-0 -mt-4 space-y-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <Input
-                  placeholder="Search trades, items, or bids..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="!pl-10 pr-3 shadow-sm"
-                />
-              </div>
+              <Input
+                placeholder="Search trades, items, or bids..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                leftIcon={<Search className="h-4 w-4" />}
+                className="pr-3 shadow-sm"
+              />
               
               {/* Filter and Sort Controls */}
               <div className="grid grid-cols-2 gap-3">

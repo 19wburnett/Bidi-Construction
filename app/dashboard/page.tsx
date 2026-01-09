@@ -22,11 +22,9 @@ import {
   AlertCircle,
   ArrowRight,
   FileText,
-  BarChart3,
   Users,
   DollarSign,
   MapPin,
-  Calendar,
   Package,
   Eye,
   Loader2,
@@ -34,12 +32,10 @@ import {
   CreditCard,
   ArrowUpRight,
   Activity,
-  Bell,
   FilePlus,
   UserPlus,
   LayoutDashboard,
-  Search,
-  Filter
+  Search
 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -80,12 +76,6 @@ interface ActivityItem {
   jobName: string
 }
 
-interface ActionableMetrics {
-  pendingBidsCount: number
-  incompleteJobsCount: number
-  draftPackagesCount: number
-}
-
 function DashboardContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -114,11 +104,6 @@ function DashboardContent() {
   const [jobs, setJobs] = useState<JobWithCounts[]>([])
   const [heroJob, setHeroJob] = useState<JobWithCounts | null>(null)
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
-  const [actionableMetrics, setActionableMetrics] = useState<ActionableMetrics>({
-    pendingBidsCount: 0,
-    incompleteJobsCount: 0,
-    draftPackagesCount: 0
-  })
 
   // Filter states
   const [searchTerm, setSearchTerm] = useState('')
@@ -287,17 +272,6 @@ function DashboardContent() {
       const totalBidPackages = packagesData.length
       const totalBids = bidsData.length
       const pendingBids = bidsData.filter(bid => bid.status === 'pending').length
-
-      const incompleteJobsCount = jobsData.filter(job => 
-        plansData.filter(p => p.job_id === job.id).length === 0
-      ).length
-      const draftPackagesCount = packagesData.filter(p => p.status === 'draft').length
-
-      setActionableMetrics({
-        pendingBidsCount: pendingBids,
-        incompleteJobsCount,
-        draftPackagesCount
-      })
 
       // Load quote stats for subcontractors
       let quoteStats = {
@@ -788,22 +762,7 @@ function DashboardContent() {
                             </div>
                           </div>
                           
-                          <div className="grid grid-cols-3 gap-4 py-4 border-y border-gray-100">
-                            <div>
-                              <p className="text-sm text-gray-500 mb-1">Plans</p>
-                              <p className="text-xl font-bold text-gray-900">{heroJob.plan_count}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500 mb-1">Packages</p>
-                              <p className="text-xl font-bold text-gray-900">{heroJob.bid_package_count}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500 mb-1">Bids</p>
-                              <p className="text-xl font-bold text-gray-900">{heroJob.bid_count}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-3">
+                          <div className="flex flex-wrap gap-3 mt-4">
                             <Link href={`/dashboard/jobs/${heroJob.id}`} onClick={(e) => e.stopPropagation()}>
                               <Button size="sm">
                                 Open Dashboard
@@ -844,132 +803,6 @@ function DashboardContent() {
               </motion.div>
             )}
 
-            {/* 2. Action Center - Needs Attention */}
-            <motion.div variants={staggerItem}>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <AlertCircle className="h-5 w-5 mr-2 text-orange" />
-                Needs Attention
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Link href="/dashboard?status=waiting_for_bids">
-                  <Card className="bg-white border-orange/20 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-2xl font-bold text-orange-600">{actionableMetrics.pendingBidsCount}</p>
-                        <p className="text-sm font-medium text-gray-600">Pending Bids</p>
-                      </div>
-                      <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
-                        <FileText className="h-5 w-5 text-orange-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-
-                <Link href="/dashboard?status=needs_takeoff">
-                   <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-2xl font-bold text-gray-900">{actionableMetrics.incompleteJobsCount}</p>
-                        <p className="text-sm font-medium text-gray-600">Jobs w/o Plans</p>
-                      </div>
-                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                        <AlertCircle className="h-5 w-5 text-gray-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-
-                <Link href="/dashboard?status=needs_packages">
-                  <Card className="bg-white border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-2xl font-bold text-gray-900">{actionableMetrics.draftPackagesCount}</p>
-                        <p className="text-sm font-medium text-gray-600">Draft Packages</p>
-                      </div>
-                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center">
-                        <Package className="h-5 w-5 text-gray-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </div>
-            </motion.div>
-
-            {/* Quote Stats for Subcontractors */}
-            {userRole === 'sub' && (
-              <motion.div variants={staggerItem}>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                  <FileText className="h-5 w-5 mr-2 text-orange" />
-                  Quote Requests
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-                  <Link href="/dashboard/quotes">
-                    <Card className="bg-white border-orange/20 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                      <CardContent className="p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-2xl font-bold text-orange-600">{stats.totalQuotes || 0}</p>
-                          <p className="text-sm font-medium text-gray-600">Total Quotes</p>
-                        </div>
-                        <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
-                          <FileText className="h-5 w-5 text-orange-600" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-
-                  <Link href="/dashboard/quotes?status=pending">
-                    <Card className="bg-white border-yellow-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                      <CardContent className="p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-2xl font-bold text-yellow-600">{stats.pendingQuotes || 0}</p>
-                          <p className="text-sm font-medium text-gray-600">Pending</p>
-                        </div>
-                        <div className="h-10 w-10 rounded-full bg-yellow-50 flex items-center justify-center">
-                          <Clock className="h-5 w-5 text-yellow-600" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-
-                  <Link href="/dashboard/quotes?status=processing">
-                    <Card className="bg-white border-blue-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                      <CardContent className="p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-2xl font-bold text-blue-600">{stats.processingQuotes || 0}</p>
-                          <p className="text-sm font-medium text-gray-600">Processing</p>
-                        </div>
-                        <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center">
-                          <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-
-                  <Link href="/dashboard/quotes?status=completed">
-                    <Card className="bg-white border-green-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full">
-                      <CardContent className="p-4 flex items-center justify-between">
-                        <div>
-                          <p className="text-2xl font-bold text-green-600">{stats.completedQuotes || 0}</p>
-                          <p className="text-sm font-medium text-gray-600">Completed</p>
-                        </div>
-                        <div className="h-10 w-10 rounded-full bg-green-50 flex items-center justify-center">
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                </div>
-                <div className="mb-6">
-                  <Link href="/dashboard/quotes/new">
-                    <Button className="bg-orange-500 hover:bg-orange-600">
-                      <Plus className="h-4 w-4 mr-2" />
-                      New Quote Request
-                    </Button>
-                  </Link>
-                </div>
-              </motion.div>
-            )}
-
             {/* 3. All Jobs with Search/Filters */}
             {userRole !== 'sub' && (
               <motion.div variants={staggerItem}>
@@ -977,7 +810,6 @@ function DashboardContent() {
                   <h2 className="text-lg font-semibold text-gray-900 flex items-center">
                     <Building2 className="h-5 w-5 mr-2 text-orange" />
                     All Jobs
-                    <Badge variant="secondary" className="ml-2">{stats.totalJobs}</Badge>
                   </h2>
                 </div>
 
@@ -986,17 +818,15 @@ function DashboardContent() {
                 <CardContent className="p-4">
                   <div className="flex flex-col space-y-4">
                     <div className="flex flex-col md:flex-row gap-4">
-                      <div className="flex-1">
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <div className="flex-1">
                           <Input
                             placeholder="Search jobs..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="pl-10"
+                            leftIcon={<Search className="h-5 w-5" />}
+                            className="pl-12"
                           />
                         </div>
-                      </div>
                       <div className="flex gap-3">
                         <Select value={sortBy} onValueChange={setSortBy}>
                           <SelectTrigger className="w-[140px]">
@@ -1021,34 +851,34 @@ function DashboardContent() {
                           All Jobs
                         </TabsTrigger>
                         <TabsTrigger 
-                          value="active" 
+                          value="draft" 
                           className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
                         >
-                          Active
+                          Draft
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="needs_takeoff" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Needs Takeoff
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="needs_packages" 
+                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
+                        >
+                          Need Packages
                         </TabsTrigger>
                          <TabsTrigger 
                           value="waiting_for_bids" 
                           className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
                         >
-                          Bidding
-                        </TabsTrigger>
-                        <TabsTrigger 
-                          value="draft" 
-                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
-                        >
-                          Drafts
+                          Waiting for Bids
                         </TabsTrigger>
                         <TabsTrigger 
                           value="completed" 
                           className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
                         >
                           Completed
-                        </TabsTrigger>
-                         <TabsTrigger 
-                          value="archived" 
-                          className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-orange data-[state=active]:text-orange-600 rounded-none px-4 py-2"
-                        >
-                          Archived
                         </TabsTrigger>
                       </TabsList>
                     </Tabs>
@@ -1139,21 +969,7 @@ function DashboardContent() {
                               </div>
                             </CardHeader>
                             <CardContent className="pt-0">
-                              <div className="flex items-center justify-between text-sm">
-                                <div className="flex items-center space-x-4">
-                                  <div className="flex items-center text-gray-500">
-                                    <FileText className="h-4 w-4 mr-1" />
-                                    {job.plan_count}
-                                  </div>
-                                  <div className="flex items-center text-gray-500">
-                                    <Package className="h-4 w-4 mr-1" />
-                                    {job.bid_package_count}
-                                  </div>
-                                  <div className="flex items-center text-gray-500">
-                                    <Users className="h-4 w-4 mr-1" />
-                                    {job.bid_count}
-                                  </div>
-                                </div>
+                              <div className="flex items-center justify-end text-sm">
                                 <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-orange transition-colors" />
                               </div>
                               
@@ -1239,31 +1055,6 @@ function DashboardContent() {
               </Card>
             </motion.div>
 
-            {/* Quick Actions (Sidebar) */}
-            <motion.div variants={staggerItem}>
-              <Card>
-                <CardHeader>
-                   <CardTitle className="text-base">Quick Actions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                   <Link href="/dashboard/jobs/new">
-                    <Button variant="ghost" className="w-full justify-start" size="sm">
-                      <Plus className="h-4 w-4 mr-2" /> Create New Job
-                    </Button>
-                   </Link>
-                   <Link href="/dashboard/contacts">
-                    <Button variant="ghost" className="w-full justify-start" size="sm">
-                      <UserPlus className="h-4 w-4 mr-2" /> Manage Contacts
-                    </Button>
-                   </Link>
-                   <Link href="/dashboard/settings">
-                    <Button variant="ghost" className="w-full justify-start" size="sm">
-                      <Eye className="h-4 w-4 mr-2" /> Settings
-                    </Button>
-                   </Link>
-                </CardContent>
-              </Card>
-            </motion.div>
 
           </motion.div>
         </div>

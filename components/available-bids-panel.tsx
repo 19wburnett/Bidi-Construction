@@ -236,15 +236,12 @@ export default function AvailableBidsPanel({
         <div className="border-t p-4 space-y-4">
           {/* Search and filters */}
           <div className="space-y-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search bids..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
+            <Input
+              placeholder="Search bids..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              leftIcon={<Search className="h-4 w-4" />}
+            />
             <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => setStatusFilter(null)}

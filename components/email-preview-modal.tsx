@@ -37,6 +37,7 @@ interface EmailPreviewModalProps {
   selectedTemplateId: string | null
   canCreatePackage: boolean
   loading: boolean
+  includeQuantities?: boolean
 }
 
 export default function EmailPreviewModal({
@@ -55,7 +56,8 @@ export default function EmailPreviewModal({
   reports,
   selectedTemplateId,
   canCreatePackage,
-  loading
+  loading,
+  includeQuantities = true
 }: EmailPreviewModalProps) {
   const [template, setTemplate] = useState<any>(null)
   const [loadingTemplate, setLoadingTemplate] = useState(false)
@@ -136,7 +138,8 @@ export default function EmailPreviewModal({
         mockBidPackage,
         '#', // Preview link
         reportLinks,
-        template
+        template,
+        includeQuantities
       )
       
       // Wrap custom template body in email wrapper
@@ -152,7 +155,8 @@ export default function EmailPreviewModal({
         description: description || '',
         lineItems: lineItems,
         planLink: '#',
-        reportLinks: reportLinks
+        reportLinks: reportLinks,
+        includeQuantities: includeQuantities
       })
     }
   }
@@ -313,7 +317,8 @@ function generateCustomTemplateBody(
   bidPackage: any,
   planLink: string | null,
   reportLinks: { title: string; url: string }[],
-  template: { subject: string; html_body: string; text_body?: string; variables?: any }
+  template: { subject: string; html_body: string; text_body?: string; variables?: any },
+  includeQuantities: boolean = true
 ): string {
   let htmlBody = template.html_body
   
@@ -388,7 +393,9 @@ function generateCustomTemplateBody(
           if (item.name) parts.push(`<strong>${escapeHtml(item.name)}</strong>`)
           parts.push(escapeHtml(item.description || ''))
           if (item.cost_code) parts.push(`<span style="color: #6b7280; font-size: 14px;">(Cost Code: ${escapeHtml(item.cost_code)})</span>`)
-          parts.push(`- ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}`)
+          if (includeQuantities) {
+            parts.push(`- ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}`)
+          }
           return `<li style="margin: 8px 0; font-size: 16px; line-height: 1.5;">${parts.join(' ')}</li>`
         }).join('')}
       </ul>`

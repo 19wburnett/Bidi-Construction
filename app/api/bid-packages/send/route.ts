@@ -15,6 +15,7 @@ interface SendRequest {
   reportIds?: string[]
   templateId?: string
   deliveryChannel?: 'email' | 'sms' | 'both' // New: delivery channel preference
+  includeQuantities?: boolean // New: whether to include quantities in the email
 }
 
 /**
@@ -175,7 +176,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SendRequest = await request.json()
-    const { bidPackageId, subcontractorIds, planId, reportIds, templateId, deliveryChannel = 'email' } = body
+    const { 
+      bidPackageId, 
+      subcontractorIds, 
+      planId, 
+      reportIds, 
+      templateId, 
+      deliveryChannel = 'email',
+      includeQuantities = true // Default to true
+    } = body
 
     if (!bidPackageId || !subcontractorIds || subcontractorIds.length === 0 || !planId) {
       return NextResponse.json(
@@ -436,7 +445,7 @@ export async function POST(request: NextRequest) {
     }
     
     const emailBody = emailTemplate 
-      ? generateCustomTemplateBody(bidPackageWithFormattedDeadline, planLink, reportLinks, emailTemplate)
+      ? generateCustomTemplateBody(bidPackageWithFormattedDeadline, planLink, reportLinks, emailTemplate, includeQuantities)
       : generateBidRequestEmail({
           jobName: bidPackage.jobs.name,
           jobLocation: bidPackage.jobs.location,
@@ -446,6 +455,7 @@ export async function POST(request: NextRequest) {
           lineItems: bidPackage.minimum_line_items,
           planLink,
           reportLinks,
+          includeQuantities,
         })
 
     // Generate SMS message if needed
@@ -714,7 +724,8 @@ function generateCustomTemplateBody(
   bidPackage: any,
   planLink: string | null,
   reportLinks: { title: string; url: string }[],
-  template: { subject: string; html_body: string; text_body?: string; variables?: any }
+  template: { subject: string; html_body: string; text_body?: string; variables?: any },
+  includeQuantities: boolean = true
 ): string {
   let htmlBody = template.html_body
   
@@ -859,7 +870,9 @@ function generateCustomTemplateBody(
           if (item.name) parts.push(`<strong>${escapeHtml(item.name)}</strong>`)
           parts.push(escapeHtml(item.description || ''))
           if (item.cost_code) parts.push(`<span style="color: #6b7280; font-size: 14px;">(Cost Code: ${escapeHtml(item.cost_code)})</span>`)
-          parts.push(`- ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}`)
+          if (includeQuantities) {
+            parts.push(`- ${escapeHtml(String(item.quantity || ''))} ${escapeHtml(item.unit || '')}`)
+          }
           return `<li style="margin: 8px 0; font-size: 16px; line-height: 1.5;">${parts.join(' ')}</li>`
         }).join('')}
       </ul>`

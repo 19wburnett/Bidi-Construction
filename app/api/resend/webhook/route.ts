@@ -1085,6 +1085,8 @@ async function handleInboundEmail(body: any) {
         job_id: jobId,
         bid_package_id: bidPackageId,
         subcontractor_id: subcontractorId,
+        subcontractor_email: fromEmail,
+        subcontractor_name: subcontractorName,
         bid_amount: bidData.bidAmount || null,
         timeline: bidData.timeline || null,
         notes: bidData.notes || null,
