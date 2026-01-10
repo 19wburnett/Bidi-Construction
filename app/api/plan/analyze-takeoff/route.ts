@@ -62,14 +62,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan not found or access denied' }, { status: 404 })
     }
 
-    // Get user's cost code preference
+    // Get user's cost code preference and check for custom cost codes
     const { data: userData } = await supabase
       .from('users')
-      .select('preferred_cost_code_standard')
+      .select('preferred_cost_code_standard, use_custom_cost_codes')
       .eq('id', userId)
       .single()
     
-    const costCodeStandard: CostCodeStandard = (userData?.preferred_cost_code_standard as CostCodeStandard) || 'csi-16'
+    // Check if user has custom cost codes set as default
+    let costCodeStandard: CostCodeStandard = (userData?.preferred_cost_code_standard as CostCodeStandard) || 'csi-16'
+    if (userData?.use_custom_cost_codes) {
+      // Verify custom cost codes exist and are completed
+      const { data: customCodes } = await supabase
+        .from('custom_cost_codes')
+        .select('id, extraction_status')
+        .eq('user_id', userId)
+        .eq('is_default', true)
+        .eq('extraction_status', 'completed')
+        .single()
+      
+      if (customCodes) {
+        costCodeStandard = 'custom'
+      }
+    }
 
     // Get trade tags for this plan
     const { data: tradeTags } = await supabase
@@ -312,7 +327,7 @@ ${buildTakeoffUserPrompt(
     // Use AI Gateway to analyze using vectorized text (with optional visual images for context)
     const response = await aiGateway.generate({
       model: 'gpt-4o',
-      system: buildTakeoffSystemPrompt('takeoff', job?.project_type?.toLowerCase() || 'residential', costCodeStandard),
+      system: await buildTakeoffSystemPrompt('takeoff', job?.project_type?.toLowerCase() || 'residential', costCodeStandard, userId),
       prompt: textBasedPrompt,
       images: visualImages.length > 0 ? visualImages : undefined, // Only include images if provided and small
       maxTokens: 8192, // Increased for text-based analysis
@@ -640,7 +655,8 @@ ${buildTakeoffUserPrompt(
       reviewResults = await reviewOrchestrator.runReview(
         takeoffData,
         images,
-        costCodeStandard
+        costCodeStandard,
+        userId
       )
 
       // Save review results to database

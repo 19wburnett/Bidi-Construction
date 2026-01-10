@@ -7,17 +7,19 @@
  * 3. Validate quantities and cost codes
  */
 
-import { getRelevantCostCodesForPrompt, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
+import { CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
+import { getRelevantCostCodesForPrompt } from '@/lib/cost-codes/server-helpers'
 
 /**
  * Build prompt for Reviewer 1: Review existing takeoff items
  */
-export function buildReviewTakeoffPrompt(
+export async function buildReviewTakeoffPrompt(
   takeoffItems: any[],
-  costCodeStandard: CostCodeStandard = 'csi-16'
-): string {
+  costCodeStandard: CostCodeStandard = 'csi-16',
+  userId?: string
+): Promise<string> {
   const standardName = getStandardName(costCodeStandard)
-  const costCodeInstructions = getRelevantCostCodesForPrompt(costCodeStandard)
+  const costCodeInstructions = await getRelevantCostCodesForPrompt(costCodeStandard, userId)
   
   const itemsSummary = takeoffItems.map((item, idx) => 
     `${idx + 1}. ${item.name || item.description} - ${item.quantity || 'N/A'} ${item.unit || ''} - ${item.category || 'unknown'} - Cost Code: ${item.cost_code || 'N/A'}`
@@ -99,13 +101,14 @@ CRITICAL INSTRUCTIONS:
 /**
  * Build prompt for Reviewer 2: Re-analyze plans for missing items
  */
-export function buildReanalyzePlansPrompt(
+export async function buildReanalyzePlansPrompt(
   imageCount: number,
   costCodeStandard: CostCodeStandard = 'csi-16',
-  existingItems?: any[]
-): string {
+  existingItems?: any[],
+  userId?: string
+): Promise<string> {
   const standardName = getStandardName(costCodeStandard)
-  const costCodeInstructions = getRelevantCostCodesForPrompt(costCodeStandard)
+  const costCodeInstructions = await getRelevantCostCodesForPrompt(costCodeStandard, userId)
   
   const existingItemsNote = existingItems && existingItems.length > 0 
     ? `\n\nEXISTING TAKEOFF ITEMS (${existingItems.length} items already identified - focus on finding items NOT in this list):\n${existingItems.slice(0, 20).map((item, idx) => `${idx + 1}. ${item.name || item.description}`).join('\n')}${existingItems.length > 20 ? '\n... (and more)' : ''}`

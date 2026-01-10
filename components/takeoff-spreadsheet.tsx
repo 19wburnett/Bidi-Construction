@@ -23,11 +23,6 @@ interface TakeoffSpreadsheetProps {
     notes?: string
     scope_first_message?: string
   }
-  measurementGuidance?: {
-    message: string
-    next_step: string
-    items_needing_measurement: number
-  }
   onItemHighlight?: (bbox: BoundingBox) => void
   onPageNavigate?: (page: number) => void
   onOpenChatTab?: () => void
@@ -42,7 +37,6 @@ interface TakeoffSpreadsheetProps {
     where_to_find: string
     impact: 'critical' | 'high' | 'medium' | 'low'
   }>
-  scopeFirst?: boolean
 }
 
 interface GroupedRow {
@@ -71,14 +65,12 @@ const CATEGORY_CONFIG: Record<string, { color: string; bgColor: string; label: s
 export default function TakeoffSpreadsheet({
   items,
   summary,
-  measurementGuidance,
   onItemHighlight,
   onPageNavigate,
   onOpenChatTab,
   editable = false,
   onItemsChange,
-  missingInformation = [],
-  scopeFirst = false
+  missingInformation = []
 }: TakeoffSpreadsheetProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
@@ -1570,82 +1562,8 @@ export default function TakeoffSpreadsheet({
     }))
   }, [groupedRows])
 
-  // Calculate items needing measurement
-  const itemsNeedingMeasurement = useMemo(() => {
-    return normalizedItems.filter(item => item.needs_measurement || item.quantity === 0).length
-  }, [normalizedItems])
-
   return (
     <div className="space-y-4">
-      {/* Scope-First Guidance Banner */}
-      {(scopeFirst || itemsNeedingMeasurement > 0) && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-              <Ruler className="h-5 w-5 text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-blue-900 mb-1">
-                {measurementGuidance?.message || 'Scope Defined - Ready for Measurements'}
-              </h3>
-              <p className="text-sm text-blue-700 mb-2">
-                {measurementGuidance?.next_step || 
-                  `AI has identified ${itemsNeedingMeasurement} items from your plans. Now you need to measure quantities.`
-                }
-              </p>
-              
-              {/* Step-by-step workflow */}
-              <div className="bg-white/60 rounded-md p-3 mb-3 border border-blue-100">
-                <div className="text-xs font-semibold text-blue-800 mb-2 uppercase tracking-wide">How to Complete Your Takeoff:</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">1</div>
-                    <div>
-                      <div className="font-medium text-blue-900">Find the Item</div>
-                      <div className="text-blue-600">Click the page badge to jump to that location in your plans</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">2</div>
-                    <div>
-                      <div className="font-medium text-blue-900">Measure It</div>
-                      <div className="text-blue-600">Use the plan's scale to measure lengths, areas, or count items</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <div className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">3</div>
-                    <div>
-                      <div className="font-medium text-blue-900">Enter Quantity</div>
-                      <div className="text-blue-600">Click the quantity cell in the table below to enter your measurement</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 flex-wrap">
-                <Badge variant="outline" className="bg-blue-100 border-blue-300 text-blue-700">
-                  {itemsNeedingMeasurement} items need quantities
-                </Badge>
-                {onOpenChatTab && (
-                  <Button 
-                    size="sm" 
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={onOpenChatTab}
-                  >
-                    <Lightbulb className="h-4 w-4 mr-1" />
-                    Get AI Help Measuring
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                )}
-                <span className="text-xs text-blue-600">
-                  Tip: The Chat tab can guide you step-by-step through measuring each item
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Header with totals and controls */}
       <div className="bg-gradient-to-r from-orange-50 to-orange-50/50 border border-orange-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-4">

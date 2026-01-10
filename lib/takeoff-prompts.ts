@@ -5,17 +5,19 @@
  */
 
 import { generateTemplateInstructions } from '@/lib/takeoff-template'
-import { getRelevantCostCodesForPrompt, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
+import { CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
+import { getRelevantCostCodesForPrompt } from '@/lib/cost-codes/server-helpers'
 
 /**
  * Build specialized system prompt based on task type and job type
  */
-export function buildTakeoffSystemPrompt(
+export async function buildTakeoffSystemPrompt(
   taskType: string, 
   jobType: string = 'residential',
-  costCodeStandard: CostCodeStandard = 'csi-16'
-): string {
-  const costCodeInstructions = getRelevantCostCodesForPrompt(costCodeStandard)
+  costCodeStandard: CostCodeStandard = 'csi-16',
+  userId?: string
+): Promise<string> {
+  const costCodeInstructions = await getRelevantCostCodesForPrompt(costCodeStandard, userId)
   const standardName = getStandardName(costCodeStandard)
   
   const basePrompt = `You are an expert construction analyst with specialized knowledge in construction plans, building codes, and material takeoffs. You are part of a multi-model consensus system that provides the most accurate analysis possible.

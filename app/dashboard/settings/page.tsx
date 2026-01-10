@@ -13,6 +13,7 @@ import { Save, User, Phone, Bell, CreditCard, Coins, ListChecks, FileText, Mail,
 import FallingBlocksLoader from '@/components/ui/falling-blocks-loader'
 import DocumentTemplatesManager from '@/components/document-templates-manager'
 import EmailTemplatesManager from '@/components/email-templates-manager'
+import CustomCostCodesManager from '@/components/custom-cost-codes-manager'
 import { AVAILABLE_STANDARDS, CostCodeStandard, getStandardName } from '@/lib/cost-code-helpers'
 import { cn } from '@/lib/utils'
 
@@ -273,7 +274,7 @@ export default function SettingsPage() {
           <div className="space-y-8">
             <div>
               <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Cost Code Standards</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Select the cost code standard you prefer for your takeoffs</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Select the cost code standard you prefer for your takeoffs, or upload custom cost codes</p>
             </div>
             
             <div className="space-y-6">
@@ -295,8 +296,13 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                  This standard will be used by the AI to categorize items in your future takeoffs.
+                  This standard will be used by the AI to categorize items in your future takeoffs. Select "Custom Cost Codes" if you have uploaded your own.
                 </p>
+              </div>
+
+              {/* Custom Cost Codes Section */}
+              <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800">
+                <CustomCostCodesManager />
               </div>
             </div>
           </div>

@@ -32,7 +32,8 @@ import {
   Plus,
   Tag,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Ruler
 } from 'lucide-react'
 import Link from 'next/link'
 import { drawerSlide } from '@/lib/animations'
@@ -52,8 +53,8 @@ import ShareLinkGenerator from '@/components/share-link-generator'
 import BidPackageModal from '@/components/bid-package-modal'
 import BidComparisonModal from '@/components/bid-comparison-modal'
 import TakeoffSpreadsheet from '@/components/takeoff-spreadsheet'
-import TakeoffReviewPanel from '@/components/takeoff-review-panel'
-import MissingInformationPanel from '@/components/missing-information-panel'
+import PlanQualityAnalysis from '@/components/plan-quality-analysis'
+// MissingInformationPanel removed - missing info now shown inline in spreadsheet items
 import PdfQualitySettings, { QualityMode } from '@/components/pdf-quality-settings'
 import PlanChatPanel from '@/components/plan/plan-chat-panel'
 import ThreadedCommentDisplay from '@/components/threaded-comment-display'
@@ -66,12 +67,13 @@ import { normalizeTradeScopeReview, TradeScopeReviewEntry } from '@/lib/trade-sc
 import { getJobForUser } from '@/lib/job-access'
 import PDFSearch from '@/components/pdf-search'
 import MeasurementSummaryPanel from '@/components/measurement-summary-panel'
-import TaggedMeasurementSummary from '@/components/tagged-measurement-summary'
+// TaggedMeasurementSummary removed - measurement tags shown in left sidebar only
 import { MeasurementTagPersistence, MeasurementTag } from '@/lib/measurement-tag-persistence'
 import { PlanProcessingStatus } from '@/components/plan-processing-status'
+import MeasurementTagsSidebar from '@/components/measurement-tags-sidebar'
 
 
-type AnalysisMode = 'takeoff' | 'chat' | 'comments' | 'items'
+type AnalysisMode = 'takeoff' | 'chat'
 
 type TradeScopeStatus = 'complete' | 'partial' | 'missing'
 
@@ -92,6 +94,8 @@ export default function EnhancedPlanViewer() {
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [activeTab, setActiveTab] = useState<AnalysisMode>('takeoff')
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(280)
   const [sidebarMaximized, setSidebarMaximized] = useState(false)
   const [planUrl, setPlanUrl] = useState<string>('')
   const [commentFormOpen, setCommentFormOpen] = useState(false)
@@ -150,6 +154,40 @@ export default function EnhancedPlanViewer() {
       setGoToCoordinate(undefined)
     }, 100)
   }, [])
+
+  // Calculate measurement centroid for navigation
+  const getMeasurementCentroid = useCallback((measurement: Drawing) => {
+    const points = measurement.geometry.points || []
+    if (points.length < 2) return null
+    
+    let sumX = 0, sumY = 0, count = 0
+    for (let i = 0; i < points.length; i += 2) {
+      sumX += points[i]
+      sumY += points[i + 1]
+      count++
+    }
+    
+    return count > 0 ? { x: sumX / count, y: sumY / count } : null
+  }, [])
+
+  // Handle navigation to a measurement from the left sidebar
+  const handleNavigateToMeasurement = useCallback((measurement: Drawing) => {
+    const centroid = getMeasurementCentroid(measurement)
+    if (centroid) {
+      setGoToPage(measurement.pageNumber)
+      setGoToCoordinate({ x: centroid.x, y: centroid.y, pageNumber: measurement.pageNumber })
+      setHighlightedMeasurementIds([measurement.id])
+      // Reset navigation after it completes, but keep highlight for a bit longer
+      setTimeout(() => {
+        setGoToPage(undefined)
+        setGoToCoordinate(undefined)
+      }, 100)
+      // Clear highlight after a pulse effect
+      setTimeout(() => {
+        setHighlightedMeasurementIds([])
+      }, 2000)
+    }
+  }, [getMeasurementCentroid])
   
   // PDF quality settings
   const [qualityMode, setQualityMode] = useState<QualityMode>('balanced')
@@ -527,22 +565,22 @@ export default function EnhancedPlanViewer() {
     }
   }, [planId, user])
 
-  // Load measurement tags
-  useEffect(() => {
+  // Load measurement tags function
+  const loadMeasurementTags = useCallback(async () => {
     if (!planId || !user) return
-
-    const loadTags = async () => {
-      try {
-        const tagPersistence = new MeasurementTagPersistence(planId, user.id)
-        const loadedTags = await tagPersistence.loadTags()
-        setMeasurementTags(loadedTags)
-      } catch (error) {
-        console.error('Error loading measurement tags:', error)
-      }
+    try {
+      const tagPersistence = new MeasurementTagPersistence(planId, user.id)
+      const loadedTags = await tagPersistence.loadTags()
+      setMeasurementTags(loadedTags)
+    } catch (error) {
+      console.error('Error loading measurement tags:', error)
     }
-
-    loadTags()
   }, [planId, user])
+
+  // Load measurement tags on mount
+  useEffect(() => {
+    loadMeasurementTags()
+  }, [loadMeasurementTags])
 
   // Load data and PDF images
   useEffect(() => {
@@ -964,9 +1002,23 @@ export default function EnhancedPlanViewer() {
           setDrawings(current => {
             const nonMeasurements = current.filter(d => !isMeasurementDrawing(d))
             // Keep any local measurements that weren't in the sync (newly added during sync)
+            // BUT only keep measurements with valid UUIDs - temp IDs should be replaced by synced results
             const syncedIds = new Set(syncedMeasurements.map(m => m.id))
             const currentMeasurements = current.filter(isMeasurementDrawing)
-            const localOnlyMeasurements = currentMeasurements.filter(m => !syncedIds.has(m.id))
+            
+            // UUID pattern to identify properly persisted measurements
+            const uuidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/
+            
+            // Only keep local measurements that:
+            // 1. Are NOT in the synced results (by ID)
+            // 2. AND have a valid UUID (meaning they were previously synced but not in this batch)
+            // Measurements with temp IDs (non-UUID) should be replaced by synced results
+            const localOnlyMeasurements = currentMeasurements.filter(m => {
+              const isInSynced = syncedIds.has(m.id)
+              const hasValidUuid = uuidPattern.test(m.id)
+              // Only keep if not synced AND has a valid UUID (was previously persisted)
+              return !isInSynced && hasValidUuid
+            })
             
             // Deduplicate by ID to prevent duplicates
             const allMeasurements = [...syncedMeasurements, ...localOnlyMeasurements]
@@ -1454,6 +1506,39 @@ export default function EnhancedPlanViewer() {
       alert('Failed to delete item. Please try again.')
     }
   }, [drawings, handleDrawingsChange])
+
+  // Handle measurement delete
+  const handleDeleteMeasurement = useCallback(async (measurementId: string) => {
+    try {
+      // Remove from local state immediately for responsive UI
+      const newDrawings = drawings.filter(d => d.id !== measurementId)
+      await handleDrawingsChange(newDrawings)
+    } catch (error) {
+      console.error('Error deleting measurement:', error)
+      alert('Failed to delete measurement. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange])
+
+  // Handle tag deletion with all its measurements
+  const handleDeleteTagWithMeasurements = useCallback(async (tagId: string, measurementIds: string[]) => {
+    try {
+      // Only delete the tag if it's not 'untagged' (untagged is a virtual group)
+      if (tagId !== 'untagged') {
+        const tagPersistence = new MeasurementTagPersistence(planId, user?.id)
+        await tagPersistence.deleteTag(tagId)
+      }
+      
+      // Remove all measurements with this tag from local state
+      const newDrawings = drawings.filter(d => !measurementIds.includes(d.id))
+      await handleDrawingsChange(newDrawings)
+      
+      // Reload tags
+      await loadMeasurementTags()
+    } catch (error) {
+      console.error('Error deleting tag and measurements:', error)
+      alert('Failed to delete. Please try again.')
+    }
+  }, [drawings, handleDrawingsChange, planId, user?.id, loadMeasurementTags])
 
   // Handle item edit
   const handleItemEdit = useCallback((item: Drawing) => {
@@ -1990,12 +2075,16 @@ export default function EnhancedPlanViewer() {
     }
   }, [searchMatchCount])
 
-  // Keyboard shortcut for search (Ctrl+F / Cmd+F)
+  // Keyboard shortcuts for search (Ctrl+F) and measurements sidebar (Ctrl+M)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault()
         setSearchOpen(true)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+        e.preventDefault()
+        setLeftSidebarOpen(prev => !prev)
       }
     }
 
@@ -2122,10 +2211,21 @@ export default function EnhancedPlanViewer() {
                 compact
                 autoHideOnComplete
                 autoHideDelay={5000}
+                hideOnFailed
               />
             </div>
             
             <div className="flex items-center space-x-1 md:space-x-2 flex-wrap">
+              <Button 
+                variant={leftSidebarOpen ? "secondary" : "ghost"} 
+                size="sm" 
+                onClick={() => setLeftSidebarOpen(!leftSidebarOpen)} 
+                className="h-9"
+                title="Toggle Measurements Panel"
+              >
+                <Ruler className="h-4 w-4" />
+                <span className="hidden lg:inline ml-2">Measurements</span>
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => setShowShareModal(true)} className="h-9">
                 <Share2 className="h-4 w-4" />
                 <span className="hidden lg:inline ml-2">Share</span>
@@ -2163,14 +2263,73 @@ export default function EnhancedPlanViewer() {
 
         {/* Canvas Area */}
         <div className="flex-1 flex relative" ref={containerRef}>
+          {/* Left Sidebar - Measurement Tags */}
+          <AnimatePresence>
+            {(leftSidebarOpen || isMobile || isTablet) && (
+              <MeasurementTagsSidebar
+                isOpen={leftSidebarOpen}
+                onToggle={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                measurements={drawings.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area')}
+                items={drawings.filter(d => d.type === 'item')}
+                comments={drawings.filter(d => d.type === 'comment')}
+                tags={measurementTags}
+                onNavigateToMeasurement={handleNavigateToMeasurement}
+                onMeasurementHighlight={setHighlightedMeasurementIds}
+                highlightedMeasurementIds={highlightedMeasurementIds}
+                selectedMeasurementIds={selectedMeasurementIds}
+                onTagChange={loadMeasurementTags}
+                onDeleteMeasurement={handleDeleteMeasurement}
+                onDeleteTagWithMeasurements={handleDeleteTagWithMeasurements}
+                planId={planId}
+                userId={user?.id}
+                userEmail={user?.email}
+                unit={measurementScaleSettings[currentPage]?.unit || 'ft'}
+                width={leftSidebarWidth}
+                onWidthChange={setLeftSidebarWidth}
+                isMobile={isMobile}
+                isTablet={isTablet}
+                onItemClick={handleItemClick}
+                onItemEdit={handleItemEdit}
+                onItemDelete={handleItemDelete}
+                onItemHover={setSidebarHoveredItemId}
+                onAddItemType={(itemType, itemCategory, itemLabel) => {
+                  setSelectedItemType({
+                    itemType,
+                    itemCategory,
+                    itemLabel
+                  })
+                }}
+                onCommentClick={(comment) => {
+                  setGoToPage(comment.pageNumber)
+                  setTimeout(() => setGoToPage(undefined), 100)
+                }}
+                onCommentReply={handleCommentReply}
+                onCommentResolve={handleCommentResolve}
+                onAddComment={handleAddCommentFromTab}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* Floating button to open measurements sidebar on mobile/tablet */}
+          {!leftSidebarOpen && (isMobile || isTablet) && (
+            <Button
+              className="fixed bottom-4 left-4 z-40 h-12 px-5 rounded-full shadow-xl bg-blue-600 text-white flex items-center gap-2 hover:bg-blue-700 active:bg-blue-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              onClick={() => setLeftSidebarOpen(true)}
+              size="lg"
+              aria-label="Open measurements sidebar"
+            >
+              <Ruler className="h-5 w-5" />
+              <span className="text-sm font-medium">Measurements</span>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+
           <div 
             className="flex-1 min-w-0"
             style={{ 
-              width: rightSidebarOpen && !isMobile && !isTablet && !sidebarMaximized
-                ? `calc(100% - ${sidebarWidth}px - 1px)` 
-                : sidebarMaximized
-                  ? '0%'
-                  : '100%' 
+              width: sidebarMaximized
+                ? '0%'
+                : `calc(100% - ${leftSidebarOpen && !isMobile && !isTablet ? leftSidebarWidth : 0}px - ${rightSidebarOpen && !isMobile && !isTablet ? sidebarWidth : 0}px - 2px)`
             }}
           >
             {planUrl ? (
@@ -2324,7 +2483,7 @@ export default function EnhancedPlanViewer() {
                 
                 <div className="flex-1 overflow-hidden flex flex-col">
                   <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as AnalysisMode)} className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="grid w-full grid-cols-4 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
+                    <TabsList className="grid w-full grid-cols-2 mx-2 md:mx-3 mt-2 md:mt-3 mb-0 gap-1 flex-shrink-0">
                       <TabsTrigger value="takeoff" className="text-xs md:text-sm px-2 md:px-3">
                         <BarChart3 className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden xl:inline">Takeoff</span>
@@ -2332,14 +2491,6 @@ export default function EnhancedPlanViewer() {
                       <TabsTrigger value="chat" className="text-xs md:text-sm px-2 md:px-3">
                         <Bot className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
                         <span className="hidden xl:inline">Chat</span>
-                      </TabsTrigger>
-                      <TabsTrigger value="comments" className="text-xs md:text-sm px-2 md:px-3">
-                        <MessageSquare className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden xl:inline">Comments</span>
-                      </TabsTrigger>
-                      <TabsTrigger value="items" className="text-xs md:text-sm px-2 md:px-3">
-                        <Tag className="h-3 w-3 md:h-4 md:w-4 md:mr-1" />
-                        <span className="hidden xl:inline">Items</span>
                       </TabsTrigger>
                     </TabsList>
                     
@@ -2480,47 +2631,6 @@ export default function EnhancedPlanViewer() {
                                 </div>
                               </div>
                               
-                              {/* Missing Information Panel */}
-                              {missingInformation && missingInformation.length > 0 && (
-                                <div className="mb-4">
-                                  <MissingInformationPanel 
-                                    missingInformation={missingInformation}
-                                    onOpenChat={() => setActiveTab('chat')}
-                                    onEnterData={(itemName, category) => {
-                                      // Scroll to spreadsheet and potentially highlight the item
-                                      const spreadsheetElement = document.getElementById('takeoff-spreadsheet')
-                                      if (spreadsheetElement) {
-                                        spreadsheetElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                                      }
-                                      // Could also trigger a search/filter in the spreadsheet
-                                    }}
-                                  />
-                                </div>
-                              )}
-                              
-                              {/* Review Panel */}
-                              {reviewResults && (
-                                <div className="mb-4">
-                                  <TakeoffReviewPanel 
-                                    reviewFindings={reviewResults}
-                                  />
-                                </div>
-                              )}
-                              
-                              {/* Tagged Measurement Summary */}
-                              {drawings.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area').length > 0 && (
-                                <div className="mb-4">
-                                  <TaggedMeasurementSummary
-                                    measurements={drawings.filter(d => d.type === 'measurement_line' || d.type === 'measurement_area')}
-                                    tags={measurementTags}
-                                    selectedTagIds={filteredTagIds}
-                                    onTagFilter={setFilteredTagIds}
-                                    onMeasurementHighlight={setHighlightedMeasurementIds}
-                                    unit={measurementScaleSettings[currentPage]?.unit || 'ft'}
-                                  />
-                                </div>
-                              )}
-                              
                               <div id="takeoff-spreadsheet">
                                 <TakeoffSpreadsheet
                                   items={takeoffResults.results?.items || []}
@@ -2532,6 +2642,17 @@ export default function EnhancedPlanViewer() {
                                   onOpenChatTab={() => setActiveTab('chat')}
                                 />
                               </div>
+                              
+                              {/* Plan Quality Analysis - Below Spreadsheet */}
+                              {takeoffResults.results?.items?.length > 0 && (
+                                <div className="mt-6">
+                                  <PlanQualityAnalysis 
+                                    items={takeoffResults.results.items}
+                                    missingInformation={missingInformation}
+                                    qualityAnalysis={takeoffResults.results?.quality_analysis}
+                                  />
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="text-center py-8">
@@ -2545,86 +2666,6 @@ export default function EnhancedPlanViewer() {
 
                       <TabsContent value="chat" className="h-full mt-0">
                         <PlanChatPanel jobId={jobId} planId={planId} />
-                      </TabsContent>
-                      
-                      <TabsContent value="comments" className="h-full">
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="text-sm font-semibold text-gray-900">
-                              Comments ({drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length})
-                            </h4>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={handleAddCommentFromTab}
-                              className="h-7 px-2 text-xs"
-                            >
-                              <Plus className="h-3 w-3 mr-1" />
-                              Add Comment
-                            </Button>
-                          </div>
-                          {drawings.filter(d => d.type === 'comment' && !d.parentCommentId).length === 0 ? (
-                            <div className="text-center py-12">
-                              <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                              <p className="text-sm text-gray-600 mb-3">No comments yet</p>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={handleAddCommentFromTab}
-                                className="h-8"
-                              >
-                                <Plus className="h-3 w-3 mr-1" />
-                                Add Comment
-                              </Button>
-                            </div>
-                          ) : (() => {
-                            const commentMap = new Map<string, Drawing>()
-                            drawings.filter(d => d.type === 'comment').forEach(c => commentMap.set(c.id, c))
-                            
-                            return organizeCommentsIntoThreads(drawings.filter(d => d.type === 'comment'))
-                              .map(comment => (
-                                <div
-                                  key={comment.id}
-                                  onClick={() => {
-                                    setGoToPage(comment.pageNumber)
-                                    setTimeout(() => setGoToPage(undefined), 100)
-                                  }}
-                                >
-                                  <ThreadedCommentDisplay
-                                    comment={comment}
-                                    onReply={handleCommentReply}
-                                    onResolve={handleCommentResolve}
-                                    currentUserId={user?.id}
-                                    currentUserName={user?.email}
-                                    getReplyCount={(commentId) => {
-                                      const foundComment = commentMap.get(commentId)
-                                      return foundComment ? getReplyCount(foundComment) : 0
-                                    }}
-                                  />
-                                </div>
-                              ))
-                          })()}
-                        </div>
-                      </TabsContent>
-                      
-                      <TabsContent value="items" className="h-full">
-                        <ItemList
-                          items={drawings.filter(d => d.type === 'item')}
-                          onItemClick={handleItemClick}
-                          onItemEdit={handleItemEdit}
-                          onItemDelete={handleItemDelete}
-                          onItemHover={setSidebarHoveredItemId}
-                          onAddItemType={(itemType, itemCategory, itemLabel) => {
-                            setSelectedItemType({
-                              itemType,
-                              itemCategory,
-                              itemLabel
-                            })
-                            // Note: The tool will be set to 'item' when user clicks on canvas
-                            // We could add a prop to FastPlanCanvas to set the tool, but for now
-                            // the user can just click on the canvas and it will place the item
-                          }}
-                        />
                       </TabsContent>
                     </div>
                   </Tabs>

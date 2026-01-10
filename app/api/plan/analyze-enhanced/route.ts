@@ -178,7 +178,27 @@ export async function POST(request: NextRequest) {
     // User is admin if role = 'admin' OR is_admin = true
     const isAdmin = userData.role === 'admin' || userData.is_admin === true
     
-    const costCodeStandard: CostCodeStandard = (userData.preferred_cost_code_standard as CostCodeStandard) || 'csi-16'
+    // Check if user has custom cost codes set as default
+    let costCodeStandard: CostCodeStandard = (userData.preferred_cost_code_standard as CostCodeStandard) || 'csi-16'
+    const { data: userSettings } = await supabase
+      .from('users')
+      .select('use_custom_cost_codes')
+      .eq('id', userId)
+      .single()
+    
+    if (userSettings?.use_custom_cost_codes) {
+      const { data: customCodes } = await supabase
+        .from('custom_cost_codes')
+        .select('id, extraction_status')
+        .eq('user_id', userId)
+        .eq('is_default', true)
+        .eq('extraction_status', 'completed')
+        .single()
+      
+      if (customCodes) {
+        costCodeStandard = 'custom'
+      }
+    }
 
     // Determine job type first (needed for both admin and non-admin paths)
     let finalJobType = jobType
@@ -433,7 +453,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Build specialized prompts based on task type and job type, injecting extracted text when available
-    const systemPrompt = buildTakeoffSystemPrompt(taskType, finalJobType, costCodeStandard)
+    const systemPrompt = await buildTakeoffSystemPrompt(taskType, finalJobType, costCodeStandard, userId)
     const userPrompt = buildTakeoffUserPrompt(images.length, undefined, undefined, extractedText, drawings, costCodeStandard)
 
     // Configure analysis options

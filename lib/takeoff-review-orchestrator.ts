@@ -146,7 +146,8 @@ export class TakeoffReviewOrchestrator {
   async runReview(
     primaryTakeoff: any,
     planImages: string[],
-    costCodeStandard: CostCodeStandard = 'csi-16'
+    costCodeStandard: CostCodeStandard = 'csi-16',
+    userId?: string
   ): Promise<ReviewOrchestratorResult> {
     const items = primaryTakeoff.items || []
     
@@ -154,8 +155,8 @@ export class TakeoffReviewOrchestrator {
 
     // Run all three reviewers in parallel
     const [reviewResult, reanalysisResult, validationResult] = await Promise.all([
-      this.reviewTakeoffItems(items, costCodeStandard),
-      this.reanalyzePlans(planImages, costCodeStandard, items),
+      this.reviewTakeoffItems(items, costCodeStandard, userId),
+      this.reanalyzePlans(planImages, costCodeStandard, items, userId),
       this.validateTakeoff(primaryTakeoff, undefined) // Will be updated with review findings
     ])
 
@@ -188,18 +189,19 @@ export class TakeoffReviewOrchestrator {
    */
   private async reviewTakeoffItems(
     items: any[],
-    costCodeStandard: CostCodeStandard
+    costCodeStandard: CostCodeStandard,
+    userId?: string
   ): Promise<ReviewResult> {
     console.log('📋 Reviewer 1: Reviewing takeoff items...')
     
     try {
-      const prompt = buildReviewTakeoffPrompt(items, costCodeStandard)
+      const prompt = await buildReviewTakeoffPrompt(items, costCodeStandard, userId)
       
       const response = await aiGateway.generate({
         model: 'gpt-4o',
         system: 'You are an expert construction estimator reviewing takeoff items for completeness and accuracy.',
         prompt,
-        maxTokens: 4096,
+        maxTokens: 16384,
         temperature: 0.2,
         responseFormat: { type: 'json_object' }
       })
@@ -216,6 +218,8 @@ export class TakeoffReviewOrchestrator {
         parsed = JSON.parse(jsonText)
       } catch (error) {
         console.error('Error parsing Reviewer 1 response:', error)
+        console.error('Response length:', content.length, 'chars')
+        console.error('Response preview (last 500 chars):', content.slice(-500))
         // Return empty result structure
         parsed = {
           reviewed_items: [],
@@ -254,19 +258,20 @@ export class TakeoffReviewOrchestrator {
   private async reanalyzePlans(
     planImages: string[],
     costCodeStandard: CostCodeStandard,
-    existingItems: any[]
+    existingItems: any[],
+    userId?: string
   ): Promise<ReanalysisResult> {
     console.log('🔍 Reviewer 2: Re-analyzing plans for missing items...')
     
     try {
-      const prompt = buildReanalyzePlansPrompt(planImages.length, costCodeStandard, existingItems)
+      const prompt = await buildReanalyzePlansPrompt(planImages.length, costCodeStandard, existingItems, userId)
       
       const response = await aiGateway.generate({
         model: 'claude-sonnet-4-20250514',
         system: 'You are an expert construction estimator re-analyzing plans to find items missed in the initial takeoff.',
         prompt,
         images: planImages,
-        maxTokens: 4096,
+        maxTokens: 16384,
         temperature: 0.2,
         responseFormat: { type: 'json_object' }
       })
@@ -283,6 +288,8 @@ export class TakeoffReviewOrchestrator {
         parsed = JSON.parse(jsonText)
       } catch (error) {
         console.error('Error parsing Reviewer 2 response:', error)
+        console.error('Response length:', content.length, 'chars')
+        console.error('Response preview (last 500 chars):', content.slice(-500))
         parsed = {
           missing_items: [],
           items_with_missing_data: [],
@@ -328,7 +335,7 @@ export class TakeoffReviewOrchestrator {
         model: 'gpt-4o',
         system: 'You are an expert construction estimator validating takeoff quantities and cost code assignments.',
         prompt,
-        maxTokens: 4096,
+        maxTokens: 16384,
         temperature: 0.2,
         responseFormat: { type: 'json_object' }
       })
@@ -345,6 +352,8 @@ export class TakeoffReviewOrchestrator {
         parsed = JSON.parse(jsonText)
       } catch (error) {
         console.error('Error parsing Reviewer 3 response:', error)
+        console.error('Response length:', content.length, 'chars')
+        console.error('Response preview (last 500 chars):', content.slice(-500))
         parsed = {
           validated_items: [],
           impossible_calculations: [],
@@ -503,15 +512,119 @@ export class TakeoffReviewOrchestrator {
     // Remove markdown code blocks if present
     const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
     if (codeBlockMatch) {
-      return codeBlockMatch[1]
+      return this.repairJSON(codeBlockMatch[1])
     }
     
     // Try to find JSON object in the text
     const jsonMatch = content.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      return jsonMatch[0]
+      return this.repairJSON(jsonMatch[0])
     }
     
-    return content
+    return this.repairJSON(content)
+  }
+
+  /**
+   * Attempt to repair truncated or malformed JSON
+   */
+  private repairJSON(json: string): string {
+    let repaired = json.trim()
+    
+    // Track open brackets/braces
+    let openBraces = 0
+    let openBrackets = 0
+    let inString = false
+    let escapeNext = false
+    
+    for (let i = 0; i < repaired.length; i++) {
+      const char = repaired[i]
+      
+      if (escapeNext) {
+        escapeNext = false
+        continue
+      }
+      
+      if (char === '\\' && inString) {
+        escapeNext = true
+        continue
+      }
+      
+      if (char === '"' && !escapeNext) {
+        inString = !inString
+        continue
+      }
+      
+      if (!inString) {
+        if (char === '{') openBraces++
+        if (char === '}') openBraces--
+        if (char === '[') openBrackets++
+        if (char === ']') openBrackets--
+      }
+    }
+    
+    // If we're in a string, close it
+    if (inString) {
+      repaired += '"'
+    }
+    
+    // Remove trailing incomplete array elements (common truncation issue)
+    // Look for patterns like: }, { "incomplete... or , "incomplete...
+    const truncatedArrayPattern = /,\s*\{[^}]*$/
+    const truncatedValuePattern = /,\s*"[^"]*$/
+    const truncatedKeyPattern = /,\s*"[^"]*":\s*$/
+    const incompleteObjectPattern = /\{[^{}]*$/
+    
+    if (truncatedArrayPattern.test(repaired)) {
+      repaired = repaired.replace(truncatedArrayPattern, '')
+    } else if (truncatedValuePattern.test(repaired)) {
+      repaired = repaired.replace(truncatedValuePattern, '')
+    } else if (truncatedKeyPattern.test(repaired)) {
+      repaired = repaired.replace(truncatedKeyPattern, '')
+    }
+    
+    // Close unclosed brackets and braces
+    // Recount after potential repairs
+    openBraces = 0
+    openBrackets = 0
+    inString = false
+    escapeNext = false
+    
+    for (let i = 0; i < repaired.length; i++) {
+      const char = repaired[i]
+      
+      if (escapeNext) {
+        escapeNext = false
+        continue
+      }
+      
+      if (char === '\\' && inString) {
+        escapeNext = true
+        continue
+      }
+      
+      if (char === '"' && !escapeNext) {
+        inString = !inString
+        continue
+      }
+      
+      if (!inString) {
+        if (char === '{') openBraces++
+        if (char === '}') openBraces--
+        if (char === '[') openBrackets++
+        if (char === ']') openBrackets--
+      }
+    }
+    
+    // Add missing closing brackets/braces
+    while (openBrackets > 0) {
+      repaired += ']'
+      openBrackets--
+    }
+    while (openBraces > 0) {
+      repaired += '}'
+      openBraces--
+    }
+    
+    return repaired
   }
 }

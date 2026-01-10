@@ -556,9 +556,11 @@ export class TakeoffOrchestrator {
     const taskType: TaskType = mode === 'quality_analysis' ? 'quality' : 'takeoff'
     
     // Build prompts using full prompts from analyze-enhanced
-    const systemPrompt = buildTakeoffSystemPrompt(
+    // Note: userId not available in orchestrator context, will use standard codes
+    const systemPrompt = await buildTakeoffSystemPrompt(
       mode === 'quality_analysis' ? 'quality' : 'takeoff',
-      jobType || 'residential'
+      jobType || 'residential',
+      'csi-16' // Default to CSI-16 if userId not available
     )
     
     // Extract text from pages if available

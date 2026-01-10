@@ -35,6 +35,8 @@ interface PlanProcessingStatusProps {
   compact?: boolean
   /** Show in a badge style */
   badge?: boolean
+  /** Whether to hide when processing fails */
+  hideOnFailed?: boolean
 }
 
 export function PlanProcessingStatus({
@@ -47,6 +49,7 @@ export function PlanProcessingStatus({
   autoHideDelay = 3000,
   compact = false,
   badge = false,
+  hideOnFailed = false,
 }: PlanProcessingStatusProps) {
   const [job, setJob] = useState<VectorizationJob | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -110,6 +113,11 @@ export function PlanProcessingStatus({
   
   // Don't render if already completed (unless we haven't shown it yet)
   if (job.status === 'completed' && hasCalledComplete && autoHideOnComplete) {
+    return null
+  }
+  
+  // Don't render if failed and hideOnFailed is true
+  if (job.status === 'failed' && hideOnFailed) {
     return null
   }
 

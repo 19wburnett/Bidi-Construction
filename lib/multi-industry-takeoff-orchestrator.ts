@@ -385,7 +385,7 @@ export class MultiIndustryTakeoffOrchestrator {
       throw new Error('No valid PDF pages available after preprocessing. Ensure the plan PDF is accessible.')
     }
 
-    const { systemPrompt, userPrompt } = this.buildConsensusPrompts(
+    const { systemPrompt, userPrompt } = await this.buildConsensusPrompts(
       input,
       segments,
       images.length,
@@ -949,14 +949,15 @@ export class MultiIndustryTakeoffOrchestrator {
     })
   }
 
-  private buildConsensusPrompts(
+  private async buildConsensusPrompts(
     input: MultiIndustryTakeoffInput,
     segments: SegmentPlan[],
     pageCount: number,
     extractedText?: string
-  ): { systemPrompt: string; userPrompt: string } {
+  ): Promise<{ systemPrompt: string; userPrompt: string }> {
     const currency = input.currency || 'USD'
-    const baseSystem = buildTakeoffSystemPrompt('takeoff', input.job_context.building_type || 'residential')
+    // Note: userId not available in orchestrator context, will use standard codes
+    const baseSystem = await buildTakeoffSystemPrompt('takeoff', input.job_context.building_type || 'residential', 'csi-16')
 
     const segmentInstructions = segments
       .map(segment => `- ${segment.industry.toUpperCase()}: ${segment.categories.join(', ')}`)

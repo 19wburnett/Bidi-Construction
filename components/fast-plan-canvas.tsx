@@ -1943,7 +1943,7 @@ export default function FastPlanCanvas({
     
     const container = containerRef.current
     if (!container) return
-    
+
     if (e.ctrlKey || e.metaKey) {
       // Zoom when Ctrl/Cmd is pressed
       const rect = container.getBoundingClientRect()
@@ -1961,24 +1961,13 @@ export default function FastPlanCanvas({
     } else {
       // Natural scrolling - pan vertically through all pages
       const panSpeed = 0.5
-      setViewport(prev => {
-        const newPanY = prev.panY - e.deltaY * panSpeed
-        // Update current page based on scroll position
-        const scrollY = -newPanY / prev.zoom
-        const newPage = getPageNumber(scrollY)
-        // Only update page if we got a valid page number (not scrolled outside document)
-        if (newPage !== null && newPage !== currentPage) {
-          setCurrentPage(newPage)
-        }
-        return {
-          ...prev,
-          panX: prev.panX - e.deltaX * panSpeed,
-          panY: newPanY
-        }
-      })
-      
+      setViewport(prev => ({
+        ...prev,
+        panX: prev.panX - e.deltaX * panSpeed,
+        panY: prev.panY - e.deltaY * panSpeed
+      }))
     }
-  }, [viewport, calculatePagePositions, getPageNumber, currentPage])
+  }, [viewport])
 
   // Check if a point intersects with a comment (current page only)
   const isPointInComment = useCallback((worldX: number, worldY: number, drawing: Drawing) => {
