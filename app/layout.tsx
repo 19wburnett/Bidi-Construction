@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Saira_Stencil_One, Barlow } from 'next/font/google'
 import Script from 'next/script'
+import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { Providers } from './providers'
 import AuthErrorBoundary from '@/components/auth-error-boundary'
@@ -139,6 +140,7 @@ export default function RootLayout({
             {children}
           </AuthErrorBoundary>
         </Providers>
+        <Analytics />
       </body>
     </html>
   )
