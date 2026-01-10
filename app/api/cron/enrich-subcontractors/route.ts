@@ -9,9 +9,9 @@ export const maxDuration = 60 // Allow up to 60 seconds for enrichment
 /**
  * Cron endpoint for automatically enriching subcontractors
  * 
- * This endpoint runs every hour and slowly enriches subcontractors
- * that haven't been enriched or need re-enrichment. Results are
- * created with status 'complete' and appear in the admin dashboard
+ * This endpoint runs every 30 minutes and slowly enriches subcontractors
+ * that haven't been enriched yet or had their enrichment declined/rejected.
+ * Results are created with status 'complete' and appear in the admin dashboard
  * for review and approval.
  * 
  * Security: Validates CRON_SECRET header to prevent unauthorized access
@@ -39,18 +39,14 @@ export async function GET(request: NextRequest) {
     // Find subcontractors that need enrichment:
     // 1. Never enriched (enrichment_status is null)
     // 2. Previous enrichment failed (enrichment_status is 'error')
-    // 3. Enrichment is old (enrichment_status is 'complete' but enrichment_updated_at is older than 30 days)
+    // 3. Enrichment was declined/rejected (enrichment_status is 'rejected')
     // Exclude: Currently running enrichments
-    // Exclude: Subcontractors that already have a 'complete' enrichment waiting for approval
     
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-    
-    // First, get all subcontractors that might need enrichment
+    // Get all subcontractors that need enrichment
     const { data: allSubcontractors, error: fetchError } = await supabaseAdmin
       .from('subcontractors')
       .select('id, name, trade_category, location, website_url, enrichment_status, enrichment_updated_at')
-      .or(`enrichment_status.is.null,enrichment_status.eq.error,enrichment_status.eq.complete`)
+      .or(`enrichment_status.is.null,enrichment_status.eq.error,enrichment_status.eq.rejected`)
       .neq('enrichment_status', 'running')
       .order('enrichment_updated_at', { ascending: true, nullsFirst: true })
       .limit(100) // Get a larger pool to filter from
@@ -72,43 +68,14 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Filter out subcontractors that already have a 'complete' enrichment waiting for approval
-    const subcontractorIds = allSubcontractors.map(s => s.id)
-    const { data: existingEnrichments } = await supabaseAdmin
-      .from('subcontractor_enrichments')
-      .select('subcontractor_id')
-      .eq('status', 'complete')
-      .in('subcontractor_id', subcontractorIds)
-
-    const hasPendingEnrichment = new Set(
-      existingEnrichments?.map(e => e.subcontractor_id) || []
-    )
-
-    // Filter subcontractors:
-    // 1. Don't have pending enrichments
-    // 2. If enrichment_status is 'complete', check if it's older than 30 days
-    const candidates = allSubcontractors.filter(sub => {
-      // Skip if already has a pending enrichment
-      if (hasPendingEnrichment.has(sub.id)) {
-        return false
-      }
-      
-      // If never enriched or error, include
-      if (!sub.enrichment_status || sub.enrichment_status === 'error') {
-        return true
-      }
-      
-      // If complete, check if it's old enough to re-enrich
-      if (sub.enrichment_status === 'complete' && sub.enrichment_updated_at) {
-        const updatedAt = new Date(sub.enrichment_updated_at)
-        return updatedAt < thirtyDaysAgo
-      }
-      
-      return false
-    })
+    // All subcontractors returned from the query are candidates for enrichment:
+    // - enrichment_status is null (never enriched)
+    // - enrichment_status is 'error' (previous enrichment failed)
+    // - enrichment_status is 'rejected' (enrichment was declined)
+    const candidates = allSubcontractors
 
     if (candidates.length === 0) {
-      console.log('✅ No subcontractors need enrichment (all have pending enrichments or are up to date)')
+      console.log('✅ No subcontractors need enrichment')
       return NextResponse.json({
         success: true,
         processed: 0,
